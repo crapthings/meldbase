@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "compound-range-or-sort-limit",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"a"}],["age",{"t":"number","v":17}],["profile",{"t":"object","v":[["city",{"t":"string","v":"Shanghai"}]]}],["tags",{"t":"array","v":[{"t":"string","v":"new"}]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"b"}],["age",{"t":"number","v":24}],["profile",{"t":"object","v":[["city",{"t":"string","v":"Hangzhou"}]]}],["tags",{"t":"array","v":[{"t":"string","v":"active"},{"t":"string","v":"new"}]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"c"}],["age",{"t":"number","v":30}],["profile",{"t":"object","v":[["city",{"t":"string","v":"Shanghai"}]]}],["tags",{"t":"array","v":[]}]]}
+      ],
+      "query": {"version":1,"where":{"op":"and","args":[{"op":"compare","cmp":"gte","path":"age","value":{"t":"number","v":18}},{"op":"or","args":[{"op":"compare","cmp":"eq","path":"profile.city","value":{"t":"string","v":"Shanghai"}},{"op":"compare","cmp":"eq","path":"tags","value":{"t":"string","v":"active"}}]}]},"sort":[{"path":"age","direction":-1}],"limit":2},
+      "expectedIds": ["c", "b"]
+    },
+    {
+      "name": "missing-is-distinct-from-null",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"a"}],["x",{"t":"null"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"b"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"c"}],["x",{"t":"array","v":[{"t":"number","v":1},{"t":"number","v":2}]}]]}
+      ],
+      "query": {"version":1,"where":{"op":"exists","path":"x","value":false}},
+      "expectedIds": ["b"]
+    },
+    {
+      "name": "int64-remains-exact-across-wire",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"a"}],["n",{"t":"int64","v":"9007199254740993"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"b"}],["n",{"t":"number","v":10}]]}
+      ],
+      "query": {"version":1,"where":{"op":"compare","cmp":"gt","path":"n","value":{"t":"number","v":9007199254740992}}},
+      "expectedIds": ["a"]
+    }
+  ]
+}

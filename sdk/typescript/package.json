@@ -1,0 +1,62 @@
+{
+  "name": "@meldbase/client",
+  "version": "0.1.0-alpha.1",
+  "description": "Isomorphic reactive query client for Meldbase",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/crapthings/meldbase.git",
+    "directory": "sdk/typescript"
+  },
+  "homepage": "https://github.com/crapthings/meldbase#readme",
+  "bugs": "https://github.com/crapthings/meldbase/issues",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./local": {
+      "types": "./dist/local.d.ts",
+      "default": "./dist/local.js"
+    },
+    "./remote": {
+      "types": "./dist/remote.d.ts",
+      "default": "./dist/remote.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    }
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/local.js",
+    "dist/local.d.ts",
+    "dist/mutation.js",
+    "dist/mutation.d.ts",
+    "dist/query.js",
+    "dist/query.d.ts",
+    "dist/remote.js",
+    "dist/remote.d.ts",
+    "dist/safe-value.js",
+    "dist/safe-value.d.ts",
+    "dist/types.js",
+    "dist/types.d.ts",
+    "dist/wire.js",
+    "dist/wire.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && node --test dist/**/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

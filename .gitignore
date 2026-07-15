@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+*.coverprofile
+*.log
+*.out
+*.test
+*.meld
+*.meld.wal
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+tmp/

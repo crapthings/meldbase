@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "typed-nested-array-mutation",
+      "document": {"t":"object","v":[["_id",{"t":"id","v":"00000000000000000000000000000001"}],["count",{"t":"int64","v":"1"}],["notes",{"t":"array","v":[]}],["obsolete",{"t":"bool","v":true}],["profile",{"t":"object","v":[["city",{"t":"string","v":"A"}]]}],["tags",{"t":"array","v":[{"t":"string","v":"old"},{"t":"string","v":"keep"}]}]]},
+      "mutation": {"version":1,"operations":[{"op":"inc","path":"count","value":{"t":"int64","v":"2"}},{"op":"pull","path":"tags","value":{"t":"string","v":"old"}},{"op":"push","path":"notes","value":{"t":"string","v":"new"}},{"op":"set","path":"profile.city","value":{"t":"string","v":"B"}},{"op":"unset","path":"obsolete"}]},
+      "expected": {"t":"object","v":[["_id",{"t":"id","v":"00000000000000000000000000000001"}],["count",{"t":"int64","v":"3"}],["notes",{"t":"array","v":[{"t":"string","v":"new"}]}],["profile",{"t":"object","v":[["city",{"t":"string","v":"B"}]]}],["tags",{"t":"array","v":[{"t":"string","v":"keep"}]}]]}
+    }
+  ]
+}
