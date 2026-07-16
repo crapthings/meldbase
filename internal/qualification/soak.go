@@ -27,6 +27,7 @@ const SoakReceiptSchemaVersion uint32 = 4
 // Release runs begin unthrottled only until the optimistic auditor observes one
 // real concurrent-publication conflict; the remaining work uses this cadence.
 const soakWriteInterval = time.Second
+const soakIndexCatchUpInterval = 5 * time.Second
 
 type SoakProgressStage string
 
@@ -532,7 +533,7 @@ func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, f
 	go func() {
 		defer workers.Done()
 		for ctx.Err() == nil {
-			applied, err := advanceSoakIndexBuild(file, buildID)
+			applied, err := advanceSoakIndexBuild(ctx, file, buildID)
 			if err != nil {
 				recordError(err)
 				return
@@ -615,7 +616,7 @@ func loadSoakActivity(writes, snapshotReads, indexBuildBatches, reclamationAttem
 	}
 }
 
-func advanceSoakIndexBuild(file *storagev2.File, buildID [16]byte) (bool, error) {
+func advanceSoakIndexBuild(ctx context.Context, file *storagev2.File, buildID [16]byte) (bool, error) {
 	build, exists, err := file.IndexBuild(buildID)
 	if err != nil || !exists {
 		if err != nil {
@@ -648,7 +649,7 @@ func advanceSoakIndexBuild(file *storagev2.File, buildID [16]byte) (bool, error)
 		}
 		return err == nil, err
 	case storagev2.IndexBuildCatchUp, storagev2.IndexBuildReady:
-		return advanceSoakIndexBuildCatchUp(file, buildID)
+		return advanceSoakIndexBuildCatchUp(ctx, file, buildID)
 	case storagev2.IndexBuildFailed:
 		return false, storagev2.ErrIndexBuildState
 	default:
@@ -656,14 +657,20 @@ func advanceSoakIndexBuild(file *storagev2.File, buildID [16]byte) (bool, error)
 	}
 }
 
-func advanceSoakIndexBuildCatchUp(file *storagev2.File, buildID [16]byte) (_ bool, resultErr error) {
+func advanceSoakIndexBuildCatchUp(ctx context.Context, file *storagev2.File, buildID [16]byte) (_ bool, resultErr error) {
 	opened, snapshot, err := file.OpenIndexBuildCatchUpSnapshot(buildID)
 	if err != nil {
 		return false, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, snapshot.Close()) }()
 	if snapshot.Sequence() <= opened.AppliedSequence {
-		time.Sleep(time.Millisecond)
+		timer := time.NewTimer(soakIndexCatchUpInterval)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return false, nil
+		case <-timer.C:
+		}
 		return false, nil
 	}
 	through := min(snapshot.Sequence(), opened.AppliedSequence+64)

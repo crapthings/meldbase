@@ -516,7 +516,12 @@ cadence thereafter. This makes the
 duration qualification reproducible across hardware and prevents a faster host
 from exhausting the normal V2 physical safety quota before a phase-boundary
 reclamation. It is deliberately not a throughput benchmark. The reader,
-shadow-index catch-up and optimistic auditor remain concurrent. The runner also
+shadow-index catch-up and optimistic auditor remain concurrent. Once the
+initial shadow scan reaches catch-up, an idle worker waits five seconds before
+reading the next bounded Commit Log window. This deliberately exercises ordered
+multi-commit catch-up batches instead of turning every one-per-second business
+write into an immediate second COW commit; a backlog larger than one batch is
+drained without another wait. The runner also
 fails before setup unless the actual Meld binary
 was built with `-race`, carries clean Go VCS build metadata and exactly matches
 the claimed 40- or 64-hex source revision. A `go test` binary carries no VCS
