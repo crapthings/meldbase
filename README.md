@@ -79,7 +79,7 @@ shadow-index catch-up, reclamation, repeated reopen and final offline semantics.
 Its four-hour release floor applies to measured concurrent worker time; reopen
 and verification overhead is reported separately and cannot satisfy the floor.
 The release writer runs flat out only until it proves one real optimistic
-reclamation conflict, then uses a hardware-independent two-writes-per-second
+reclamation conflict, then uses a hardware-independent one-write-per-second
 cadence. This keeps the duration/recovery qualification inside the normal V2
 physical safety quota; it is not a storage-throughput benchmark.
 Sanitized 30-second stderr heartbeats expose phase progress and aggregate work

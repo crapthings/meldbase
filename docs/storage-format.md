@@ -510,8 +510,9 @@ larger `actualDurationNanos`; it cannot be used to satisfy
 `concurrentDurationNanos`. The runner additionally requires nonzero work from
 every concurrent worker in every phase and at least one observed optimistic
 reclamation conflict. The writer starts unthrottled only until a release run
-observes that real conflict, then uses a fixed two-writes-per-second cadence;
-non-release profiles use the same cadence from their first write. This makes the
+observes that real conflict, then uses a fixed one-write-per-second cadence;
+non-release profiles execute their first write immediately and use the same
+cadence thereafter. This makes the
 duration qualification reproducible across hardware and prevents a faster host
 from exhausting the normal V2 physical safety quota before a phase-boundary
 reclamation. It is deliberately not a throughput benchmark. The reader,

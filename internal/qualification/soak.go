@@ -26,7 +26,7 @@ const SoakReceiptSchemaVersion uint32 = 4
 // portable across machines and below the engine's normal 8 GiB safety quota.
 // Release runs begin unthrottled only until the optimistic auditor observes one
 // real concurrent-publication conflict; the remaining work uses this cadence.
-const soakWriteInterval = 500 * time.Millisecond
+const soakWriteInterval = time.Second
 
 type SoakProgressStage string
 
@@ -504,11 +504,12 @@ func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, f
 			if !requireReclamationConflict || reclamationConflicts.Load() > 0 {
 				if writeTicker == nil {
 					writeTicker = time.NewTicker(soakWriteInterval)
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-writeTicker.C:
+				} else {
+					select {
+					case <-ctx.Done():
+						return
+					case <-writeTicker.C:
+					}
 				}
 			}
 			current := ordinal.Load()
