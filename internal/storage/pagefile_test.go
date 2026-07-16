@@ -285,6 +285,61 @@ func TestCheckpointReusesOnlyPagesOlderThanBothMetaGenerations(t *testing.T) {
 	}
 }
 
+func TestCheckpointPhysicalCrashPointMatrixPublishesOnlyWholeSnapshots(t *testing.T) {
+	points := []checkpointFaultPoint{
+		faultAfterCheckpointPageWrite,
+		faultBeforeCheckpointDataSync,
+		faultAfterCheckpointDataSync,
+		faultAfterCheckpointMetaWrite,
+		faultAfterCheckpointMetaSync,
+	}
+	for _, point := range points {
+		point := point
+		t.Run(string(rune('0'+point)), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "checkpoint-crash.meld")
+			file, _, _, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stable := bytes.Repeat([]byte{2}, PageSize*2+127)
+			if err := file.Checkpoint(1, bytes.Repeat([]byte{1}, PageSize+31)); err != nil {
+				t.Fatal(err)
+			}
+			if err := file.Checkpoint(2, stable); err != nil {
+				t.Fatal(err)
+			}
+			candidate := bytes.Repeat([]byte{3}, PageSize*3+257)
+			injected := errors.New("injected physical checkpoint boundary")
+			file.fault = func(actual checkpointFaultPoint) error {
+				if actual == point {
+					return injected
+				}
+				return nil
+			}
+			if err := file.Checkpoint(3, candidate); !errors.Is(err, injected) {
+				t.Fatalf("checkpoint error=%v", err)
+			}
+			file.fault = nil
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			reopened, got, meta, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			wantToken, want := uint64(2), stable
+			if point >= faultAfterCheckpointMetaWrite {
+				wantToken, want = 3, candidate
+			}
+			if meta.CheckpointToken != wantToken || !bytes.Equal(got, want) {
+				t.Fatalf("point=%d token=%d want=%d bytes=%d", point, meta.CheckpointToken, wantToken, len(got))
+			}
+		})
+	}
+}
+
 func firstCatalogRecordID(t *testing.T, file *File) RecordID {
 	t.Helper()
 	page := make([]byte, PageSize)

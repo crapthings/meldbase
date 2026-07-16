@@ -97,17 +97,25 @@ func collectExprPaths(expression expr, seen map[string]struct{}) {
 	}
 }
 
+type queryCandidate struct {
+	document Document
+	position uint64
+}
+
 func (q QuerySpec) Execute(documents []Document) []Document {
-	type positioned struct {
-		document Document
-		position int
-	}
-	result := make([]positioned, 0, len(documents))
+	result := make([]queryCandidate, 0, len(documents))
 	for i, document := range documents {
 		if q.Match(document) {
-			result = append(result, positioned{document, i})
+			result = append(result, queryCandidate{document: document, position: uint64(i)})
 		}
 	}
+	return q.executeMatched(result)
+}
+
+// executeMatched applies ordering and window modifiers to documents whose
+// predicate membership is already known. Position is the stable collection
+// insertion order used to break sort ties.
+func (q QuerySpec) executeMatched(result []queryCandidate) []Document {
 	if len(q.sort) > 0 {
 		sort.SliceStable(result, func(i, j int) bool {
 			left, right := result[i].document, result[j].document
@@ -133,6 +141,19 @@ func (q QuerySpec) Execute(documents []Document) []Document {
 			}
 			return result[i].position < result[j].position
 		})
+	} else {
+		// Storage trees are keyed by DocumentID or encoded index value, while the
+		// public unsorted order is stable collection insertion order.
+		ordered := true
+		for index := 1; index < len(result); index++ {
+			if result[index-1].position > result[index].position {
+				ordered = false
+				break
+			}
+		}
+		if !ordered {
+			sort.SliceStable(result, func(i, j int) bool { return result[i].position < result[j].position })
+		}
 	}
 	start := q.skip
 	if start > len(result) {

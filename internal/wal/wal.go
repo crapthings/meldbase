@@ -12,7 +12,12 @@ import (
 const headerSize = 64
 
 var magic = [8]byte{'M', 'E', 'L', 'D', 'W', 'A', 'L', '1'}
-var ErrCorrupt = errors.New("meldbase wal: corrupt log")
+var (
+	ErrCorrupt          = errors.New("meldbase wal: corrupt log")
+	ErrRecoveryRequired = errors.New("meldbase wal: recovery required")
+)
+
+type OpenOptions struct{ RequireClean bool }
 
 type Record struct {
 	Token   uint64
@@ -24,27 +29,61 @@ type Log struct {
 	offset    int64
 }
 
+type OpenReport struct {
+	RecordsReplayed uint64
+	BytesDiscarded  uint64
+}
+
+// Size reports the current durable log length. Callers serialize Append and
+// Reset; Meldbase uses it only while holding the database lock.
+func (l *Log) Size() int64 {
+	if l == nil {
+		return 0
+	}
+	return l.offset
+}
+
 func Open(path string, checkpointToken uint64) (*Log, []Record, error) {
+	log, records, _, err := OpenWithReport(path, checkpointToken)
+	return log, records, err
+}
+
+func OpenWithReport(path string, checkpointToken uint64) (*Log, []Record, OpenReport, error) {
+	return OpenWithOptions(path, checkpointToken, OpenOptions{})
+}
+
+func OpenWithOptions(path string, checkpointToken uint64, options OpenOptions) (*Log, []Record, OpenReport, error) {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, OpenReport{}, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, nil, OpenReport{}, err
 	}
 	records, offset, last, partial, err := scan(file, checkpointToken)
 	if err != nil {
 		file.Close()
-		return nil, nil, err
+		return nil, nil, OpenReport{}, err
+	}
+	if options.RequireClean && (partial || len(records) != 0) {
+		file.Close()
+		return nil, nil, OpenReport{}, ErrRecoveryRequired
 	}
 	if partial {
 		if err := file.Truncate(offset); err != nil {
 			file.Close()
-			return nil, nil, err
+			return nil, nil, OpenReport{}, err
 		}
 		if err := file.Sync(); err != nil {
 			file.Close()
-			return nil, nil, err
+			return nil, nil, OpenReport{}, err
 		}
 	}
-	return &Log{file: file, lastToken: last, offset: offset}, records, nil
+	return &Log{file: file, lastToken: last, offset: offset}, records, OpenReport{
+		RecordsReplayed: uint64(len(records)), BytesDiscarded: uint64(info.Size() - offset),
+	}, nil
 }
 
 func (l *Log) Append(token uint64, payload []byte) error {

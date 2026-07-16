@@ -2,6 +2,7 @@ package meldbase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -81,21 +82,27 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 		return UpdateResult{}, c.db.fatalErr
 	}
 	data := c.db.collections[c.name]
-	if data == nil {
+	selectionLimit, resourceBounded := c.db.boundedMutationSelection(maxAffected, one)
+	selected, err := c.selectMutationDocumentsLocked(ctx, query, one, selectionLimit)
+	if err != nil {
 		c.db.mu.Unlock()
-		return UpdateResult{}, nil
+		if resourceBounded && errors.Is(err, ErrMutationLimit) {
+			c.db.metrics.resourceLimitRejections.Add(1)
+			return UpdateResult{}, fmt.Errorf("%w: transaction changes exceed limit %d", ErrResourceLimit, c.db.resourceLimits.MaxTransactionChanges)
+		}
+		return UpdateResult{}, err
+	}
+	if len(selected) > 0 && data == nil {
+		c.db.mu.Unlock()
+		return UpdateResult{}, ErrCorrupt
 	}
 	changes := []pendingUpdate{}
-	result := UpdateResult{}
-	for _, id := range data.order {
-		document := data.documents[id]
-		if !query.Match(document) || (one && result.MatchedCount > 0) {
-			continue
-		}
-		result.MatchedCount++
-		if maxAffected > 0 && result.MatchedCount > int64(maxAffected) {
+	result := UpdateResult{MatchedCount: int64(len(selected))}
+	for _, document := range selected {
+		id, exists := document.ID()
+		if !exists {
 			c.db.mu.Unlock()
-			return UpdateResult{}, ErrMutationLimit
+			return UpdateResult{}, ErrCorrupt
 		}
 		after := document.Clone()
 		for _, operation := range mutation.operations {
@@ -122,25 +129,31 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 		before, after := change.before.Clone(), change.after.Clone()
 		events[i] = Change{Collection: c.name, Operation: UpdateOperation, DocumentID: change.id, Before: &before, After: &after}
 	}
+	if err := c.db.validateTransactionResource(events); err != nil {
+		c.db.mu.Unlock()
+		return UpdateResult{}, err
+	}
 	if err := data.validateIndexUpdates(changes); err != nil {
 		c.db.mu.Unlock()
 		return UpdateResult{}, err
 	}
 	if len(events) > 0 {
-		if err := c.db.appendCommit(token, events); err != nil {
+		if err := c.db.appendCommit(ctx, token, events); err != nil {
 			c.db.mu.Unlock()
 			return UpdateResult{}, err
 		}
 		c.db.token = token
 	}
-	for _, change := range changes {
-		data.deleteIndexes(change.id, change.before)
-		data.documents[change.id] = change.after
-		data.insertIndexes(change.id, change.after)
+	if c.db.querySource == nil {
+		for _, change := range changes {
+			data.deleteIndexes(change.id, change.before)
+			data.documents[change.id] = change.after
+			data.insertIndexes(change.id, change.after)
+		}
 	}
 	if len(events) > 0 {
 		batch := ChangeBatch{Token: token, Changes: events}
-		c.db.recordCommittedBatch(batch)
+		c.db.recordLiveCommit(batch)
 		c.db.publish(batch)
 	}
 	c.db.mu.Unlock()

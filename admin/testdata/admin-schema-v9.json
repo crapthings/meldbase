@@ -1,0 +1,1759 @@
+{
+  "formatVersion": 1,
+  "adminSchemaVersion": 9,
+  "root": "admin.Sample",
+  "fields": [
+    {
+      "path": "health",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.database",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.durability",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.overall",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.realtime",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.commitRetentionPressure",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.databaseClosed",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.durabilityFailure",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.indexBuildFailed",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.indexBuildRetentionPressure",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.persistentFreeSpaceDiscarded",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.reactiveQueueOverflow",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.reactiveQueuePressure",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.rpcOutcomeUnknown",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.slowConsumer",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.storageLimitRejected",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.storageQuotaExhausted",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.telemetryDeliveryDropped",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.transportBusy",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.workerProtocolFailure",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.signals.writesDisabled",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.storage",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.telemetry",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "health.transport",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.changesPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.commitsPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.deltaDeliveriesPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.documentCacheHitRatio",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.documentsExaminedPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.documentsReturnedPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.failedQueriesPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.pageCacheHitRatio",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.publishedChangesPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.queriesPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.rpcBusyPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.rpcFailuresPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.rpcRatesValid",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.rpcRequestsPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.valid",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.walBytesPerSecond",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "rates.windowSeconds",
+      "type": "number:float64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "sampler",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "sampler.droppedDeliveries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "sampler.historySamples",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "sampler.samples",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "sampler.subscribers",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "sequence",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "server",
+      "type": "object",
+      "optional": true,
+      "nullable": true
+    },
+    {
+      "path": "server.activeConnections",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.capturedAt",
+      "type": "string:rfc3339nano",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.connectionsAccepted",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcActive",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcArguments",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcAtomicCommits",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcAtomicNoopCompletions",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcAtomicRollbacks",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcBusy",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcCanceled",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcFailed",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcIdempotencyClaims",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcIdempotencyConflicts",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcIdempotencyFailures",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcIdempotencyInProgress",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcIdempotencyReplays",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcIdempotencyUnknown",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcMaxLatencyNanos",
+      "type": "integer:nanoseconds",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcRejected",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcRequestBytes",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcRequests",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcResultBytes",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcSucceeded",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.rpcTotalNanos",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.startedAt",
+      "type": "string:rfc3339nano",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker",
+      "type": "object",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.bytesReceived",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.bytesSent",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.callsActive",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.callsBusy",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.callsCanceled",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.callsFailed",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.callsStarted",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.callsSucceeded",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.connectedWorkers",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.policyActive",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.policyBusy",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.policyCanceled",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.policyDenied",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.policyEvaluations",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.policyFailed",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.policyInvalidations",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.policySucceeded",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.protocolFailures",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.registeredMethods",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.registeredPublications",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "server.worker.transactionOps",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "stats",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.activeChangeWatchers",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.backup",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.backup.active",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.backup.attempts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.backup.completed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.backup.failed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.backup.lastBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.backup.lastDurationNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.capturedAt",
+      "type": "string:rfc3339nano",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.closed",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.collections",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.commitSequence",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.commits",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.commits.changes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.commits.total",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.compaction",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.compaction.active",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.compaction.attempts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.compaction.completed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.compaction.failed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.compaction.inputBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.compaction.lastDurationNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.compaction.outputBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.diagnostics",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.diagnostics.capacity",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.diagnostics.commitsObserved",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.diagnostics.enabled",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.diagnostics.overwritten",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.diagnostics.queriesObserved",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.diagnostics.recorded",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.diagnostics.retained",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.documents",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.automaticCheckpoints",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.checkpointAttempts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.checkpointFailures",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.checkpointMaxLatencyNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.checkpointNanos",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.checkpointsCompleted",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.walAppendFailures",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.walAppendMaxLatencyNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.walAppendNanos",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.walAppends",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.walCurrentBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.walCurrentCommits",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durability.walPayloadBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.durable",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.active",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.attempts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.catchingUp",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.completed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.conflicts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.failed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.lastBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.lastDurationNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.lastEntries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.maxDurationNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.persistent",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.persistentBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.persistentEntries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.persistentFailed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.ready",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.retentionLeaseActive",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.retentionPressure",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.retries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.scanning",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.schedulerFailures",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.schedulerRuns",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexBuilds.schedulerYields",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.indexes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries.activeCursors",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries.collectionScans",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries.documentsExamined",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries.documentsReturned",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries.failed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries.idLookups",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries.indexScans",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.queries.total",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.deltaDeliveries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.deltaOperations",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.documentsEmitted",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.fullViewRecomputes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.incrementalBatches",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.incrementalViewUpdates",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.initialSnapshots",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.pendingBatchCapacity",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.pendingBatches",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.pendingChangeCapacity",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.pendingChanges",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.publishedBatches",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.publishedChanges",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.queryRecomputes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.querySubscribers",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.queueOverflows",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.sharedDeltas",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.sharedViewReuses",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.sharedViews",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.slowConsumers",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.snapshotsEmitted",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.watcherDeliveries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.active",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.attempts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.completed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.conflicts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.failed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.lastAttempts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.lastDurationNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.lastOnline",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.lastReachable",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.lastReclaimable",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.reclamation.scans",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.accelerationDegraded",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.checksumValidMetaSlots",
+      "type": "integer:uint8",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.commitSequenceAfter",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.commitSequenceBefore",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.created",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.engine",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.fallbackToOlderRoot",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.mainTailBytesRemoved",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.metaRedundancyDegraded",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.recovered",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.rootValidMetaSlots",
+      "type": "integer:uint8",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.schemaVersion",
+      "type": "integer:int",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.selectedMetaSlot",
+      "type": "integer:uint8",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.walRecordsReplayed",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.recovery.walTailBytesRemoved",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.resources",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.resources.limits",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.resources.limits.maxDocumentBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.resources.limits.maxIndexBuildBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.resources.limits.maxIndexBuildEntries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.resources.limits.maxTransactionBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.resources.limits.maxTransactionChanges",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.resources.rejections",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.startedAt",
+      "type": "string:rfc3339nano",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.activeReaders",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.activeReplayLeases",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.collections",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.commitAttempts",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.commitMaxLatencyNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.commitNanos",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.commitRetentionByteOverage",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.commitRetentionMax",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.commitRetentionMaxBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.commitRetentionOverage",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.commitSequence",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.committedTransactions",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documentCache",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documentCache.bytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documentCache.capacityBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documentCache.capacityEntries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documentCache.entries",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documentCache.evictions",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documentCache.hits",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documentCache.misses",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.documents",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.engine",
+      "type": "string",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.freeSpaceCandidateChecks",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.freeSpaceLoadFailures",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.freeSpaceLoads",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.freeSpacePublishes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.oldestRetainedSequence",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.pageCache",
+      "type": "object",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.pageCache.capacityPages",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.pageCache.evictions",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.pageCache.hits",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.pageCache.misses",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.pageCache.residentPages",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.pageSize",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.persistentFreeSpace",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.physicalPages",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.rejectedTransactions",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.retainedCommitBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.retainedCommits",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.retentionPressure",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.retentionPressureEvents",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.retentionPrunedCommits",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.reusablePages",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.storageByteOverage",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.storageLimitRejections",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.storageMaxBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.storageQuotaExhausted",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.storageUsedBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.treeMerges",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.storage.treeSplits",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.uptimeNanos",
+      "type": "integer:nanoseconds",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.writesDisabled",
+      "type": "boolean",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "version",
+      "type": "integer:uint32",
+      "optional": false,
+      "nullable": false
+    }
+  ]
+}

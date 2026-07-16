@@ -1,0 +1,42 @@
+{
+  "name": "@meldbase/server",
+  "version": "0.1.0-alpha.2",
+  "description": "Trusted Node.js method and data-only publication worker SDK for Meldbase",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/crapthings/meldbase.git",
+    "directory": "sdk/server"
+  },
+  "homepage": "https://github.com/crapthings/meldbase#readme",
+  "bugs": "https://github.com/crapthings/meldbase/issues",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/worker.js",
+    "dist/worker.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && node --test dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@meldbase/client": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

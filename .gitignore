@@ -8,6 +8,9 @@ coverage/
 *.test
 *.meld
 *.meld.wal
+*.meld2
+*.meld2.wal
+*.pprof
 .env
 .env.*
 !.env.example

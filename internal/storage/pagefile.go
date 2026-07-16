@@ -27,11 +27,14 @@ const (
 )
 
 var (
-	pageMagic    = [8]byte{'M', 'E', 'L', 'D', 'P', 'A', 'G', 'E'}
-	catalogMagic = [8]byte{'M', 'E', 'L', 'D', 'C', 'A', 'T', '1'}
-	ErrCorrupt   = errors.New("meldbase storage: corrupt database")
-	ErrLocked    = errors.New("meldbase storage: database is locked")
+	pageMagic           = [8]byte{'M', 'E', 'L', 'D', 'P', 'A', 'G', 'E'}
+	catalogMagic        = [8]byte{'M', 'E', 'L', 'D', 'C', 'A', 'T', '1'}
+	ErrCorrupt          = errors.New("meldbase storage: corrupt database")
+	ErrLocked           = errors.New("meldbase storage: database is locked")
+	ErrRecoveryRequired = errors.New("meldbase storage: recovery required")
 )
+
+type OpenOptions struct{ RequireClean bool }
 
 type Meta struct {
 	DatabaseID      [16]byte
@@ -69,7 +72,29 @@ type File struct {
 	metaValid [2]bool
 	reachable [2]map[uint64]struct{}
 	freePages map[uint64]struct{}
+	fault     func(checkpointFaultPoint) error
 }
+
+// OpenReport records bounded recovery actions performed by OpenBlobsWithReport.
+// It deliberately excludes paths and snapshot contents.
+type OpenReport struct {
+	Created                bool
+	SelectedMetaSlot       uint8
+	ValidMetaSlots         uint8
+	MetaRedundancyDegraded bool
+	TrailingBytesRemoved   uint64
+	FreePageReuseDegraded  bool
+}
+
+type checkpointFaultPoint uint8
+
+const (
+	faultAfterCheckpointPageWrite checkpointFaultPoint = 1 + iota
+	faultBeforeCheckpointDataSync
+	faultAfterCheckpointDataSync
+	faultAfterCheckpointMetaWrite
+	faultAfterCheckpointMetaSync
+)
 
 func Open(path string) (*File, []byte, Meta, error) {
 	file, blobs, meta, err := OpenBlobs(path)
@@ -87,18 +112,27 @@ func Open(path string) (*File, []byte, Meta, error) {
 }
 
 func OpenBlobs(path string) (*File, []Blob, Meta, error) {
+	file, blobs, meta, _, err := OpenBlobsWithReport(path)
+	return file, blobs, meta, err
+}
+
+func OpenBlobsWithReport(path string) (*File, []Blob, Meta, OpenReport, error) {
+	return OpenBlobsWithOptions(path, OpenOptions{})
+}
+
+func OpenBlobsWithOptions(path string, options OpenOptions) (*File, []Blob, Meta, OpenReport, error) {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
-		return nil, nil, Meta{}, err
+		return nil, nil, Meta{}, OpenReport{}, err
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		file.Close()
-		return nil, nil, Meta{}, fmt.Errorf("%w: %v", ErrLocked, err)
+		return nil, nil, Meta{}, OpenReport{}, fmt.Errorf("%w: %v", ErrLocked, err)
 	}
-	cleanup := func(err error) (*File, []Blob, Meta, error) {
+	cleanup := func(err error) (*File, []Blob, Meta, OpenReport, error) {
 		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		file.Close()
-		return nil, nil, Meta{}, err
+		return nil, nil, Meta{}, OpenReport{}, err
 	}
 	info, err := file.Stat()
 	if err != nil {
@@ -126,7 +160,7 @@ func OpenBlobs(path string) (*File, []Blob, Meta, error) {
 			file: file, meta: meta, metaSlot: 0, nextPage: 2,
 			metas: [2]Meta{0: meta}, metaValid: [2]bool{true, false},
 			reachable: [2]map[uint64]struct{}{0: map[uint64]struct{}{}}, freePages: map[uint64]struct{}{},
-		}, nil, meta, nil
+		}, nil, meta, OpenReport{Created: true, SelectedMetaSlot: 0, ValidMetaSlots: 1}, nil
 	}
 	if info.Size() < 2*PageSize {
 		return cleanup(fmt.Errorf("%w: invalid file length", ErrCorrupt))
@@ -155,6 +189,20 @@ func OpenBlobs(path string) (*File, []Blob, Meta, error) {
 		slot = 1
 	}
 	meta := metas[slot]
+	validSlots := uint8(0)
+	for _, ok := range valid {
+		if ok {
+			validSlots++
+		}
+	}
+	preReport := OpenReport{
+		SelectedMetaSlot: uint8(slot), ValidMetaSlots: validSlots,
+		TrailingBytesRemoved:   uint64(info.Size() - effectiveSize),
+		MetaRedundancyDegraded: validSlots < 2 && effectiveSize > 2*PageSize,
+	}
+	if options.RequireClean && (preReport.TrailingBytesRemoved != 0 || preReport.MetaRedundancyDegraded) {
+		return cleanup(ErrRecoveryRequired)
+	}
 	blobs, err := readSnapshotBlobs(file, meta)
 	if err != nil {
 		return cleanup(err)
@@ -190,7 +238,11 @@ func OpenBlobs(path string) (*File, []Blob, Meta, error) {
 	if reuseSafe {
 		result.rebuildFreePages()
 	}
-	return result, blobs, meta, nil
+	preReport.FreePageReuseDegraded = !reuseSafe
+	if options.RequireClean && preReport.FreePageReuseDegraded {
+		return cleanup(ErrRecoveryRequired)
+	}
+	return result, blobs, meta, preReport, nil
 }
 
 func (f *File) Checkpoint(token uint64, snapshot []byte) error {
@@ -259,6 +311,9 @@ func (f *File) CheckpointBlobs(token uint64, blobs []Blob) error {
 			if _, err := f.file.WriteAt(encoded, int64(pageID)*PageSize); err != nil {
 				return err
 			}
+			if err := f.injectCheckpointFault(faultAfterCheckpointPageWrite); err != nil {
+				return err
+			}
 			entries = append(entries, catalogEntry{blob: uint32(blobIndex), kind: blob.Kind, chunk: uint32(chunkIndex), chunks: uint32(chunkCount), record: rid})
 			recordIndex++
 		}
@@ -280,8 +335,17 @@ func (f *File) CheckpointBlobs(token uint64, blobs []Blob) error {
 		if _, err := f.file.WriteAt(page, int64(pageID)*PageSize); err != nil {
 			return err
 		}
+		if err := f.injectCheckpointFault(faultAfterCheckpointPageWrite); err != nil {
+			return err
+		}
+	}
+	if err := f.injectCheckpointFault(faultBeforeCheckpointDataSync); err != nil {
+		return err
 	}
 	if err := f.file.Sync(); err != nil {
+		return err
+	}
+	if err := f.injectCheckpointFault(faultAfterCheckpointDataSync); err != nil {
 		return err
 	}
 	meta := Meta{DatabaseID: f.meta.DatabaseID, Generation: generation, RootPage: catalogRoot, PageCount: uint32(totalRecords), CheckpointToken: token}
@@ -293,7 +357,13 @@ func (f *File) CheckpointBlobs(token uint64, blobs []Blob) error {
 	if _, err := f.file.WriteAt(page, int64(slot*PageSize)); err != nil {
 		return err
 	}
+	if err := f.injectCheckpointFault(faultAfterCheckpointMetaWrite); err != nil {
+		return err
+	}
 	if err := f.file.Sync(); err != nil {
+		return err
+	}
+	if err := f.injectCheckpointFault(faultAfterCheckpointMetaSync); err != nil {
 		return err
 	}
 	newReachable := make(map[uint64]struct{}, len(allocated))
@@ -304,6 +374,13 @@ func (f *File) CheckpointBlobs(token uint64, blobs []Blob) error {
 	f.metas[slot], f.metaValid[slot], f.reachable[slot] = meta, true, newReachable
 	f.rebuildFreePages()
 	return nil
+}
+
+func (f *File) injectCheckpointFault(point checkpointFaultPoint) error {
+	if f == nil || f.fault == nil {
+		return nil
+	}
+	return f.fault(point)
 }
 
 func (f *File) allocatePages(count int) []uint64 {

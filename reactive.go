@@ -17,7 +17,24 @@ type QuerySubscription struct {
 	once      sync.Once
 }
 
+// QueryDeltaSubscription returns one safe initial snapshot and then ordered
+// deltas. It is the preferred core stream for transports and reactive clients;
+// QuerySubscription remains the full-snapshot compatibility adapter.
+type QueryDeltaSubscription struct {
+	Initial QuerySnapshot
+	Deltas  <-chan QueryDelta
+	Errors  <-chan error
+	cancel  context.CancelFunc
+	once    sync.Once
+}
+
 func (s *QuerySubscription) Close() {
+	if s != nil {
+		s.once.Do(s.cancel)
+	}
+}
+
+func (s *QueryDeltaSubscription) Close() {
 	if s != nil {
 		s.once.Do(s.cancel)
 	}
@@ -35,93 +52,57 @@ func (c *Collection) SnapshotQuery(ctx context.Context, query QuerySpec) (QueryS
 	if c.db.closed {
 		return QuerySnapshot{}, ErrClosed
 	}
-	documents := []Document{}
-	if data := c.db.collections[c.name]; data != nil {
-		documents = make([]Document, 0, len(data.order))
-		for _, id := range data.order {
-			if document, ok := data.documents[id]; ok {
-				documents = append(documents, document)
-			}
+	if c.db.querySource != nil {
+		documents, _, err := c.planStorageLocked(ctx, query)
+		if err != nil {
+			return QuerySnapshot{}, err
 		}
+		return QuerySnapshot{Token: c.db.token, Documents: documents}, nil
 	}
-	return QuerySnapshot{Token: c.db.token, Documents: query.Execute(documents)}, nil
+	return snapshotQueryUnlocked(c.db, c.name, query), nil
 }
 
 func (c *Collection) SubscribeQuery(ctx context.Context, query QuerySpec, buffer int) (*QuerySubscription, error) {
+	subscriber, cancel, err := c.subscribeSharedQuery(ctx, query, buffer, false)
+	if err != nil {
+		return nil, err
+	}
+	return &QuerySubscription{Snapshots: subscriber.snapshots, Errors: subscriber.errors, cancel: cancel}, nil
+}
+
+func (c *Collection) SubscribeQueryDeltas(ctx context.Context, query QuerySpec, buffer int) (*QueryDeltaSubscription, error) {
+	subscriber, cancel, err := c.subscribeSharedQuery(ctx, query, buffer, true)
+	if err != nil {
+		return nil, err
+	}
+	return &QueryDeltaSubscription{Initial: subscriber.initial, Deltas: subscriber.deltas, Errors: subscriber.errors, cancel: cancel}, nil
+}
+
+func (c *Collection) subscribeSharedQuery(ctx context.Context, query QuerySpec, buffer int, deltas bool) (*sharedQuerySubscriber, context.CancelFunc, error) {
 	if buffer <= 0 || buffer > 1024 {
-		return nil, ErrSlowConsumer
+		return nil, nil, ErrSlowConsumer
+	}
+	if err := contextError(ctx); err != nil {
+		return nil, nil, err
+	}
+	if err := c.validate(); err != nil {
+		return nil, nil, err
+	}
+	canonical, err := MarshalQuerySpecJSON(query)
+	if err != nil {
+		return nil, nil, err
 	}
 	child, cancel := context.WithCancel(ctx)
-	batches, feedErrors, err := c.db.WatchChanges(child, c.name, buffer)
+	if c.db.reactive == nil {
+		cancel()
+		return nil, nil, ErrClosed
+	}
+	subscriber, err := c.db.reactive.subscribe(child, c.name, query, canonical, buffer, cancel, deltas)
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, nil, err
 	}
-	initial, err := c.SnapshotQuery(child, query)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	snapshots := make(chan QuerySnapshot, buffer)
-	errorsOut := make(chan error, 1)
-	snapshots <- cloneSnapshot(initial)
-	subscription := &QuerySubscription{Snapshots: snapshots, Errors: errorsOut, cancel: cancel}
-	go func() {
-		defer close(snapshots)
-		defer close(errorsOut)
-		defer cancel()
-		lastToken, lastDocuments := initial.Token, initial.Documents
-		for {
-			select {
-			case <-child.Done():
-				return
-			case err, ok := <-feedErrors:
-				if ok && err != nil && err != context.Canceled {
-					select {
-					case errorsOut <- err:
-					default:
-					}
-				}
-				return
-			case batch, ok := <-batches:
-				if !ok {
-					return
-				}
-				if batch.Token <= lastToken {
-					continue
-				}
-				next, err := c.SnapshotQuery(child, query)
-				if err != nil {
-					select {
-					case errorsOut <- err:
-					default:
-					}
-					return
-				}
-				if next.Token <= lastToken {
-					continue
-				}
-				changed := !documentSlicesEqual(lastDocuments, next.Documents)
-				lastToken = next.Token
-				lastDocuments = next.Documents
-				if !changed {
-					continue
-				}
-				select {
-				case snapshots <- cloneSnapshot(next):
-				case <-child.Done():
-					return
-				default:
-					select {
-					case errorsOut <- ErrSlowConsumer:
-					default:
-					}
-					return
-				}
-			}
-		}
-	}()
-	return subscription, nil
+	return subscriber, cancel, nil
 }
 
 func cloneSnapshot(snapshot QuerySnapshot) QuerySnapshot {

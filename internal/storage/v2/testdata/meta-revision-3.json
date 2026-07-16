@@ -1,0 +1,14 @@
+{
+  "formatRevision": 3,
+  "databaseIdHex": "00112233445566778899aabbccddeeff",
+  "generation": 42,
+  "commitSequence": 0,
+  "rootPage": 0,
+  "physicalPageCount": 2,
+  "oldestRetainedSequence": 0,
+  "requiredFeatures": 0,
+  "optionalFeatures": 0,
+  "encodedPrefixBase64": "TUVMRE1UMgADAAABAEAAAAARIjNEVWZ3iJmqu8zd7v8qAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+  "metaChecksumHex": "e0eb3459499514d4757646205d54e657de43502b5172a79dc323b346cd7a55b2",
+  "encodedPageSha256": "1f689f69b0359481ac741a10a99f8ada9b62d3863c2977fc410c863a0c0d48bd"
+}

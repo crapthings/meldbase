@@ -1,0 +1,17 @@
+{
+  "name": "@meldbase/example-server-worker",
+  "version": "0.1.0-alpha.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "pnpm --filter @meldbase/client build && pnpm --filter @meldbase/server build && node index.mjs"
+  },
+  "dependencies": {
+    "@meldbase/client": "workspace:*",
+    "@meldbase/server": "workspace:*",
+    "ws": "^8.21.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

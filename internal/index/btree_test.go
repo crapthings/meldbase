@@ -64,6 +64,23 @@ func TestBTreeCopiesCallerBuffers(t *testing.T) {
 	}
 }
 
+func TestBTreeDeleteMutatesOnlySearchPath(t *testing.T) {
+	tree := NewWithOrder(5)
+	for number := 0; number < 5_000; number++ {
+		if !tree.Insert(integer(number), integer(number+10_000)) {
+			t.Fatalf("insert %d failed", number)
+		}
+	}
+	unrelatedLeaf := tree.findLeaf(integer(4_999))
+	if !tree.Delete(integer(0), integer(10_000)) {
+		t.Fatal("delete failed")
+	}
+	if tree.findLeaf(integer(4_999)) != unrelatedLeaf {
+		t.Fatal("delete rebuilt or replaced an unrelated leaf")
+	}
+	assertBTreeStructure(t, tree)
+}
+
 func TestBTreeRandomOperationsMatchOrderedSetModel(t *testing.T) {
 	for seed := uint64(1); seed <= 8; seed++ {
 		t.Run(string(rune('a'+seed-1)), func(t *testing.T) {
@@ -123,8 +140,26 @@ func FuzzBTreeMatchesOrderedSetModel(f *testing.F) {
 	})
 }
 
+func BenchmarkBTreeLocalDeleteReinsert(b *testing.B) {
+	tree := New()
+	const documents = 100_000
+	for number := 0; number < documents; number++ {
+		tree.Insert(integer(number), integer(number+documents))
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		number := iteration % documents
+		key, value := integer(number), integer(number+documents)
+		if !tree.Delete(key, value) || !tree.Insert(key, value) {
+			b.Fatal("steady-state delete/reinsert failed")
+		}
+	}
+}
+
 func assertTreeMatchesModel(t *testing.T, tree *Tree, model map[[2]uint16]struct{}) {
 	t.Helper()
+	assertBTreeStructure(t, tree)
 	expected := make([]Pair, 0, len(model))
 	for pair := range model {
 		expected = append(expected, Pair{Key: integer(int(pair[0])), Value: integer(int(pair[1]))})
@@ -143,6 +178,76 @@ func assertTreeMatchesModel(t *testing.T, tree *Tree, model map[[2]uint16]struct
 		if !bytes.Equal(actual[index].Key, expected[index].Key) || !bytes.Equal(actual[index].Value, expected[index].Value) {
 			t.Fatalf("entry %d differs", index)
 		}
+	}
+}
+
+func assertBTreeStructure(t *testing.T, tree *Tree) {
+	t.Helper()
+	if tree == nil || tree.root == nil {
+		t.Fatal("nil tree root")
+	}
+	leafDepth := -1
+	leaves := make([]*node, 0)
+	pairs := 0
+	var walk func(*node, int, bool)
+	walk = func(current *node, depth int, root bool) {
+		if current == nil {
+			t.Fatal("nil node")
+		}
+		if current.leaf {
+			if len(current.keys) != len(current.values) || len(current.keys) > tree.maxKeys || (!root && len(current.keys) < (tree.maxKeys+1)/2) {
+				t.Fatalf("leaf occupancy keys=%d values=%d root=%t", len(current.keys), len(current.values), root)
+			}
+			if leafDepth < 0 {
+				leafDepth = depth
+			} else if leafDepth != depth {
+				t.Fatalf("leaf depths %d and %d differ", leafDepth, depth)
+			}
+			for index, key := range current.keys {
+				if index > 0 && bytes.Compare(current.keys[index-1], key) >= 0 {
+					t.Fatal("leaf keys are not strictly ordered")
+				}
+				if len(current.values[index]) == 0 {
+					t.Fatal("leaf has empty value list")
+				}
+				for valueIndex, value := range current.values[index] {
+					if valueIndex > 0 && bytes.Compare(current.values[index][valueIndex-1], value) >= 0 {
+						t.Fatal("leaf values are not strictly ordered")
+					}
+				}
+				pairs += len(current.values[index])
+			}
+			leaves = append(leaves, current)
+			return
+		}
+		if len(current.children) != len(current.keys)+1 || len(current.keys) > tree.maxKeys ||
+			(!root && len(current.children) < (tree.maxKeys+2)/2) {
+			t.Fatalf("branch occupancy keys=%d children=%d root=%t", len(current.keys), len(current.children), root)
+		}
+		for index, key := range current.keys {
+			if index > 0 && bytes.Compare(current.keys[index-1], key) >= 0 {
+				t.Fatal("branch keys are not strictly ordered")
+			}
+			if !bytes.Equal(key, minKey(current.children[index+1])) {
+				t.Fatal("branch separator differs from child minimum")
+			}
+		}
+		for _, child := range current.children {
+			walk(child, depth+1, false)
+		}
+	}
+	walk(tree.root, 0, true)
+	for index, leaf := range leaves {
+		var expected *node
+		if index+1 < len(leaves) {
+			expected = leaves[index+1]
+		}
+		if leaf.next != expected {
+			t.Fatalf("leaf %d next link is inconsistent", index)
+		}
+	}
+	if pairs != tree.size {
+		t.Fatalf("tree size=%d structural pairs=%d", tree.size, pairs)
 	}
 }
 

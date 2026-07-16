@@ -104,20 +104,132 @@ func (t *Tree) Get(key []byte) [][]byte {
 }
 
 func (t *Tree) Delete(key, value []byte) bool {
-	entries := t.entries()
-	removed := false
-	rebuilt := NewWithOrder(t.maxKeys)
-	for _, entry := range entries {
-		if !removed && bytes.Equal(entry.key, key) && bytes.Equal(entry.value, value) {
-			removed = true
-			continue
+	if t == nil || t.root == nil || len(key) == 0 || !t.delete(t.root, key, value) {
+		return false
+	}
+	t.size--
+	for !t.root.leaf && len(t.root.children) == 1 {
+		t.root = t.root.children[0]
+	}
+	if t.size == 0 {
+		t.root = &node{leaf: true}
+	}
+	return true
+}
+
+func (t *Tree) delete(current *node, key, value []byte) bool {
+	if current.leaf {
+		position := sort.Search(len(current.keys), func(index int) bool { return bytes.Compare(current.keys[index], key) >= 0 })
+		if position >= len(current.keys) || !bytes.Equal(current.keys[position], key) {
+			return false
 		}
-		rebuilt.Insert(entry.key, entry.value)
+		values := current.values[position]
+		valuePosition := sort.Search(len(values), func(index int) bool { return bytes.Compare(values[index], value) >= 0 })
+		if valuePosition >= len(values) || !bytes.Equal(values[valuePosition], value) {
+			return false
+		}
+		values = removeBytes(values, valuePosition)
+		if len(values) > 0 {
+			current.values[position] = values
+			return true
+		}
+		current.keys = removeBytes(current.keys, position)
+		current.values = removeValueList(current.values, position)
+		return true
 	}
-	if removed {
-		t.root, t.size = rebuilt.root, rebuilt.size
+	childIndex := sort.Search(len(current.keys), func(index int) bool { return bytes.Compare(key, current.keys[index]) < 0 })
+	if !t.delete(current.children[childIndex], key, value) {
+		return false
 	}
-	return removed
+	t.rebalanceChild(current, childIndex)
+	recompute(current)
+	return true
+}
+
+func (t *Tree) rebalanceChild(parent *node, childIndex int) {
+	if parent == nil || parent.leaf || childIndex < 0 || childIndex >= len(parent.children) {
+		return
+	}
+	child := parent.children[childIndex]
+	if !t.underfilled(child) || len(parent.children) == 1 {
+		return
+	}
+	if childIndex > 0 {
+		left := parent.children[childIndex-1]
+		if t.canLend(left) {
+			t.borrowFromLeft(left, child)
+			return
+		}
+	}
+	if childIndex+1 < len(parent.children) {
+		right := parent.children[childIndex+1]
+		if t.canLend(right) {
+			t.borrowFromRight(child, right)
+			return
+		}
+	}
+	if childIndex > 0 {
+		t.mergeNodes(parent.children[childIndex-1], child)
+		parent.children = removeNode(parent.children, childIndex)
+		return
+	}
+	t.mergeNodes(child, parent.children[1])
+	parent.children = removeNode(parent.children, 1)
+}
+
+func (t *Tree) underfilled(current *node) bool {
+	if current.leaf {
+		return len(current.keys) < (t.maxKeys+1)/2
+	}
+	return len(current.children) < (t.maxKeys+2)/2
+}
+
+func (t *Tree) canLend(current *node) bool {
+	if current.leaf {
+		return len(current.keys) > (t.maxKeys+1)/2
+	}
+	return len(current.children) > (t.maxKeys+2)/2
+}
+
+func (t *Tree) borrowFromLeft(left, current *node) {
+	if current.leaf {
+		last := len(left.keys) - 1
+		current.keys = insertBytes(current.keys, 0, left.keys[last])
+		current.values = insertValues(current.values, 0, left.values[last])
+		left.keys = removeBytes(left.keys, last)
+		left.values = removeValueList(left.values, last)
+		return
+	}
+	last := len(left.children) - 1
+	current.children = insertNode(current.children, 0, left.children[last])
+	left.children = removeNode(left.children, last)
+	recompute(left)
+	recompute(current)
+}
+
+func (t *Tree) borrowFromRight(current, right *node) {
+	if current.leaf {
+		current.keys = append(current.keys, right.keys[0])
+		current.values = append(current.values, right.values[0])
+		right.keys = removeBytes(right.keys, 0)
+		right.values = removeValueList(right.values, 0)
+		return
+	}
+	current.children = append(current.children, right.children[0])
+	right.children = removeNode(right.children, 0)
+	recompute(current)
+	recompute(right)
+}
+
+func (t *Tree) mergeNodes(left, right *node) {
+	if left.leaf {
+		left.keys = append(left.keys, right.keys...)
+		left.values = append(left.values, right.values...)
+		left.next = right.next
+		return
+	}
+	left.children = append(left.children, right.children...)
+	recompute(left)
 }
 
 type Pair struct{ Key, Value []byte }
@@ -154,24 +266,24 @@ func (t *Tree) findLeaf(key []byte) *node {
 	return current
 }
 
-type entry struct{ key, value []byte }
-
-func (t *Tree) entries() []entry {
-	pairs := t.Scan(nil, nil, false)
-	result := make([]entry, len(pairs))
-	for i, pair := range pairs {
-		result[i] = entry{pair.Key, pair.Value}
-	}
-	return result
-}
-
 func recompute(current *node) {
 	if current.leaf {
 		return
 	}
-	current.keys = make([][]byte, len(current.children)-1)
+	needed := len(current.children) - 1
+	if needed < 0 {
+		needed = 0
+	}
+	if cap(current.keys) < needed {
+		current.keys = make([][]byte, needed)
+	} else {
+		for index := needed; index < len(current.keys); index++ {
+			current.keys[index] = nil
+		}
+		current.keys = current.keys[:needed]
+	}
 	for i := 1; i < len(current.children); i++ {
-		current.keys[i-1] = clone(minKey(current.children[i]))
+		current.keys[i-1] = append(current.keys[i-1][:0], minKey(current.children[i])...)
 	}
 }
 func minKey(current *node) []byte {
@@ -197,6 +309,21 @@ func insertNode(values []*node, index int, value *node) []*node {
 	copy(values[index+1:], values[index:])
 	values[index] = value
 	return values
+}
+func removeBytes(values [][]byte, index int) [][]byte {
+	copy(values[index:], values[index+1:])
+	values[len(values)-1] = nil
+	return values[:len(values)-1]
+}
+func removeValueList(values [][][]byte, index int) [][][]byte {
+	copy(values[index:], values[index+1:])
+	values[len(values)-1] = nil
+	return values[:len(values)-1]
+}
+func removeNode(values []*node, index int) []*node {
+	copy(values[index:], values[index+1:])
+	values[len(values)-1] = nil
+	return values[:len(values)-1]
 }
 func clone(value []byte) []byte { return append([]byte(nil), value...) }
 func cloneKeys(values [][]byte) [][]byte {

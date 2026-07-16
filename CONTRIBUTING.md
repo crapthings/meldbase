@@ -28,6 +28,7 @@ go vet ./...
 go run ./cmd/meld demo
 pnpm check
 pnpm test
+pnpm pack:check
 pnpm build:example
 ```
 

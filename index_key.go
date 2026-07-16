@@ -4,49 +4,93 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
-	"math/big"
 )
 
 const numericMagnitudeBytes = 263
 
 func encodeIndexKey(value Value) ([]byte, error) {
+	return appendIndexKey(nil, value)
+}
+
+func appendIndexKey(destination []byte, value Value) ([]byte, error) {
 	switch value.kind {
 	case NullKind:
-		return []byte{0x10}, nil
+		return append(destination, 0x10), nil
 	case BoolKind:
 		if value.b {
-			return []byte{0x21}, nil
+			return append(destination, 0x21), nil
 		}
-		return []byte{0x20}, nil
+		return append(destination, 0x20), nil
 	case Int64Kind, Float64Kind:
-		return encodeNumericIndexKey(value)
+		return appendNumericIndexKey(destination, value)
 	case StringKind:
-		return append([]byte{0x40}, escapeIndexBytes([]byte(value.s))...), nil
+		destination = append(destination, 0x40)
+		return appendEscapedIndexBytes(destination, []byte(value.s)), nil
 	case TimeKind:
-		result := make([]byte, 9)
-		result[0] = 0x50
-		binary.BigEndian.PutUint64(result[1:], uint64(value.t.UnixMilli())^(1<<63))
-		return result, nil
+		start := len(destination)
+		destination = append(destination, make([]byte, 9)...)
+		destination[start] = 0x50
+		binary.BigEndian.PutUint64(destination[start+1:], uint64(value.t.UnixMilli())^(1<<63))
+		return destination, nil
 	case IDKind:
-		return append([]byte{0x60}, value.id[:]...), nil
+		destination = append(destination, 0x60)
+		return append(destination, value.id[:]...), nil
 	case BinaryKind:
-		return append([]byte{0x70}, escapeIndexBytes(value.bin)...), nil
+		destination = append(destination, 0x70)
+		return appendEscapedIndexBytes(destination, value.bin), nil
 	default:
 		return nil, errors.New("meldbase: value is not scalar-indexable")
 	}
 }
 
+func indexKeyCapacity(value Value) int {
+	switch value.kind {
+	case NullKind, BoolKind:
+		return 1
+	case Int64Kind, Float64Kind:
+		return 2 + numericMagnitudeBytes
+	case StringKind:
+		return 1 + escapedIndexBytesLength([]byte(value.s))
+	case TimeKind:
+		return 9
+	case IDKind:
+		return 17
+	case BinaryKind:
+		return 1 + escapedIndexBytesLength(value.bin)
+	default:
+		return 0
+	}
+}
+
+func escapedIndexBytesLength(value []byte) int {
+	length := len(value) + 2
+	for _, item := range value {
+		if item == 0 {
+			length++
+		}
+	}
+	return length
+}
+
 func encodeNumericIndexKey(value Value) ([]byte, error) {
-	result := make([]byte, 2+numericMagnitudeBytes)
+	return appendNumericIndexKey(nil, value)
+}
+
+func appendNumericIndexKey(destination []byte, value Value) ([]byte, error) {
+	start := len(destination)
+	destination = append(destination, make([]byte, 2+numericMagnitudeBytes)...)
+	result := destination[start:]
 	result[0] = 0x30
-	magnitude := new(big.Int)
-	negative := false
+	negative, magnitude, shift := false, uint64(0), uint(0)
 	if value.kind == Int64Kind {
 		number := value.i
 		negative = number < 0
-		magnitude.SetInt64(number)
-		magnitude.Abs(magnitude)
-		magnitude.Lsh(magnitude, 1074)
+		if negative {
+			magnitude = uint64(-(number + 1)) + 1
+		} else {
+			magnitude = uint64(number)
+		}
+		shift = 1074
 	} else {
 		if math.IsNaN(value.f) || math.IsInf(value.f, 0) {
 			return nil, ErrInvalidDocument
@@ -56,21 +100,19 @@ func encodeNumericIndexKey(value Value) ([]byte, error) {
 		exponent := int((bits >> 52) & 0x7ff)
 		fraction := bits & ((1 << 52) - 1)
 		if exponent == 0 {
-			magnitude.SetUint64(fraction)
+			magnitude = fraction
 		} else {
-			magnitude.SetUint64((1 << 52) | fraction)
-			magnitude.Lsh(magnitude, uint(exponent-1))
+			magnitude = (1 << 52) | fraction
+			shift = uint(exponent - 1)
 		}
 	}
-	if magnitude.Sign() == 0 {
+	if magnitude == 0 {
 		result[1] = 0x01
-		return result, nil
+		return destination, nil
 	}
-	bytes := magnitude.Bytes()
-	if len(bytes) > numericMagnitudeBytes {
+	if !writeShiftedIndexMagnitude(result[2:], magnitude, shift) {
 		return nil, errors.New("numeric index magnitude overflow")
 	}
-	copy(result[len(result)-len(bytes):], bytes)
 	if negative {
 		result[1] = 0x00
 		for i := 2; i < len(result); i++ {
@@ -79,11 +121,36 @@ func encodeNumericIndexKey(value Value) ([]byte, error) {
 	} else {
 		result[1] = 0x02
 	}
-	return result, nil
+	return destination, nil
+}
+
+func writeShiftedIndexMagnitude(destination []byte, magnitude uint64, shift uint) bool {
+	if len(destination) == 0 || magnitude == 0 {
+		return magnitude == 0
+	}
+	byteShift, bitShift := int(shift/8), uint(shift%8)
+	end := len(destination) - byteShift
+	if end < 8 {
+		return false
+	}
+	binary.BigEndian.PutUint64(destination[end-8:end], magnitude<<bitShift)
+	if bitShift != 0 {
+		high := magnitude >> (64 - bitShift)
+		if high != 0 {
+			if end < 9 {
+				return false
+			}
+			destination[end-9] = byte(high)
+		}
+	}
+	return true
 }
 
 func escapeIndexBytes(value []byte) []byte {
-	result := make([]byte, 0, len(value)+2)
+	return appendEscapedIndexBytes(make([]byte, 0, len(value)+2), value)
+}
+
+func appendEscapedIndexBytes(result, value []byte) []byte {
 	for _, item := range value {
 		if item == 0 {
 			result = append(result, 0, 0xff)

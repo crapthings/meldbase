@@ -1,6 +1,9 @@
 package server
 
 import (
+	"bytes"
+	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,5 +54,34 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 	service.now = func() time.Time { return now.Add(time.Minute) }
 	if _, err := service.validate(token, database, principal, "items", query, "policy-v1"); err == nil {
 		t.Fatal("expired token was accepted")
+	}
+}
+
+func TestResumeTokenRejectsNonCanonicalBase64URLAliases(t *testing.T) {
+	service := newResumeTokenService([]byte("0123456789abcdef0123456789abcdef"), time.Minute)
+	database := [16]byte{1, 2, 3}
+	principal := Principal{Subject: "user-1", Tenant: "tenant-1"}
+	query, err := meldbase.CompileQuery(meldbase.Filter{}, meldbase.QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := service.issue(database, principal, "items", query, "policy-v1", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(token, ".")
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, parts[1][len(parts[1])-1])
+	if last < 0 || last%4 != 0 {
+		t.Fatalf("unexpected canonical signature ending %q", parts[1])
+	}
+	aliasSignature := parts[1][:len(parts[1])-1] + string(alphabet[last+1])
+	canonicalBytes, canonicalErr := base64.RawURLEncoding.DecodeString(parts[1])
+	aliasBytes, aliasErr := base64.RawURLEncoding.DecodeString(aliasSignature)
+	if canonicalErr != nil || aliasErr != nil || !bytes.Equal(canonicalBytes, aliasBytes) {
+		t.Fatal("test did not construct an equivalent Base64URL alias")
+	}
+	if _, err := service.validate(parts[0]+"."+aliasSignature, database, principal, "items", query, "policy-v1"); err == nil {
+		t.Fatal("non-canonical token encoding was accepted")
 	}
 }

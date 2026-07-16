@@ -8,8 +8,9 @@
   },
   "packageManager": "pnpm@11.10.0",
   "scripts": {
-    "check": "pnpm --filter @meldbase/client check && pnpm --filter @meldbase/client build && pnpm --filter @meldbase/react check && pnpm --filter @meldbase/react build && pnpm --filter @meldbase/example-realtime-todos check",
+    "check": "pnpm --filter @meldbase/client check && pnpm --filter @meldbase/client build && pnpm --filter @meldbase/server check && pnpm --filter @meldbase/server build && pnpm --filter @meldbase/react check && pnpm --filter @meldbase/react build && pnpm --filter @meldbase/example-realtime-todos check",
     "test": "pnpm --filter './sdk/*' test",
+    "pack:check": "pnpm --filter './sdk/*' build && node scripts/verify-sdk-packages.mjs",
     "build:example": "pnpm --filter @meldbase/example-realtime-todos build"
   }
 }

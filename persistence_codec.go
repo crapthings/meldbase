@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 	"time"
+	"unicode/utf8"
 
 	btree "github.com/crapthings/meldbase/internal/index"
 	storagefile "github.com/crapthings/meldbase/internal/storage"
@@ -165,7 +166,7 @@ func decodeCheckpointBlobs(blobs []storagefile.Blob) (map[string]*collectionData
 		if err != nil || documentCount > 10_000_000 {
 			return nil, nil, ErrCorrupt
 		}
-		collection := &collectionData{documents: make(map[DocumentID]Document, int(documentCount)), order: make([]DocumentID, 0, int(documentCount)), indexes: make(map[string]*indexState)}
+		collection := &collectionData{documents: make(map[DocumentID]Document, int(documentCount)), order: make([]DocumentID, 0, int(documentCount)), positions: make(map[DocumentID]uint64, int(documentCount)), indexes: make(map[string]*indexState)}
 		for range documentCount {
 			blobIndex, err := readU32(reader)
 			if err != nil || blobIndex == 0 || int(blobIndex) >= len(blobs) || referenced[blobIndex] || blobs[blobIndex].Kind != checkpointDocumentBlob || blobs[blobIndex].Class != storagefile.BlobClassRecord {
@@ -184,6 +185,7 @@ func decodeCheckpointBlobs(blobs []storagefile.Blob) (map[string]*collectionData
 				return nil, nil, ErrCorrupt
 			}
 			collection.documents[id] = document
+			collection.positions[id] = uint64(len(collection.order))
 			collection.order = append(collection.order, id)
 		}
 		indexCount, err := readU16(reader)
@@ -378,7 +380,7 @@ func decodeSnapshot(data []byte) (map[string]*collectionData, error) {
 		if err != nil || documentCount > 10_000_000 {
 			return nil, ErrCorrupt
 		}
-		collection := &collectionData{documents: make(map[DocumentID]Document, int(documentCount)), order: make([]DocumentID, 0, int(documentCount)), indexes: make(map[string]*indexState)}
+		collection := &collectionData{documents: make(map[DocumentID]Document, int(documentCount)), order: make([]DocumentID, 0, int(documentCount)), positions: make(map[DocumentID]uint64, int(documentCount)), indexes: make(map[string]*indexState)}
 		for range documentCount {
 			length, err := readU32(reader)
 			if err != nil || length > 64<<20 || uint64(length) > uint64(reader.Len()) {
@@ -400,6 +402,7 @@ func decodeSnapshot(data []byte) (map[string]*collectionData, error) {
 				return nil, ErrCorrupt
 			}
 			collection.documents[id] = document
+			collection.positions[id] = uint64(len(collection.order))
 			collection.order = append(collection.order, id)
 		}
 		indexCount, err := readU16(reader)
@@ -429,7 +432,7 @@ func decodeSnapshot(data []byte) (map[string]*collectionData, error) {
 			definition := IndexDefinition{Name: indexName, Field: field, Order: 1, Unique: unique == 1}
 			var state *indexState
 			if version == 2 {
-				state, err = buildIndex(definition, collection)
+				state, err = buildIndex(definition, collection, nil)
 			} else {
 				length, readErr := readU32(reader)
 				if readErr != nil || length > 512<<20 || uint64(length) > uint64(reader.Len()) {
@@ -786,8 +789,8 @@ func decodeValueBinary(reader *bytes.Reader, depth int) (Value, error) {
 		return Float(value), nil
 	case StringKind:
 		value, err := readBytes32(reader, 64<<20)
-		if err != nil {
-			return Value{}, err
+		if err != nil || !utf8.Valid(value) {
+			return Value{}, ErrCorrupt
 		}
 		return String(string(value)), nil
 	case BinaryKind:
@@ -810,7 +813,7 @@ func decodeValueBinary(reader *bytes.Reader, depth int) (Value, error) {
 		return ID(id), nil
 	case ArrayKind:
 		count, err := readU32(reader)
-		if err != nil || count > 10_000_000 {
+		if err != nil || count > 10_000_000 || uint64(count) > uint64(reader.Len()) {
 			return Value{}, ErrCorrupt
 		}
 		values := make([]Value, count)
@@ -835,13 +838,14 @@ func decodeObjectBinary(reader *bytes.Reader, depth int) (Document, error) {
 		return nil, ErrCorrupt
 	}
 	count, err := readU32(reader)
-	if err != nil || count > 1_000_000 {
+	if err != nil || count > 1_000_000 || uint64(count) > uint64(reader.Len()/4) {
 		return nil, ErrCorrupt
 	}
 	document := make(Document, count)
+	previous := ""
 	for range count {
 		key, err := readString16(reader)
-		if err != nil || validField(key) != nil {
+		if err != nil || validField(key) != nil || (previous != "" && key <= previous) {
 			return nil, ErrCorrupt
 		}
 		if _, exists := document[key]; exists {
@@ -852,6 +856,7 @@ func decodeObjectBinary(reader *bytes.Reader, depth int) (Document, error) {
 			return nil, err
 		}
 		document[key] = value
+		previous = key
 	}
 	return document, nil
 }

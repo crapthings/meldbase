@@ -20,25 +20,44 @@ import (
 )
 
 type Config struct {
-	DB                            *meldbase.DB
-	Authenticator                 Authenticator
-	Authorizer                    Authorizer
-	PublicRealtimeURL             string
-	OriginPatterns                []string
-	AllowedHTTPOrigins            []string
-	TicketTTL                     time.Duration
-	ResumeTokenKey                []byte
-	ResumeTokenTTL                time.Duration
-	MaxBodyBytes                  int
-	MaxSubscriptionsPerConnection int
-	QueryLimits                   meldbase.QueryLimits
+	DB                             *meldbase.DB
+	Authenticator                  Authenticator
+	Authorizer                     Authorizer
+	QueryPolicyResolver            QueryPolicyResolver
+	PublicRealtimeURL              string
+	OriginPatterns                 []string
+	AllowedHTTPOrigins             []string
+	TicketTTL                      time.Duration
+	ResumeTokenKey                 []byte
+	ResumeTokenTTL                 time.Duration
+	MaxBodyBytes                   int
+	MaxSubscriptionsPerConnection  int
+	QueryLimits                    meldbase.QueryLimits
+	ReplaySource                   meldbase.QueryReplaySource
+	RPCMethods                     map[string]RPCMethod
+	RPCTransactionalMethods        map[string]RPCTransactionalMethod
+	RPCMethodResolver              RPCMethodResolver
+	RPCTransactionalMethodResolver RPCTransactionalMethodResolver
+	RPCAuthorizer                  RPCAuthorizer
+	MaxConcurrentRPC               int
+	MaxRPCPerConnection            int
+	MaxRPCArguments                int
+	MaxRPCResultBytes              int
+	RPCIdempotencyStore            RPCIdempotencyStore
+	RPCIdempotencyRetention        time.Duration
+	RPCIdempotencyCommitTimeout    time.Duration
 }
 
 type Handler struct {
-	config  Config
-	mux     *http.ServeMux
-	tickets *ticketStore
-	resume  *resumeTokenService
+	config           Config
+	mux              *http.ServeMux
+	tickets          *ticketStore
+	resume           *resumeTokenService
+	rpcSlots         chan struct{}
+	startedAt        time.Time
+	rpcSessionID     [16]byte
+	operationalState func() meldbase.OperationalState
+	metrics          serverMetrics
 }
 
 func New(config Config) (*Handler, error) {
@@ -76,18 +95,138 @@ func New(config Config) (*Handler, error) {
 	if config.MaxSubscriptionsPerConnection <= 0 {
 		config.MaxSubscriptionsPerConnection = 32
 	}
+	if config.MaxConcurrentRPC <= 0 {
+		config.MaxConcurrentRPC = 64
+	}
+	if config.MaxConcurrentRPC > 4096 {
+		return nil, errors.New("max concurrent RPC exceeds 4096")
+	}
+	if config.MaxRPCPerConnection <= 0 {
+		config.MaxRPCPerConnection = min(8, config.MaxConcurrentRPC)
+	}
+	if config.MaxRPCPerConnection > config.MaxConcurrentRPC {
+		return nil, errors.New("max RPC per connection exceeds global RPC concurrency")
+	}
+	if config.MaxRPCArguments <= 0 {
+		config.MaxRPCArguments = 32
+	}
+	if config.MaxRPCArguments > 1024 {
+		return nil, errors.New("max RPC arguments exceeds 1024")
+	}
+	if config.MaxRPCResultBytes <= 0 {
+		config.MaxRPCResultBytes = config.MaxBodyBytes
+	}
+	if config.MaxRPCResultBytes > 16<<20 {
+		return nil, errors.New("max RPC result bytes exceeds 16 MiB")
+	}
+	if config.RPCIdempotencyStore != nil {
+		if config.RPCIdempotencyRetention <= 0 {
+			config.RPCIdempotencyRetention = 24 * time.Hour
+		}
+		if config.RPCIdempotencyRetention < time.Minute || config.RPCIdempotencyRetention > 30*24*time.Hour {
+			return nil, errors.New("RPC idempotency retention must be between one minute and 30 days")
+		}
+		if config.RPCIdempotencyCommitTimeout <= 0 {
+			config.RPCIdempotencyCommitTimeout = 5 * time.Second
+		}
+		if config.RPCIdempotencyCommitTimeout > 30*time.Second {
+			return nil, errors.New("RPC idempotency commit timeout exceeds 30 seconds")
+		}
+	}
+	methods := make(map[string]RPCMethod, len(config.RPCMethods))
+	for name, method := range config.RPCMethods {
+		if !validRPCMethodName(name) || method == nil {
+			return nil, errors.New("RPC methods require valid names and non-nil handlers")
+		}
+		methods[name] = method
+	}
+	config.RPCMethods = methods
+	transactionalMethods := make(map[string]RPCTransactionalMethod, len(config.RPCTransactionalMethods))
+	for name, method := range config.RPCTransactionalMethods {
+		if !validRPCMethodName(name) || method == nil {
+			return nil, errors.New("transactional RPC methods require valid names and non-nil handlers")
+		}
+		if _, duplicate := methods[name]; duplicate {
+			return nil, errors.New("RPC method name is registered in both standard and transactional registries")
+		}
+		transactionalMethods[name] = method
+	}
+	config.RPCTransactionalMethods = transactionalMethods
+	reservedNames := make([]string, 0, len(methods)+len(transactionalMethods))
+	for name := range methods {
+		reservedNames = append(reservedNames, name)
+	}
+	for name := range transactionalMethods {
+		reservedNames = append(reservedNames, name)
+	}
+	if len(transactionalMethods) > 0 {
+		store, ok := config.RPCIdempotencyStore.(*durableRPCIdempotencyStore)
+		if !ok || store.db != config.DB {
+			return nil, errors.New("transactional RPC methods require the built-in durable idempotency store for the same V2 database")
+		}
+	}
+	if config.RPCTransactionalMethodResolver != nil {
+		store, ok := config.RPCIdempotencyStore.(*durableRPCIdempotencyStore)
+		if !ok || store.db != config.DB {
+			return nil, errors.New("transactional RPC resolver requires the built-in durable idempotency store for the same V2 database")
+		}
+	}
+	if (len(methods) > 0 || len(transactionalMethods) > 0 || config.RPCMethodResolver != nil || config.RPCTransactionalMethodResolver != nil) && config.RPCAuthorizer == nil {
+		return nil, errors.New("RPC authorizer is required when RPC methods are registered")
+	}
+	if config.ReplaySource == nil {
+		config.ReplaySource = config.DB
+	}
 	for _, origin := range config.AllowedHTTPOrigins {
 		parsed, err := url.Parse(origin)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return nil, errors.New("allowed HTTP origins must be exact http(s) origins")
 		}
 	}
-	h := &Handler{config: config, mux: http.NewServeMux(), tickets: newTicketStore(config.TicketTTL), resume: newResumeTokenService(config.ResumeTokenKey, config.ResumeTokenTTL)}
+	rpcSessionID, err := randomToken16()
+	if err != nil {
+		return nil, errors.New("could not generate RPC session identity")
+	}
+	standardHub, standardWorkerResolver := config.RPCMethodResolver.(*WorkerHub)
+	transactionalHub, transactionalWorkerResolver := config.RPCTransactionalMethodResolver.(*WorkerHub)
+	policyHub, policyWorkerResolver := config.QueryPolicyResolver.(*WorkerHub)
+	if standardWorkerResolver && transactionalWorkerResolver && standardHub != transactionalHub {
+		return nil, errors.New("standard and transactional worker resolvers must use the same worker hub")
+	}
+	reservationHub := standardHub
+	if reservationHub == nil {
+		reservationHub = transactionalHub
+	}
+	if policyWorkerResolver {
+		if store, ok := policyHub.config.PolicyGenerationStore.(*DurablePolicyGenerationStore); ok && store.db != config.DB {
+			return nil, errors.New("worker policy generation store must use the server database")
+		}
+		if reservationHub != nil && reservationHub != policyHub {
+			return nil, errors.New("method and publication worker resolvers must use the same worker hub")
+		}
+		reservationHub = policyHub
+	}
+	if reservationHub != nil {
+		if err := reservationHub.reserveRPCMethods(reservedNames); err != nil {
+			return nil, err
+		}
+	}
+	h := &Handler{
+		config: config, mux: http.NewServeMux(), tickets: newTicketStore(config.TicketTTL),
+		resume:           newResumeTokenService(config.ResumeTokenKey, config.ResumeTokenTTL),
+		rpcSlots:         make(chan struct{}, config.MaxConcurrentRPC),
+		startedAt:        time.Now(),
+		rpcSessionID:     rpcSessionID,
+		operationalState: config.DB.OperationalState,
+	}
 	h.mux.HandleFunc("GET /health", h.health)
+	h.mux.HandleFunc("GET /livez", h.liveness)
+	h.mux.HandleFunc("GET /readyz", h.readiness)
 	h.mux.HandleFunc("POST /v1/collections/{collection}/query", h.query)
 	h.mux.HandleFunc("POST /v1/collections/{collection}/documents", h.insert)
 	h.mux.HandleFunc("POST /v1/collections/{collection}/mutations", h.mutate)
 	h.mux.HandleFunc("POST /v1/realtime/tickets", h.issueTicket)
+	h.mux.HandleFunc("POST /v1/rpc", h.rpc)
 	h.mux.HandleFunc("GET /v1/realtime", h.realtime)
 	return h, nil
 }
@@ -115,8 +254,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mux.ServeHTTP(w, r)
 }
-func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+
+type probeResponse struct {
+	Version  int    `json:"version"`
+	Status   string `json:"status"`
+	Readable *bool  `json:"readable,omitempty"`
+	Writable *bool  `json:"writable,omitempty"`
+}
+
+func (h *Handler) liveness(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("cache-control", "no-store")
+	writeJSON(w, http.StatusOK, probeResponse{Version: 1, Status: "live"})
+}
+
+func (h *Handler) health(w http.ResponseWriter, request *http.Request) {
+	h.readiness(w, request)
+}
+
+func (h *Handler) readiness(w http.ResponseWriter, _ *http.Request) {
+	state := meldbase.OperationalState{}
+	if h.operationalState != nil {
+		state = h.operationalState()
+	}
+	status, code := "ready", http.StatusOK
+	if !state.Readable || !state.Writable {
+		status, code = "not_ready", http.StatusServiceUnavailable
+	}
+	w.Header().Set("cache-control", "no-store")
+	writeJSON(w, code, probeResponse{
+		Version: 1, Status: status, Readable: &state.Readable, Writable: &state.Writable,
+	})
 }
 
 func (h *Handler) insert(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +319,7 @@ func (h *Handler) insert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	policy = freezeInsertPolicy(policy)
 	if !policy.AllowAllInputFields {
 		for field := range document {
 			if field == "_id" {
@@ -236,6 +404,7 @@ func (h *Handler) mutate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
+		policy = freezeUpdatePolicy(policy)
 		query, err = applyUpdatePolicy(query, mutation, policy)
 		if err != nil {
 			writeError(w, http.StatusForbidden, "forbidden")
@@ -262,6 +431,7 @@ func (h *Handler) mutate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
+		policy = freezeDeletePolicy(policy)
 		query, err = applyDeletePolicy(query, policy)
 		if err != nil {
 			writeError(w, http.StatusForbidden, "forbidden")
@@ -311,7 +481,7 @@ func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_query")
 		return
 	}
-	policy, err := h.config.Authorizer.AuthorizeQuery(r.Context(), principal, r.PathValue("collection"), query)
+	policy, err := h.authorizeQuery(r.Context(), principal, r.PathValue("collection"), query)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
@@ -321,26 +491,60 @@ func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	cursor, err := h.config.DB.Collection(r.PathValue("collection")).FindQuery(r.Context(), query)
-	if err != nil {
-		writeEngineError(w, err)
-		return
-	}
-	documents, err := cursor.All(r.Context())
-	if err != nil {
-		writeEngineError(w, err)
-		return
-	}
-	encoded := make([]json.RawMessage, len(documents))
-	for i, document := range documents {
-		raw, err := meldbase.MarshalWireDocument(project(document, policy))
+	var encoded []json.RawMessage
+	authorized, err := underQueryPolicy(policy, func() error {
+		cursor, err := h.config.DB.Collection(r.PathValue("collection")).FindQuery(r.Context(), query)
 		if err != nil {
-			writeEngineError(w, err)
-			return
+			return err
 		}
-		encoded[i] = raw
+		documents, err := cursor.All(r.Context())
+		if err != nil {
+			return err
+		}
+		encoded = make([]json.RawMessage, len(documents))
+		for i, document := range documents {
+			raw, err := meldbase.MarshalWireDocument(project(document, policy))
+			if err != nil {
+				return err
+			}
+			encoded[i] = raw
+		}
+		return nil
+	})
+	if !authorized {
+		writeError(w, http.StatusForbidden, "policy_expired")
+		return
+	}
+	if err != nil {
+		writeEngineError(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "documents": encoded})
+}
+
+func (h *Handler) authorizeQuery(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
+	base, err := h.config.Authorizer.AuthorizeQuery(ctx, principal, collection, query)
+	if err != nil {
+		return QueryPolicy{}, err
+	}
+	base = freezeQueryPolicy(base)
+	if base.Lease != nil && !base.Lease.Valid() {
+		return QueryPolicy{}, ErrForbidden
+	}
+	if _, err := applyPolicy(query, base); err != nil {
+		return QueryPolicy{}, err
+	}
+	if h.config.QueryPolicyResolver == nil {
+		return base, nil
+	}
+	additional, found, err := h.config.QueryPolicyResolver.ResolveQueryPolicy(ctx, principal, collection, query)
+	if err != nil {
+		return QueryPolicy{}, ErrForbidden
+	}
+	if !found {
+		return base, nil
+	}
+	return intersectQueryPolicies(base, freezeQueryPolicy(additional))
 }
 
 func (h *Handler) issueTicket(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +559,11 @@ func (h *Handler) issueTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("cache-control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"url": h.config.PublicRealtimeURL, "ticket": ticket})
+	response := map[string]any{"url": h.config.PublicRealtimeURL, "ticket": ticket}
+	if requestsRealtimeCapabilities(r) {
+		response["protocol"] = realtimeProtocolDescriptor(h.config)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 type socketSession struct {
@@ -368,6 +576,7 @@ type socketSession struct {
 	mu         sync.Mutex
 	byRequest  map[string]*socketSubscription
 	byServer   map[string]*socketSubscription
+	rpcCalls   map[string]context.CancelFunc
 }
 type socketSubscription struct {
 	requestID, serverID string
@@ -381,7 +590,11 @@ func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	connection.SetReadLimit(int64(h.config.MaxBodyBytes))
 	ctx, cancel := context.WithCancel(context.Background())
-	session := &socketSession{handler: h, ctx: ctx, cancel: cancel, connection: connection, outgoing: make(chan any, 64), byRequest: make(map[string]*socketSubscription), byServer: make(map[string]*socketSubscription)}
+	session := &socketSession{
+		handler: h, ctx: ctx, cancel: cancel, connection: connection, outgoing: make(chan any, 64),
+		byRequest: make(map[string]*socketSubscription), byServer: make(map[string]*socketSubscription),
+		rpcCalls: make(map[string]context.CancelFunc),
+	}
 	defer session.shutdown()
 	authCtx, authCancel := context.WithTimeout(ctx, 5*time.Second)
 	raw, err := readSocketJSON(authCtx, connection, h.config.MaxBodyBytes)
@@ -395,7 +608,7 @@ func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
 		Type   string `json:"type"`
 		Ticket string `json:"ticket"`
 	}
-	if err := decodeStrict(raw, &auth); err != nil || auth.V != 1 || auth.Type != "authenticate" || auth.Ticket == "" {
+	if err := decodeStrict(raw, &auth); err != nil || auth.V != protocolVersion || auth.Type != "authenticate" || auth.Ticket == "" {
 		connection.Close(websocket.StatusPolicyViolation, "invalid authentication")
 		return
 	}
@@ -405,9 +618,12 @@ func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session.principal = principal
+	h.metrics.connectionsAccepted.Add(1)
+	h.metrics.activeConnections.Add(1)
+	defer h.metrics.activeConnections.Add(^uint64(0))
 	writerDone := make(chan error, 1)
 	go session.writeLoop(writerDone)
-	if !session.enqueue(map[string]any{"v": 1, "type": "authenticated"}) {
+	if !session.enqueue(map[string]any{"v": protocolVersion, "type": "authenticated"}) {
 		return
 	}
 	for {
@@ -437,7 +653,7 @@ func (s *socketSession) handleMessage(raw []byte) error {
 	}
 	var version int
 	var messageType string
-	if value, ok := fields["v"]; !ok || decodeStrict(value, &version) != nil || version != 1 {
+	if value, ok := fields["v"]; !ok || decodeStrict(value, &version) != nil || version != protocolVersion {
 		return errors.New("invalid version")
 	}
 	if value, ok := fields["type"]; !ok || decodeStrict(value, &messageType) != nil {
@@ -452,7 +668,7 @@ func (s *socketSession) handleMessage(raw []byte) error {
 		if err := decodeStrict(raw, &message); err != nil {
 			return err
 		}
-		return enqueueError(s.enqueue(map[string]any{"v": 1, "type": "pong"}))
+		return enqueueError(s.enqueue(map[string]any{"v": protocolVersion, "type": "pong"}))
 	case "unsubscribe":
 		var message struct {
 			V              int    `json:"v"`
@@ -475,6 +691,7 @@ func (s *socketSession) handleMessage(raw []byte) error {
 			Collection  string          `json:"collection"`
 			Query       json.RawMessage `json:"query"`
 			ResumeToken string          `json:"resumeToken,omitempty"`
+			Mode        string          `json:"mode,omitempty"`
 		}
 		if err := decodeStrict(raw, &message); err != nil {
 			return err
@@ -482,19 +699,40 @@ func (s *socketSession) handleMessage(raw []byte) error {
 		if message.RequestID == "" || message.Collection == "" || len(message.Query) == 0 {
 			return errors.New("incomplete subscription")
 		}
-		return s.subscribe(message.RequestID, message.Collection, message.Query, message.ResumeToken)
+		if message.Mode != "" && message.Mode != "delta" {
+			return errors.New("invalid subscription mode")
+		}
+		return s.subscribe(message.RequestID, message.Collection, message.Query, message.ResumeToken, message.Mode)
+	case "call":
+		envelope, err := decodeRPCCallEnvelope(raw, s.handler.config.MaxRPCArguments)
+		if err != nil {
+			return err
+		}
+		s.startRPCCall(envelope, len(raw))
+		return nil
+	case "cancel":
+		var message struct {
+			V         int    `json:"v"`
+			Type      string `json:"type"`
+			RequestID string `json:"requestId"`
+		}
+		if err := decodeStrict(raw, &message); err != nil || message.V != protocolVersion || message.Type != "cancel" || !rpcRequestIDPattern.MatchString(message.RequestID) {
+			return errors.New("invalid RPC cancellation")
+		}
+		s.cancelRPCCall(message.RequestID)
+		return nil
 	default:
 		return errors.New("unknown message type")
 	}
 }
 
-func (s *socketSession) subscribe(requestID, collection string, rawQuery []byte, resumeToken string) error {
+func (s *socketSession) subscribe(requestID, collection string, rawQuery []byte, resumeToken, mode string) error {
 	query, err := meldbase.DecodeQuerySpecJSON(rawQuery, s.handler.config.QueryLimits)
 	if err != nil {
 		s.subscriptionError(requestID, "invalid_query")
 		return nil
 	}
-	policy, err := s.handler.config.Authorizer.AuthorizeQuery(s.ctx, s.principal, collection, query)
+	policy, err := s.handler.authorizeQuery(s.ctx, s.principal, collection, query)
 	if err != nil {
 		s.subscriptionError(requestID, "forbidden")
 		return nil
@@ -504,28 +742,150 @@ func (s *socketSession) subscribe(requestID, collection string, rawQuery []byte,
 		s.subscriptionError(requestID, "forbidden")
 		return nil
 	}
-	if policy.PolicyVersion == "" {
-		s.subscriptionError(requestID, "invalid_policy")
-		return nil
-	}
+	var resumePosition *uint64
 	if resumeToken != "" {
 		position, err := s.handler.resume.validate(resumeToken, s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion)
-		if err != nil || !s.handler.config.DB.CanResumeFrom(position) {
-			return enqueueError(s.enqueue(map[string]any{"v": 1, "type": "resync_required", "requestId": requestID}))
+		if err != nil || mode != "delta" || s.handler.config.ReplaySource == nil {
+			return enqueueError(s.enqueue(map[string]any{"v": protocolVersion, "type": "resync_required", "requestId": requestID}))
 		}
+		resumePosition = &position
 	}
 	s.mu.Lock()
-	if _, exists := s.byRequest[requestID]; exists || len(s.byRequest) >= s.handler.config.MaxSubscriptionsPerConnection {
+	_, rpcExists := s.rpcCalls[requestID]
+	if _, exists := s.byRequest[requestID]; exists || rpcExists || len(s.byRequest) >= s.handler.config.MaxSubscriptionsPerConnection {
 		s.mu.Unlock()
 		s.subscriptionError(requestID, "subscription_limit_or_duplicate")
 		return nil
 	}
 	s.mu.Unlock()
+	if resumePosition != nil {
+		return s.startResumedDeltaSubscription(requestID, collection, query, policy, resumeToken, *resumePosition)
+	}
+	if mode == "delta" {
+		return s.startDeltaSubscription(requestID, collection, query, policy)
+	}
+	return s.startSnapshotSubscription(requestID, collection, query, policy)
+}
+
+func (s *socketSession) startResumedDeltaSubscription(requestID, collection string, query meldbase.QuerySpec, policy QueryPolicy, clientToken string, position uint64) error {
+	ctx, cancel := context.WithCancel(s.ctx)
+	replay, err := s.handler.config.ReplaySource.OpenQueryReplay(ctx, collection, query, position, 8)
+	if err != nil || replay == nil || replay.Initial.Token != position {
+		cancel()
+		if replay != nil {
+			replay.Close()
+		}
+		if err != nil && engineErrorCode(err, "") == "database_unavailable" {
+			s.subscriptionError(requestID, "database_unavailable")
+			return nil
+		}
+		return enqueueError(s.enqueue(map[string]any{"v": protocolVersion, "type": "resync_required", "requestId": requestID}))
+	}
+	serverID, err := randomID()
+	if err != nil {
+		cancel()
+		replay.Close()
+		return err
+	}
+	subscription := &socketSubscription{requestID: requestID, serverID: serverID, cancel: cancel}
+	s.mu.Lock()
+	s.byRequest[requestID] = subscription
+	s.byServer[serverID] = subscription
+	s.mu.Unlock()
+	var overlay *visibilityOverlay
+	authorized, err := underQueryPolicy(policy, func() error {
+		var err error
+		overlay, _, err = newVisibilityOverlay(replay.Initial, policy)
+		if err != nil {
+			return err
+		}
+		return enqueueError(s.enqueue(map[string]any{
+			"v": protocolVersion, "type": "resumed", "requestId": requestID,
+			"subscriptionId": serverID, "token": clientToken,
+		}))
+	})
+	if !authorized || err != nil {
+		cancel()
+		replay.Close()
+		s.remove(subscription)
+		if !authorized {
+			s.enqueue(map[string]any{"v": protocolVersion, "type": "resync_required", "requestId": requestID})
+		} else {
+			s.subscriptionError(requestID, "resume_failed")
+		}
+		return nil
+	}
+	go func() {
+		defer cancel()
+		defer replay.Close()
+		defer s.remove(subscription)
+		lastClientToken := clientToken
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-policy.Lease.Done():
+				s.policyResync(subscription)
+				return
+			case <-policy.additionalLease.Done():
+				s.policyResync(subscription)
+				return
+			case err := <-replay.Errors:
+				if engineErrorCode(err, "") == "database_unavailable" {
+					subscription.cancel()
+					s.remove(subscription)
+					s.subscriptionError(requestID, "database_unavailable")
+				} else {
+					s.policyResync(subscription)
+				}
+				return
+			case delta, ok := <-replay.Deltas:
+				if !ok {
+					s.policyResync(subscription)
+					return
+				}
+				authorized, err := underQueryPolicy(policy, func() error {
+					visible, changed, err := overlay.apply(delta, policy)
+					if err != nil || !changed {
+						return err
+					}
+					nextToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, delta.Token)
+					if err != nil {
+						return err
+					}
+					operations, err := encodeVisibleDelta(visible)
+					if err != nil {
+						return err
+					}
+					if !s.enqueue(map[string]any{
+						"v": protocolVersion, "type": "delta", "requestId": requestID, "subscriptionId": serverID,
+						"fromToken": lastClientToken, "token": nextToken, "operations": operations,
+					}) {
+						return errors.New("outbound queue full")
+					}
+					lastClientToken = nextToken
+					return nil
+				})
+				if !authorized {
+					s.policyResync(subscription)
+					return
+				}
+				if err != nil {
+					s.policyResync(subscription)
+					return
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+func (s *socketSession) startSnapshotSubscription(requestID, collection string, query meldbase.QuerySpec, policy QueryPolicy) error {
 	ctx, cancel := context.WithCancel(s.ctx)
 	live, err := s.handler.config.DB.Collection(collection).SubscribeQuery(ctx, query, 2)
 	if err != nil {
 		cancel()
-		s.subscriptionError(requestID, "subscription_failed")
+		s.subscriptionError(requestID, engineErrorCode(err, "subscription_failed"))
 		return nil
 	}
 	serverID, err := randomID()
@@ -540,42 +900,335 @@ func (s *socketSession) subscribe(requestID, collection string, rawQuery []byte,
 	s.byServer[serverID] = subscription
 	s.mu.Unlock()
 	go func() {
+		defer cancel()
 		defer live.Close()
 		defer s.remove(subscription)
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-policy.Lease.Done():
+				s.policyResync(subscription)
+				return
+			case <-policy.additionalLease.Done():
+				s.policyResync(subscription)
+				return
 			case err, ok := <-live.Errors:
 				if ok && err != nil {
-					s.subscriptionError(requestID, "subscription_ended")
+					s.subscriptionError(requestID, engineErrorCode(err, "subscription_ended"))
 				}
 				return
 			case snapshot, ok := <-live.Snapshots:
 				if !ok {
 					return
 				}
-				documents := make([]json.RawMessage, len(snapshot.Documents))
-				for i, document := range snapshot.Documents {
-					raw, err := meldbase.MarshalWireDocument(project(document, policy))
-					if err != nil {
-						s.subscriptionError(requestID, "encode_failed")
-						return
+				authorized, err := underQueryPolicy(policy, func() error {
+					documents := make([]json.RawMessage, len(snapshot.Documents))
+					for i, document := range snapshot.Documents {
+						raw, err := meldbase.MarshalWireDocument(project(document, policy))
+						if err != nil {
+							return err
+						}
+						documents[i] = raw
 					}
-					documents[i] = raw
-				}
-				resumeToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, snapshot.Token)
-				if err != nil {
-					s.subscriptionError(requestID, "resume_token_failed")
+					resumeToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, snapshot.Token)
+					if err != nil {
+						return err
+					}
+					return enqueueError(s.enqueue(map[string]any{"v": protocolVersion, "type": "snapshot", "requestId": requestID, "subscriptionId": serverID, "token": resumeToken, "documents": documents}))
+				})
+				if !authorized {
+					s.policyResync(subscription)
 					return
 				}
-				if !s.enqueue(map[string]any{"v": 1, "type": "snapshot", "requestId": requestID, "subscriptionId": serverID, "token": resumeToken, "documents": documents}) {
+				if err != nil {
+					s.subscriptionError(requestID, "snapshot_failed")
 					return
 				}
 			}
 		}
 	}()
 	return nil
+}
+
+func (s *socketSession) startDeltaSubscription(requestID, collection string, query meldbase.QuerySpec, policy QueryPolicy) error {
+	ctx, cancel := context.WithCancel(s.ctx)
+	live, err := s.handler.config.DB.Collection(collection).SubscribeQueryDeltas(ctx, query, 8)
+	if err != nil {
+		cancel()
+		s.subscriptionError(requestID, engineErrorCode(err, "subscription_failed"))
+		return nil
+	}
+	serverID, err := randomID()
+	if err != nil {
+		cancel()
+		live.Close()
+		return err
+	}
+	subscription := &socketSubscription{requestID: requestID, serverID: serverID, cancel: cancel}
+	s.mu.Lock()
+	s.byRequest[requestID] = subscription
+	s.byServer[serverID] = subscription
+	s.mu.Unlock()
+	var initial *visibilityOverlay
+	var initialVisible []meldbase.Document
+	var initialToken string
+	authorized, err := underQueryPolicy(policy, func() error {
+		var err error
+		initial, initialVisible, err = newVisibilityOverlay(live.Initial, policy)
+		if err != nil {
+			return err
+		}
+		initialToken, err = s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, initial.visibleToken)
+		if err != nil {
+			return err
+		}
+		initialDocuments, err := encodeVisibleDocuments(initialVisible)
+		if err != nil {
+			return err
+		}
+		return enqueueError(s.enqueue(map[string]any{
+			"v": protocolVersion, "type": "snapshot", "requestId": requestID, "subscriptionId": serverID,
+			"token": initialToken, "documents": initialDocuments,
+		}))
+	})
+	if !authorized {
+		cancel()
+		live.Close()
+		s.remove(subscription)
+		s.enqueue(map[string]any{"v": protocolVersion, "type": "resync_required", "requestId": requestID})
+		return nil
+	}
+	if err != nil {
+		cancel()
+		live.Close()
+		s.remove(subscription)
+		s.subscriptionError(requestID, "initial_snapshot_failed")
+		return nil
+	}
+	go func() {
+		defer cancel()
+		defer live.Close()
+		defer s.remove(subscription)
+		clientToken := initialToken
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-policy.Lease.Done():
+				s.policyResync(subscription)
+				return
+			case <-policy.additionalLease.Done():
+				s.policyResync(subscription)
+				return
+			case err, ok := <-live.Errors:
+				if ok && err != nil {
+					s.subscriptionError(requestID, engineErrorCode(err, "subscription_ended"))
+				}
+				return
+			case delta, ok := <-live.Deltas:
+				if !ok {
+					return
+				}
+				authorized, err := underQueryPolicy(policy, func() error {
+					visible, changed, err := initial.apply(delta, policy)
+					if err != nil || !changed {
+						return err
+					}
+					nextToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, delta.Token)
+					if err != nil {
+						return err
+					}
+					operations, err := encodeVisibleDelta(visible)
+					if err != nil {
+						return err
+					}
+					if !s.enqueue(map[string]any{
+						"v": protocolVersion, "type": "delta", "requestId": requestID, "subscriptionId": serverID,
+						"fromToken": clientToken, "token": nextToken, "operations": operations,
+					}) {
+						return errors.New("outbound queue full")
+					}
+					clientToken = nextToken
+					return nil
+				})
+				if !authorized {
+					s.policyResync(subscription)
+					return
+				}
+				if err != nil {
+					s.subscriptionError(requestID, "delta_failed")
+					return
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+type visibilityNode struct {
+	id             meldbase.DocumentID
+	document       meldbase.Document
+	previous, next *visibilityNode
+}
+
+// visibilityOverlay owns one connection-local projected ordered result. It is
+// initialized in O(N), then applies a k-operation engine delta in O(k) without
+// rebuilding or cloning the complete query result.
+type visibilityOverlay struct {
+	engineToken, visibleToken uint64
+	head, tail                *visibilityNode
+	byID                      map[meldbase.DocumentID]*visibilityNode
+}
+
+func newVisibilityOverlay(snapshot meldbase.QuerySnapshot, policy QueryPolicy) (*visibilityOverlay, []meldbase.Document, error) {
+	overlay := &visibilityOverlay{
+		engineToken:  snapshot.Token,
+		visibleToken: snapshot.Token,
+		byID:         make(map[meldbase.DocumentID]*visibilityNode, len(snapshot.Documents)),
+	}
+	projected := make([]meldbase.Document, len(snapshot.Documents))
+	for index, document := range snapshot.Documents {
+		projected[index] = project(document, policy)
+		id, ok := projected[index].ID()
+		if !ok || id.IsZero() || overlay.byID[id] != nil || projected[index].Validate() != nil {
+			return nil, nil, meldbase.ErrCorrupt
+		}
+		overlay.insertBefore(&visibilityNode{id: id, document: projected[index]}, nil)
+	}
+	return overlay, projected, nil
+}
+
+func (overlay *visibilityOverlay) apply(delta meldbase.QueryDelta, policy QueryPolicy) (meldbase.QueryDelta, bool, error) {
+	if delta.FromToken != overlay.engineToken || delta.Token <= delta.FromToken || len(delta.Operations) == 0 {
+		return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
+	}
+	visible := meldbase.QueryDelta{
+		FromToken:  overlay.visibleToken,
+		Token:      delta.Token,
+		Operations: make([]meldbase.QueryDeltaOperation, 0, len(delta.Operations)),
+	}
+	for _, operation := range delta.Operations {
+		node := overlay.byID[operation.DocumentID]
+		var anchor *visibilityNode
+		if !operation.BeforeID.IsZero() {
+			anchor = overlay.byID[operation.BeforeID]
+			if anchor == nil || operation.BeforeID == operation.DocumentID {
+				return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
+			}
+		}
+		projected := operation
+		if operation.Document != nil {
+			projected.Document = project(operation.Document, policy)
+			id, ok := projected.Document.ID()
+			if !ok || id != operation.DocumentID || projected.Document.Validate() != nil {
+				return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
+			}
+		}
+		switch operation.Kind {
+		case meldbase.QueryDeltaRemove:
+			if node == nil || !operation.BeforeID.IsZero() || operation.Document != nil {
+				return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
+			}
+			overlay.remove(node)
+		case meldbase.QueryDeltaAdd:
+			if node != nil || projected.Document == nil {
+				return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
+			}
+			overlay.insertBefore(&visibilityNode{id: operation.DocumentID, document: projected.Document}, anchor)
+		case meldbase.QueryDeltaMove:
+			if node == nil || operation.Document != nil || node.next == anchor {
+				return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
+			}
+			overlay.remove(node)
+			overlay.insertBefore(node, anchor)
+		case meldbase.QueryDeltaChange:
+			if node == nil || !operation.BeforeID.IsZero() || projected.Document == nil {
+				return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
+			}
+			if node.document.Equal(projected.Document) {
+				node.document = projected.Document
+				continue
+			}
+			node.document = projected.Document
+		default:
+			return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
+		}
+		visible.Operations = append(visible.Operations, projected)
+	}
+	overlay.engineToken = delta.Token
+	if len(visible.Operations) == 0 {
+		return visible, false, nil
+	}
+	overlay.visibleToken = delta.Token
+	return visible, true, nil
+}
+
+func (overlay *visibilityOverlay) remove(node *visibilityNode) {
+	if node.previous == nil {
+		overlay.head = node.next
+	} else {
+		node.previous.next = node.next
+	}
+	if node.next == nil {
+		overlay.tail = node.previous
+	} else {
+		node.next.previous = node.previous
+	}
+	delete(overlay.byID, node.id)
+	node.previous, node.next = nil, nil
+}
+
+func (overlay *visibilityOverlay) insertBefore(node, anchor *visibilityNode) {
+	if anchor == nil {
+		node.previous, node.next = overlay.tail, nil
+		if overlay.tail == nil {
+			overlay.head = node
+		} else {
+			overlay.tail.next = node
+		}
+		overlay.tail = node
+	} else {
+		node.previous, node.next = anchor.previous, anchor
+		if anchor.previous == nil {
+			overlay.head = node
+		} else {
+			anchor.previous.next = node
+		}
+		anchor.previous = node
+	}
+	overlay.byID[node.id] = node
+}
+
+func encodeVisibleDocuments(documents []meldbase.Document) ([]json.RawMessage, error) {
+	encoded := make([]json.RawMessage, len(documents))
+	for index, document := range documents {
+		raw, err := meldbase.MarshalWireDocument(document)
+		if err != nil {
+			return nil, err
+		}
+		encoded[index] = raw
+	}
+	return encoded, nil
+}
+
+func encodeVisibleDelta(delta meldbase.QueryDelta) ([]map[string]any, error) {
+	operations := make([]map[string]any, len(delta.Operations))
+	for index, operation := range delta.Operations {
+		wire := map[string]any{"op": string(operation.Kind), "id": operation.DocumentID.String()}
+		if !operation.BeforeID.IsZero() {
+			wire["before"] = operation.BeforeID.String()
+		}
+		if operation.Document != nil {
+			raw, err := meldbase.MarshalWireDocument(operation.Document)
+			if err != nil {
+				return nil, err
+			}
+			wire["document"] = json.RawMessage(raw)
+		}
+		operations[index] = wire
+	}
+	return operations, nil
 }
 
 func (s *socketSession) writeLoop(done chan<- error) {
@@ -606,8 +1259,19 @@ func (s *socketSession) enqueue(message any) bool {
 	}
 }
 func (s *socketSession) subscriptionError(requestID, code string) {
-	s.enqueue(map[string]any{"v": 1, "type": "error", "requestId": requestID, "message": code})
+	s.enqueue(rpcErrorMessage(requestID, code))
 }
+
+func (s *socketSession) policyResync(subscription *socketSubscription) {
+	if subscription == nil {
+		return
+	}
+	// Remove before publication so a client may immediately reuse requestId.
+	subscription.cancel()
+	s.remove(subscription)
+	s.enqueue(map[string]any{"v": protocolVersion, "type": "resync_required", "requestId": subscription.requestID})
+}
+
 func (s *socketSession) unsubscribe(serverID string) {
 	s.mu.Lock()
 	subscription := s.byServer[serverID]
@@ -628,8 +1292,12 @@ func (s *socketSession) shutdown() {
 	for _, subscription := range s.byRequest {
 		subscription.cancel()
 	}
+	for _, cancel := range s.rpcCalls {
+		cancel()
+	}
 	s.byRequest = map[string]*socketSubscription{}
 	s.byServer = map[string]*socketSubscription{}
+	s.rpcCalls = map[string]context.CancelFunc{}
 	s.mu.Unlock()
 	s.connection.Close(websocket.StatusNormalClosure, "")
 }
@@ -724,8 +1392,19 @@ func validPreflight(request *http.Request) bool {
 	return true
 }
 func writeEngineError(w http.ResponseWriter, err error) {
-	status := http.StatusInternalServerError
-	code := "internal"
+	status, code := engineErrorStatusCode(err)
+	writeError(w, status, code)
+}
+
+func engineErrorStatusCode(err error) (int, string) {
+	status, code := http.StatusInternalServerError, "internal"
+	// ErrDurability is a fail-stop state: reads can continue, but the result of
+	// the write that entered the state must not be exposed as an ordinary 500.
+	// ErrClosed makes both reads and writes unavailable. The public transport
+	// intentionally gives both the same non-sensitive recovery signal.
+	if errors.Is(err, meldbase.ErrDurability) || errors.Is(err, meldbase.ErrClosed) {
+		return http.StatusServiceUnavailable, "database_unavailable"
+	}
 	if errors.Is(err, meldbase.ErrInvalidCollection) || errors.Is(err, meldbase.ErrInvalidFilter) {
 		status, code = http.StatusBadRequest, "invalid_request"
 	}
@@ -735,11 +1414,22 @@ func writeEngineError(w http.ResponseWriter, err error) {
 	if errors.Is(err, meldbase.ErrMutationLimit) {
 		status, code = http.StatusConflict, "mutation_limit_exceeded"
 	}
+	if errors.Is(err, meldbase.ErrResourceLimit) {
+		status, code = http.StatusRequestEntityTooLarge, "resource_limit_exceeded"
+	}
 	if errors.Is(err, meldbase.ErrDuplicateID) || errors.Is(err, meldbase.ErrDuplicateKey) {
 		status, code = http.StatusConflict, "duplicate_key"
 	}
 	if errors.Is(err, context.Canceled) {
 		status, code = 499, "cancelled"
 	}
-	writeError(w, status, code)
+	return status, code
+}
+
+func engineErrorCode(err error, fallback string) string {
+	_, code := engineErrorStatusCode(err)
+	if code == "internal" {
+		return fallback
+	}
+	return code
 }

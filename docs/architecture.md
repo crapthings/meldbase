@@ -15,11 +15,114 @@ server / SDK
         -> planner and execution
             -> transactions and catalog
                 -> indexes and record store
-                    -> pager and WAL
+                    -> pager and Commit Log (legacy V1: WAL)
 ```
 
 Lower layers never import server, transport, or UI concepts. A committed change
 is the single source for storage visibility, index maintenance, and live events.
+
+Durable RPC idempotency follows the same dependency rule. The transport owns
+method authorization and wire envelopes, while V2 owns a private COW system tree
+and compare-and-set record transitions. Internal idempotency state is never a
+user collection or a reactive query source. A durable claim is published before
+application code starts; an interrupted pending claim becomes outcome-unknown
+and is never automatically stolen. See
+[`rpc-idempotency.md`](rpc-idempotency.md) for the crash contract.
+
+Transactional RPC is a distinct opt-in registry. Its point-write view runs on an
+immutable V2 snapshot without holding the writer lock, then validates the base
+token and publishes business roots plus the terminal System record in one COW
+generation. Contention is a durable conflict, not an implicit method retry.
+Handlers may not hide external side effects inside this contract.
+
+Server JavaScript uses a separate trusted worker process and a language-neutral
+WebSocket control protocol. A private worker hub dynamically resolves methods
+and data-only query publications; it cannot bypass client RPC authorization or
+publish documents directly. Go predeclares every worker-managed collection,
+intersects Worker constraints with the local Authorizer and owns projection,
+visibility overlays and disconnect revocation. Transaction point operations
+execute against the Go-owned optimistic snapshot, preserving the same atomic
+terminal contract as local Go methods.
+
+Both public realtime and private Worker control protocols use an opt-in,
+bounded compatibility descriptor before application frames begin. Versions and
+capabilities are canonical fixed arrays: unknown capabilities are additive,
+while a missing required capability fails before work is sent. The descriptor
+is omitted for legacy peers during rolling upgrades; each TypeScript SDK has an
+explicit strict mode that makes omission an anti-downgrade failure. Discovery
+runs only on authenticated control/ticket paths and never enters storage,
+reactive publication, or commit hot paths.
+
+Authorization semantics that depend on another collection use an explicit
+commit-ordered invalidation, not a best-effort WebSocket event. The business
+write, RPC terminal and random policy generation are published under one V2
+Catalog/meta root. Only after durability does Go rotate the publication lease,
+and it does so before publishing the business ChangeBatch. Existing subscribers
+therefore resync before observing output under stale visibility; restart reloads
+the generation from the same private System tree.
+
+Observability follows the same dependency rule. The root database exposes only
+a fixed-schema `DB.Stats()` snapshot and always-on bounded counters. The optional
+`admin` package samples it, derives rates, retains a fixed history, serves a
+separately authenticated SSE stream and can embed the dependency-free developer
+dashboard. Admin consumers never enter the business reactive pipeline, and slow
+consumers overwrite their own pending telemetry instead of backpressuring
+commits.
+
+The sampler also derives a fixed health state from engine-owned state and
+adjacent counter deltas. Database fail-stop state and reactive queue capacities
+come from the allocation-free core snapshot; transient overflow, slow-consumer,
+durability, telemetry and transport signals are evaluated only across the same
+process session. The result is a bounded enum/boolean contract, not an alerting
+callback and not a source of dynamic metric labels.
+
+The transport consumes a narrower allocation-free `OperationalState` contract
+for orchestration probes. Liveness never consults the database; readiness
+requires both readable and writable state. A durability fail-stop therefore
+keeps diagnostic liveness and committed reads possible while removing the
+instance from general traffic. Probe responses expose fixed booleans only and
+never reuse detailed admin telemetry on the public listener.
+
+Detailed diagnostics are a second, explicitly enabled layer. A small inlinable
+fast path loads an atomic session pointer; when absent it does not read a clock.
+An active session records only sanitized fixed-schema query/commit events into a
+fixed ring. Admin readers paginate by diagnostic sequence and reset on a new
+session identity; neither the ring nor its transport can retain application data.
+
+Prometheus exposition is another cold consumer of the immutable admin sample. It
+has a fixed `meldbase_` schema and only engine-owned enum labels. The separate
+`integrations/otel` package consumes the same sample through caller-owned stable
+Metrics API interfaces; it does not construct an SDK/exporter or describe the
+embedded engine as a database client. The core database package and normal admin
+sampler import no OpenTelemetry package.
+
+Full runtime traces and CPU/heap profiles are a separate explicit admin-library
+operation. Captures have hard time/byte limits, share a process-global exclusion
+slot and write only to a caller-owned destination. They are not exposed by the
+default admin HTTP handler and never run from storage or query hot paths.
+
+Resource admission is also a core contract, not a transport-only defense. Every
+memory, V1 and V2 write applies the same immutable document-byte,
+transaction-byte and transaction-change limits. Bytes mean the deterministic
+canonical typed encoding, so accounting cannot drift with JSON spelling, Go heap
+layout or compression. Rejection occurs before durable publication and is
+reported through a fixed aggregate counter; it never exposes collection or
+document identity.
+
+Commit history is governed by two independent logical budgets: commit count and
+canonical encoded bytes. The latter prevents a small number of unusually large
+commits from defeating the count window. The writer evaluates both while the
+business Commit Log tree is mutable, but replay leases cap the deletion
+watermark. Byte accounting is derived from persisted inline/overflow descriptors
+on open and then advanced only after a successful Meta publication.
+
+V2 page allocation has a separate physical high-water quota. The allocator
+consumes epoch-safe reusable pages first and checks the quota before increasing
+`nextPage`; a rejection therefore performs no file write and is not a durability
+failure. Real write/fsync/Meta errors retain fail-stop semantics. The quota does
+not pretend that logical pruning immediately shrinks a COW file: reclamation
+makes unreachable pages reusable, while compaction is the explicit shrinking
+operation.
 
 ## Decisions that supersede the initial sketch
 
@@ -43,29 +146,189 @@ first-class live-query and local-first operators later.
 
 ### Commit and recovery
 
-The first durable engine will use a single writer and redo-only, no-steal
-transactions:
+Legacy V1 uses a single writer and redo-only, no-steal transaction boundary:
 
 1. Build private page images and index changes.
 2. Append transaction records and a commit record to the WAL.
 3. `fsync` the WAL.
 4. Publish the committed version to readers.
-5. Write dirty pages later during checkpoint.
+5. Publish a catalog-rooted COW checkpoint when explicitly requested or when
+   the bounded WAL byte/commit policy triggers.
 6. Emit the change event from the committed transaction record.
 
-Uncommitted page images are never written to the database file. Recovery redoes
-only transactions with a valid commit record; replay is idempotent through page
-LSNs. This is simpler and safer than mixing page writes with an undefined undo
-policy. The WAL may be a sidecar during development. A release may still call
-the database “single-file” only when normal operation does not require one.
+The checkpoint's data pages are synced before its inactive Meta; only after that
+Meta sync may V1 reset the WAL. Automatic maintenance runs after the triggering
+logical commit is already durable and never emits a second logical token. A
+maintenance error fail-stops later writes without making the successful business
+operation ambiguous. Recovery replays only complete checksum-valid frames newer
+than the selected checkpoint token.
+
+New/default V2 has no sidecar WAL or deferred checkpoint. Each logical write
+publishes immutable tree pages, a DatabaseRoot and the inactive Meta in one COW
+generation; its Commit Log is part of that same atomic root.
+
+Public `RunWriteTransaction` uses the same V2 `DocumentTransaction` publication
+primitive as transactional RPC. Its callback reads a pinned immutable root and
+maintains a point overlay without holding the database writer mutex. Commit
+validates an exact point read set inside the same storage write closure that
+publishes the mutations. Every read or touched `(collection, document ID)` pins
+expected existence and the hash of its canonical stored body. A related insert,
+update or delete returns `ErrWriteConflict` without retrying callback code;
+intervening commits to disjoint points may serialize before this transaction and
+do not cause false conflicts. Effective mutations across collections,
+Primary/Order/Secondary roots and one Commit Log batch share one Meta publication
+and one reactive token. An index created after the callback snapshot but before
+commit is included when the transaction builds its current Secondary mutations.
+
+The point overlay is admitted while the callback runs, not only at commit:
+tracked points are bounded by `MaxTransactionChanges`, and retained immutable
+base plus current canonical document bytes share `MaxTransactionBytes` with
+staged private System mutations. Replacing the same overlay value adjusts its
+charge instead of accumulating it. The current API deliberately exposes no
+range reads; a future transactional range-query API must add predicate/range
+validation before claiming phantom-safe serializability. V1 is rejected rather
+than extending the frozen legacy WAL transaction-v1 grammar with mixed-operation
+semantics an older reader cannot understand.
+
+Open freezes a non-sensitive `RecoveryReport` after storage validation and
+before the DB is returned. It describes selected Meta/root redundancy, removed
+provable crash tails, replayed V1 WAL records and optional allocator degradation.
+It never turns ambiguous corruption into recovery. An in-process durability
+failure remains fail-stop until close/restart; restart re-enters the complete
+format negotiation and graph validation path rather than resetting an error bit.
 
 ### Stable live-query boundary
 
 Subscriptions consume ordered commit batches rather than observing collection
 methods directly. This prevents events for failed transactions and allows the
-same log position to support reconnect, audit, and future replication. V1 may
-re-run affected queries and send snapshots; the protocol includes revision and
-resume tokens so incremental diffs can be added without changing correctness.
+same log position to support reconnect, audit, and future replication. The
+server accepts a replay source that reconstructs Snapshot N and tails N+1; when
+none can prove that contract it emits `resync_required` instead of presenting a
+fresh snapshot as resumed history.
+
+### Storage format and V2 integration boundary
+
+`Open` performs read-only family detection: existing V1 remains V1, existing V2
+remains V2, and a missing/empty path creates V2. An orphan legacy WAL, unknown
+non-empty file or mixed-family file fails closed. `OpenV1` and `OpenV2` are the
+explicit format-specific entry points; no opener performs implicit migration.
+
+V2 is the default-new copy-on-write page engine. It
+persists primary records, per-collection secondary-index catalogs and the
+logical Commit Log under one CatalogRoot publication, then provides exact
+historical query replay to the server. Opening reads only collection and index
+catalog metadata; it does not scan or decode Primary records. Index candidates
+are checked against their resolved Primary document when read. Explicit
+Reachability performs exhaustive Primary↔Order and Secondary-position checks.
+
+Public V2 queries pin one immutable DatabaseRoot and read Primary/Secondary
+trees directly. `_id` lookup resolves one primary record; equality/range plans
+stream a Secondary iterator and resolve matching primary records; unsorted
+collection scans stream the persistent Order tree and resolve Primary records
+under the same root. Secondary suffixes contain insertion position before
+DocumentID, preserving the public tie breaker. A byte-and-entry-bounded decoded-document LRU
+validates the current encoded record on every hit, while the immutable page cache
+remains the lower-level IO cache. V2 no longer rebuilds process-local query
+B+Trees or a decoded-document collection mirror on open. Update/Delete selection,
+CreateIndex construction, SnapshotQuery and Reactive View initialization/resync
+all consume pinned storage snapshots. Live CRUD retains only collection/index
+definitions in the process-local catalog.
+
+The compatibility `CreateIndex` path separates snapshot extraction from publication. Key
+extraction runs against a pinned immutable root without holding the database
+writer mutex; if a concurrent commit advances the source sequence, the build
+discards that private result and retries a bounded number of times. The final
+storage transaction revalidates Primary↔Order ownership and atomically attaches
+the index catalog entry. Until that commit, queries and CRUD cannot observe the
+candidate tree. A sorted bulk loader seals leaves page-by-page and retains only
+the current leaf plus the branch frontier, avoiding the former second key copy
+and complete mutable-node graph. This sorted-stream→private-tree→atomic-catalog
+boundary is intentionally suitable for a later external merge source.
+
+For write-heavy databases, `StartIndexBuild`/`ResumeIndexBuild` negotiate
+`RequiredFeatureShadowIndexBuilds` and persist a separate BuildCatalog edge from
+DatabaseRoot. Bounded maintenance generations advance the protected Primary
+cursor and private Secondary root without advancing the logical sequence. The
+build's applied watermark is also a persistent Commit Log retention lease.
+After strict catch-up, finalization moves the already-built root into
+IndexCatalog, removes the build record and appends its catalog event in one COW
+commit. Cancellation preserves progress; explicit abort releases it. See
+`docs/index-builds.md` for states and limits.
+
+An optional per-database scheduler runs builds in deadline-bounded quanta with
+fixed concurrency. It is outside the storage engine and default-off. Terminal
+semantic failures are persisted as bounded enums; failed builds stop pinning
+Commit Log history but retain their private graph until operator abort.
+
+Physical V2 B+Tree nodes split by exact encoded bytes rather than entry count.
+Path-copy deletion merges fitting siblings and can propagate a new split upward
+when a replacement separator grows beyond the page budget. The legacy in-memory
+index also deletes through local borrow/merge rather than rebuilding the tree.
+
+`DetectStorageFormat` distinguishes missing/empty, V1 and V2 paths without
+mutating them; an unknown non-empty or mixed-family file fails closed.
+`InspectStorageFormat` checksum-validates both Meta slots and reports the newest
+revision/features/identity without acquiring the writer lock. Its compatibility
+bit is a negotiation result, not a substitute for `Open` graph validation.
+`VerifyV2File` occupies the explicit offline layer between them: a shared-lock,
+read-only audit reuses normal Meta selection, walks both protected business
+graphs, proves published Secondary-to-Primary key correctness and
+Primary-to-Secondary completeness from canonical stored documents, reports
+optional FreeSpace degradation independently, and hashes the complete file
+without repair or maintenance side effects. This semantic work is excluded from
+normal open, read, commit and reclamation paths.
+The V2 Meta magic, full-page checksum envelope and checksum position are a stable
+negotiation boundary. A checksum-valid future revision or unknown required
+feature fails explicitly as unsupported and blocks dual-Meta fallback; only a
+torn/checksum-invalid slot may fall back. Unknown optional bits are carried
+without becoming recovery authority.
+Format extensions use additive golden evidence. The applied shadow watermark
+extension is pinned as a page-delta over the immutable business fixture: base,
+patch and reconstructed-file digests are all checked, and the reader rebuilds
+the artifact without running the current writer. This preserves historical
+fixtures while avoiding duplicated full database blobs.
+The nine B+Tree branch PageTypes are additionally frozen in a compact corpus
+produced by the real sorted-tree builder. A coverage gate joins codec corpora
+with openable database fixtures and rejects any PageType that has no revision-3
+artifact. Codec evidence and reachable full-graph compatibility remain separate
+claims: the former catches byte/type drift; the latter must also prove traversal,
+recovery and future-writer advancement.
+`DB.MigrateToV2` takes a consistent read lock over an open V1 database, writes a
+private V2 file, performs reachability and semantic reopen audits, and publishes
+it with a no-overwrite filesystem link. Empty collections, insertion order,
+typed documents and index definitions are preserved. The destination receives a
+new database identity, so every old V1 resume token is explicitly invalid rather
+than reinterpreted against unrelated V2 sequence numbers.
+
+Unsorted V2 COLLSCAN cursors are lazy and own a bounded snapshot pin until
+exhaustion, limit completion, error, context cancellation or explicit `Close`.
+Indexed and sorted plans retain the correct materializing fallback. Manual
+compact-to-new-file and explicit epoch-safe page reuse are available. The
+disk-full publication matrix and configurable large-database churn/reopen/reclaim
+soak gate the default path; broader platform durability testing remains release
+work. Page reuse protects both valid meta roots and every
+pinned reader/replay root. Blocking reclamation remains available, while online
+reclamation walks a duplicated read handle without holding the writer mutex and
+installs candidates only if the Meta generation, physical high-water mark and
+prior free pool remain unchanged. Concurrent commits cause bounded full-scan
+retries instead of unsafe merging. An explicit default-off scheduler runs these
+online audits serially with per-run deadlines and stops with the DB. The resulting candidate extents may be published
+as optional immutable FreeSpace metadata without advancing the logical Commit
+Log. Restart recovery filters the allocator's consumed high-ID suffix by page
+generation; invalid acceleration falls back to an empty pool, never to an
+unverified allocation. V1 files are never silently reinterpreted as V2.
+The scheduler defaults to a memory-only O(1) pool installation; physical
+FreeSpace publication is explicit because extent construction and fsync remain
+a writer-lock maintenance step.
+
+Physical backup is separate from logical compaction. `BackupV2` holds the source
+writer boundary, copies and hashes the exact page-aligned file, performs physical
+reachability plus public reopen verification, and publishes through a synced
+no-overwrite destination link. It preserves database identity, Meta generation
+and Commit Log history, so only one descendant may be writable in that identity
+domain. `CompactToV2` rebuilds live logical state under a new identity when an
+independent fork is intended. Both operations serialize with V2 maintenance and
+compaction, and expose only fixed aggregate observability fields.
 
 ## Concurrency model
 
@@ -77,12 +340,15 @@ lock is held.
 ## Package boundaries
 
 - Root package `meldbase`: public embedded API and stable value types.
+- `admin`: optional bounded sampler, secured admin HTTP/SSE adapter and embedded
+  developer dashboard, plus fixed-schema Prometheus exposition.
 - `internal/storage`: page IO, checksums, allocation, and record identifiers.
 - `internal/wal`: framing, durability, and recovery scanning.
 - `internal/query`: parsed expression tree and evaluation.
 - `internal/index`: ordered key encoding and B+Tree implementation.
 - `internal/reactive`: subscriptions driven by committed batches.
-- `internal/server`: HTTP/WebSocket adapters only.
+- `server`: public authenticated HTTP/WebSocket/RPC facade.
+- `internal/server`: transport implementation and security machinery.
 
 Packages are introduced when they have executable behavior; empty architecture
 folders are deliberately avoided.

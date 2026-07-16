@@ -1,0 +1,146 @@
+name: Storage soak
+
+on:
+  schedule:
+    - cron: "17 18 * * 0"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Release enforces the production qualification floor; custom is exploratory only
+        required: true
+        type: choice
+        default: release
+        options:
+          - release
+          - custom
+      seconds:
+        description: Concurrent online-maintenance run time in seconds
+        required: true
+        default: "14400"
+      documents:
+        description: Documents retained and fully verified after every reopen
+        required: true
+        default: "10000"
+      reopens:
+        description: Close/reopen verification phases
+        required: true
+        default: "12"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-soak-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  online-maintenance:
+    name: Online maintenance and reopen
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      MELDBASE_STORAGE_SOAK_PROFILE: ${{ github.event_name == 'schedule' && 'sentinel' || inputs.profile }}
+      MELDBASE_STORAGE_SOAK_SECONDS: ${{ github.event_name == 'schedule' && '1800' || inputs.seconds }}
+      MELDBASE_STORAGE_SOAK_DOCUMENTS: ${{ inputs.documents || '10000' }}
+      MELDBASE_STORAGE_SOAK_REOPENS: ${{ inputs.reopens || '12' }}
+      MELDBASE_STORAGE_SOAK_RECEIPT: ${{ runner.temp }}/meldbase-storage-soak-receipt.json
+      MELDBASE_DURABILITY_RECEIPT: ${{ runner.temp }}/meldbase-durability-check.json
+      MELDBASE_QUALIFICATION_PACKET: ${{ runner.temp }}/meldbase-qualification-level-3.json
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build race-enabled VCS-stamped qualification executable
+        run: go build -race -o "$RUNNER_TEMP/meld" ./cmd/meld
+      - name: Probe the exact soak volume with the same binary
+        run: >-
+          "$RUNNER_TEMP/meld" durability-check
+          --dir "$RUNNER_TEMP"
+          --source-revision "$GITHUB_SHA"
+          --require-clean-source
+          > "$MELDBASE_DURABILITY_RECEIPT"
+      - name: Concurrent writer, shadow-index catch-up, snapshots, reclamation, and repeated recovery
+        run: |
+          "$RUNNER_TEMP/meld" storage-soak \
+            --dir "$RUNNER_TEMP" \
+            --out "$MELDBASE_STORAGE_SOAK_RECEIPT" \
+            --profile "$MELDBASE_STORAGE_SOAK_PROFILE" \
+            --seconds "$MELDBASE_STORAGE_SOAK_SECONDS" \
+            --documents "$MELDBASE_STORAGE_SOAK_DOCUMENTS" \
+            --reopens "$MELDBASE_STORAGE_SOAK_REOPENS" \
+            --source-revision "$GITHUB_SHA" \
+            --require-clean-source \
+            2>&1 | tee "$RUNNER_TEMP/meldbase-storage-soak.log"
+      - name: Validate versioned soak receipt
+        run: >-
+          jq -e '
+            .schemaVersion == 4 and .formatRevision == 3 and .engine == "v2" and
+            .profile == env.MELDBASE_STORAGE_SOAK_PROFILE and
+            .sourceRevision == env.GITHUB_SHA and .buildRevision == env.GITHUB_SHA and
+            .buildModified == false and
+            .device > 0 and (.filesystemType | length) > 0 and
+            (.filesystemName | length) > 0 and .blockSize > 0 and
+            .raceEnabled == true and .completedReopens == .requestedReopens and
+            (.phases | length) == .requestedReopens and
+            .concurrentDurationNanos >= (.requestedSeconds * 1000000000) and
+            .actualDurationNanos >= .concurrentDurationNanos and
+            .writes > 0 and .snapshotReads > 0 and .indexBuildBatches > 0 and
+            .reclamationAttempts > 0 and .freeSpaceValid == true and
+            .semanticIndexesVerified == true and
+            .semanticIndexBuildsVerified == true and .finalIndexBuildAbsent == true and
+            (.finalFileSha256 | length) == 64 and
+            (if .profile == "release" then
+              .requestedSeconds >= 14400 and .documents >= 10000 and .requestedReopens >= 12 and
+              .reclamationConflicts > 0 and
+              all(.phases[]; .concurrentDurationNanos > 0 and
+                  .writes > 0 and .snapshotReads > 0 and
+                  .indexBuildBatches > 0 and .reclamationAttempts > 0)
+            else true end)
+          ' "$MELDBASE_STORAGE_SOAK_RECEIPT"
+      - name: Bind release receipts into a Level 3 packet
+        if: env.MELDBASE_STORAGE_SOAK_PROFILE == 'release'
+        run: |
+          "$RUNNER_TEMP/meld" qualification-check \
+            --source-revision "$GITHUB_SHA" \
+            --durability-receipt "$MELDBASE_DURABILITY_RECEIPT" \
+            --soak-receipt "$MELDBASE_STORAGE_SOAK_RECEIPT" \
+            --require-level 3 \
+            > "$MELDBASE_QUALIFICATION_PACKET"
+          jq -e '
+            .schemaVersion == 1 and .sourceRevision == env.GITHUB_SHA and
+            .evidenceLevel == 3 and .productionQualified == false and
+            .passed == true and
+            (.durabilityReceiptSha256 | length) == 64 and
+            (.soakReceiptSha256 | length) == 64
+          ' "$MELDBASE_QUALIFICATION_PACKET"
+      - name: Publish soak summary
+        run: >-
+          jq -r '
+            "### Meldbase storage soak\n" +
+            "- source / binary: `" + (.sourceRevision // "unknown") + "` / `" + (.buildRevision // "unknown") + "`\n" +
+            "- profile / receipt schema: " + .profile + " / " + (.schemaVersion | tostring) + "\n" +
+            "- duration: " + ((.actualDurationNanos / 1000000000) | tostring) + " seconds\n" +
+            "- concurrent duration: " + ((.concurrentDurationNanos / 1000000000) | tostring) + " seconds\n" +
+            "- documents: " + (.documents | tostring) + "\n" +
+            "- reopens: " + (.completedReopens | tostring) + "\n" +
+            "- writes / snapshot reads / index batches: " +
+              (.writes | tostring) + " / " + (.snapshotReads | tostring) + " / " + (.indexBuildBatches | tostring) + "\n" +
+            "- reclamation attempts / conflicts: " +
+              (.reclamationAttempts | tostring) + " / " + (.reclamationConflicts | tostring) + "\n" +
+            "- shadow index semantics / final abort: " +
+              (.semanticIndexBuildsVerified | tostring) + " / " + (.finalIndexBuildAbsent | tostring) + "\n" +
+            "- final SHA-256: `" + .finalFileSha256 + "`"
+          ' "$MELDBASE_STORAGE_SOAK_RECEIPT" >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive release evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: storage-soak-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/meldbase-storage-soak-receipt.json
+            ${{ runner.temp }}/meldbase-durability-check.json
+            ${{ runner.temp }}/meldbase-qualification-level-3.json
+            ${{ runner.temp }}/meldbase-storage-soak.log
+          if-no-files-found: error
+          retention-days: 90

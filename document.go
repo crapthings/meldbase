@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unicode/utf8"
 )
 
 type Document map[string]Value
@@ -76,7 +77,7 @@ func lookup(d Document, path string) (Value, bool) {
 }
 
 func validField(k string) error {
-	if k == "" || strings.ContainsRune(k, '\x00') || strings.Contains(k, ".") || strings.HasPrefix(k, "$") || k == "__proto__" || k == "prototype" || k == "constructor" {
+	if k == "" || !utf8.ValidString(k) || strings.ContainsRune(k, '\x00') || strings.Contains(k, ".") || strings.HasPrefix(k, "$") || k == "__proto__" || k == "prototype" || k == "constructor" {
 		return fmt.Errorf("%w: invalid field name %q", ErrInvalidDocument, k)
 	}
 	return nil
@@ -99,6 +100,9 @@ func validateDocument(d Document, depth int) error {
 		if v.kind == Float64Kind && (math.IsNaN(v.f) || math.IsInf(v.f, 0)) {
 			return fmt.Errorf("%w: non-finite number at %q", ErrInvalidDocument, k)
 		}
+		if v.kind == StringKind && !utf8.ValidString(v.s) {
+			return fmt.Errorf("%w: invalid UTF-8 string at %q", ErrInvalidDocument, k)
+		}
 		if v.kind == ObjectKind {
 			if err := validateDocument(v.obj, depth+1); err != nil {
 				return err
@@ -120,6 +124,9 @@ func validateArray(values []Value, depth int) error {
 	for _, v := range values {
 		if v.kind == Float64Kind && (math.IsNaN(v.f) || math.IsInf(v.f, 0)) {
 			return fmt.Errorf("%w: non-finite number", ErrInvalidDocument)
+		}
+		if v.kind == StringKind && !utf8.ValidString(v.s) {
+			return fmt.Errorf("%w: invalid UTF-8 string", ErrInvalidDocument)
 		}
 		if v.kind == ObjectKind {
 			if err := validateDocument(v.obj, depth+1); err != nil {

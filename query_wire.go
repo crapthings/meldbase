@@ -464,6 +464,24 @@ func MarshalWireValue(value Value) ([]byte, error) {
 	return json.Marshal(encoded)
 }
 
+// UnmarshalWireValue decodes one closed, typed wire value using the same
+// depth/item/byte limits as query operands. It is suitable for data-only
+// protocol arguments such as RPC; it never evaluates source or callbacks.
+func UnmarshalWireValue(data []byte, limits QueryLimits) (Value, error) {
+	limits = normalizedLimits(limits)
+	if len(data) > limits.MaxWireBytes {
+		return Value{}, fmt.Errorf("%w: value exceeds wire limit", ErrInvalidDocument)
+	}
+	if err := validateJSON(data); err != nil {
+		return Value{}, fmt.Errorf("%w: %v", ErrInvalidDocument, err)
+	}
+	value, err := decodeWireValue(data, limits, 0)
+	if err != nil {
+		return Value{}, fmt.Errorf("%w: %v", ErrInvalidDocument, err)
+	}
+	return value, nil
+}
+
 func MarshalWireDocument(document Document) ([]byte, error) {
 	if err := document.Validate(); err != nil {
 		return nil, err

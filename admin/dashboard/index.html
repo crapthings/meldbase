@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Meldbase Observatory</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Meldbase / local control plane</p>
+        <h1>Observatory</h1>
+      </div>
+      <div class="connection" aria-live="polite">
+        <span id="connection-dot" class="dot idle"></span>
+        <span id="connection-label">Disconnected</span>
+      </div>
+    </header>
+
+    <section id="login" class="login panel">
+      <div>
+        <p class="eyebrow">Admin authentication</p>
+        <h2>Connect to this process</h2>
+        <p>The token stays in this tab's memory. It is never written to the URL or browser storage.</p>
+      </div>
+      <form id="login-form">
+        <label for="token">Bearer token</label>
+        <div class="token-row">
+          <input id="token" name="token" type="password" minlength="32" autocomplete="off" required placeholder="32+ byte admin token">
+          <button type="submit">Connect</button>
+        </div>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <div id="dashboard" hidden>
+      <section id="health-panel" class="health-panel panel healthy" aria-live="polite">
+        <div>
+          <p class="eyebrow">Derived engine state</p>
+          <strong id="health-overall">Healthy</strong>
+          <p id="health-signals" class="health-signals">No active engine health signals.</p>
+        </div>
+        <div class="health-components">
+          <span>Database <b id="health-database">healthy</b></span>
+          <span>Durability <b id="health-durability">healthy</b></span>
+          <span>Storage <b id="health-storage">healthy</b></span>
+          <span>Realtime <b id="health-realtime">healthy</b></span>
+          <span>Telemetry <b id="health-telemetry">healthy</b></span>
+          <span>Transport <b id="health-transport">unavailable</b></span>
+        </div>
+      </section>
+
+      <section class="hero-grid">
+        <article class="metric panel"><span>Commit sequence</span><strong id="commit-sequence">—</strong><small id="engine">engine —</small></article>
+        <article class="metric panel"><span>Commits / sec</span><strong id="commit-rate">—</strong><small id="change-rate">— changes / sec</small></article>
+        <article class="metric panel"><span>Queries / sec</span><strong id="query-rate">—</strong><small id="query-fail-rate">— failed / sec</small></article>
+        <article class="metric panel"><span>Documents</span><strong id="documents">—</strong><small id="collections">— collections</small></article>
+      </section>
+
+      <section class="chart-panel panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">Last samples</p><h2>Workload pulse</h2></div>
+          <div class="legend"><span><i class="commit"></i> commits/s</span><span><i class="query"></i> queries/s</span></div>
+        </div>
+        <svg id="rate-chart" viewBox="0 0 900 220" role="img" aria-label="Commit and query rates over time">
+          <g class="grid-lines"></g>
+          <polyline id="commit-line" class="line commit-line" points=""></polyline>
+          <polyline id="query-line" class="line query-line" points=""></polyline>
+        </svg>
+      </section>
+
+      <section class="detail-grid">
+        <article class="panel detail">
+          <div class="section-heading"><div><p class="eyebrow">Planner</p><h2>Query work</h2></div><span id="active-cursors" class="pill">0 active</span></div>
+          <dl>
+            <div><dt>Index scans</dt><dd id="index-scans">—</dd></div>
+            <div><dt>Collection scans</dt><dd id="collection-scans">—</dd></div>
+            <div><dt>ID lookups</dt><dd id="id-lookups">—</dd></div>
+            <div><dt>Examined / returned</dt><dd id="examined-ratio">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel detail">
+          <div class="section-heading"><div><p class="eyebrow">Reactive</p><h2>Live pipeline</h2></div><span id="subscribers" class="pill">0 subscribers</span></div>
+          <dl>
+            <div><dt>Shared views</dt><dd id="shared-views">—</dd></div>
+            <div><dt>Pending batches</dt><dd id="pending-batches">—</dd></div>
+            <div><dt>Pending changes</dt><dd id="pending-changes">—</dd></div>
+            <div><dt>Queue overflows</dt><dd id="queue-overflows">—</dd></div>
+            <div><dt>Slow consumers</dt><dd id="slow-consumers">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel detail">
+          <div class="section-heading"><div><p class="eyebrow">Pager</p><h2>Storage health</h2></div><span id="readers" class="pill">0 readers</span></div>
+          <dl>
+            <div><dt>Physical pages</dt><dd id="physical-pages">—</dd></div>
+			<div><dt>Storage quota</dt><dd id="storage-quota">—</dd></div>
+			<div><dt>Quota rejections</dt><dd id="storage-limit-rejections">—</dd></div>
+            <div><dt>Reusable pages</dt><dd id="reusable-pages">—</dd></div>
+			<div><dt>Tree splits</dt><dd id="tree-splits">—</dd></div>
+			<div><dt>Tree merges</dt><dd id="tree-merges">—</dd></div>
+			<div><dt>Persistent free map</dt><dd id="persistent-free-space">—</dd></div>
+			<div><dt>Free-map load failures</dt><dd id="free-space-load-failures">—</dd></div>
+			<div><dt>Retained commits</dt><dd id="retained-commits">—</dd></div>
+			<div><dt>Retained history bytes</dt><dd id="retained-commit-bytes">—</dd></div>
+			<div><dt>Retention overage</dt><dd id="retention-overage">—</dd></div>
+            <div><dt>Page cache hit</dt><dd id="page-cache-hit">—</dd></div>
+            <div><dt>Document cache hit</dt><dd id="document-cache-hit">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel detail">
+          <div class="section-heading"><div><p class="eyebrow">Maintenance</p><h2>Durability</h2></div><span id="uptime" class="pill">— uptime</span></div>
+          <dl>
+            <div><dt>Commit max</dt><dd id="commit-max">—</dd></div>
+			<div><dt>V1 WAL size</dt><dd id="wal-size">—</dd></div>
+			<div><dt>Automatic checkpoints</dt><dd id="automatic-checkpoints">—</dd></div>
+			<div><dt>Checkpoint failures</dt><dd id="checkpoint-failures">—</dd></div>
+			<div><dt>Checkpoint max</dt><dd id="checkpoint-max">—</dd></div>
+			<div><dt>Startup recovery</dt><dd id="recovery-status">—</dd></div>
+			<div><dt>Meta roots</dt><dd id="recovery-meta">—</dd></div>
+			<div><dt>Removed crash tails</dt><dd id="recovery-tail">—</dd></div>
+			<div><dt>WAL replay</dt><dd id="recovery-wal">—</dd></div>
+			<div><dt>Document limit</dt><dd id="resource-document-limit">—</dd></div>
+			<div><dt>Transaction limit</dt><dd id="resource-transaction-limit">—</dd></div>
+			<div><dt>Index build limit</dt><dd id="resource-index-limit">—</dd></div>
+			<div><dt>Resource rejections</dt><dd id="resource-rejections">—</dd></div>
+			<div><dt>Write transactions</dt><dd id="write-transactions">—</dd></div>
+			<div><dt>Write conflicts</dt><dd id="write-transaction-conflicts">—</dd></div>
+			<div><dt>Write aborts</dt><dd id="write-transaction-aborts">—</dd></div>
+			<div><dt>Index builds</dt><dd id="index-build-status">—</dd></div>
+			<div><dt>Durable index builds</dt><dd id="index-build-persistent">—</dd></div>
+			<div><dt>Last index build</dt><dd id="index-build-last">—</dd></div>
+			<div><dt>Max index build</dt><dd id="index-build-max">—</dd></div>
+            <div><dt>Rejected transactions</dt><dd id="rejected-transactions">—</dd></div>
+            <div><dt>Reclaimable last scan</dt><dd id="reclaimable-pages">—</dd></div>
+			<div><dt>Reclamation mode</dt><dd id="reclamation-mode">—</dd></div>
+			<div><dt>Last scan attempts</dt><dd id="reclamation-attempts">—</dd></div>
+			<div><dt>Online conflicts</dt><dd id="reclamation-conflicts">—</dd></div>
+			<div><dt>Backup last size</dt><dd id="backup-last-size">—</dd></div>
+			<div><dt>Backup last duration</dt><dd id="backup-last-duration">—</dd></div>
+			<div><dt>Backup failures</dt><dd id="backup-failures">—</dd></div>
+            <div><dt>Telemetry drops</dt><dd id="telemetry-drops">—</dd></div>
+          </dl>
+        </article>
+
+		<article class="panel detail">
+		  <div class="section-heading"><div><p class="eyebrow">Transport</p><h2>RPC</h2></div><span id="rpc-active" class="pill">— active</span></div>
+		  <dl>
+			<div><dt>Requests / sec</dt><dd id="rpc-rate">—</dd></div>
+			<div><dt>Failures / sec</dt><dd id="rpc-fail-rate">—</dd></div>
+			<div><dt>Realtime connections</dt><dd id="server-connections">—</dd></div>
+			<div><dt>Maximum latency</dt><dd id="rpc-max">—</dd></div>
+			<div><dt>Idempotency replays</dt><dd id="rpc-idempotency-replays">—</dd></div>
+			<div><dt>Outcome unknown</dt><dd id="rpc-idempotency-unknown">—</dd></div>
+			<div><dt>Atomic commits</dt><dd id="rpc-atomic-commits">—</dd></div>
+			<div><dt>Atomic rollbacks</dt><dd id="rpc-atomic-rollbacks">—</dd></div>
+			<div><dt>Method workers</dt><dd id="worker-connections">—</dd></div>
+			<div><dt>Query publications</dt><dd id="worker-publications">—</dd></div>
+			<div><dt>Policy denied</dt><dd id="worker-policy-denied">—</dd></div>
+			<div><dt>Policy invalidations</dt><dd id="worker-policy-invalidations">—</dd></div>
+			<div><dt>Worker protocol failures</dt><dd id="worker-protocol-failures">—</dd></div>
+		  </dl>
+		</article>
+      </section>
+
+      <section class="diagnostics-panel panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">Opt-in ring</p><h2>Recent diagnostics</h2></div>
+          <span id="diagnostic-status" class="pill">disabled</span>
+        </div>
+        <p id="diagnostic-empty" class="empty-state">Enable bounded diagnostics to see slow, failed or sampled operations.</p>
+        <div class="diagnostic-table-wrap">
+          <table id="diagnostic-table" hidden>
+            <thead><tr><th>Time</th><th>Kind</th><th>Stage</th><th>Outcome</th><th>Duration</th><th>Work</th></tr></thead>
+            <tbody id="diagnostic-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer>
+        <span id="captured-at">No sample</span>
+        <button id="disconnect" class="secondary" type="button">Disconnect</button>
+      </footer>
+    </div>
+  </main>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

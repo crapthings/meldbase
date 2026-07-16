@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 
@@ -24,12 +26,23 @@ type Authenticator interface {
 
 type QueryPolicy struct {
 	PolicyVersion        string
+	Lease                *QueryPolicyLease
 	Constraint           *meldbase.QuerySpec
 	MaxResults           int
 	AllowAllQueryPaths   bool
 	AllowedQueryPaths    map[string]struct{}
 	AllowAllResultFields bool
 	AllowedResultFields  map[string]struct{}
+	additionalLease      *QueryPolicyLease
+	compositeLeases      bool
+}
+
+// QueryPolicyResolver adds a dynamic, data-only visibility policy after the
+// application's Authorizer has allowed a query. When configured, a missing
+// resolution fails closed. Implementations may never return documents; they
+// only narrow row membership, query paths, result fields and result count.
+type QueryPolicyResolver interface {
+	ResolveQueryPolicy(context.Context, Principal, string, meldbase.QuerySpec) (QueryPolicy, bool, error)
 }
 
 type Authorizer interface {
@@ -59,7 +72,55 @@ type InsertPolicy struct {
 	AllowedResultFields  map[string]struct{}
 }
 
+// Authorizer implementations may reuse their input maps. Freeze every returned
+// policy at the trust boundary so later mutation cannot race with or silently
+// change an in-flight query/subscription. QuerySpec internals are immutable, but
+// the optional pointer itself is copied into server-owned storage.
+func freezeQueryPolicy(policy QueryPolicy) QueryPolicy {
+	policy.AllowedQueryPaths = cloneStringSet(policy.AllowedQueryPaths)
+	policy.AllowedResultFields = cloneStringSet(policy.AllowedResultFields)
+	if policy.Constraint != nil {
+		constraint := *policy.Constraint
+		policy.Constraint = &constraint
+	}
+	return policy
+}
+
+func freezeInsertPolicy(policy InsertPolicy) InsertPolicy {
+	policy.AllowedInputFields = cloneStringSet(policy.AllowedInputFields)
+	policy.AllowedResultFields = cloneStringSet(policy.AllowedResultFields)
+	policy.SetFields = policy.SetFields.Clone()
+	return policy
+}
+
+func freezeUpdatePolicy(policy UpdatePolicy) UpdatePolicy {
+	policy.QueryPolicy = freezeQueryPolicy(policy.QueryPolicy)
+	policy.AllowedUpdatePaths = cloneStringSet(policy.AllowedUpdatePaths)
+	return policy
+}
+
+func freezeDeletePolicy(policy DeletePolicy) DeletePolicy {
+	policy.QueryPolicy = freezeQueryPolicy(policy.QueryPolicy)
+	return policy
+}
+
+func cloneStringSet(source map[string]struct{}) map[string]struct{} {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]struct{}, len(source))
+	for value := range source {
+		result[value] = struct{}{}
+	}
+	return result
+}
+
 func applyPolicy(query meldbase.QuerySpec, policy QueryPolicy) (meldbase.QuerySpec, error) {
+	if !validPolicyVersion(policy.PolicyVersion) ||
+		(policy.Lease != nil && (!validPolicyVersion(policy.Lease.Version()) || (!policy.compositeLeases && policy.Lease.Version() != policy.PolicyVersion))) ||
+		(policy.additionalLease != nil && !validPolicyVersion(policy.additionalLease.Version())) {
+		return meldbase.QuerySpec{}, ErrForbidden
+	}
 	if policy.MaxResults <= 0 || policy.MaxResults > meldbase.DefaultQueryLimits.MaxLimit {
 		return meldbase.QuerySpec{}, ErrForbidden
 	}
@@ -77,6 +138,56 @@ func applyPolicy(query meldbase.QuerySpec, policy QueryPolicy) (meldbase.QuerySp
 		query = query.Constrain(*policy.Constraint)
 	}
 	return query.Capped(policy.MaxResults), nil
+}
+
+func intersectQueryPolicies(base, additional QueryPolicy) (QueryPolicy, error) {
+	if !validPolicyVersion(base.PolicyVersion) || !validPolicyVersion(additional.PolicyVersion) {
+		return QueryPolicy{}, ErrForbidden
+	}
+	versionInput := base.PolicyVersion + "\x00" + additional.PolicyVersion
+	versionHash := sha256.Sum256([]byte(versionInput))
+	result := QueryPolicy{
+		PolicyVersion:        "intersection-" + hex.EncodeToString(versionHash[:]),
+		MaxResults:           min(base.MaxResults, additional.MaxResults),
+		AllowAllQueryPaths:   base.AllowAllQueryPaths && additional.AllowAllQueryPaths,
+		AllowedQueryPaths:    intersectStringSets(base.AllowAllQueryPaths, base.AllowedQueryPaths, additional.AllowAllQueryPaths, additional.AllowedQueryPaths),
+		AllowAllResultFields: base.AllowAllResultFields && additional.AllowAllResultFields,
+		AllowedResultFields:  intersectStringSets(base.AllowAllResultFields, base.AllowedResultFields, additional.AllowAllResultFields, additional.AllowedResultFields),
+		compositeLeases:      true,
+	}
+	if base.Constraint != nil && additional.Constraint != nil {
+		constraint := base.Constraint.Constrain(*additional.Constraint)
+		result.Constraint = &constraint
+	} else if base.Constraint != nil {
+		constraint := *base.Constraint
+		result.Constraint = &constraint
+	} else if additional.Constraint != nil {
+		constraint := *additional.Constraint
+		result.Constraint = &constraint
+	}
+	result.Lease = base.Lease
+	if result.Lease == nil {
+		result.Lease = additional.Lease
+	} else if additional.Lease != nil && additional.Lease != result.Lease {
+		result.additionalLease = additional.Lease
+	}
+	return freezeQueryPolicy(result), nil
+}
+
+func intersectStringSets(firstAll bool, first map[string]struct{}, secondAll bool, second map[string]struct{}) map[string]struct{} {
+	if firstAll {
+		return cloneStringSet(second)
+	}
+	if secondAll {
+		return cloneStringSet(first)
+	}
+	result := make(map[string]struct{}, min(len(first), len(second)))
+	for value := range first {
+		if _, ok := second[value]; ok {
+			result[value] = struct{}{}
+		}
+	}
+	return result
 }
 
 func applyUpdatePolicy(query meldbase.QuerySpec, mutation meldbase.MutationSpec, policy UpdatePolicy) (meldbase.QuerySpec, error) {

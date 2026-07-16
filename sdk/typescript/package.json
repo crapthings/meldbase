@@ -1,6 +1,6 @@
 {
   "name": "@meldbase/client",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Isomorphic reactive query client for Meldbase",
   "license": "Apache-2.0",
   "repository": {
@@ -11,6 +11,7 @@
   "homepage": "https://github.com/crapthings/meldbase#readme",
   "bugs": "https://github.com/crapthings/meldbase/issues",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -36,6 +37,8 @@
     "dist/local.d.ts",
     "dist/mutation.js",
     "dist/mutation.d.ts",
+    "dist/protocol.js",
+    "dist/protocol.d.ts",
     "dist/query.js",
     "dist/query.d.ts",
     "dist/remote.js",

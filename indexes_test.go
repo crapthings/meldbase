@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	btree "github.com/crapthings/meldbase/internal/index"
@@ -112,6 +113,284 @@ func TestUniqueIndexMaintainedAcrossCRUDAndPlanner(t *testing.T) {
 	}
 }
 
+func TestCompoundIndexPlannerMixedDirectionsAndStableOrder(t *testing.T) {
+	db := New()
+	t.Cleanup(func() { _ = db.Close() })
+	items := db.Collection("items")
+	for _, document := range []Document{
+		{"group": String("a"), "score": Int(8), "label": String("first")},
+		{"group": String("b"), "score": Int(99), "label": String("other")},
+		{"group": String("a"), "score": Int(9), "label": String("second")},
+		{"group": String("a"), "score": Int(7), "label": String("third")},
+		{"group": String("a"), "label": String("missing")},
+	} {
+		if _, err := items.InsertOne(context.Background(), document); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fields := []IndexField{{Field: "group", Order: 1}, {Field: "score", Order: -1}}
+	if err := items.CreateIndex(context.Background(), "group_score", fields, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertIndex := func(filter Filter) {
+		t.Helper()
+		explain, err := items.Explain(context.Background(), filter)
+		if err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "group_score" {
+			t.Fatalf("filter=%v explain=%+v err=%v", filter, explain, err)
+		}
+	}
+	assertIndex(Filter{"group": "a", "score": int64(8)})
+	assertIndex(Filter{"group": "a"})
+	assertIndex(Filter{"group": "a", "score": map[string]any{"$gt": int64(7), "$lte": int64(9)}})
+
+	cursor, err := items.Find(context.Background(), Filter{"group": "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	documents, err := cursor.All(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := make([]string, 0, len(documents))
+	for _, document := range documents {
+		label, _ := document["label"].StringValue()
+		labels = append(labels, label)
+	}
+	if !reflect.DeepEqual(labels, []string{"first", "second", "third", "missing"}) {
+		t.Fatalf("unsorted compound index changed insertion order: %v", labels)
+	}
+
+	cursor, err = items.Find(context.Background(), Filter{
+		"group": "a",
+		"score": map[string]any{"$gt": int64(7), "$lte": int64(9)},
+	}, QueryOptions{Sort: []SortField{{Path: "score", Direction: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	documents, err = cursor.All(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scores := make([]int64, 0, len(documents))
+	for _, document := range documents {
+		score, _ := document["score"].Int64()
+		scores = append(scores, score)
+	}
+	if !reflect.DeepEqual(scores, []int64{8, 9}) {
+		t.Fatalf("descending physical range returned %v", scores)
+	}
+}
+
+func TestCompoundIndexPlannerMatchesCollectionScanAcrossDirections(t *testing.T) {
+	for _, directions := range [][2]int{{1, 1}, {1, -1}, {-1, 1}, {-1, -1}} {
+		name := fmt.Sprintf("%d_%d", directions[0], directions[1])
+		t.Run(name, func(t *testing.T) {
+			db := New()
+			defer db.Close()
+			items := db.Collection("items")
+			random := rand.New(rand.NewPCG(uint64(directions[0]+2), uint64(directions[1]+7)))
+			for ordinal := range 120 {
+				document := Document{"a": Int(int64(random.Uint64() % 6)), "ordinal": Int(int64(ordinal))}
+				if ordinal%11 != 0 {
+					document["b"] = Int(int64(random.Uint64() % 30))
+				}
+				if _, err := items.InsertOne(context.Background(), document); err != nil {
+					t.Fatal(err)
+				}
+			}
+			type sample struct {
+				filter Filter
+				want   []DocumentID
+			}
+			samples := make([]sample, 0, 30)
+			options := QueryOptions{Sort: []SortField{{Path: "b", Direction: 1}, {Path: "ordinal", Direction: 1}}}
+			for range 10 {
+				a := int64(random.Uint64() % 6)
+				lower := int64(random.Uint64() % 25)
+				upper := lower + int64(random.Uint64()%6)
+				for _, filter := range []Filter{
+					{"a": a},
+					{"a": a, "b": lower},
+					{"a": a, "b": map[string]any{"$gt": lower, "$lte": upper}},
+				} {
+					samples = append(samples, sample{filter: filter, want: queryIDs(t, items, filter, options)})
+				}
+			}
+			if err := items.CreateIndex(context.Background(), "a_b", []IndexField{
+				{Field: "a", Order: directions[0]}, {Field: "b", Order: directions[1]},
+			}, IndexOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			for _, sample := range samples {
+				if got := queryIDs(t, items, sample.filter, options); !reflect.DeepEqual(got, sample.want) {
+					t.Fatalf("filter=%v got=%v want=%v", sample.filter, got, sample.want)
+				}
+				if explain, err := items.Explain(context.Background(), sample.filter); err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "a_b" {
+					t.Fatalf("filter=%v explain=%+v err=%v", sample.filter, explain, err)
+				}
+			}
+			if explain, err := items.Explain(context.Background(), Filter{"b": int64(1)}); err != nil || explain.Stage != "COLLSCAN" {
+				t.Fatalf("non-prefix explain=%+v err=%v", explain, err)
+			}
+		})
+	}
+}
+
+func TestUniqueCompoundIndexMaintainedAcrossCRUD(t *testing.T) {
+	db := New()
+	t.Cleanup(func() { _ = db.Close() })
+	items := db.Collection("items")
+	first, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "slug": String("one")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "slug": String("two")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := items.CreateIndex(context.Background(), "tenant_slug", []IndexField{
+		{Field: "tenant", Order: 1}, {Field: "slug", Order: 1},
+	}, IndexOptions{Unique: true}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := items.InsertOne(context.Background(), Document{"tenant": String("missing-suffix")}); err != nil {
+			t.Fatalf("partial tuples must not conflict in a unique index: %v", err)
+		}
+	}
+	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("b"), "slug": String("one")}); err != nil {
+		t.Fatalf("same suffix in another tuple must be allowed: %v", err)
+	}
+	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "slug": String("one")}); !errors.Is(err, ErrDuplicateKey) {
+		t.Fatalf("duplicate tuple error = %v", err)
+	}
+	if _, err := items.UpdateOne(context.Background(), Filter{"_id": second}, Update{"$set": map[string]any{"slug": "one"}}); !errors.Is(err, ErrDuplicateKey) {
+		t.Fatalf("duplicate tuple update error = %v", err)
+	}
+	if _, err := items.UpdateOne(context.Background(), Filter{"_id": second}, Update{"$set": map[string]any{"slug": "three"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryIDs(t, items, Filter{"tenant": "a", "slug": "two"}, QueryOptions{}); len(got) != 0 {
+		t.Fatalf("old tuple remained indexed: %v", got)
+	}
+	if got := queryIDs(t, items, Filter{"tenant": "a", "slug": "three"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second}) {
+		t.Fatalf("updated tuple IDs = %v", got)
+	}
+	if _, err := items.DeleteOne(context.Background(), Filter{"_id": first}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "slug": String("one")}); err != nil {
+		t.Fatalf("deleted tuple was not released: %v", err)
+	}
+}
+
+func TestCompoundIndexPreservesMissingSuffixMatchesAndRejectsNonScalars(t *testing.T) {
+	db := New()
+	t.Cleanup(func() { _ = db.Close() })
+	items := db.Collection("items")
+	missing, err := items.InsertOne(context.Background(), Document{"a": Int(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := items.CreateIndex(context.Background(), "a_b", []IndexField{{Field: "a", Order: 1}, {Field: "b", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryIDs(t, items, Filter{"a": int64(1)}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{missing}) {
+		t.Fatalf("left-prefix query lost missing suffix document: %v (missing=%s)", got, missing)
+	}
+	if _, err := items.InsertOne(context.Background(), Document{"a": Int(1), "b": Array(Int(2))}); !errors.Is(err, ErrInvalidIndex) {
+		t.Fatalf("non-scalar insert error = %v", err)
+	}
+	valid, err := items.InsertOne(context.Background(), Document{"a": Int(1), "b": Int(2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := items.UpdateOne(context.Background(), Filter{"_id": valid}, Update{"$set": map[string]any{"b": []any{2}}}); !errors.Is(err, ErrInvalidIndex) {
+		t.Fatalf("non-scalar update error = %v", err)
+	}
+	if got := queryIDs(t, items, Filter{"a": int64(1), "b": int64(2)}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{valid}) {
+		t.Fatalf("failed update changed index/document atomically: %v", got)
+	}
+}
+
+func TestCompoundIndexDefinitionValidationAndOwnership(t *testing.T) {
+	db := New()
+	t.Cleanup(func() { _ = db.Close() })
+	items := db.Collection("items")
+	invalid := []struct {
+		name   string
+		fields []IndexField
+	}{
+		{"duplicate", []IndexField{{Field: "a", Order: 1}, {Field: "a", Order: -1}}},
+		{"direction", []IndexField{{Field: "a", Order: 0}}},
+		{"too_many", []IndexField{{Field: "a", Order: 1}, {Field: "b", Order: 1}, {Field: "c", Order: 1}, {Field: "d", Order: 1}, {Field: "e", Order: 1}}},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			if err := items.CreateIndex(context.Background(), test.name, test.fields, IndexOptions{}); !errors.Is(err, ErrInvalidIndex) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+
+	fields := []IndexField{{Field: "a", Order: 1}, {Field: "b", Order: -1}}
+	if err := items.CreateIndex(context.Background(), "owned", fields, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	fields[0].Field, fields[1].Order = "mutated", 1
+	definition := db.collections["items"].indexes["owned"].definition
+	if !reflect.DeepEqual(definition.Fields, []IndexField{{Field: "a", Order: 1}, {Field: "b", Order: -1}}) {
+		t.Fatalf("definition retained caller-owned slice: %+v", definition)
+	}
+}
+
+func TestCompoundIndexRejectsOversizedCanonicalTupleAcrossBuildAndInsert(t *testing.T) {
+	oversized := String(strings.Repeat("x", maxCanonicalSecondaryKeyLen))
+	for _, existing := range []bool{true, false} {
+		t.Run(fmt.Sprintf("existing_%t", existing), func(t *testing.T) {
+			db := New()
+			defer db.Close()
+			items := db.Collection("items")
+			if existing {
+				if _, err := items.InsertOne(context.Background(), Document{"a": oversized, "b": Int(1)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := items.CreateIndex(context.Background(), "a_b", []IndexField{{Field: "a", Order: 1}, {Field: "b", Order: 1}}, IndexOptions{})
+			if existing {
+				if !errors.Is(err, ErrInvalidIndex) {
+					t.Fatalf("build error = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := items.InsertOne(context.Background(), Document{"a": oversized, "b": Int(1)}); !errors.Is(err, ErrInvalidIndex) {
+				t.Fatalf("insert error = %v", err)
+			}
+		})
+	}
+}
+
+func TestV1RejectsCompoundAndDescendingIndexes(t *testing.T) {
+	db, err := OpenV1(filepath.Join(t.TempDir(), "legacy.meld"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	items := db.Collection("items")
+	for name, fields := range map[string][]IndexField{
+		"compound":   {{Field: "a", Order: 1}, {Field: "b", Order: 1}},
+		"descending": {{Field: "a", Order: -1}},
+	} {
+		if err := items.CreateIndex(context.Background(), name, fields, IndexOptions{}); !errors.Is(err, ErrCompoundIndexUnsupported) {
+			t.Fatalf("%s error = %v", name, err)
+		}
+	}
+}
+
 func TestIndexRangeScanAndExactMixedNumericUniqueness(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -152,7 +431,7 @@ func TestIndexRangeScanAndExactMixedNumericUniqueness(t *testing.T) {
 
 func TestIndexDefinitionAndContentsRecoverFromWALAndCheckpoint(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "indexed.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +443,7 @@ func TestIndexDefinitionAndContentsRecoverFromWALAndCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	crashClose(t, db)
-	recovered, err := Open(path)
+	recovered, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +457,7 @@ func TestIndexDefinitionAndContentsRecoverFromWALAndCheckpoint(t *testing.T) {
 	if err := recovered.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path)
+	reopened, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +476,7 @@ func TestIndexDefinitionAndContentsRecoverFromWALAndCheckpoint(t *testing.T) {
 
 func TestUniqueIndexBatchUpdateRecoversWithoutFalseIntermediateConflict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "batch.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +493,7 @@ func TestUniqueIndexBatchUpdateRecoversWithoutFalseIntermediateConflict(t *testi
 		t.Fatal(err)
 	}
 	crashClose(t, db)
-	recovered, err := Open(path)
+	recovered, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}

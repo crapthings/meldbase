@@ -62,11 +62,11 @@ func (s *resumeTokenService) validate(token string, database [16]byte, principal
 	}
 	parts := strings.SplitN(token, ".", 2)
 	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil || len(payload) > 3072 {
+	if err != nil || len(payload) > 3072 || base64.RawURLEncoding.EncodeToString(payload) != parts[0] {
 		return 0, errInvalidResumeToken
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil || !hmac.Equal(signature, s.sign(payload)) {
+	if err != nil || base64.RawURLEncoding.EncodeToString(signature) != parts[1] || !hmac.Equal(signature, s.sign(payload)) {
 		return 0, errInvalidResumeToken
 	}
 	var claims resumeClaims

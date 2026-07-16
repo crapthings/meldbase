@@ -1,0 +1,93 @@
+name: Observability performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      gate_runs:
+        description: Independent relative p99 gate runs
+        required: true
+        type: choice
+        default: "10"
+        options:
+          - "5"
+          - "10"
+          - "20"
+      benchmark_count:
+        description: Repetitions for allocation/throughput benchmarks
+        required: true
+        type: choice
+        default: "10"
+        options:
+          - "5"
+          - "10"
+          - "20"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observability-performance
+  cancel-in-progress: false
+
+jobs:
+  dedicated-linux:
+    name: Dedicated Linux observability budget
+    runs-on: [self-hosted, linux, x64, meldbase-performance]
+    timeout-minutes: 90
+    env:
+      GOMAXPROCS: "1"
+      MELDBASE_PERF_GATE: "1"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          clean: true
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Record immutable run context
+        run: |
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD > "$RUNNER_TEMP/meldbase-performance-revision.txt"
+          go env -json GOOS GOARCH GOVERSION GOAMD64 > "$RUNNER_TEMP/meldbase-performance-environment.json"
+      - name: Enforce diagnostics p99 and Stats sampling budgets
+        run: >-
+          go test .
+          -run '^(TestDiagnosticsPerformanceBudget|TestStatsSamplingPerformanceBudget)$'
+          -count=${{ inputs.gate_runs }} -v
+          | tee "$RUNNER_TEMP/meldbase-observability-p99.log"
+      - name: Measure database observability paths
+        run: >-
+          go test . -run '^$' -cpu=1 -benchmem -benchtime=2s
+          -count=${{ inputs.benchmark_count }}
+          -bench '^(BenchmarkStatsSnapshot|BenchmarkStatsSnapshotCollectionCardinality|BenchmarkStatsSnapshotDiagnosticsEnabled|BenchmarkV2StatsSnapshot|BenchmarkV2StatsSnapshotWithPersistentIndexBuilds|BenchmarkPointQueryDiagnosticsModes|BenchmarkDiagnosticHookModes)$'
+          | tee "$RUNNER_TEMP/meldbase-observability-core-benchmarks.log"
+      - name: Measure sampler, exporter, transport, and OTel snapshots
+        run: >-
+          go test ./admin ./internal/server ./integrations/otel
+          -run '^$' -cpu=1 -benchmem -benchtime=2s
+          -count=${{ inputs.benchmark_count }}
+          -bench '^(BenchmarkAssessHealth|BenchmarkSamplerCapture|BenchmarkMarshalPrometheus|BenchmarkServerStatsSnapshot|BenchmarkRPCMetricSpan|BenchmarkAdapterObserve)$'
+          | tee "$RUNNER_TEMP/meldbase-observability-adapter-benchmarks.log"
+      - name: Publish evidence summary
+        run: |
+          {
+            echo "### Meldbase observability performance"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- runner class: dedicated self-hosted Linux x64"
+            echo "- GOMAXPROCS: 1"
+            echo "- relative p99 gate runs: ${{ inputs.gate_runs }}"
+            echo "- benchmark repetitions: ${{ inputs.benchmark_count }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive performance evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: observability-performance-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/meldbase-performance-revision.txt
+            ${{ runner.temp }}/meldbase-performance-environment.json
+            ${{ runner.temp }}/meldbase-observability-p99.log
+            ${{ runner.temp }}/meldbase-observability-core-benchmarks.log
+            ${{ runner.temp }}/meldbase-observability-adapter-benchmarks.log
+          if-no-files-found: error
+          retention-days: 90

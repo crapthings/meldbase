@@ -18,11 +18,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify immutable workflow action references
+        run: |
+          unpinned="$(grep -REn 'uses:[[:space:]]+[^[:space:]#]+@' .github/workflows \
+            | grep -Ev '@[0-9a-f]{40}([[:space:]]|$)' || true)"
+          if [ -n "$unpinned" ]; then
+            printf '%s\n' "$unpinned"
+            exit 1
+          fi
       - name: Unit and integration tests
         run: go test ./...
       - name: Race detector
@@ -32,16 +40,65 @@ jobs:
       - name: End-to-end demo
         run: go run ./cmd/meld demo
 
+  storage-platform:
+    name: Storage contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Format, locking, recovery, and disk-full contracts
+        run: >-
+          go test -count=1 ./...
+          -run 'Test(OpenDispatcherPreservesExclusiveWriterLocks|OpenRejectsLockAndRecoversTrailingPartialPage|CheckpointPhysicalCrashPointMatrixPublishesOnlyWholeSnapshots|CommitFaultsReopenAtExactlyOldOrNewGeneration|V2AbruptProcessExitPublicationMatrix|ENOSPC.*|MetaRevision3GoldenFixture|OpenAndAdvanceRevision3GoldenFixture|BusinessRevision3.*|OpenNeverDowngradesAcrossValidUnsupportedMeta|OptimisticReclamation.*|V2Maintenance.*|V1AutomaticCheckpointCrashBoundaryMatrix|WALCrashBoundaryMatrixRecoversOnlyCompleteCommitPrefixes)$'
+      - name: Target-volume capability probe
+        run: |
+          go build -o "$RUNNER_TEMP/meld" ./cmd/meld
+          "$RUNNER_TEMP/meld" durability-check --dir "$RUNNER_TEMP" \
+            --source-revision "$GITHUB_SHA" --require-clean-source \
+            | tee "$RUNNER_TEMP/meldbase-durability-check.json"
+      - name: Validate target-volume capability receipt
+        run: >-
+          jq -e '
+            .schemaVersion == 2 and .sourceRevision == env.GITHUB_SHA and
+            .buildRevision == env.GITHUB_SHA and .buildModified == false and
+            .passed == true and (.goos == "linux" or .goos == "darwin") and
+            (.goVersion | length) > 0 and (.filesystemType | length) > 0 and
+            (.filesystemName | length) > 0 and .blockSize > 0 and
+            .totalBytes > 0 and .availableBytes <= .totalBytes and
+            (.checks | length) == 10 and
+            all(.checks[]; .passed == true and .durationNanos > 0) and
+            .database.verificationSchemaVersion == 3 and
+            .database.formatRevision == 3 and .database.commitSequence == 3 and
+            .database.fileBytes > 0 and .database.physicalPages > 0 and
+            .database.reachablePages > 0 and
+            .database.indexContentsVerified == true and
+            .database.freeSpaceValid == true and (.database.sha256 | length) == 64
+          ' "$RUNNER_TEMP/meldbase-durability-check.json"
+      - name: Archive target-volume capability result
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: durability-check-${{ matrix.os }}
+          path: ${{ runner.temp }}/meldbase-durability-check.json
+          if-no-files-found: error
+
   typescript:
     name: TypeScript and React
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           run_install: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -51,5 +108,7 @@ jobs:
         run: pnpm check
       - name: SDK tests
         run: pnpm test
+      - name: Published package contract
+        run: pnpm pack:check
       - name: Browser example production build
         run: pnpm build:example

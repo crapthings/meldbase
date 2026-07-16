@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
+	mathrand "math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,7 +20,7 @@ import (
 func TestWALCrashBoundaryMatrixRecoversOnlyCompleteCommitPrefixes(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "source.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func TestWALCrashBoundaryMatrixRecoversOnlyCompleteCommitPrefixes(t *testing.T) 
 			if err := os.WriteFile(candidate+".wal", walBytes[:point.cut], 0o600); err != nil {
 				t.Fatal(err)
 			}
-			recovered, err := Open(candidate)
+			recovered, err := OpenV1(candidate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +97,7 @@ func TestWALCrashBoundaryMatrixRecoversOnlyCompleteCommitPrefixes(t *testing.T) 
 
 func TestOpenCloseCheckpointAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +118,7 @@ func TestOpenCloseCheckpointAndReopen(t *testing.T) {
 	if info, err := os.Stat(path + ".wal"); err != nil || info.Size() != 0 {
 		t.Fatalf("WAL was not checkpointed: info=%v err=%v", info, err)
 	}
-	reopened, err := Open(path)
+	reopened, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,9 +140,241 @@ func TestOpenCloseCheckpointAndReopen(t *testing.T) {
 	}
 }
 
+func TestV1AutomaticCheckpointBoundsWALWithoutLogicalCommit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "automatic-checkpoint.meld")
+	db, err := OpenV1WithOptions(path, V1Options{Checkpoint: V1CheckpointPolicy{
+		MaxWALBytes:   math.MaxInt64,
+		MaxWALCommits: 2,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collection := db.Collection("items")
+	first, err := collection.InsertOne(context.Background(), Document{"rank": Int(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := db.Stats()
+	if before.CommitSequence != 1 || before.Durability.WALCurrentCommits != 1 || before.Durability.CheckpointAttempts != 0 {
+		t.Fatalf("before threshold stats=%+v", before)
+	}
+	second, err := collection.InsertOne(context.Background(), Document{"rank": Int(2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := db.Stats()
+	if after.CommitSequence != 2 || after.Commits.Total != 2 || after.Durability.WALCurrentBytes != 0 ||
+		after.Durability.WALCurrentCommits != 0 || after.Durability.CheckpointAttempts != 1 ||
+		after.Durability.CheckpointsCompleted != 1 || after.Durability.CheckpointFailures != 0 ||
+		after.Durability.AutomaticCheckpoints != 1 {
+		t.Fatalf("after threshold stats=%+v", after)
+	}
+	if info, err := os.Stat(path + ".wal"); err != nil || info.Size() != 0 {
+		t.Fatalf("automatic checkpoint WAL=%v err=%v", info, err)
+	}
+	crashClose(t, db)
+
+	reopened, err := OpenV1(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if reopened.Stats().CommitSequence != 2 {
+		t.Fatalf("reopened sequence=%d", reopened.Stats().CommitSequence)
+	}
+	for _, id := range []DocumentID{first, second} {
+		if _, err := reopened.Collection("items").FindOne(context.Background(), Filter{"_id": id}); err != nil {
+			t.Fatalf("reopened document %s: %v", id, err)
+		}
+	}
+}
+
+func TestV1AutomaticCheckpointCrashBoundaryMatrix(t *testing.T) {
+	points := []v1CheckpointFaultPoint{
+		v1CheckpointBeforePages,
+		v1CheckpointAfterPages,
+		v1CheckpointBeforeWALReset,
+		v1CheckpointAfterWALReset,
+	}
+	for _, point := range points {
+		point := point
+		t.Run(fmt.Sprintf("point-%d", point), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "checkpoint-fault.meld")
+			db, err := OpenV1WithOptions(path, V1Options{Checkpoint: V1CheckpointPolicy{
+				MaxWALBytes:   math.MaxInt64,
+				MaxWALCommits: 1,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			injected := errors.New("injected checkpoint crash boundary")
+			db.store.checkpointFault = func(actual v1CheckpointFaultPoint) error {
+				if actual == point {
+					return injected
+				}
+				return nil
+			}
+			id, err := db.Collection("items").InsertOne(context.Background(), Document{"safe": Bool(true)})
+			if err != nil {
+				t.Fatalf("durable logical commit became ambiguous: %v", err)
+			}
+			if !errors.Is(db.fatalErr, ErrDurability) || db.token != 1 {
+				t.Fatalf("fail-stop state token=%d error=%v", db.token, db.fatalErr)
+			}
+			stats := db.Stats()
+			if stats.Durability.CheckpointAttempts != 1 || stats.Durability.CheckpointFailures != 1 ||
+				stats.Durability.CheckpointsCompleted != 0 || stats.Durability.AutomaticCheckpoints != 1 {
+				t.Fatalf("failure stats=%+v", stats.Durability)
+			}
+			if _, err := db.Collection("items").FindOne(context.Background(), Filter{"_id": id}); err != nil {
+				t.Fatalf("committed read after maintenance failure: %v", err)
+			}
+			if _, err := db.Collection("items").InsertOne(context.Background(), Document{"unsafe": Bool(true)}); !errors.Is(err, ErrDurability) {
+				t.Fatalf("later write did not fail stop: %v", err)
+			}
+			crashClose(t, db)
+
+			recovered, err := OpenV1WithOptions(path, V1Options{Checkpoint: V1CheckpointPolicy{Disabled: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer recovered.Close()
+			if recovered.token != 1 {
+				t.Fatalf("recovered token=%d", recovered.token)
+			}
+			if _, err := recovered.Collection("items").FindOne(context.Background(), Filter{"_id": id}); err != nil {
+				t.Fatalf("recovered committed document: %v", err)
+			}
+		})
+	}
+}
+
+func TestV1CheckpointPolicyValidationAndDisable(t *testing.T) {
+	if _, err := OpenV1WithOptions(filepath.Join(t.TempDir(), "invalid.meld"), V1Options{Checkpoint: V1CheckpointPolicy{MaxWALBytes: -1}}); err == nil {
+		t.Fatal("negative WAL threshold accepted")
+	}
+	path := filepath.Join(t.TempDir(), "disabled.meld")
+	db, err := OpenV1WithOptions(path, V1Options{Checkpoint: V1CheckpointPolicy{Disabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"payload": Binary(bytes.Repeat([]byte{1}, 1024))}); err != nil {
+		t.Fatal(err)
+	}
+	stats := db.Stats().Durability
+	if stats.CheckpointAttempts != 0 || stats.WALCurrentBytes == 0 || stats.WALCurrentCommits != 1 {
+		t.Fatalf("disabled policy stats=%+v", stats)
+	}
+}
+
+func TestV1AutomaticCheckpointCanTriggerByWALBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "byte-threshold.meld")
+	db, err := OpenV1WithOptions(path, V1Options{Checkpoint: V1CheckpointPolicy{
+		MaxWALBytes:   1,
+		MaxWALCommits: math.MaxUint64,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"payload": Binary(bytes.Repeat([]byte{1}, 1024))}); err != nil {
+		t.Fatal(err)
+	}
+	stats := db.Stats().Durability
+	if stats.AutomaticCheckpoints != 1 || stats.CheckpointsCompleted != 1 || stats.WALCurrentBytes != 0 || stats.WALCurrentCommits != 0 {
+		t.Fatalf("byte-triggered checkpoint stats=%+v", stats)
+	}
+}
+
+func TestV1AutomaticCheckpointReopenMatchesMutationModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "checkpoint-model.meld")
+	options := V1Options{Checkpoint: V1CheckpointPolicy{MaxWALBytes: math.MaxInt64, MaxWALCommits: 3}}
+	db, err := OpenV1WithOptions(path, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	random := mathrand.New(mathrand.NewSource(0x4d454c44))
+	live := make([]DocumentID, 0)
+	model := make(map[DocumentID]int64)
+	var automatic uint64
+	for step := 1; step <= 100; step++ {
+		choice := random.Intn(100)
+		switch {
+		case len(live) == 0 || choice < 40:
+			value := int64(random.Intn(10_000))
+			id, err := db.Collection("items").InsertOne(context.Background(), Document{"value": Int(value)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			live = append(live, id)
+			model[id] = value
+		case choice < 75:
+			id := live[random.Intn(len(live))]
+			value := int64(random.Intn(10_000))
+			if value == model[id] {
+				value = (value + 1) % 10_000
+			}
+			result, err := db.Collection("items").UpdateOne(context.Background(), Filter{"_id": id}, Update{"$set": map[string]any{"value": value}})
+			if err != nil || result.ModifiedCount != 1 {
+				t.Fatalf("step %d update=%+v err=%v", step, result, err)
+			}
+			model[id] = value
+		default:
+			position := random.Intn(len(live))
+			id := live[position]
+			result, err := db.Collection("items").DeleteOne(context.Background(), Filter{"_id": id})
+			if err != nil || result.DeletedCount != 1 {
+				t.Fatalf("step %d delete=%+v err=%v", step, result, err)
+			}
+			delete(model, id)
+			live[position] = live[len(live)-1]
+			live = live[:len(live)-1]
+		}
+		if step%11 == 0 {
+			automatic += db.Stats().Durability.AutomaticCheckpoints
+			crashClose(t, db)
+			db, err = OpenV1WithOptions(path, options)
+			if err != nil {
+				t.Fatalf("step %d reopen: %v", step, err)
+			}
+			assertV1MutationModel(t, db, model, uint64(step))
+		}
+	}
+	automatic += db.Stats().Durability.AutomaticCheckpoints
+	defer db.Close()
+	assertV1MutationModel(t, db, model, 100)
+	if automatic == 0 {
+		t.Fatal("model run never triggered an automatic checkpoint")
+	}
+}
+
+func assertV1MutationModel(t *testing.T, db *DB, model map[DocumentID]int64, token uint64) {
+	t.Helper()
+	if db.Stats().CommitSequence != token {
+		t.Fatalf("sequence=%d want=%d", db.Stats().CommitSequence, token)
+	}
+	cursor, err := db.Collection("items").Find(context.Background(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	documents, err := cursor.All(context.Background())
+	if err != nil || len(documents) != len(model) {
+		t.Fatalf("documents=%d model=%d err=%v", len(documents), len(model), err)
+	}
+	for _, document := range documents {
+		id, exists := document.ID()
+		value, valueOK := document["value"].Int64()
+		want, found := model[id]
+		if !exists || !valueOK || !found || value != want {
+			t.Fatalf("document id=%s value=%d/%t model=%d/%t", id, value, valueOK, want, found)
+		}
+	}
+}
+
 func TestCheckpointRoundTripsEmptyAndMultiPageDocuments(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "document-sizes.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +390,7 @@ func TestCheckpointRoundTripsEmptyAndMultiPageDocuments(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path)
+	reopened, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +411,7 @@ func TestCheckpointRoundTripsEmptyAndMultiPageDocuments(t *testing.T) {
 
 func TestCheckpointSeparatesCatalogDocumentsAndIndexBlobs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "structured.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +457,7 @@ func TestCheckpointSeparatesCatalogDocumentsAndIndexBlobs(t *testing.T) {
 	if err := pages.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path)
+	reopened, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +491,7 @@ func TestOpenMigratesLegacyMonolithicSnapshot(t *testing.T) {
 	if err := pages.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +507,7 @@ func TestOpenMigratesLegacyMonolithicSnapshot(t *testing.T) {
 
 func TestWALRecoversCommittedInsertUpdateDeleteWithoutCheckpoint(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +527,7 @@ func TestWALRecoversCommittedInsertUpdateDeleteWithoutCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	crashClose(t, db)
-	recovered, err := Open(path)
+	recovered, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +550,7 @@ func TestWALRecoversCommittedInsertUpdateDeleteWithoutCheckpoint(t *testing.T) {
 
 func TestRecoveryDiscardsPartialWALTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +567,7 @@ func TestRecoveryDiscardsPartialWALTail(t *testing.T) {
 		t.Fatal(err)
 	}
 	file.Close()
-	recovered, err := Open(path)
+	recovered, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,12 +579,12 @@ func TestRecoveryDiscardsPartialWALTail(t *testing.T) {
 
 func TestOpenRejectsConcurrentWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.meld")
-	first, err := Open(path)
+	first, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	if second, err := Open(path); err == nil {
+	if second, err := OpenV1(path); err == nil {
 		second.Close()
 		t.Fatal("second writer opened locked database")
 	}
@@ -376,7 +610,7 @@ func TestBinaryCodecRejectsTrailingAndUnsafeData(t *testing.T) {
 
 func TestDurabilityFailurePoisonsFurtherWritesButPreservesReadsAndRecovery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "failure.meld")
-	db, err := Open(path)
+	db, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +636,7 @@ func TestDurabilityFailurePoisonsFurtherWritesButPreservesReadsAndRecovery(t *te
 	if err := db.Close(); !errors.Is(err, ErrDurability) {
 		t.Fatalf("close error = %v", err)
 	}
-	recovered, err := Open(path)
+	recovered, err := OpenV1(path)
 	if err != nil {
 		t.Fatal(err)
 	}

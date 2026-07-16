@@ -29,6 +29,10 @@ type IndexDefinition struct {
 	Name, Field string
 	Order       int
 	Unique      bool
+	// Fields is the ordered definition for compound/descending indexes. Field
+	// and Order remain the compatibility mirror of Fields[0] for V1 records and
+	// existing callers; new code must use indexDefinitionFields.
+	Fields []IndexField
 }
 
 type Change struct {
@@ -46,28 +50,55 @@ type ChangeBatch struct {
 }
 
 type DB struct {
-	mu           sync.RWMutex
-	closed       bool
-	collections  map[string]*collectionData
-	token        uint64
-	feedMu       sync.Mutex
-	nextWatcher  uint64
-	watchers     map[uint64]*changeWatcher
-	store        *durableStore
-	fatalErr     error
-	databaseID   [16]byte
-	history      []ChangeBatch
-	historyLimit int
+	mu                        sync.RWMutex
+	startedAt                 time.Time
+	closed                    bool
+	closedCh                  chan struct{}
+	collections               map[string]*collectionData
+	token                     uint64
+	feedMu                    sync.Mutex
+	nextWatcher               uint64
+	watchers                  map[uint64]*changeWatcher
+	store                     *durableStore
+	durability                durabilityBackend
+	replaySource              QueryReplaySource
+	querySource               querySnapshotSource
+	fatalErr                  error
+	databaseID                [16]byte
+	history                   []ChangeBatch
+	historyLimit              int
+	metrics                   dbMetrics
+	diagnostics               atomic.Pointer[Diagnostics]
+	diagnosticSession         atomic.Uint64
+	reactive                  *reactiveHub
+	recovery                  RecoveryReport
+	resourceLimits            ResourceLimits
+	activeIndexBuild          *indexBuildBudget
+	indexBuildReservations    map[string]struct{}
+	indexBuildSchedulerActive bool
+	v2StorageLimits           V2StorageLimits
 }
 
 type collectionData struct {
 	documents map[DocumentID]Document
 	order     []DocumentID
+	positions map[DocumentID]uint64
 	indexes   map[string]*indexState
 }
 
 func newCollectionData() *collectionData {
-	return &collectionData{documents: make(map[DocumentID]Document), indexes: make(map[string]*indexState)}
+	return &collectionData{
+		documents: make(map[DocumentID]Document),
+		positions: make(map[DocumentID]uint64),
+		indexes:   make(map[string]*indexState),
+	}
+}
+
+func (d *collectionData) rebuildPositions() {
+	d.positions = make(map[DocumentID]uint64, len(d.order))
+	for position, id := range d.order {
+		d.positions[id] = uint64(position)
+	}
 }
 
 type changeWatcher struct {
@@ -77,7 +108,24 @@ type changeWatcher struct {
 }
 
 func New() *DB {
-	db := &DB{collections: make(map[string]*collectionData), watchers: make(map[uint64]*changeWatcher), historyLimit: 1024}
+	db, _ := NewWithOptions(DatabaseOptions{})
+	return db
+}
+
+// NewWithOptions creates an in-memory database with explicit resource limits.
+func NewWithOptions(options DatabaseOptions) (*DB, error) {
+	resourceLimits, err := normalizeResourceLimits(options.ResourceLimits)
+	if err != nil {
+		return nil, err
+	}
+	db := &DB{
+		startedAt: time.Now(), closedCh: make(chan struct{}), collections: make(map[string]*collectionData),
+		watchers: make(map[uint64]*changeWatcher), historyLimit: 1024,
+		recovery:       finalizeRecoveryReport(RecoveryReport{Engine: "memory", Created: true}),
+		resourceLimits: resourceLimits,
+	}
+	db.reactive = newReactiveHub(db)
+	db.initializeLogicalStats(nil)
 	if _, err := rand.Read(db.databaseID[:]); err != nil {
 		// The identity is a namespace binding, not a secret. Keep the infallible
 		// in-memory constructor usable if the OS entropy source is unavailable,
@@ -88,7 +136,7 @@ func New() *DB {
 		digest := sha256.Sum256(seed[:])
 		copy(db.databaseID[:], digest[:16])
 	}
-	return db
+	return db, nil
 }
 func (db *DB) Close() error {
 	db.mu.Lock()
@@ -97,22 +145,18 @@ func (db *DB) Close() error {
 		return nil
 	}
 	var closeErr error
-	if db.store != nil {
-		err := db.fatalErr
-		if err == nil {
-			blobs, snapshotErr := encodeCheckpointBlobs(db.collections, db.history)
-			err = snapshotErr
-			if err == nil {
-				err = db.store.pages.CheckpointBlobs(db.token, blobs)
-			}
-			if err == nil {
-				err = db.store.log.Reset(db.token)
-			}
-		}
-		closeErr = errors.Join(err, db.store.close())
+	if db.durability != nil {
+		closeErr = db.durability.closeDB(db)
 	}
 	db.closed = true
+	close(db.closedCh)
+	if diagnostics := db.diagnostics.Swap(nil); diagnostics != nil {
+		diagnostics.closed.Store(true)
+	}
 	db.mu.Unlock()
+	if db.reactive != nil {
+		db.reactive.close()
+	}
 	db.feedMu.Lock()
 	for id, watcher := range db.watchers {
 		delete(db.watchers, id)
@@ -148,6 +192,10 @@ func (c *Collection) InsertMany(ctx context.Context, documents []Document) ([]Do
 	}
 	if len(documents) == 0 {
 		return nil, fmt.Errorf("%w: empty insert batch", ErrInvalidDocument)
+	}
+	if uint64(len(documents)) > c.db.resourceLimits.MaxTransactionChanges {
+		c.db.metrics.resourceLimitRejections.Add(1)
+		return nil, fmt.Errorf("%w: transaction changes %d exceed limit %d", ErrResourceLimit, len(documents), c.db.resourceLimits.MaxTransactionChanges)
 	}
 	copies := make([]Document, len(documents))
 	ids := make([]DocumentID, len(documents))
@@ -191,7 +239,7 @@ func (c *Collection) InsertMany(ctx context.Context, documents []Document) ([]Do
 		return nil, c.db.fatalErr
 	}
 	data := c.db.collections[c.name]
-	if data != nil {
+	if data != nil && c.db.querySource == nil {
 		for _, id := range ids {
 			if _, exists := data.documents[id]; exists {
 				c.db.mu.Unlock()
@@ -208,8 +256,12 @@ func (c *Collection) InsertMany(ctx context.Context, documents []Document) ([]Do
 		after := copy.Clone()
 		changes[index] = Change{Collection: c.name, Operation: InsertOperation, DocumentID: ids[index], After: &after}
 	}
+	if err := c.db.validateTransactionResource(changes); err != nil {
+		c.db.mu.Unlock()
+		return nil, err
+	}
 	token := c.db.token + 1
-	if err := c.db.appendCommit(token, changes); err != nil {
+	if err := c.db.appendCommit(ctx, token, changes); err != nil {
 		c.db.mu.Unlock()
 		return nil, err
 	}
@@ -217,15 +269,18 @@ func (c *Collection) InsertMany(ctx context.Context, documents []Document) ([]Do
 		data = newCollectionData()
 		c.db.collections[c.name] = data
 	}
-	for index, copy := range copies {
-		id := ids[index]
-		data.documents[id] = copy
-		data.order = append(data.order, id)
-		data.insertIndexes(id, copy)
+	if c.db.querySource == nil {
+		for index, copy := range copies {
+			id := ids[index]
+			data.documents[id] = copy
+			data.positions[id] = uint64(len(data.order))
+			data.order = append(data.order, id)
+			data.insertIndexes(id, copy)
+		}
 	}
 	c.db.token = token
 	batch := ChangeBatch{Token: token, Changes: changes}
-	c.db.recordCommittedBatch(batch)
+	c.db.recordLiveCommit(batch)
 	c.db.publish(batch)
 	c.db.mu.Unlock()
 	return append([]DocumentID(nil), ids...), nil
@@ -247,7 +302,55 @@ func (c *Collection) Find(ctx context.Context, filter Filter, options ...QueryOp
 }
 
 func (c *Collection) FindQuery(ctx context.Context, query QuerySpec) (*Cursor, error) {
-	documents, _, err := c.plan(ctx, query)
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	diagnostic := c.db.beginDiagnostic(DiagnosticQuery)
+	if c.db.querySource != nil {
+		c.db.mu.RLock()
+		if c.db.closed {
+			c.db.mu.RUnlock()
+			c.db.recordQuery(ExplainResult{Stage: "COLLSCAN"}, 0, ErrClosed, diagnostic)
+			return nil, ErrClosed
+		}
+		stream, streamed, err := c.openStorageCollectionStreamLocked(ctx, query)
+		c.db.mu.RUnlock()
+		if err != nil {
+			c.db.recordQuery(ExplainResult{Stage: "COLLSCAN"}, 0, err, diagnostic)
+			return nil, err
+		}
+		if streamed {
+			limit := -1
+			if value, exists := query.Limit(); exists {
+				limit = value
+			}
+			cursor := &Cursor{
+				stream: stream, query: query, skip: query.Skip(), remaining: limit,
+				db: c.db, explain: ExplainResult{Stage: "COLLSCAN"}, active: true, diagnostic: diagnostic,
+			}
+			c.db.metrics.activeCursors.Add(1)
+			stop := context.AfterFunc(ctx, func() { _ = cursor.closeWithError(ctx.Err()) })
+			cursor.mu.Lock()
+			if cursor.closed {
+				cursor.mu.Unlock()
+				stop()
+			} else {
+				cursor.stop = stop
+				cursor.mu.Unlock()
+			}
+			if limit == 0 {
+				_ = cursor.Close()
+			}
+			return cursor, nil
+		}
+	}
+	documents, explain, err := c.plan(ctx, query)
+	if c != nil && c.db != nil {
+		c.db.recordQuery(explain, len(documents), err, diagnostic)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -319,42 +422,59 @@ func (c *Collection) deleteQuery(ctx context.Context, query QuerySpec, one bool,
 		return DeleteResult{}, c.db.fatalErr
 	}
 	data := c.db.collections[c.name]
-	if data == nil {
+	selectionLimit, resourceBounded := c.db.boundedMutationSelection(maxAffected, one)
+	selected, err := c.selectMutationDocumentsLocked(ctx, query, one, selectionLimit)
+	if err != nil {
 		c.db.mu.Unlock()
-		return DeleteResult{}, nil
+		if resourceBounded && errors.Is(err, ErrMutationLimit) {
+			c.db.metrics.resourceLimitRejections.Add(1)
+			return DeleteResult{}, fmt.Errorf("%w: transaction changes exceed limit %d", ErrResourceLimit, c.db.resourceLimits.MaxTransactionChanges)
+		}
+		return DeleteResult{}, err
 	}
-	changes := []Change{}
-	kept := make([]DocumentID, 0, len(data.order))
-	for _, id := range data.order {
-		document, exists := data.documents[id]
-		if !exists {
-			continue
+	if len(selected) > 0 && data == nil {
+		c.db.mu.Unlock()
+		return DeleteResult{}, ErrCorrupt
+	}
+	changes := make([]Change, len(selected))
+	deleted := make(map[DocumentID]struct{}, len(selected))
+	for index, document := range selected {
+		id, exists := document.ID()
+		if !exists || id.IsZero() {
+			c.db.mu.Unlock()
+			return DeleteResult{}, ErrCorrupt
 		}
-		if query.Match(document) && (!one || len(changes) == 0) {
-			before := document.Clone()
-			changes = append(changes, Change{Collection: c.name, Operation: DeleteOperation, DocumentID: id, Before: &before})
-			if maxAffected > 0 && len(changes) > maxAffected {
-				c.db.mu.Unlock()
-				return DeleteResult{}, ErrMutationLimit
-			}
-			continue
-		}
-		kept = append(kept, id)
+		before := document.Clone()
+		changes[index] = Change{Collection: c.name, Operation: DeleteOperation, DocumentID: id, Before: &before}
+		deleted[id] = struct{}{}
+	}
+	if err := c.db.validateTransactionResource(changes); err != nil {
+		c.db.mu.Unlock()
+		return DeleteResult{}, err
 	}
 	var token uint64
 	if len(changes) > 0 {
 		token = c.db.token + 1
-		if err := c.db.appendCommit(token, changes); err != nil {
+		if err := c.db.appendCommit(ctx, token, changes); err != nil {
 			c.db.mu.Unlock()
 			return DeleteResult{}, err
 		}
-		for _, change := range changes {
-			data.deleteIndexes(change.DocumentID, *change.Before)
-			delete(data.documents, change.DocumentID)
+		if c.db.querySource == nil {
+			for _, change := range changes {
+				data.deleteIndexes(change.DocumentID, *change.Before)
+				delete(data.documents, change.DocumentID)
+			}
+			kept := data.order[:0]
+			for _, id := range data.order {
+				if _, remove := deleted[id]; !remove {
+					kept = append(kept, id)
+				}
+			}
+			data.order = kept
+			data.rebuildPositions()
 		}
-		data.order = kept
 		c.db.token = token
-		c.db.recordCommittedBatch(ChangeBatch{Token: token, Changes: changes})
+		c.db.recordLiveCommit(ChangeBatch{Token: token, Changes: changes})
 	}
 	if len(changes) > 0 {
 		c.db.publish(ChangeBatch{Token: token, Changes: changes})
@@ -407,31 +527,170 @@ func (c *Collection) validate() error {
 type DeleteResult struct{ DeletedCount int64 }
 
 type Cursor struct {
-	documents []Document
-	position  int
+	mu         sync.Mutex
+	documents  []Document
+	position   int
+	stream     queryStorageDocumentIterator
+	query      QuerySpec
+	skip       int
+	remaining  int
+	db         *DB
+	explain    ExplainResult
+	recorded   bool
+	returned   int
+	closed     bool
+	active     bool
+	diagnostic diagnosticSpan
+	stop       func() bool
 }
 
 func (c *Cursor) Next(ctx context.Context) (Document, bool, error) {
+	if c == nil {
+		return nil, false, ErrClosed
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if err := contextError(ctx); err != nil {
+		_ = c.finishLocked(err)
+		return nil, false, err
+	}
+	if c.closed {
+		return nil, false, nil
+	}
+	if c.stream != nil {
+		if c.remaining == 0 {
+			return nil, false, c.finishLocked(nil)
+		}
+		for c.stream.Next() {
+			record := c.stream.Record()
+			candidate, err := decodeQueryStorageCandidate(record)
+			if err != nil {
+				_ = c.finishLocked(err)
+				return nil, false, err
+			}
+			c.explain.DocumentsExamined++
+			if !c.query.Match(candidate.document) {
+				continue
+			}
+			if c.skip > 0 {
+				c.skip--
+				continue
+			}
+			document := candidate.document.Clone()
+			c.returned++
+			if c.remaining > 0 {
+				c.remaining--
+				if c.remaining == 0 {
+					if err := c.finishLocked(nil); err != nil {
+						return nil, false, err
+					}
+				}
+			}
+			return document, true, nil
+		}
+		err := c.stream.Err()
+		if finishErr := c.finishLocked(err); err == nil {
+			err = finishErr
+		}
 		return nil, false, err
 	}
 	if c.position >= len(c.documents) {
+		c.closed = true
 		return nil, false, nil
 	}
-	document := c.documents[c.position].Clone()
+	// Cursor owns already-detached query results. Transfer this document to the
+	// caller and clear our reference instead of cloning a second time.
+	document := c.documents[c.position]
+	c.documents[c.position] = nil
 	c.position++
 	return document, true, nil
 }
 func (c *Cursor) All(ctx context.Context) ([]Document, error) {
-	if err := contextError(ctx); err != nil {
-		return nil, err
+	if c == nil {
+		return nil, ErrClosed
 	}
-	result := make([]Document, len(c.documents)-c.position)
-	for i := range result {
-		result[i] = c.documents[c.position+i].Clone()
+	c.mu.Lock()
+	streamed := c.stream != nil
+	if !streamed {
+		defer c.mu.Unlock()
+		if err := contextError(ctx); err != nil {
+			return nil, err
+		}
+		result := append([]Document(nil), c.documents[c.position:]...)
+		for index := c.position; index < len(c.documents); index++ {
+			c.documents[index] = nil
+		}
+		c.position = len(c.documents)
+		c.closed = true
+		return result, nil
 	}
-	c.position = len(c.documents)
-	return result, nil
+	c.mu.Unlock()
+	result := make([]Document, 0)
+	for {
+		document, exists, err := c.Next(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return result, nil
+		}
+		result = append(result, document)
+	}
+}
+
+// Close releases a pinned storage snapshot held by a lazy cursor. It is safe to
+// call repeatedly. Exhaustion, limit completion, errors and context cancellation
+// close automatically; callers that stop early must close explicitly.
+func (c *Cursor) Close() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.finishLocked(nil)
+}
+
+func (c *Cursor) closeWithError(err error) error {
+	if c == nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.finishLocked(err)
+}
+
+func (c *Cursor) finishLocked(operationErr error) error {
+	if c.closed {
+		return operationErr
+	}
+	c.closed = true
+	closeErr := error(nil)
+	if c.stream != nil {
+		closeErr = c.stream.Close()
+		c.stream = nil
+	} else if c.position < len(c.documents) {
+		for index := c.position; index < len(c.documents); index++ {
+			c.documents[index] = nil
+		}
+		c.position = len(c.documents)
+	}
+	if c.stop != nil {
+		c.stop()
+		c.stop = nil
+	}
+	resultErr := operationErr
+	if resultErr == nil {
+		resultErr = closeErr
+	}
+	if c.db != nil && !c.recorded {
+		c.recorded = true
+		c.db.recordQuery(c.explain, c.returned, resultErr, c.diagnostic)
+	}
+	if c.db != nil && c.active {
+		c.active = false
+		c.db.metrics.activeCursors.Add(^uint64(0))
+	}
+	return resultErr
 }
 
 func (db *DB) WatchChanges(ctx context.Context, collection string, buffer int) (<-chan ChangeBatch, <-chan error, error) {
@@ -468,6 +727,11 @@ func (db *DB) WatchChanges(ctx context.Context, collection string, buffer int) (
 }
 
 func (db *DB) publish(batch ChangeBatch) {
+	db.metrics.publishedBatches.Add(1)
+	db.metrics.publishedChanges.Add(uint64(len(batch.Changes)))
+	if db.reactive != nil {
+		db.reactive.notify(batch)
+	}
 	db.feedMu.Lock()
 	defer db.feedMu.Unlock()
 	for id, watcher := range db.watchers {
@@ -482,7 +746,9 @@ func (db *DB) publish(batch ChangeBatch) {
 		}
 		select {
 		case watcher.events <- ChangeBatch{Token: batch.Token, Changes: filtered}:
+			db.metrics.watcherDeliveries.Add(1)
 		default:
+			db.metrics.slowConsumers.Add(1)
 			delete(db.watchers, id)
 			watcher.done <- ErrSlowConsumer
 			close(watcher.events)

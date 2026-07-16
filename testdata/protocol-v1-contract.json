@@ -1,0 +1,145 @@
+{
+  "formatVersion": 1,
+  "protocolVersion": 1,
+  "realtimeTicketAccept": "application/vnd.meldbase.realtime-ticket+json; capabilities=1",
+  "realtimeCapabilities": {
+    "base": [
+      "query.delta",
+      "query.resume",
+      "rpc",
+      "rpc.cancel"
+    ],
+    "conditional": [
+      "rpc.idempotency",
+      "rpc.transactional"
+    ]
+  },
+  "workerCapabilities": [
+    "cancel",
+    "publication.policy",
+    "rpc",
+    "rpc.transactional",
+    "transaction.compiled_update",
+    "transaction.invalidate_publication",
+    "transaction.point_operations"
+  ],
+  "fixedErrorCodes": [
+    "cancelled",
+    "database_unavailable",
+    "delta_failed",
+    "duplicate_key",
+    "forbidden",
+    "initial_snapshot_failed",
+    "internal",
+    "invalid_query",
+    "invalid_request",
+    "invalid_rpc_argument",
+    "invalid_update",
+    "mutation_limit_exceeded",
+    "resource_limit_exceeded",
+    "resume_failed",
+    "rpc_busy",
+    "rpc_canceled",
+    "rpc_duplicate_request",
+    "rpc_idempotency_conflict",
+    "rpc_idempotency_required",
+    "rpc_idempotency_unavailable",
+    "rpc_in_progress",
+    "rpc_not_found",
+    "rpc_outcome_unknown",
+    "rpc_result_invalid",
+    "rpc_transaction_conflict",
+    "rpc_transaction_requires_write",
+    "snapshot_failed",
+    "subscription_ended",
+    "subscription_failed",
+    "subscription_limit_or_duplicate",
+    "worker_busy"
+  ],
+  "clientFrames": [
+    {
+      "type": "authenticate",
+      "required": ["ticket", "type", "v"],
+      "optional": []
+    },
+    {
+      "type": "call",
+      "required": ["arguments", "method", "requestId", "type", "v"],
+      "optional": ["idempotencyKey"]
+    },
+    {
+      "type": "cancel",
+      "required": ["requestId", "type", "v"],
+      "optional": []
+    },
+    {
+      "type": "ping",
+      "required": ["type", "v"],
+      "optional": []
+    },
+    {
+      "type": "subscribe",
+      "required": ["collection", "query", "requestId", "type", "v"],
+      "optional": ["mode", "resumeToken"]
+    },
+    {
+      "type": "unsubscribe",
+      "required": ["subscriptionId", "type", "v"],
+      "optional": []
+    }
+  ],
+  "serverFrames": [
+    {
+      "type": "authenticated",
+      "required": ["type", "v"],
+      "optional": []
+    },
+    {
+      "type": "delta",
+      "required": ["fromToken", "operations", "requestId", "subscriptionId", "token", "type", "v"],
+      "optional": []
+    },
+    {
+      "type": "error",
+      "required": ["error", "requestId", "type", "v"],
+      "optional": []
+    },
+    {
+      "type": "pong",
+      "required": ["type", "v"],
+      "optional": []
+    },
+    {
+      "type": "result",
+      "required": ["requestId", "result", "type", "v"],
+      "optional": []
+    },
+    {
+      "type": "resumed",
+      "required": ["requestId", "subscriptionId", "token", "type", "v"],
+      "optional": []
+    },
+    {
+      "type": "resync_required",
+      "required": ["requestId", "type", "v"],
+      "optional": []
+    },
+    {
+      "type": "snapshot",
+      "required": ["documents", "requestId", "subscriptionId", "token", "type", "v"],
+      "optional": []
+    }
+  ],
+  "nestedShapes": [
+    {
+      "name": "delta.operation",
+      "required": ["id", "op"],
+      "optional": ["before", "document"]
+    },
+    {
+      "name": "error",
+      "required": ["code"],
+      "optional": []
+    }
+  ]
+}
