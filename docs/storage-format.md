@@ -509,7 +509,14 @@ Reopen, audit, final verification and cleanup time is tracked separately in the
 larger `actualDurationNanos`; it cannot be used to satisfy
 `concurrentDurationNanos`. The runner additionally requires nonzero work from
 every concurrent worker in every phase and at least one observed optimistic
-reclamation conflict. It also fails before setup unless the actual Meld binary
+reclamation conflict. The writer starts unthrottled only until a release run
+observes that real conflict, then uses a fixed ten-writes-per-second cadence;
+non-release profiles use the same cadence from their first write. This makes the
+duration qualification reproducible across hardware and prevents a faster host
+from exhausting the normal V2 physical safety quota before a phase-boundary
+reclamation. It is deliberately not a throughput benchmark. The reader,
+shadow-index catch-up and optimistic auditor remain concurrent. The runner also
+fails before setup unless the actual Meld binary
 was built with `-race`, carries clean Go VCS build metadata and exactly matches
 the claimed 40- or 64-hex source revision. A `go test` binary carries no VCS
 identity and is deliberately unable to produce this receipt. Every
@@ -525,6 +532,13 @@ of following one complete reachability scan immediately with another. It then
 reopens and compares the stored values to its workload model. These
 qualification-only arrays are bounded by the explicit `--documents` value and
 are not allocated by normal database traffic.
+
+The underlying reachability collection audit likewise scans Primary once into
+an ID-to-position table, then validates Order and every Secondary against that
+table. It retains the same bidirectional/count/uniqueness proof while avoiding
+one B+Tree point lookup per cross-reference. The table replaces the previous
+Order de-duplication map, so explicit audit memory remains O(document count);
+normal open, query and commit paths never allocate it.
 
 The optional receipt path is created with no-overwrite semantics and emits
 schema 4 JSON containing claimed and actual binary revisions, dirty status,

@@ -532,6 +532,11 @@ func (walker *reachabilityWalker) auditCollection(meta CollectionMeta) error {
 	if walker == nil || walker.file == nil {
 		return ErrCorrupt
 	}
+	type primaryAuditRecord struct {
+		position uint64
+		ordered  bool
+	}
+	primaryRecords := make(map[[16]byte]primaryAuditRecord, meta.DocumentCount)
 	primary, err := newTreeIterator(walker.file, meta.PrimaryRoot, TreePrimary, nil, nil, 0)
 	if err != nil {
 		return fmt.Errorf("Primary iterator: %w", err)
@@ -541,18 +546,20 @@ func (walker *reachabilityWalker) auditCollection(meta CollectionMeta) error {
 		if err := walker.checkContext(); err != nil {
 			return err
 		}
-		id, stored := primary.Key(), primary.Value()
-		if len(id) != 16 || allZero(id) {
+		key, stored := primary.Key(), primary.Value()
+		if len(key) != 16 || allZero(key) {
 			return fmt.Errorf("%w: Primary ID", ErrCorrupt)
+		}
+		var id [16]byte
+		copy(id[:], key)
+		if _, duplicate := primaryRecords[id]; duplicate {
+			return fmt.Errorf("%w: duplicate Primary ID", ErrCorrupt)
 		}
 		position, _, err := decodeDocumentRecordDescriptor(stored)
 		if err != nil {
 			return fmt.Errorf("Primary descriptor: %w", err)
 		}
-		owner, exists, err := walker.treeGetUnlocked(meta.OrderRoot, TreeOrder, insertionPositionKey(position))
-		if err != nil || !exists || !bytes.Equal(owner, id) {
-			return fmt.Errorf("%w: Primary to Order", ErrCorrupt)
-		}
+		primaryRecords[id] = primaryAuditRecord{position: position}
 		primaryCount++
 	}
 	if primary.Err() != nil || primaryCount != meta.DocumentCount {
@@ -563,7 +570,6 @@ func (walker *reachabilityWalker) auditCollection(meta CollectionMeta) error {
 		return fmt.Errorf("Order iterator: %w", err)
 	}
 	var orderCount uint64
-	seenIDs := make(map[[16]byte]struct{}, meta.DocumentCount)
 	for order.nextUnlocked() {
 		if err := walker.checkContext(); err != nil {
 			return err
@@ -574,18 +580,18 @@ func (walker *reachabilityWalker) auditCollection(meta CollectionMeta) error {
 		}
 		var id [16]byte
 		copy(id[:], value)
-		if _, duplicate := seenIDs[id]; duplicate {
-			return fmt.Errorf("%w: duplicate Order ID", ErrCorrupt)
-		}
-		seenIDs[id] = struct{}{}
-		stored, exists, err := walker.treeGetUnlocked(meta.PrimaryRoot, TreePrimary, value)
-		if err != nil || !exists {
+		record, exists := primaryRecords[id]
+		if !exists {
 			return fmt.Errorf("%w: Order to Primary", ErrCorrupt)
 		}
-		position, _, err := decodeDocumentRecordDescriptor(stored)
-		if err != nil || position != binary.BigEndian.Uint64(key) {
+		if record.ordered {
+			return fmt.Errorf("%w: duplicate Order ID", ErrCorrupt)
+		}
+		if record.position != binary.BigEndian.Uint64(key) {
 			return fmt.Errorf("%w: Order position", ErrCorrupt)
 		}
+		record.ordered = true
+		primaryRecords[id] = record
 		orderCount++
 	}
 	if order.Err() != nil || orderCount != meta.DocumentCount {
@@ -632,15 +638,12 @@ func (walker *reachabilityWalker) auditCollection(meta CollectionMeta) error {
 				previousKey = append(previousKey[:0], storedKey...)
 			}
 			seenDocuments[id] = struct{}{}
-			if walker.indexAudit == nil {
-				stored, exists, err := walker.treeGetUnlocked(meta.PrimaryRoot, TreePrimary, id[:])
-				if err != nil || !exists {
-					return fmt.Errorf("%w: Secondary to Primary", ErrCorrupt)
-				}
-				actualPosition, _, err := decodeDocumentRecordDescriptor(stored)
-				if err != nil || actualPosition != position {
-					return fmt.Errorf("%w: Secondary position", ErrCorrupt)
-				}
+			primary, exists := primaryRecords[id]
+			if !exists {
+				return fmt.Errorf("%w: Secondary to Primary", ErrCorrupt)
+			}
+			if primary.position != position {
+				return fmt.Errorf("%w: Secondary position", ErrCorrupt)
 			}
 			entryCount++
 		}

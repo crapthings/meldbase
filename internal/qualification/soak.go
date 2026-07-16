@@ -21,6 +21,13 @@ import (
 
 const SoakReceiptSchemaVersion uint32 = 4
 
+// The operational soak is a duration and recovery qualification, not a storage
+// throughput benchmark. A fixed write cadence keeps its physical churn
+// portable across machines and below the engine's normal 8 GiB safety quota.
+// Release runs begin unthrottled only until the optimistic auditor observes one
+// real concurrent-publication conflict; the remaining work uses this cadence.
+const soakWriteInterval = 100 * time.Millisecond
+
 type SoakProgressStage string
 
 const (
@@ -251,7 +258,8 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 		var activity soakActivity
 		emitProgress(SoakProgressPhaseRunning, phase+1, 0, activity)
 		concurrentStarted := time.Now()
-		transactionOrdinal, activity, err = runSoakPhase(ctx, file, keys, transactionOrdinal, buildID, phaseDuration, progressInterval, func(current soakActivity, elapsed time.Duration) {
+		requireReclamationConflict := options.Profile == "release" && receipt.ReclamationConflicts == 0
+		transactionOrdinal, activity, err = runSoakPhase(ctx, file, keys, transactionOrdinal, buildID, phaseDuration, progressInterval, requireReclamationConflict, func(current soakActivity, elapsed time.Duration) {
 			emitProgress(SoakProgressPhaseRunning, phase+1, elapsed, current)
 		})
 		concurrentDuration := time.Since(concurrentStarted)
@@ -464,7 +472,7 @@ func createSoakDatabase(path string, documentCount int) (*storagev2.File, []stri
 	return file, keys, transactionOrdinal + 1, nil
 }
 
-func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, firstOrdinal uint64, buildID [16]byte, duration, progressInterval time.Duration, progress func(soakActivity, time.Duration)) (uint64, soakActivity, error) {
+func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, firstOrdinal uint64, buildID [16]byte, duration, progressInterval time.Duration, requireReclamationConflict bool, progress func(soakActivity, time.Duration)) (uint64, soakActivity, error) {
 	ctx, cancel := context.WithTimeout(parent, duration)
 	defer cancel()
 	errorsSeen := make(chan error, 1)
@@ -486,7 +494,23 @@ func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, f
 	workers.Add(4)
 	go func() {
 		defer workers.Done()
+		var writeTicker *time.Ticker
+		defer func() {
+			if writeTicker != nil {
+				writeTicker.Stop()
+			}
+		}()
 		for ctx.Err() == nil {
+			if !requireReclamationConflict || reclamationConflicts.Load() > 0 {
+				if writeTicker == nil {
+					writeTicker = time.NewTicker(soakWriteInterval)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-writeTicker.C:
+				}
+			}
 			current := ordinal.Load()
 			index := int(current % uint64(len(keys)))
 			before, after := keys[index], soakKey(index, int(current))

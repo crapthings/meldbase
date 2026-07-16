@@ -81,7 +81,7 @@ func TestRunStorageSoakExercisesAndCleansTarget(t *testing.T) {
 	if receipt.SchemaVersion != 4 || receipt.Profile != "custom" || receipt.RaceEnabled != RaceEnabled ||
 		receipt.BuildRevision != soakTestRevision || !receipt.BuildModified || receipt.CompletedReopens != 1 || len(receipt.Phases) != 1 ||
 		receipt.ConcurrentDuration < time.Second || receipt.Phases[0].ConcurrentDuration < time.Second ||
-		receipt.Writes == 0 || receipt.SnapshotReads == 0 || receipt.IndexBuildBatches == 0 || receipt.ReclamationAttempts == 0 ||
+		receipt.Writes == 0 || receipt.Writes > 20 || receipt.SnapshotReads == 0 || receipt.IndexBuildBatches == 0 || receipt.ReclamationAttempts == 0 ||
 		!receipt.SemanticIndexes || !receipt.SemanticIndexBuilds || !receipt.FinalIndexBuildAbsent || !receipt.FreeSpaceValid ||
 		len(receipt.FinalFileSHA256) != 64 || receipt.ActualDuration <= 0 {
 		t.Fatalf("receipt=%+v", receipt)
