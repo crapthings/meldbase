@@ -209,7 +209,7 @@ func validateQualificationSoak(receipt qualificationSoakReceipt, durability dura
 	}
 	if receipt.GoVersion == "" || !qualificationTimingValid(receipt.StartedAt, receipt.FinishedAt, receipt.ActualDuration) ||
 		receipt.RequestedSeconds < 4*60*60 || receipt.RequestedSeconds > 6*60*60 ||
-		receipt.ActualDuration != receipt.FinishedAt.Sub(receipt.StartedAt) || receipt.ConcurrentDuration > receipt.ActualDuration ||
+		receipt.ConcurrentDuration > receipt.ActualDuration ||
 		receipt.ActualDuration < time.Duration(receipt.RequestedSeconds)*time.Second ||
 		receipt.Documents < 10_000 || receipt.Documents > 1_000_000 || receipt.RequestedReopens < 12 || receipt.RequestedReopens > 1_000 ||
 		receipt.CompletedReopens != receipt.RequestedReopens ||
@@ -242,7 +242,7 @@ func validateQualificationSoak(receipt qualificationSoakReceipt, durability dura
 		phaseDuration > receipt.ActualDuration {
 		return errors.New("aggregate worker evidence does not match phase totals")
 	}
-	if receipt.FinalCommitSequence <= previousSequence || receipt.FinalFileBytes == 0 || receipt.FinalPhysicalPages == 0 ||
+	if receipt.FinalCommitSequence < previousSequence || receipt.FinalFileBytes == 0 || receipt.FinalPhysicalPages == 0 ||
 		receipt.FinalReachablePages == 0 || receipt.FinalReachablePages > receipt.FinalPhysicalPages ||
 		!qualificationHexDigest(receipt.FinalFileSHA256) || !receipt.PersistentFreeSpace ||
 		!receipt.FreeSpaceValid || !receipt.SemanticIndexes || !receipt.SemanticIndexBuilds || !receipt.FinalIndexBuildAbsent {

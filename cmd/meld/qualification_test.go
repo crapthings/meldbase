@@ -175,6 +175,16 @@ func TestQualificationTimingAllowsSmallWallClockDrift(t *testing.T) {
 	}
 }
 
+func TestQualificationSoakAllowsBoundedClockDriftAndStableFinalSequence(t *testing.T) {
+	durability, soak := qualificationFixtures()
+	soak.FinishedAt = soak.FinishedAt.Add(500 * time.Millisecond)
+	soak.FinalCommitSequence = soak.Phases[len(soak.Phases)-1].CommitSequence
+
+	if err := validateQualificationSoak(soak, durability, qualificationTestRevision); err != nil {
+		t.Fatalf("valid long-run receipt rejected: %v", err)
+	}
+}
+
 func qualificationFixtures() (durabilityCheckResult, qualificationSoakReceipt) {
 	started := time.Date(2026, 7, 17, 1, 0, 0, 0, time.UTC)
 	checks := make([]durabilityCheckRecord, 0, 10)

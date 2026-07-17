@@ -43,15 +43,17 @@ jobs:
       MELDBASE_STORAGE_SOAK_SECONDS: ${{ github.event_name == 'schedule' && '1800' || inputs.seconds }}
       MELDBASE_STORAGE_SOAK_DOCUMENTS: ${{ inputs.documents || '10000' }}
       MELDBASE_STORAGE_SOAK_REOPENS: ${{ inputs.reopens || '12' }}
-      MELDBASE_STORAGE_SOAK_RECEIPT: ${{ runner.temp }}/meldbase-storage-soak-receipt.json
-      MELDBASE_DURABILITY_RECEIPT: ${{ runner.temp }}/meldbase-durability-check.json
-      MELDBASE_QUALIFICATION_PACKET: ${{ runner.temp }}/meldbase-qualification-level-3.json
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           cache: true
+      - name: Set evidence paths
+        run: |
+          echo "MELDBASE_STORAGE_SOAK_RECEIPT=$RUNNER_TEMP/meldbase-storage-soak-receipt.json" >> "$GITHUB_ENV"
+          echo "MELDBASE_DURABILITY_RECEIPT=$RUNNER_TEMP/meldbase-durability-check.json" >> "$GITHUB_ENV"
+          echo "MELDBASE_QUALIFICATION_PACKET=$RUNNER_TEMP/meldbase-qualification-level-3.json" >> "$GITHUB_ENV"
       - name: Build race-enabled VCS-stamped qualification executable
         run: go build -race -o "$RUNNER_TEMP/meld" ./cmd/meld
       - name: Probe the exact soak volume with the same binary
