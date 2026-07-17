@@ -510,14 +510,14 @@ larger `actualDurationNanos`; it cannot be used to satisfy
 `concurrentDurationNanos`. The runner additionally requires nonzero work from
 every concurrent worker in every phase and at least one observed optimistic
 reclamation conflict. The writer starts unthrottled only until a release run
-observes that real conflict, then uses a fixed cadence of one write every two seconds;
+observes that real conflict, then uses a fixed cadence of one write every ten seconds;
 non-release profiles execute their first write immediately and use the same
 cadence thereafter. This makes the
 duration qualification reproducible across hardware and prevents a faster host
 from exhausting the normal V2 physical safety quota before a phase-boundary
 reclamation. It is deliberately not a throughput benchmark. The reader,
 shadow-index catch-up and optimistic auditor remain concurrent. Once the
-initial shadow scan reaches catch-up, an idle worker waits ten seconds before
+initial shadow scan reaches catch-up, an idle worker waits thirty seconds before
 reading the next bounded Commit Log window. This deliberately exercises ordered
 multi-commit catch-up batches instead of turning every business write into an
 immediate second COW commit; a backlog larger than one batch is

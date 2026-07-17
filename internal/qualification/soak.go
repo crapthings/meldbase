@@ -26,8 +26,8 @@ const SoakReceiptSchemaVersion uint32 = 4
 // portable across machines and below the engine's normal 8 GiB safety quota.
 // Release runs begin unthrottled only until the optimistic auditor observes one
 // real concurrent-publication conflict; the remaining work uses this cadence.
-const soakWriteInterval = 2 * time.Second
-const soakIndexCatchUpInterval = 10 * time.Second
+const soakWriteInterval = 10 * time.Second
+const soakIndexCatchUpInterval = 30 * time.Second
 
 type SoakProgressStage string
 

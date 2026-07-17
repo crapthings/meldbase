@@ -80,9 +80,9 @@ Its four-hour release floor applies to measured concurrent worker time; reopen
 and verification overhead is reported separately and cannot satisfy the floor.
 The release writer runs flat out only until it proves one real optimistic
 reclamation conflict, then uses a hardware-independent cadence of one write
-every two seconds. This keeps the duration/recovery qualification inside the normal V2
+every ten seconds. This keeps the duration/recovery qualification inside the normal V2
 physical safety quota; it is not a storage-throughput benchmark.
-Shadow-index catch-up coalesces up to ten seconds of ordered Commit Log work,
+Shadow-index catch-up coalesces up to thirty seconds of ordered Commit Log work,
 then drains any larger backlog in bounded batches. This keeps the soak focused
 on realtime recovery behavior instead of synchronously mirroring every write
 with another COW commit.
