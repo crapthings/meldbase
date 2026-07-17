@@ -510,17 +510,17 @@ larger `actualDurationNanos`; it cannot be used to satisfy
 `concurrentDurationNanos`. The runner additionally requires nonzero work from
 every concurrent worker in every phase and at least one observed optimistic
 reclamation conflict. The writer starts unthrottled only until a release run
-observes that real conflict, then uses a fixed one-write-per-second cadence;
+observes that real conflict, then uses a fixed cadence of one write every two seconds;
 non-release profiles execute their first write immediately and use the same
 cadence thereafter. This makes the
 duration qualification reproducible across hardware and prevents a faster host
 from exhausting the normal V2 physical safety quota before a phase-boundary
 reclamation. It is deliberately not a throughput benchmark. The reader,
 shadow-index catch-up and optimistic auditor remain concurrent. Once the
-initial shadow scan reaches catch-up, an idle worker waits five seconds before
+initial shadow scan reaches catch-up, an idle worker waits ten seconds before
 reading the next bounded Commit Log window. This deliberately exercises ordered
-multi-commit catch-up batches instead of turning every one-per-second business
-write into an immediate second COW commit; a backlog larger than one batch is
+multi-commit catch-up batches instead of turning every business write into an
+immediate second COW commit; a backlog larger than one batch is
 drained without another wait. The runner also
 fails before setup unless the actual Meld binary
 was built with `-race`, carries clean Go VCS build metadata and exactly matches
