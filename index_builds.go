@@ -123,6 +123,9 @@ func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []
 	if err != nil {
 		return IndexBuildID{}, c.db.handleV2IndexBuildErrorLocked(err)
 	}
+	if err := c.db.advanceV2RollbackAnchorLocked(ctx, store, c.db.token); err != nil {
+		return IndexBuildID{}, err
+	}
 	store.refreshIndexBuildStats()
 	c.db.indexBuildReservations[reservation] = struct{}{}
 	return id, nil
@@ -335,6 +338,9 @@ func (db *DB) resumeIndexBuildScan(ctx context.Context, store *v2DurableStore, m
 	if err != nil {
 		return db.handleV2IndexBuildError(err)
 	}
+	if err := db.advanceV2RollbackAnchor(ctx, store, meta.AppliedSequence); err != nil {
+		return err
+	}
 	store.refreshIndexBuildStats()
 	return nil
 }
@@ -422,6 +428,9 @@ func (db *DB) resumeIndexBuildCatchUp(ctx context.Context, store *v2DurableStore
 	if err != nil {
 		return db.handleV2IndexBuildError(err)
 	}
+	if err := db.advanceV2RollbackAnchor(ctx, store, through); err != nil {
+		return err
+	}
 	store.refreshIndexBuildStats()
 	return nil
 }
@@ -455,6 +464,9 @@ func (db *DB) finalizeIndexBuild(ctx context.Context, store *v2DurableStore, met
 	if sequence != db.token+1 {
 		db.fatalErr = fmt.Errorf("%w: V2 index build sequence mismatch", ErrDurability)
 		return db.fatalErr
+	}
+	if err := db.advanceV2RollbackAnchorLocked(ctx, store, sequence); err != nil {
+		return err
 	}
 	store.refreshIndexBuildStats()
 	fields, err := publicV2IndexFields(meta.FieldPath, meta.Fields)
@@ -501,6 +513,9 @@ func (db *DB) AbortIndexBuild(ctx context.Context, id IndexBuildID) error {
 	if err := store.file.AbortIndexBuild([16]byte(id)); err != nil {
 		return db.handleV2IndexBuildErrorLocked(err)
 	}
+	if err := db.advanceV2RollbackAnchorLocked(ctx, store, db.token); err != nil {
+		return err
+	}
 	store.refreshIndexBuildStats()
 	delete(db.indexBuildReservations, indexBuildReservation(meta.Collection, meta.Name))
 	return nil
@@ -525,6 +540,9 @@ func (db *DB) failIndexBuild(ctx context.Context, id IndexBuildID, failure stora
 	meta, err := store.file.FailIndexBuild(storagev2.FailIndexBuildTransaction{BuildID: [16]byte(id), Failure: failure})
 	if err != nil {
 		return IndexBuildStatus{}, db.handleV2IndexBuildErrorLocked(err)
+	}
+	if err := db.advanceV2RollbackAnchorLocked(ctx, store, db.token); err != nil {
+		return IndexBuildStatus{}, err
 	}
 	store.refreshIndexBuildStats()
 	return publicIndexBuildStatus(meta), nil

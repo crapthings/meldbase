@@ -63,7 +63,17 @@ func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 		"meldbase.index.build.retention.pressure": 1,
 		"meldbase.wal.current.size":               4096, "meldbase.checkpoint.automatic": 3,
 		"meldbase.storage.physical.page": 101, "meldbase.storage.transaction.rejected": 4,
-		"meldbase.storage.size": 8192, "meldbase.storage.max_size": 8000,
+		"meldbase.storage.generation": 20, "meldbase.storage.rollback.protected": 1,
+		"meldbase.storage.rollback.anchor.sequence": 17, "meldbase.storage.rollback.anchor.lag": 1,
+		"meldbase.storage.rollback.anchor.generation": 19, "meldbase.storage.rollback.anchor.generation_lag": 1,
+		"meldbase.storage.rollback.anchor.failure": 2,
+		"meldbase.storage.rollback.anchor.replica": 3, "meldbase.storage.rollback.anchor.quorum": 2,
+		"meldbase.storage.rollback.anchor.store.load": 7, "meldbase.storage.rollback.anchor.store.advance": 6,
+		"meldbase.storage.rollback.anchor.endpoint.failure": 5, "meldbase.storage.rollback.anchor.quorum.failure": 4,
+		"meldbase.storage.rollback.anchor.conflict": 3, "meldbase.storage.rollback.anchor.authentication.failure": 2,
+		"meldbase.storage.rollback.anchor.protocol.failure":      1,
+		"meldbase.storage.rollback.anchor.configuration.failure": 8,
+		"meldbase.storage.size":                                  8192, "meldbase.storage.max_size": 8000,
 		"meldbase.storage.size_overage": 192, "meldbase.storage.quota.exhausted": 1, "meldbase.storage.limit.rejection": 5,
 		"meldbase.storage.retained_commit": 14, "meldbase.storage.retention.max": 10,
 		"meldbase.storage.retention.overage": 4, "meldbase.storage.retention.pressure": 1,
@@ -80,11 +90,14 @@ func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]float64{
-		"meldbase.wal.append.time":             0.009,
-		"meldbase.storage.commit.max_duration": 0.004,
-		"meldbase.backup.last_duration":        1.5,
-		"meldbase.cache.page.hit_ratio":        0.8,
-		"meldbase.rpc.time":                    0.012,
+		"meldbase.wal.append.time":                      0.009,
+		"meldbase.storage.commit.max_duration":          0.004,
+		"meldbase.storage.rollback.anchor.time":         0.006,
+		"meldbase.storage.rollback.anchor.max_duration": 0.003,
+		"meldbase.storage.rollback.anchor.timeout":      10,
+		"meldbase.backup.last_duration":                 1.5,
+		"meldbase.cache.page.hit_ratio":                 0.8,
+		"meldbase.rpc.time":                             0.012,
 	} {
 		if got, exists := sink.floats[name]; !exists || math.Abs(got-want) > 1e-12 {
 			t.Fatalf("%s=%g/%t want=%g", name, got, exists, want)
@@ -156,7 +169,7 @@ func TestAdapterContractHasUniqueSafeNamesAndNoDynamicIdentity(t *testing.T) {
 		t.Fatalf("aggregate contract unexpectedly small: %d instruments", len(seen))
 	}
 	public := Instruments()
-	if SchemaVersion != 7 || len(public) != len(seen) || public[0].Name != "meldbase.up" {
+	if SchemaVersion != 8 || len(public) != len(seen) || public[0].Name != "meldbase.up" {
 		t.Fatalf("public schema version=%d instruments=%d/%d first=%+v", SchemaVersion, len(public), len(seen), public[0])
 	}
 	public[0].Name = "mutated"
@@ -192,7 +205,10 @@ func representativeSample() admin.Sample {
 				CheckpointAttempts: 4, CheckpointsCompleted: 3, AutomaticCheckpoints: 3,
 			},
 			Storage: meldbase.StorageStats{
-				PhysicalPages: 101, ReusablePages: 9, CommittedTransactions: 13, RejectedTransactions: 4,
+				Generation: 20, CommitSequence: 18, RollbackProtected: true, RollbackAnchorSequence: 17, RollbackAnchorGeneration: 19,
+				RollbackAnchorFailures: 2, RollbackAnchorTimeout: 10 * time.Second, RollbackAnchorNanos: 6_000_000, RollbackAnchorMaxLatency: 3 * time.Millisecond,
+				RollbackAnchorStore: meldbase.RollbackAnchorStoreStatus{Replicas: 3, Quorum: 2, Loads: 7, Advances: 6, EndpointFailures: 5, QuorumFailures: 4, Conflicts: 3, AuthenticationFailures: 2, ProtocolFailures: 1, ConfigurationFailures: 8},
+				PhysicalPages:       101, ReusablePages: 9, CommittedTransactions: 13, RejectedTransactions: 4,
 				RetainedCommits: 14, CommitRetentionMax: 10, CommitRetentionOverage: 4,
 				RetainedCommitBytes: 1024, CommitRetentionMaxBytes: 900, CommitRetentionByteOverage: 124,
 				RetentionPrunedCommits: 23, RetentionPressureEvents: 2, RetentionPressure: true,

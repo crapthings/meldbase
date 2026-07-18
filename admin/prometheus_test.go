@@ -48,6 +48,25 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		`meldbase_write_transaction_outcomes_total{outcome="conflict"} 3`,
 		`meldbase_write_transaction_outcomes_total{outcome="aborted"} 1`,
 		`meldbase_storage_transactions_total{outcome="committed"} 13`,
+		`meldbase_storage_generation 5`,
+		`meldbase_storage_rollback_protected 1`,
+		`meldbase_storage_rollback_anchor_sequence 1`,
+		`meldbase_storage_rollback_anchor_generation 4`,
+		`meldbase_storage_rollback_anchor_lag 1`,
+		`meldbase_storage_rollback_anchor_generation_lag 1`,
+		`meldbase_storage_rollback_anchor_failures_total 2`,
+		`meldbase_storage_rollback_anchor_replicas 3`,
+		`meldbase_storage_rollback_anchor_quorum 2`,
+		`meldbase_storage_rollback_anchor_store_loads_total 7`,
+		`meldbase_storage_rollback_anchor_store_advances_total 6`,
+		`meldbase_storage_rollback_anchor_endpoint_failures_total 5`,
+		`meldbase_storage_rollback_anchor_quorum_failures_total 4`,
+		`meldbase_storage_rollback_anchor_conflicts_total 3`,
+		`meldbase_storage_rollback_anchor_authentication_failures_total 2`,
+		`meldbase_storage_rollback_anchor_protocol_failures_total 1`,
+		`meldbase_storage_rollback_anchor_configuration_failures_total 8`,
+		`meldbase_storage_rollback_anchor_timeout_seconds 10`,
+		`meldbase_storage_rollback_anchor_duration_seconds_total 0.004`,
 		`meldbase_storage_tree_splits_total 11`,
 		`meldbase_storage_tree_merges_total 6`,
 		`meldbase_storage_persistent_free_space 1`,
@@ -99,6 +118,13 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 	validatePrometheusText(t, text)
 }
 
+func TestMarshalPrometheusDoesNotReportRollbackLagWhenProtectionIsDisabled(t *testing.T) {
+	payload := string(MarshalPrometheus(Sample{Stats: meldbase.DBStats{CommitSequence: 9}}))
+	if !strings.Contains(payload, "meldbase_storage_rollback_anchor_lag 0\n") {
+		t.Fatalf("unexpected rollback lag metric:\n%s", payload)
+	}
+}
+
 func representativePrometheusSample() Sample {
 	return Sample{
 		Version: SchemaVersion,
@@ -130,6 +156,9 @@ func representativePrometheusSample() Sample {
 			},
 			Storage: meldbase.StorageStats{
 				Engine: "secret_engine", PageSize: 16_384, PhysicalPages: 101,
+				Generation: 5, CommitSequence: 2, RollbackProtected: true, RollbackAnchorSequence: 1, RollbackAnchorGeneration: 4, RollbackAnchorFailures: 2,
+				RollbackAnchorStore:   meldbase.RollbackAnchorStoreStatus{Replicas: 3, Quorum: 2, Loads: 7, Advances: 6, EndpointFailures: 5, QuorumFailures: 4, Conflicts: 3, AuthenticationFailures: 2, ProtocolFailures: 1, ConfigurationFailures: 8},
+				RollbackAnchorTimeout: 10 * time.Second, RollbackAnchorNanos: 4_000_000, RollbackAnchorMaxLatency: 2 * time.Millisecond,
 				OldestRetainedSequence: 12, ActiveReaders: 2, ActiveReplayLeases: 1, ReusablePages: 7,
 				PageCache: meldbase.PageCacheStats{CapacityPages: 100, ResidentPages: 80, Hits: 50, Misses: 5, Evictions: 2},
 				DocumentCache: meldbase.DocumentCacheStats{

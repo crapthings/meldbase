@@ -69,6 +69,10 @@ The V2 backend used for new default databases additionally exposes:
 - persistent index-build phase/entry/byte gauges plus scheduler run/yield/failure
   counters and a retention-lease gauge, read from an immutable aggregate
   snapshot rather than scanning the BuildCatalog on each sample.
+- rollback-anchor sequence/generation lag and, when the store provides it,
+  fixed-cardinality replica/quorum gauges plus load, advance, endpoint,
+  quorum, conflict, authentication, protocol and static-configuration failure
+  counters.
 
 These values contain no path, collection name, document ID, query literal,
 principal, tenant, authorization value, or document content. `Stats()` is for a
@@ -114,6 +118,9 @@ transport busy, outcome-unknown and worker-protocol signals use counter increase
 between adjacent samples; they clear after a quiet window and are ignored across
 database/server session resets. Application RPC failures, collection scans and
 cache hit ratios are intentionally not classified as engine health failures.
+An observed rollback-anchor endpoint failure degrades Durability for the latest
+sample window even when a majority completed the operation, making latent loss
+of fault tolerance visible before the next replica failure stops writes.
 
 A durable index build in its terminal `failed` state keeps Storage and Overall
 `degraded` until it is inspected and aborted. An active build lease is not itself
@@ -254,7 +261,7 @@ and never accepts credentials in a URL. Cross-origin access is denied unless its
 exact HTTP(S) origin was configured; wildcard origins are rejected. Browser
 preflight permits only `GET` and `Authorization`.
 
-The admin snapshot schema is version 10 and uses camel-case JSON fields. Version 2
+The admin snapshot schema is version 11 and uses camel-case JSON fields. Version 2
 added the fixed health assessment, fail-stop write state and reactive capacities;
 version 3 adds the immutable startup recovery receipt; version 4 adds resource
 admission, Commit Log byte retention and physical storage quota fields/signals;
@@ -262,8 +269,12 @@ version 5 adds index-build entry/byte budgets; version 6 adds fixed index-build
 activity, outcome, size and latency signals; versions 7 and 8 add durable
 index-build phase/size and scheduler signals; version 9 adds the aggregate
 index-build retention lease and its fixed degraded-health explanations; version
-10 adds public optimistic write-transaction lifecycle aggregates.
-The checked-in `admin/testdata/admin-schema-v10.json` fixture pins every reachable
+10 adds public optimistic write-transaction lifecycle aggregates; version 11
+adds fixed-cardinality physical generation, rollback-protection state, anchor
+sequence/generation, failure and synchronous update-latency fields.
+It also includes optional fixed-cardinality rollback-anchor backend topology and
+failure-class counters plus a degraded-health signal for partial endpoint loss.
+The checked-in `admin/testdata/admin-schema-v11.json` fixture pins every reachable
 `Sample` object and scalar path, JSON wire type, optionality and nullability in
 deterministic order. A test also compares that reflected contract with Go's
 actual JSON encoder. Adding, removing, renaming or changing a field requires an

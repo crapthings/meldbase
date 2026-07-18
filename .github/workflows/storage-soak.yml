@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Release enforces the production qualification floor; custom is exploratory only
+        description: Release enforces the Level 3 soak floor; custom is exploratory only
         required: true
         type: choice
         default: release
@@ -111,8 +111,9 @@ jobs:
             --require-level 3 \
             > "$MELDBASE_QUALIFICATION_PACKET"
           jq -e '
-            .schemaVersion == 1 and .sourceRevision == env.GITHUB_SHA and
-            .evidenceLevel == 3 and .productionQualified == false and
+            .schemaVersion == 2 and .sourceRevision == env.GITHUB_SHA and
+            .evidenceLevel == 3 and .storageQualified == false and
+            .rollbackProtectionQualified == false and .productionQualified == false and
             .passed == true and
             (.durabilityReceiptSha256 | length) == 64 and
             (.soakReceiptSha256 | length) == 64

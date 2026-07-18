@@ -64,6 +64,7 @@ func runDurabilityCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("durability-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	directory := flags.String("dir", ".", "existing directory on the target database volume")
+	output := flags.String("out", "", "optional new no-overwrite durable schema-2 receipt path")
 	sourceRevision := flags.String("source-revision", "", "optional 40- or 64-hex source revision recorded in the receipt")
 	requireCleanSource := flags.Bool("require-clean-source", false, "require the claimed revision to match clean Go VCS build metadata")
 	if err := flags.Parse(args); err != nil {
@@ -71,6 +72,23 @@ func runDurabilityCheck(args []string, stdout, stderr io.Writer) error {
 	}
 	if *sourceRevision != "" && !validDurabilitySourceRevision(*sourceRevision) {
 		return errors.New("durability-check --source-revision must be 40 or 64 hexadecimal characters")
+	}
+	cleanOutput := ""
+	if *output != "" {
+		var err error
+		cleanOutput, err = filepath.Abs(filepath.Clean(*output))
+		if err != nil {
+			return err
+		}
+		if _, err := os.Lstat(cleanOutput); err == nil {
+			return fmt.Errorf("durability-check receipt already exists: %s", cleanOutput)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		parent, err := os.Stat(filepath.Dir(cleanOutput))
+		if err != nil || !parent.IsDir() {
+			return errors.New("durability-check receipt parent must be an existing directory")
+		}
 	}
 	buildRevision, buildModified := durabilityBuildIdentity()
 	if *requireCleanSource && (*sourceRevision == "" || buildRevision == "" || buildRevision != *sourceRevision || buildModified) {
@@ -192,6 +210,11 @@ func runDurabilityCheck(args []string, stdout, stderr io.Writer) error {
 	result.Passed = passed
 	result.FinishedAt = time.Now()
 	result.Duration = result.FinishedAt.Sub(result.StartedAt)
+	if cleanOutput != "" {
+		if err := writeJSONExclusiveDurable(cleanOutput, result); err != nil {
+			return err
+		}
+	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(result); err != nil {

@@ -1,6 +1,10 @@
 package meldbase
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"time"
+)
 
 // RecoveryMode controls whether Open may perform only the bounded recovery
 // actions described by RecoveryReport. Zero selects the normal automatic mode.
@@ -12,22 +16,86 @@ const (
 )
 
 // OpenOptions configures format-neutral Open. V1Checkpoint is ignored for V2;
-// V2 retention/storage fields are ignored for V1.
+// V2 retention/storage fields are ignored for V1, while V2RollbackProtection
+// is rejected for V1 so a requested safety boundary is never silently absent.
 type OpenOptions struct {
-	Recovery          RecoveryMode
-	V1Checkpoint      V1CheckpointPolicy
-	V2CommitRetention V2CommitRetentionPolicy
-	ResourceLimits    ResourceLimits
-	V2StorageLimits   V2StorageLimits
+	Recovery             RecoveryMode
+	V1Checkpoint         V1CheckpointPolicy
+	V2CommitRetention    V2CommitRetentionPolicy
+	ResourceLimits       ResourceLimits
+	V2StorageLimits      V2StorageLimits
+	V2RollbackProtection V2RollbackProtection
 }
 
 // V2Options configures explicitly selected Storage V2 opening.
 type V2Options struct {
-	Recovery        RecoveryMode
-	CommitRetention V2CommitRetentionPolicy
-	ResourceLimits  ResourceLimits
-	StorageLimits   V2StorageLimits
+	Recovery           RecoveryMode
+	CommitRetention    V2CommitRetentionPolicy
+	ResourceLimits     ResourceLimits
+	StorageLimits      V2StorageLimits
+	RollbackProtection V2RollbackProtection
 }
+
+// RollbackAnchor is trusted state retained outside the database device. A
+// server must never accept the same identity below either an acknowledged
+// logical commit sequence or physical maintenance generation after restart.
+type RollbackAnchor struct {
+	DatabaseID            [16]byte
+	MinimumCommitSequence uint64
+	MinimumGeneration     uint64
+}
+
+// RollbackAnchorStore durably loads and atomically advances one database's
+// monotonic anchor. Advance must not return until the anchor is persistent and
+// must reject identity changes or regression of either monotonic coordinate.
+// Implementations must be safe for concurrent callers and honor cancellation.
+// An Advance error does not prove that state was unchanged: persistence may
+// have completed before a response, deadline or cancellation was observed.
+type RollbackAnchorStore interface {
+	Load(context.Context) (RollbackAnchor, bool, error)
+	Advance(context.Context, RollbackAnchor) error
+}
+
+// RollbackAnchorStoreStatus is a bounded, identity-free process-session view of
+// an anchor backend. Counters are diagnostic and never participate in recovery.
+type RollbackAnchorStoreStatus struct {
+	Replicas               uint64 `json:"replicas"`
+	Quorum                 uint64 `json:"quorum"`
+	Loads                  uint64 `json:"loads"`
+	Advances               uint64 `json:"advances"`
+	EndpointFailures       uint64 `json:"endpointFailures"`
+	QuorumFailures         uint64 `json:"quorumFailures"`
+	Conflicts              uint64 `json:"conflicts"`
+	AuthenticationFailures uint64 `json:"authenticationFailures"`
+	ProtocolFailures       uint64 `json:"protocolFailures"`
+	ConfigurationFailures  uint64 `json:"configurationFailures"`
+}
+
+// RollbackAnchorStatusProvider is an optional lock-free observability contract
+// for RollbackAnchorStore implementations.
+type RollbackAnchorStatusProvider interface {
+	RollbackAnchorStatus() RollbackAnchorStoreStatus
+}
+
+// V2RollbackProtection configures fail-closed database identity and sequence
+// checks. AnchorStore should live on an independently trusted device or remote
+// quorum; placing it beside the database cannot detect whole-device rollback.
+// InitializeAnchor explicitly trusts the database currently at Path when the
+// store is empty and should only be used during provisioning or audited restore.
+type V2RollbackProtection struct {
+	ExpectedDatabaseID    [16]byte
+	MinimumCommitSequence uint64
+	MinimumGeneration     uint64
+	AnchorStore           RollbackAnchorStore
+	InitializeAnchor      bool
+	// OperationTimeout bounds each Load/Advance/read-back interaction. Zero
+	// selects DefaultRollbackAnchorOperationTimeout.
+	OperationTimeout time.Duration
+}
+
+// DefaultRollbackAnchorOperationTimeout prevents a failed remote trust service
+// from indefinitely holding database publication acknowledgement.
+const DefaultRollbackAnchorOperationTimeout = 10 * time.Second
 
 // V2StorageLimits bounds the physical single-file high-water mark. Zero selects
 // DefaultV2MaxFileBytes. The value must be a 16 KiB V2 page multiple.

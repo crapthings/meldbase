@@ -11,10 +11,10 @@ import (
 const PrometheusContentType = "text/plain; version=0.0.4; charset=utf-8"
 
 // The fixed schema currently renders below this size even with the optional
-// transport families. Pre-growing once avoids the 32 KiB -> 64 KiB buffer copy
+// transport families. Pre-growing once avoids a late buffer growth and copy
 // on every scrape. Keep BenchmarkMarshalPrometheus's output-B metric and tests
 // visible when adding families so this remains an optimization, never a limit.
-const prometheusInitialCapacity = 40 << 10
+const prometheusInitialCapacity = 48 << 10
 
 type prometheusSample struct {
 	labels  string
@@ -169,6 +169,35 @@ func MarshalPrometheus(sample Sample) []byte {
 	writePrometheusFamily(&output, "meldbase_checkpoint_max_duration_seconds", "Maximum successful V1 checkpoint duration in this process session.", "gauge", gaugeDuration(stats.Durability.CheckpointMaxLatency))
 
 	writePrometheusFamily(&output, "meldbase_storage_page_size_bytes", "Storage page size in bytes.", "gauge", gaugeUint(stats.Storage.PageSize))
+	writePrometheusFamily(&output, "meldbase_storage_generation", "Current physical V2 publication generation.", "gauge", gaugeUint(stats.Storage.Generation))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_protected", "Whether acknowledged V2 commits are gated by an external rollback anchor.", "gauge", gaugeBool(stats.Storage.RollbackProtected))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_sequence", "Last rollback-anchor sequence durably read back in this process.", "gauge", gaugeUint(stats.Storage.RollbackAnchorSequence))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_generation", "Last rollback-anchor generation durably read back in this process.", "gauge", gaugeUint(stats.Storage.RollbackAnchorGeneration))
+	rollbackLag := uint64(0)
+	if stats.Storage.RollbackProtected && stats.Storage.CommitSequence > stats.Storage.RollbackAnchorSequence {
+		rollbackLag = stats.Storage.CommitSequence - stats.Storage.RollbackAnchorSequence
+	}
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_lag", "Logical commits by which the database is ahead of its rollback anchor.", "gauge", gaugeUint(rollbackLag))
+	rollbackGenerationLag := uint64(0)
+	if stats.Storage.RollbackProtected && stats.Storage.Generation > stats.Storage.RollbackAnchorGeneration {
+		rollbackGenerationLag = stats.Storage.Generation - stats.Storage.RollbackAnchorGeneration
+	}
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_generation_lag", "Physical generations by which the database is ahead of its rollback anchor.", "gauge", gaugeUint(rollbackGenerationLag))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_failures_total", "Rollback-anchor durable save or read-back failures.", "counter", counterUint(stats.Storage.RollbackAnchorFailures))
+	anchorStore := stats.Storage.RollbackAnchorStore
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_replicas", "Configured rollback-anchor replicas.", "gauge", gaugeUint(anchorStore.Replicas))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_quorum", "Rollback-anchor replicas required for a majority.", "gauge", gaugeUint(anchorStore.Quorum))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_store_loads_total", "Rollback-anchor store load operations.", "counter", counterUint(anchorStore.Loads))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_store_advances_total", "Rollback-anchor store advance operations.", "counter", counterUint(anchorStore.Advances))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_endpoint_failures_total", "Rollback-anchor endpoint failures observed before an operation completed.", "counter", counterUint(anchorStore.EndpointFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_quorum_failures_total", "Rollback-anchor operations that failed to reach quorum.", "counter", counterUint(anchorStore.QuorumFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_conflicts_total", "Rollback-anchor incomparable-history or identity conflicts.", "counter", counterUint(anchorStore.Conflicts))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_authentication_failures_total", "Rollback-anchor authentication failures.", "counter", counterUint(anchorStore.AuthenticationFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_protocol_failures_total", "Rollback-anchor protocol validation failures.", "counter", counterUint(anchorStore.ProtocolFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_configuration_failures_total", "Rollback-anchor static configuration or member identity failures.", "counter", counterUint(anchorStore.ConfigurationFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_timeout_seconds", "Configured deadline for each rollback-anchor interaction.", "gauge", gaugeDuration(stats.Storage.RollbackAnchorTimeout))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_duration_seconds_total", "Accumulated synchronous rollback-anchor update duration.", "counter", counterNanos(stats.Storage.RollbackAnchorNanos))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_max_duration_seconds", "Maximum synchronous rollback-anchor update duration.", "gauge", gaugeDuration(stats.Storage.RollbackAnchorMaxLatency))
 	writePrometheusFamily(&output, "meldbase_storage_physical_pages", "Current physical page high-water count.", "gauge", gaugeUint(stats.Storage.PhysicalPages))
 	writePrometheusFamily(&output, "meldbase_storage_used_bytes", "Current V2 physical file high-water bytes.", "gauge", gaugeUint(stats.Storage.StorageUsedBytes))
 	writePrometheusFamily(&output, "meldbase_storage_max_bytes", "Configured V2 physical file high-water quota.", "gauge", gaugeUint(stats.Storage.StorageMaxBytes))

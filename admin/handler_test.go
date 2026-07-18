@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -214,7 +215,11 @@ func TestEmbeddedDashboardIsOptInAndContainsNoData(t *testing.T) {
 	request = httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/javascript") {
+	script := response.Body.String()
+	version := strconv.FormatUint(uint64(SchemaVersion), 10)
+	if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/javascript") ||
+		!strings.Contains(script, "sample.version !== "+version) || !strings.Contains(script, "history.version !== "+version) ||
+		!strings.Contains(script, "rollbackAnchorGeneration") || !strings.Contains(script, "rollback-anchor-backend") {
 		t.Fatalf("dashboard script status=%d headers=%v", response.Code, response.Header())
 	}
 

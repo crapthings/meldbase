@@ -17,11 +17,20 @@ import (
 
 // v2DurableStore adapts the page/Commit Log format to the public database API.
 type v2DurableStore struct {
-	file               *storagev2.File
-	documents          *v2DocumentCache
-	path               string
-	compactMu          sync.Mutex
-	preparedIndexBuild struct {
+	file                     *storagev2.File
+	documents                *v2DocumentCache
+	path                     string
+	rollbackAnchor           RollbackAnchorStore
+	databaseID               [16]byte
+	rollbackAnchorTimeout    time.Duration
+	rollbackAnchorGate       chan struct{}
+	rollbackAnchorSequence   atomic.Uint64
+	rollbackAnchorGeneration atomic.Uint64
+	rollbackAnchorFailures   atomic.Uint64
+	rollbackAnchorNanos      atomic.Uint64
+	rollbackAnchorMaxNanos   atomic.Uint64
+	compactMu                sync.Mutex
+	preparedIndexBuild       struct {
 		active     bool
 		sequence   uint64
 		collection string
@@ -103,8 +112,53 @@ func OpenV2WithOptions(path string, options V2Options) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	protection := options.RollbackProtection
+	if protection.OperationTimeout < 0 || (protection.AnchorStore == nil && (protection.InitializeAnchor || protection.OperationTimeout != 0)) {
+		return nil, ErrInvalidRollbackProtection
+	}
+	anchorTimeout := protection.OperationTimeout
+	if protection.AnchorStore != nil && anchorTimeout == 0 {
+		anchorTimeout = DefaultRollbackAnchorOperationTimeout
+	}
+	anchor := RollbackAnchor{}
+	anchorExists := false
+	if protection.AnchorStore != nil {
+		anchorContext, cancel := context.WithTimeout(context.Background(), anchorTimeout)
+		anchor, anchorExists, err = protection.AnchorStore.Load(anchorContext)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrRollbackAnchor, err)
+		}
+		if !anchorExists && !protection.InitializeAnchor {
+			return nil, ErrRollbackAnchorRequired
+		}
+		if anchorExists && protection.InitializeAnchor {
+			return nil, ErrInvalidRollbackProtection
+		}
+		if anchorExists && !validRollbackAnchor(anchor) {
+			return nil, ErrRollbackAnchor
+		}
+	}
+	expectedID := protection.ExpectedDatabaseID
+	minimumSequence := protection.MinimumCommitSequence
+	minimumGeneration := protection.MinimumGeneration
+	if anchorExists {
+		if !zeroDatabaseID(expectedID) && expectedID != anchor.DatabaseID {
+			return nil, ErrDatabaseIdentity
+		}
+		expectedID = anchor.DatabaseID
+		if anchor.MinimumCommitSequence > minimumSequence {
+			minimumSequence = anchor.MinimumCommitSequence
+		}
+		if anchor.MinimumGeneration > minimumGeneration {
+			minimumGeneration = anchor.MinimumGeneration
+		}
+	}
 	file, meta, recovery, err := storagev2.OpenWithOptions(path, storagev2.OpenOptions{
 		RequireClean:              options.Recovery == RecoveryRequireClean,
+		ExpectedDatabaseID:        expectedID,
+		MinimumCommitSequence:     minimumSequence,
+		MinimumGeneration:         minimumGeneration,
 		CommitRetentionMaxCommits: options.CommitRetention.MaxCommits,
 		CommitRetentionMaxBytes:   options.CommitRetention.MaxBytes,
 		MaxFileBytes:              options.StorageLimits.MaxFileBytes,
@@ -133,7 +187,25 @@ func OpenV2WithOptions(path string, options V2Options) (*DB, error) {
 	if err != nil {
 		return fail(err)
 	}
-	store := &v2DurableStore{file: file, documents: newV2DocumentCache(defaultV2DocumentCacheEntries, defaultV2DocumentCacheBytes), path: absolutePath}
+	if protection.AnchorStore != nil && (!anchorExists || anchor.MinimumCommitSequence != meta.CommitSequence || anchor.MinimumGeneration != meta.Generation) {
+		anchorContext, cancel := context.WithTimeout(context.Background(), anchorTimeout)
+		requested := RollbackAnchor{DatabaseID: meta.DatabaseID, MinimumCommitSequence: meta.CommitSequence, MinimumGeneration: meta.Generation}
+		retained, err := persistRollbackAnchor(anchorContext, protection.AnchorStore, requested)
+		cancel()
+		if err != nil || retained != requested {
+			if err == nil {
+				err = fmt.Errorf("%w: anchor is ahead of the opened database", ErrRollbackAnchor)
+			}
+			return fail(err)
+		}
+	}
+	store := &v2DurableStore{file: file, documents: newV2DocumentCache(defaultV2DocumentCacheEntries, defaultV2DocumentCacheBytes), path: absolutePath, rollbackAnchor: protection.AnchorStore, databaseID: meta.DatabaseID, rollbackAnchorTimeout: anchorTimeout}
+	if protection.AnchorStore != nil {
+		store.rollbackAnchorGate = make(chan struct{}, 1)
+		store.rollbackAnchorGate <- struct{}{}
+		store.rollbackAnchorSequence.Store(meta.CommitSequence)
+		store.rollbackAnchorGeneration.Store(meta.Generation)
+	}
 	source := &v2QueryReplaySource{file: file}
 	db := &DB{
 		startedAt: time.Now(), closedCh: make(chan struct{}), collections: collections, watchers: make(map[uint64]*changeWatcher),
@@ -524,12 +596,85 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 		db.fatalErr = fmt.Errorf("%w: V2 commit sequence mismatch", ErrDurability)
 		return systemrecord.Result{}, db.fatalErr
 	}
+	if store.rollbackAnchor != nil {
+		if anchorErr := store.advanceRollbackAnchor(ctx, sequence); anchorErr != nil {
+			db.metrics.v2RejectedTransactions.Add(1)
+			db.fatalErr = fmt.Errorf("%w: committed sequence %d but %w", ErrDurability, sequence, anchorErr)
+			return systemrecord.Result{}, db.fatalErr
+		}
+	}
 	elapsed := uint64(time.Since(started))
 	db.metrics.v2CommittedTransactions.Add(1)
 	db.metrics.v2CommitNanos.Add(elapsed)
 	updateAtomicMax(&db.metrics.v2CommitMaxNanos, elapsed)
 	result.Applied = true
 	return result, nil
+}
+
+func (store *v2DurableStore) advanceRollbackAnchor(ctx context.Context, minimumSequence uint64) error {
+	if store == nil || store.rollbackAnchor == nil || zeroDatabaseID(store.databaseID) {
+		return ErrRollbackAnchor
+	}
+	if ctx == nil {
+		return ErrRollbackAnchor
+	}
+	started := time.Now()
+	defer func() {
+		elapsed := uint64(time.Since(started))
+		store.rollbackAnchorNanos.Add(elapsed)
+		updateAtomicMax(&store.rollbackAnchorMaxNanos, elapsed)
+	}()
+	select {
+	case <-ctx.Done():
+		store.rollbackAnchorFailures.Add(1)
+		return ctx.Err()
+	case <-store.rollbackAnchorGate:
+	}
+	defer func() { store.rollbackAnchorGate <- struct{}{} }()
+	meta := store.file.Meta()
+	if meta.DatabaseID != store.databaseID || meta.CommitSequence < minimumSequence || meta.Generation == 0 {
+		store.rollbackAnchorFailures.Add(1)
+		return ErrRollbackAnchor
+	}
+	operationContext, cancel := context.WithTimeout(ctx, store.rollbackAnchorTimeout)
+	defer cancel()
+	retained, err := persistRollbackAnchor(operationContext, store.rollbackAnchor, RollbackAnchor{DatabaseID: store.databaseID, MinimumCommitSequence: meta.CommitSequence, MinimumGeneration: meta.Generation})
+	if err != nil {
+		store.rollbackAnchorFailures.Add(1)
+		return err
+	}
+	latest := store.file.Meta()
+	if retained.DatabaseID != store.databaseID || retained.MinimumCommitSequence > latest.CommitSequence || retained.MinimumGeneration > latest.Generation {
+		store.rollbackAnchorFailures.Add(1)
+		return fmt.Errorf("%w: anchor advanced beyond the database", ErrRollbackAnchor)
+	}
+	store.rollbackAnchorSequence.Store(retained.MinimumCommitSequence)
+	store.rollbackAnchorGeneration.Store(retained.MinimumGeneration)
+	return nil
+}
+
+func (db *DB) advanceV2RollbackAnchorLocked(ctx context.Context, store *v2DurableStore, minimumSequence uint64) error {
+	if store == nil || store.rollbackAnchor == nil {
+		return nil
+	}
+	if err := store.advanceRollbackAnchor(ctx, minimumSequence); err != nil {
+		meta := store.file.Meta()
+		db.fatalErr = fmt.Errorf("%w: committed generation %d sequence %d but rollback anchor failed: %w", ErrDurability, meta.Generation, meta.CommitSequence, err)
+		return db.fatalErr
+	}
+	return nil
+}
+
+func (db *DB) advanceV2RollbackAnchor(ctx context.Context, store *v2DurableStore, minimumSequence uint64) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if db.closed {
+		return ErrClosed
+	}
+	if db.fatalErr != nil {
+		return db.fatalErr
+	}
+	return db.advanceV2RollbackAnchorLocked(ctx, store, minimumSequence)
 }
 
 // collectIndexEntries streams the Primary B+Tree at one exact sequence. It may
@@ -656,7 +801,18 @@ func (store *v2DurableStore) storageDBStats() StorageStats {
 		return stats
 	}
 	physical := store.file.StorageStats()
+	stats.RollbackProtected = store.rollbackAnchor != nil
+	stats.RollbackAnchorSequence = store.rollbackAnchorSequence.Load()
+	stats.RollbackAnchorGeneration = store.rollbackAnchorGeneration.Load()
+	stats.RollbackAnchorFailures = store.rollbackAnchorFailures.Load()
+	stats.RollbackAnchorTimeout = store.rollbackAnchorTimeout
+	stats.RollbackAnchorNanos = store.rollbackAnchorNanos.Load()
+	stats.RollbackAnchorMaxLatency = time.Duration(store.rollbackAnchorMaxNanos.Load())
+	if provider, ok := store.rollbackAnchor.(RollbackAnchorStatusProvider); ok {
+		stats.RollbackAnchorStore = provider.RollbackAnchorStatus()
+	}
 	stats.PageSize = physical.PageSize
+	stats.Generation = physical.Generation
 	stats.PhysicalPages = physical.PhysicalPages
 	stats.CommitSequence = physical.CommitSequence
 	stats.OldestRetainedSequence = physical.OldestRetainedSequence
@@ -734,6 +890,10 @@ func mapStorageV2Error(err error) error {
 	switch {
 	case errors.Is(err, storagev2.ErrLocked):
 		return fmt.Errorf("%w: %v", ErrDatabaseLocked, err)
+	case errors.Is(err, storagev2.ErrStaleSnapshot):
+		return fmt.Errorf("%w: %v", ErrRollbackDetected, err)
+	case errors.Is(err, storagev2.ErrDatabaseIdentity):
+		return fmt.Errorf("%w: %v", ErrDatabaseIdentity, err)
 	case errors.Is(err, storagev2.ErrUnsupportedFormat), errors.Is(err, storagev2.ErrUnsupportedFeature):
 		return fmt.Errorf("%w: %v", ErrUnsupportedFormat, err)
 	case errors.Is(err, storagev2.ErrReclamationConflict):

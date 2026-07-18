@@ -71,9 +71,39 @@ certificates.
 
 Run `meld qualification-check` over the exact capability and release-soak
 receipts before accepting them as Level 3 evidence. Production qualification
-requires `--require-level 4` plus a separately secured, hash-bound destructive
-record; the command deliberately refuses to infer power-loss safety from normal
-CI or successful `fsync` calls.
+requires `--require-level 5`: the separately secured, hash-bound Level 4
+destructive record, five ordered signed rollback-anchor phase receipts, and a
+separate signed multi-agent concurrent-history receipt with its exact
+controller log. The destructive record must bind a machine-generated exact-tree
+artifact index, and both Level 4 verification and final offline packet
+verification rehash that complete tree. It must also bind a schema-validated
+Linux environment capture whose mount, kernel, block-device/cache chain,
+controller method and operator authorization match the campaign. The release
+verifier locates all destructive receipts by content digest, reruns their
+retained-artifact checks and reconstructs the schema-6 manifest instead of
+trusting its summary. A secured evidence tree can be relocated as a whole:
+receipt bytes stay immutable while indexed content digests and unique longest
+relative-path suffixes safely rebase their old absolute artifact references.
+Campaigns must use `qualification-session-init`, record each completed
+receipt in the fixed order reported by `qualification-session-status`, and use
+`qualification-session-seal` to create the artifact index. The journal binds
+one exact executable, revision, environment, volume and controller; schema-6
+manifest assembly and every Level 4/5 recomputation reject a missing,
+incomplete, reordered or substituted journal.
+Level 4 sets `storageQualified` but not
+`productionQualified`. The command deliberately refuses to infer power-loss or
+rollback-protection safety from normal CI, successful `fsync` calls, or a
+current signer supervising old execution agents.
+
+Generate the Level 5 result with `qualification-check` using
+`--release-signing-key` and `--out`, an independent release key, and a clean
+verifier binary built from the release revision. Before publishing, run
+`qualification-packet-verify` with the signed envelope and every original
+evidence object. It verifies the
+release signature and recomputes the complete Level 5 result; a standalone
+signature check or archived `productionQualified` boolean is not a release
+decision. The offline verifier also refuses to run from a dirty build or a
+revision other than the qualified release.
 
 Never publish from a worktree containing database files, WAL files, credentials,
 or development-auth deployments.

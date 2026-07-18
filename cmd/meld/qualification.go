@@ -21,47 +21,101 @@ type qualificationSoakPhase = soakqualification.SoakPhaseReceipt
 type qualificationSoakReceipt = soakqualification.SoakReceipt
 
 type qualificationDestructiveRecord struct {
-	SchemaVersion            uint32    `json:"schemaVersion"`
-	SourceRevision           string    `json:"sourceRevision"`
-	PlatformClass            string    `json:"platformClass"`
-	GOOS                     string    `json:"goos"`
-	GOARCH                   string    `json:"goarch"`
-	Device                   uint64    `json:"device"`
-	FilesystemType           string    `json:"filesystemType"`
-	FilesystemName           string    `json:"filesystemName"`
-	BlockSize                uint64    `json:"blockSize"`
-	StartedAt                time.Time `json:"startedAt"`
-	FinishedAt               time.Time `json:"finishedAt"`
-	DurabilityReceiptSHA256  string    `json:"durabilityReceiptSha256"`
-	SoakReceiptSHA256        string    `json:"soakReceiptSha256"`
-	CapacityExhaustion       bool      `json:"capacityExhaustion"`
-	ProcessKill              bool      `json:"processKill"`
-	PowerCut                 bool      `json:"powerCut"`
-	PublicationBoundaries    bool      `json:"publicationBoundariesCovered"`
-	LockReacquisition        bool      `json:"lockReacquisition"`
-	OldOrNewStateOnly        bool      `json:"oldOrNewStateOnly"`
-	OfflineVerification      bool      `json:"offlineVerification"`
-	KernelAndMountRecorded   bool      `json:"kernelAndMountRecorded"`
-	ControllerPolicyRecorded bool      `json:"controllerPolicyRecorded"`
-	HostAndOperatorRecorded  bool      `json:"hostAndOperatorRecorded"`
-	SecuredArtifactsSHA256   string    `json:"securedArtifactsSha256"`
+	SchemaVersion               uint32                          `json:"schemaVersion"`
+	SourceRevision              string                          `json:"sourceRevision"`
+	PlatformClass               string                          `json:"platformClass"`
+	GOOS                        string                          `json:"goos"`
+	GOARCH                      string                          `json:"goarch"`
+	Device                      uint64                          `json:"device"`
+	FilesystemType              string                          `json:"filesystemType"`
+	FilesystemName              string                          `json:"filesystemName"`
+	BlockSize                   uint64                          `json:"blockSize"`
+	StartedAt                   time.Time                       `json:"startedAt"`
+	FinishedAt                  time.Time                       `json:"finishedAt"`
+	DurabilityReceiptSHA256     string                          `json:"durabilityReceiptSha256"`
+	SoakReceiptSHA256           string                          `json:"soakReceiptSha256"`
+	ProcessReceiptSHA256        string                          `json:"processReceiptSha256"`
+	CapacityReceiptSHA256       string                          `json:"capacityReceiptSha256"`
+	CorruptionReceiptSHA256     string                          `json:"corruptionReceiptSha256"`
+	PowerReceiptSHA256          []string                        `json:"powerReceiptSha256"`
+	Trials                      []qualificationDestructiveTrial `json:"trials"`
+	Infrastructure              qualificationInfrastructure     `json:"infrastructure"`
+	SecuredArtifactsIndexSHA256 string                          `json:"securedArtifactsIndexSha256"`
+	SessionPlanSHA256           string                          `json:"sessionPlanSha256"`
+	SessionHeadEventSHA256      string                          `json:"sessionHeadEventSha256"`
+	SessionExecutableSHA256     string                          `json:"sessionExecutableSha256"`
+}
+
+type qualificationDestructiveTrial struct {
+	ID                   string    `json:"id"`
+	Kind                 string    `json:"kind"`
+	PublicationBoundary  string    `json:"publicationBoundary"`
+	TriggerPoint         string    `json:"triggerPoint"`
+	StartedAt            time.Time `json:"startedAt"`
+	FinishedAt           time.Time `json:"finishedAt"`
+	OldCommitSequence    uint64    `json:"oldCommitSequence"`
+	NewCommitSequence    uint64    `json:"newCommitSequence"`
+	RecoveredSequence    uint64    `json:"recoveredCommitSequence"`
+	Outcome              string    `json:"outcome"`
+	OldStateSHA256       string    `json:"oldStateSha256"`
+	NewStateSHA256       string    `json:"newStateSha256"`
+	RecoveredStateSHA256 string    `json:"recoveredStateSha256"`
+	LockReacquired       bool      `json:"lockReacquired"`
+	OfflineVerified      bool      `json:"offlineVerified"`
+	DatabaseSHA256       string    `json:"databaseSha256"`
+	ArtifactsSHA256      string    `json:"artifactsSha256"`
+}
+
+type qualificationInfrastructure struct {
+	EnvironmentRecordSHA256 string `json:"environmentRecordSha256"`
+	KernelAndMountSHA256    string `json:"kernelAndMountSha256"`
+	ControllerPolicySHA256  string `json:"controllerPolicySha256"`
+	HostAndOperatorSHA256   string `json:"hostAndOperatorSha256"`
+	ControllerMethod        string `json:"controllerMethod"`
+}
+
+const (
+	qualificationTrialCapacity         = "capacity-exhaustion"
+	qualificationTrialProcess          = "process-kill"
+	qualificationTrialPower            = "power-cut"
+	qualificationAsyncBoundary         = "asynchronous"
+	qualificationMinimumBoundaryTrials = 3
+	qualificationMinimumProcessTrials  = 20
+)
+
+var qualificationPublicationBoundaries = [...]string{
+	"after-page-write",
+	"before-data-sync",
+	"after-data-sync",
+	"after-meta-write",
+	"after-meta-sync",
 }
 
 type qualificationCheckResult struct {
-	SchemaVersion           uint32 `json:"schemaVersion"`
-	SourceRevision          string `json:"sourceRevision"`
-	EvidenceLevel           uint8  `json:"evidenceLevel"`
-	ProductionQualified     bool   `json:"productionQualified"`
-	GOOS                    string `json:"goos"`
-	GOARCH                  string `json:"goarch"`
-	Device                  uint64 `json:"device"`
-	FilesystemType          string `json:"filesystemType"`
-	FilesystemName          string `json:"filesystemName"`
-	BlockSize               uint64 `json:"blockSize"`
-	DurabilityReceiptSHA256 string `json:"durabilityReceiptSha256"`
-	SoakReceiptSHA256       string `json:"soakReceiptSha256"`
-	DestructiveRecordSHA256 string `json:"destructiveRecordSha256,omitempty"`
-	Passed                  bool   `json:"passed"`
+	SchemaVersion                 uint32   `json:"schemaVersion"`
+	SourceRevision                string   `json:"sourceRevision"`
+	EvidenceLevel                 uint8    `json:"evidenceLevel"`
+	StorageQualified              bool     `json:"storageQualified"`
+	RollbackProtectionQualified   bool     `json:"rollbackProtectionQualified"`
+	ProductionQualified           bool     `json:"productionQualified"`
+	GOOS                          string   `json:"goos"`
+	GOARCH                        string   `json:"goarch"`
+	Device                        uint64   `json:"device"`
+	FilesystemType                string   `json:"filesystemType"`
+	FilesystemName                string   `json:"filesystemName"`
+	BlockSize                     uint64   `json:"blockSize"`
+	DurabilityReceiptSHA256       string   `json:"durabilityReceiptSha256"`
+	SoakReceiptSHA256             string   `json:"soakReceiptSha256"`
+	DestructiveRecordSHA256       string   `json:"destructiveRecordSha256,omitempty"`
+	AnchorPublicKeySHA256         string   `json:"anchorPublicKeySha256,omitempty"`
+	AnchorPhaseReceiptSHA256      []string `json:"anchorPhaseReceiptSha256,omitempty"`
+	AnchorHistoryReceiptSHA256    string   `json:"anchorHistoryReceiptSha256,omitempty"`
+	AnchorHistoryControllerSHA256 string   `json:"anchorHistoryControllerSha256,omitempty"`
+	AnchorRunID                   string   `json:"anchorRunId,omitempty"`
+	AnchorHistoryRunID            string   `json:"anchorHistoryRunId,omitempty"`
+	AnchorConfigurationID         string   `json:"anchorConfigurationId,omitempty"`
+	AnchorHistoryConfigurationID  string   `json:"anchorHistoryConfigurationId,omitempty"`
+	Passed                        bool     `json:"passed"`
 }
 
 func runQualificationCheck(args []string, stdout, stderr io.Writer) error {
@@ -69,62 +123,228 @@ func runQualificationCheck(args []string, stdout, stderr io.Writer) error {
 	flags.SetOutput(stderr)
 	durabilityPath := flags.String("durability-receipt", "", "schema-2 durability-check receipt from the target volume")
 	soakPath := flags.String("soak-receipt", "", "schema-4 release-soak receipt from the same target volume")
-	destructivePath := flags.String("destructive-record", "", "optional schema-1 secured destructive-test record")
+	destructivePath := flags.String("destructive-record", "", "optional schema-6 secured destructive-test manifest")
+	environmentPath := flags.String("environment-record", "", "machine-generated environment evidence required with a destructive record")
+	artifactsRootPath := flags.String("artifacts-root", "", "complete secured artifact directory required with a destructive record")
+	artifactsIndexPath := flags.String("artifacts-index", "", "machine-generated artifact index required with a destructive record")
+	anchorPublicKeyPath := flags.String("anchor-public-key", "", "Ed25519 key that verifies all rollback-anchor qualification evidence")
+	anchorHistoryReceiptPath := flags.String("anchor-history-receipt", "", "signed multi-agent history qualification receipt")
+	anchorHistoryPath := flags.String("anchor-history", "", "exact schema-3 multi-agent controller history")
+	var anchorPhasePaths anchorReceiptFlags
+	flags.Var(&anchorPhasePaths, "anchor-phase-receipt", "ordered signed anchor phase receipt; repeat exactly five times")
 	sourceRevision := flags.String("source-revision", "", "required 40- or 64-hex release revision")
-	requireLevel := flags.Int("require-level", 3, "minimum evidence level: 3 or 4")
+	requireLevel := flags.Int("require-level", 3, "minimum evidence level: 3, 4 or 5")
+	releaseSigningKeyPath := flags.String("release-signing-key", "", "private Ed25519 key for a signed Level 5 release packet")
+	outputPath := flags.String("out", "", "new exclusive durable signed Level 5 release packet")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if *durabilityPath == "" || *soakPath == "" || !validDurabilitySourceRevision(*sourceRevision) {
 		return errors.New("qualification-check requires --durability-receipt, --soak-receipt and a 40- or 64-hex --source-revision")
 	}
-	if *requireLevel != 3 && *requireLevel != 4 {
-		return errors.New("qualification-check --require-level must be 3 or 4")
+	if *requireLevel != 3 && *requireLevel != 4 && *requireLevel != 5 {
+		return errors.New("qualification-check --require-level must be 3, 4 or 5")
 	}
-
-	var durability durabilityCheckResult
-	durabilityRaw, err := readQualificationReceipt(*durabilityPath, &durability)
+	if (*releaseSigningKeyPath == "") != (*outputPath == "") {
+		return errors.New("qualification-check release signing requires both --release-signing-key and --out")
+	}
+	hasDestructive, hasEnvironment := *destructivePath != "", *environmentPath != ""
+	hasArtifactsRoot, hasArtifactsIndex := *artifactsRootPath != "", *artifactsIndexPath != ""
+	if hasDestructive != hasEnvironment || hasDestructive != hasArtifactsRoot || hasDestructive != hasArtifactsIndex {
+		return errors.New("qualification-check destructive evidence requires --destructive-record, --environment-record, --artifacts-root and --artifacts-index together")
+	}
+	result, err := buildQualificationCheckResult(qualificationCheckInputs{
+		durabilityPath: *durabilityPath, soakPath: *soakPath, destructivePath: *destructivePath,
+		environmentPath: *environmentPath, artifactsRootPath: *artifactsRootPath, artifactsIndexPath: *artifactsIndexPath,
+		anchorPublicKeyPath: *anchorPublicKeyPath, anchorPhasePaths: anchorPhasePaths,
+		anchorHistoryReceiptPath: *anchorHistoryReceiptPath, anchorHistoryPath: *anchorHistoryPath, sourceRevision: *sourceRevision,
+	})
 	if err != nil {
-		return fmt.Errorf("durability receipt: %w", err)
-	}
-	if err := validateQualificationDurability(durability, *sourceRevision); err != nil {
-		return fmt.Errorf("durability receipt: %w", err)
-	}
-	var soak qualificationSoakReceipt
-	soakRaw, err := readQualificationReceipt(*soakPath, &soak)
-	if err != nil {
-		return fmt.Errorf("soak receipt: %w", err)
-	}
-	if err := validateQualificationSoak(soak, durability, *sourceRevision); err != nil {
-		return fmt.Errorf("soak receipt: %w", err)
-	}
-
-	durabilityHash, soakHash := qualificationSHA256(durabilityRaw), qualificationSHA256(soakRaw)
-	result := qualificationCheckResult{
-		SchemaVersion: 1, SourceRevision: *sourceRevision, EvidenceLevel: 3,
-		GOOS: durability.GOOS, GOARCH: durability.GOARCH, Device: durability.Device,
-		FilesystemType: durability.FilesystemType, FilesystemName: durability.FilesystemName, BlockSize: durability.BlockSize,
-		DurabilityReceiptSHA256: durabilityHash, SoakReceiptSHA256: soakHash, Passed: true,
-	}
-	if *destructivePath != "" {
-		var destructive qualificationDestructiveRecord
-		raw, err := readQualificationReceipt(*destructivePath, &destructive)
-		if err != nil {
-			return fmt.Errorf("destructive record: %w", err)
-		}
-		if err := validateQualificationDestructive(destructive, result); err != nil {
-			return fmt.Errorf("destructive record: %w", err)
-		}
-		result.EvidenceLevel = 4
-		result.ProductionQualified = true
-		result.DestructiveRecordSHA256 = qualificationSHA256(raw)
+		return err
 	}
 	if int(result.EvidenceLevel) < *requireLevel {
 		return fmt.Errorf("qualification evidence level %d does not satisfy required level %d", result.EvidenceLevel, *requireLevel)
 	}
+	if *releaseSigningKeyPath != "" {
+		if *requireLevel != 5 || result.EvidenceLevel != 5 {
+			return errors.New("signed release packets require --require-level 5 and complete Level 5 evidence")
+		}
+		packet, err := newQualificationReleasePacket(result, *releaseSigningKeyPath)
+		if err != nil {
+			return err
+		}
+		if err := writeJSONExclusiveDurable(*outputPath, packet); err != nil {
+			return err
+		}
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(packet)
+	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(result)
+}
+
+type qualificationCheckInputs struct {
+	durabilityPath           string
+	soakPath                 string
+	destructivePath          string
+	environmentPath          string
+	artifactsRootPath        string
+	artifactsIndexPath       string
+	anchorPublicKeyPath      string
+	anchorPhasePaths         []string
+	anchorHistoryReceiptPath string
+	anchorHistoryPath        string
+	sourceRevision           string
+}
+
+func buildQualificationCheckResult(inputs qualificationCheckInputs) (qualificationCheckResult, error) {
+	if inputs.durabilityPath == "" || inputs.soakPath == "" || !validDurabilitySourceRevision(inputs.sourceRevision) {
+		return qualificationCheckResult{}, errors.New("qualification evidence requires durability, soak and a valid source revision")
+	}
+	var durability durabilityCheckResult
+	durabilityRaw, err := readQualificationReceipt(inputs.durabilityPath, &durability)
+	if err != nil {
+		return qualificationCheckResult{}, fmt.Errorf("durability receipt: %w", err)
+	}
+	if err := validateQualificationDurability(durability, inputs.sourceRevision); err != nil {
+		return qualificationCheckResult{}, fmt.Errorf("durability receipt: %w", err)
+	}
+	var soak qualificationSoakReceipt
+	soakRaw, err := readQualificationReceipt(inputs.soakPath, &soak)
+	if err != nil {
+		return qualificationCheckResult{}, fmt.Errorf("soak receipt: %w", err)
+	}
+	if err := validateQualificationSoak(soak, durability, inputs.sourceRevision); err != nil {
+		return qualificationCheckResult{}, fmt.Errorf("soak receipt: %w", err)
+	}
+
+	durabilityHash, soakHash := qualificationSHA256(durabilityRaw), qualificationSHA256(soakRaw)
+	result := qualificationCheckResult{
+		SchemaVersion: 2, SourceRevision: inputs.sourceRevision, EvidenceLevel: 3,
+		GOOS: durability.GOOS, GOARCH: durability.GOARCH, Device: durability.Device,
+		FilesystemType: durability.FilesystemType, FilesystemName: durability.FilesystemName, BlockSize: durability.BlockSize,
+		DurabilityReceiptSHA256: durabilityHash, SoakReceiptSHA256: soakHash, Passed: true,
+	}
+	if inputs.destructivePath != "" {
+		if inputs.environmentPath == "" || inputs.artifactsRootPath == "" || inputs.artifactsIndexPath == "" {
+			return qualificationCheckResult{}, errors.New("destructive qualification requires environment evidence and the complete secured artifact root and index")
+		}
+		var destructive qualificationDestructiveRecord
+		raw, err := readQualificationReceipt(inputs.destructivePath, &destructive)
+		if err != nil {
+			return qualificationCheckResult{}, fmt.Errorf("destructive record: %w", err)
+		}
+		if err := validateQualificationDestructive(destructive, result); err != nil {
+			return qualificationCheckResult{}, fmt.Errorf("destructive record: %w", err)
+		}
+		artifacts, err := verifyQualificationArtifactIndex(inputs.artifactsRootPath, inputs.artifactsIndexPath, inputs.sourceRevision)
+		if err != nil {
+			return qualificationCheckResult{}, fmt.Errorf("secured artifacts: %w", err)
+		}
+		if qualificationSHA256(artifacts.Raw) != destructive.SecuredArtifactsIndexSHA256 {
+			return qualificationCheckResult{}, errors.New("secured artifact index differs from destructive record binding")
+		}
+		var environment qualificationEnvironmentEvidence
+		environmentRaw, err := readQualificationReceipt(inputs.environmentPath, &environment)
+		if err != nil {
+			return qualificationCheckResult{}, fmt.Errorf("qualification environment: %w", err)
+		}
+		if err := validateQualificationEnvironmentBinding(environment, environmentRaw, artifacts, durability, destructive, inputs.sourceRevision, inputs.environmentPath); err != nil {
+			return qualificationCheckResult{}, fmt.Errorf("qualification environment: %w", err)
+		}
+		if err := verifyQualificationDestructiveOriginalEvidence(qualificationDestructiveRecomputeInputs{
+			Record: destructive, Artifacts: artifacts, Durability: durability, DurabilityRaw: durabilityRaw, SoakRaw: soakRaw,
+			Environment: environment, EnvironmentRaw: environmentRaw, EnvironmentPath: inputs.environmentPath, Revision: inputs.sourceRevision,
+		}); err != nil {
+			return qualificationCheckResult{}, fmt.Errorf("destructive original evidence: %w", err)
+		}
+		result.EvidenceLevel = 4
+		result.StorageQualified = true
+		result.DestructiveRecordSHA256 = qualificationSHA256(raw)
+	}
+	hasAnchorEvidence := inputs.anchorPublicKeyPath != "" || inputs.anchorHistoryReceiptPath != "" || inputs.anchorHistoryPath != "" || len(inputs.anchorPhasePaths) != 0
+	if hasAnchorEvidence {
+		if inputs.destructivePath == "" {
+			return qualificationCheckResult{}, errors.New("rollback-anchor qualification cannot raise evidence without a destructive storage record")
+		}
+		bindings, err := validateQualificationAnchorEvidence(
+			inputs.anchorPublicKeyPath, inputs.anchorPhasePaths, inputs.anchorHistoryReceiptPath, inputs.anchorHistoryPath, inputs.sourceRevision,
+		)
+		if err != nil {
+			return qualificationCheckResult{}, fmt.Errorf("rollback-anchor evidence: %w", err)
+		}
+		result.EvidenceLevel = 5
+		result.RollbackProtectionQualified = true
+		result.ProductionQualified = true
+		result.AnchorPublicKeySHA256 = bindings.PublicKeySHA256
+		result.AnchorPhaseReceiptSHA256 = bindings.PhaseReceiptSHA256
+		result.AnchorHistoryReceiptSHA256 = bindings.HistoryReceiptSHA256
+		result.AnchorHistoryControllerSHA256 = bindings.HistoryControllerSHA256
+		result.AnchorRunID = bindings.RunID
+		result.AnchorHistoryRunID = bindings.HistoryRunID
+		result.AnchorConfigurationID = bindings.ConfigurationID
+		result.AnchorHistoryConfigurationID = bindings.HistoryConfigurationID
+	}
+	return result, nil
+}
+
+type qualificationAnchorBindings struct {
+	PublicKeySHA256         string
+	PhaseReceiptSHA256      []string
+	HistoryReceiptSHA256    string
+	HistoryControllerSHA256 string
+	RunID                   string
+	HistoryRunID            string
+	ConfigurationID         string
+	HistoryConfigurationID  string
+}
+
+func validateQualificationAnchorEvidence(publicKeyPath string, phasePaths []string, historyReceiptPath, historyPath, revision string) (qualificationAnchorBindings, error) {
+	if publicKeyPath == "" || len(phasePaths) != len(anchorQualificationPhases) || historyReceiptPath == "" || historyPath == "" {
+		return qualificationAnchorBindings{}, errors.New("Level 5 requires one public key, five ordered phase receipts, one history receipt and its controller history")
+	}
+	publicKey, err := loadAnchorQualificationPublicKey(publicKeyPath)
+	if err != nil {
+		return qualificationAnchorBindings{}, err
+	}
+	chain, err := verifyAnchorQualificationChain(phasePaths, publicKey, true)
+	if err != nil {
+		return qualificationAnchorBindings{}, err
+	}
+	history, err := verifyAnchorHistoryQualificationFiles(historyReceiptPath, historyPath, publicKey)
+	if err != nil {
+		return qualificationAnchorBindings{}, err
+	}
+	finalPhase := chain.Receipts[len(chain.Receipts)-1]
+	if finalPhase.SourceRevision != revision || finalPhase.BuildRevision != revision || finalPhase.BuildModified {
+		return qualificationAnchorBindings{}, errors.New("anchor phase chain is not bound to the clean release revision")
+	}
+	if history.Receipt.SourceRevision != revision || history.Receipt.BuildRevision != revision || history.Receipt.BuildModified {
+		return qualificationAnchorBindings{}, errors.New("anchor history receipt is not bound to the clean release revision")
+	}
+	if history.Controller.SourceRevision != revision || history.Controller.BuildRevision != revision || history.Controller.BuildModified {
+		return qualificationAnchorBindings{}, errors.New("anchor history controller is not bound to the clean release revision")
+	}
+	for _, fragment := range history.Controller.Fragments {
+		if fragment.SourceRevision != revision || fragment.BuildRevision != revision || fragment.BuildModified {
+			return qualificationAnchorBindings{}, fmt.Errorf("anchor history agent %q is not bound to the clean release revision", fragment.Request.AgentID)
+		}
+	}
+	if chain.RunID == history.Receipt.RunID || chain.ConfigurationID == history.Receipt.ConfigurationID {
+		return qualificationAnchorBindings{}, errors.New("phase and concurrent-history qualifications must use separate runs and disposable anchor configurations")
+	}
+	for _, phase := range chain.Receipts {
+		if phase.ExternalEvidenceSHA256 == history.Receipt.ExternalEvidenceSHA256 {
+			return qualificationAnchorBindings{}, errors.New("history qualification reuses phase external evidence")
+		}
+	}
+	return qualificationAnchorBindings{
+		PublicKeySHA256: qualificationSHA256(publicKey), PhaseReceiptSHA256: append([]string(nil), chain.ReceiptSHA256...),
+		HistoryReceiptSHA256: history.ReceiptSHA256, HistoryControllerSHA256: history.ControllerSHA256,
+		RunID: chain.RunID, HistoryRunID: history.Receipt.RunID, ConfigurationID: chain.ConfigurationID, HistoryConfigurationID: history.Receipt.ConfigurationID,
+	}, nil
 }
 
 func readQualificationReceipt(path string, target any) ([]byte, error) {
@@ -252,23 +472,138 @@ func validateQualificationSoak(receipt qualificationSoakReceipt, durability dura
 }
 
 func validateQualificationDestructive(record qualificationDestructiveRecord, packet qualificationCheckResult) error {
-	if record.SchemaVersion != 1 || record.SourceRevision != packet.SourceRevision || !qualificationSafeName(record.PlatformClass, 128) ||
+	if record.SchemaVersion != 6 || record.SourceRevision != packet.SourceRevision || !qualificationSafeName(record.PlatformClass, 128) ||
 		record.GOOS != packet.GOOS || record.GOARCH != packet.GOARCH || record.Device != packet.Device ||
 		record.FilesystemType != packet.FilesystemType || record.FilesystemName != packet.FilesystemName || record.BlockSize != packet.BlockSize ||
 		record.StartedAt.IsZero() || !record.FinishedAt.After(record.StartedAt) ||
 		record.DurabilityReceiptSHA256 != packet.DurabilityReceiptSHA256 || record.SoakReceiptSHA256 != packet.SoakReceiptSHA256 {
 		return errors.New("record identity, target volume or receipt bindings do not match")
 	}
-	if !record.CapacityExhaustion || !record.ProcessKill || !record.PowerCut || !record.PublicationBoundaries ||
-		!record.LockReacquisition || !record.OldOrNewStateOnly || !record.OfflineVerification ||
-		!record.KernelAndMountRecorded || !record.ControllerPolicyRecorded || !record.HostAndOperatorRecorded ||
-		!qualificationHexDigest(record.SecuredArtifactsSHA256) {
-		return errors.New("destructive capacity, kill, power-cut, recovery or artifact evidence is incomplete")
-	}
 	if !qualificationProductionFilesystem(record.FilesystemName) {
 		return errors.New("filesystem class is not in the production qualification matrix")
 	}
+	if !qualificationHexDigest(record.SecuredArtifactsIndexSHA256) || !qualificationHexDigest(record.SessionPlanSHA256) ||
+		!qualificationHexDigest(record.SessionHeadEventSHA256) || !qualificationHexDigest(record.SessionExecutableSHA256) ||
+		!qualificationHexDigest(record.ProcessReceiptSHA256) || !qualificationHexDigest(record.CapacityReceiptSHA256) || !qualificationHexDigest(record.CorruptionReceiptSHA256) ||
+		len(record.PowerReceiptSHA256) == 0 ||
+		!qualificationHexDigest(record.Infrastructure.EnvironmentRecordSHA256) ||
+		!qualificationHexDigest(record.Infrastructure.KernelAndMountSHA256) ||
+		!qualificationHexDigest(record.Infrastructure.ControllerPolicySHA256) ||
+		!qualificationHexDigest(record.Infrastructure.HostAndOperatorSHA256) || !qualificationPowerMethod(record.Infrastructure.ControllerMethod) {
+		return errors.New("secured infrastructure or aggregate artifact evidence is incomplete")
+	}
+	for index, digest := range record.PowerReceiptSHA256 {
+		if !qualificationHexDigest(digest) {
+			return fmt.Errorf("power receipt hash %d is invalid", index+1)
+		}
+	}
+	if err := validateQualificationDestructiveTrials(record); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateQualificationDestructiveTrials(record qualificationDestructiveRecord) error {
+	if len(record.Trials) == 0 || len(record.Trials) > 10_000 {
+		return errors.New("destructive trial set must contain between 1 and 10000 trials")
+	}
+	seenIDs := make(map[string]struct{}, len(record.Trials))
+	coverage := make(map[string]map[string]int, 3)
+	processTriggers := make(map[string]int, 2)
+	for index, trial := range record.Trials {
+		if !qualificationSafeName(trial.ID, 128) {
+			return fmt.Errorf("destructive trial %d has an invalid id", index+1)
+		}
+		if _, exists := seenIDs[trial.ID]; exists {
+			return fmt.Errorf("destructive trial %d duplicates id %q", index+1, trial.ID)
+		}
+		seenIDs[trial.ID] = struct{}{}
+		if trial.Kind != qualificationTrialCapacity && trial.Kind != qualificationTrialProcess && trial.Kind != qualificationTrialPower {
+			return fmt.Errorf("destructive trial %s has an unknown kind", trial.ID)
+		}
+		if !qualificationBoundaryAllowed(trial.Kind, trial.PublicationBoundary) {
+			return fmt.Errorf("destructive trial %s has an invalid publication boundary", trial.ID)
+		}
+		if !qualificationSafeName(trial.TriggerPoint, 128) {
+			return fmt.Errorf("destructive trial %s has an invalid trigger point", trial.ID)
+		}
+		switch trial.Kind {
+		case qualificationTrialCapacity:
+			if trial.TriggerPoint != "real-enospc-at-boundary" {
+				return fmt.Errorf("destructive trial %s is not bound to a real ENOSPC trigger", trial.ID)
+			}
+		case qualificationTrialProcess:
+			if trial.TriggerPoint != "oracle-prepared" && trial.TriggerPoint != "oracle-committed" {
+				return fmt.Errorf("destructive trial %s has an invalid process-kill trigger", trial.ID)
+			}
+			processTriggers[trial.TriggerPoint]++
+		case qualificationTrialPower:
+			if trial.TriggerPoint != "external-power-cut" {
+				return fmt.Errorf("destructive trial %s is not bound to an external power-cut trigger", trial.ID)
+			}
+		}
+		if trial.StartedAt.Before(record.StartedAt) || trial.FinishedAt.After(record.FinishedAt) || !trial.FinishedAt.After(trial.StartedAt) {
+			return fmt.Errorf("destructive trial %s has invalid timing", trial.ID)
+		}
+		if trial.OldCommitSequence == 0 || trial.NewCommitSequence != trial.OldCommitSequence+1 ||
+			(trial.RecoveredSequence != trial.OldCommitSequence && trial.RecoveredSequence != trial.NewCommitSequence) {
+			return fmt.Errorf("destructive trial %s did not recover exactly the old or new generation", trial.ID)
+		}
+		wantOutcome := "old"
+		if trial.RecoveredSequence == trial.NewCommitSequence {
+			wantOutcome = "new"
+		}
+		if trial.Outcome != wantOutcome {
+			return fmt.Errorf("destructive trial %s outcome does not match its recovered sequence", trial.ID)
+		}
+		if !qualificationHexDigest(trial.OldStateSHA256) || !qualificationHexDigest(trial.NewStateSHA256) ||
+			!qualificationHexDigest(trial.RecoveredStateSHA256) || trial.OldStateSHA256 == trial.NewStateSHA256 {
+			return fmt.Errorf("destructive trial %s lacks distinct old/new state proofs", trial.ID)
+		}
+		wantState := trial.OldStateSHA256
+		if wantOutcome == "new" {
+			wantState = trial.NewStateSHA256
+		}
+		if trial.RecoveredStateSHA256 != wantState {
+			return fmt.Errorf("destructive trial %s recovered state does not match its outcome", trial.ID)
+		}
+		if !trial.LockReacquired || !trial.OfflineVerified || !qualificationHexDigest(trial.DatabaseSHA256) ||
+			!qualificationHexDigest(trial.ArtifactsSHA256) {
+			return fmt.Errorf("destructive trial %s lacks lock, offline verification or artifact evidence", trial.ID)
+		}
+		if coverage[trial.Kind] == nil {
+			coverage[trial.Kind] = make(map[string]int)
+		}
+		coverage[trial.Kind][trial.PublicationBoundary]++
+	}
+	for _, boundary := range qualificationPublicationBoundaries {
+		if coverage[qualificationTrialCapacity][boundary] < qualificationMinimumBoundaryTrials {
+			return fmt.Errorf("capacity-exhaustion evidence requires at least %d trials at %s", qualificationMinimumBoundaryTrials, boundary)
+		}
+		if coverage[qualificationTrialPower][boundary] < qualificationMinimumBoundaryTrials {
+			return fmt.Errorf("power-cut evidence requires at least %d trials at %s", qualificationMinimumBoundaryTrials, boundary)
+		}
+	}
+	if coverage[qualificationTrialProcess][qualificationAsyncBoundary] < qualificationMinimumProcessTrials {
+		return fmt.Errorf("process-kill evidence requires at least %d asynchronous trials", qualificationMinimumProcessTrials)
+	}
+	if processTriggers["oracle-prepared"] < qualificationMinimumProcessTrials/2 ||
+		processTriggers["oracle-committed"] < qualificationMinimumProcessTrials/2 {
+		return errors.New("process-kill evidence requires at least 10 prepared and 10 committed trigger trials")
+	}
+	return nil
+}
+
+func qualificationBoundaryAllowed(kind, boundary string) bool {
+	if kind == qualificationTrialProcess {
+		return boundary == qualificationAsyncBoundary
+	}
+	for _, candidate := range qualificationPublicationBoundaries {
+		if boundary == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func qualificationSHA256(raw []byte) string {

@@ -76,6 +76,14 @@ func (backend *dbSystemRecordBackend) CompareAndSwap(ctx context.Context, mutati
 		db.mu.Unlock()
 		return systemrecord.Result{}, db.fatalErr
 	}
+	if store.rollbackAnchor != nil {
+		if anchorErr := store.advanceRollbackAnchor(ctx, result.Sequence); anchorErr != nil {
+			db.metrics.v2RejectedTransactions.Add(1)
+			db.fatalErr = fmt.Errorf("%w: committed system sequence %d but %w", ErrDurability, result.Sequence, anchorErr)
+			db.mu.Unlock()
+			return systemrecord.Result{}, db.fatalErr
+		}
+	}
 	db.token = result.Sequence
 	elapsed := uint64(time.Since(started))
 	db.metrics.v2CommittedTransactions.Add(1)

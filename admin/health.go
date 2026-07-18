@@ -30,6 +30,7 @@ type HealthSignals struct {
 	StorageQuotaExhausted        bool `json:"storageQuotaExhausted"`
 	StorageLimitRejected         bool `json:"storageLimitRejected"`
 	DurabilityFailure            bool `json:"durabilityFailure"`
+	RollbackAnchorDegraded       bool `json:"rollbackAnchorDegraded"`
 	TelemetryDeliveryDropped     bool `json:"telemetryDeliveryDropped"`
 	TransportBusy                bool `json:"transportBusy"`
 	RPCOutcomeUnknown            bool `json:"rpcOutcomeUnknown"`
@@ -111,12 +112,18 @@ func assessHealth(previous *Sample, current Sample) HealthStatus {
 		health.Signals.ReactiveQueueOverflow = increased(previous.Stats.Realtime.QueueOverflows, current.Stats.Realtime.QueueOverflows)
 		health.Signals.SlowConsumer = increased(previous.Stats.Realtime.SlowConsumers, current.Stats.Realtime.SlowConsumers)
 		health.Signals.DurabilityFailure = increased(previous.Stats.Durability.WALAppendFailures, current.Stats.Durability.WALAppendFailures) ||
-			increased(previous.Stats.Durability.CheckpointFailures, current.Stats.Durability.CheckpointFailures)
+			increased(previous.Stats.Durability.CheckpointFailures, current.Stats.Durability.CheckpointFailures) ||
+			increased(previous.Stats.Storage.RollbackAnchorFailures, current.Stats.Storage.RollbackAnchorFailures)
+		health.Signals.RollbackAnchorDegraded = increased(previous.Stats.Storage.RollbackAnchorStore.EndpointFailures, current.Stats.Storage.RollbackAnchorStore.EndpointFailures) ||
+			increased(previous.Stats.Storage.RollbackAnchorStore.ConfigurationFailures, current.Stats.Storage.RollbackAnchorStore.ConfigurationFailures)
 		health.Signals.StorageLimitRejected = increased(previous.Stats.Storage.StorageLimitRejections, current.Stats.Storage.StorageLimitRejections)
 		if health.Signals.ReactiveQueueOverflow || health.Signals.SlowConsumer {
 			health.Realtime = maxHealth(health.Realtime, HealthDegraded)
 		}
 		if health.Signals.DurabilityFailure {
+			health.Durability = maxHealth(health.Durability, HealthDegraded)
+		}
+		if health.Signals.RollbackAnchorDegraded {
 			health.Durability = maxHealth(health.Durability, HealthDegraded)
 		}
 		if health.Signals.StorageLimitRejected {

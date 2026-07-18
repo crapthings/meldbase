@@ -81,10 +81,16 @@ func (db *DB) ReclaimV2PagesWithOptions(ctx context.Context, options ReclaimV2Op
 		db.mu.RUnlock()
 		return result, err
 	}
+	minimumSequence := db.token
+	readLockHeld := true
+	defer func() {
+		if readLockHeld {
+			db.mu.RUnlock()
+		}
+	}()
 	if options.Online {
 		db.mu.RUnlock()
-	} else {
-		defer db.mu.RUnlock()
+		readLockHeld = false
 	}
 	var (
 		stats    storagev2.ReachabilityStats
@@ -108,6 +114,13 @@ func (db *DB) ReclaimV2PagesWithOptions(ctx context.Context, options ReclaimV2Op
 	if !options.MemoryOnly {
 		if err := store.file.PersistFreeSpaceContext(ctx); err != nil {
 			return result, mapStorageV2Error(err)
+		}
+		if readLockHeld {
+			db.mu.RUnlock()
+			readLockHeld = false
+		}
+		if err := db.advanceV2RollbackAnchor(ctx, store, minimumSequence); err != nil {
+			return result, err
 		}
 	}
 	physical := store.file.StorageStats()

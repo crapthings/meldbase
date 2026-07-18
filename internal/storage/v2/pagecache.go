@@ -22,6 +22,7 @@ type PageCacheStats struct {
 // contains no keys, document identifiers, paths, or user values.
 type StorageStats struct {
 	PageSize                   uint64
+	Generation                 uint64
 	PhysicalPages              uint64
 	CommitSequence             uint64
 	OldestRetainedSequence     uint64

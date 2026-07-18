@@ -79,6 +79,7 @@
     storageQuotaExhausted: "physical storage quota is exhausted",
     storageLimitRejected: "a write exceeded the physical storage quota",
     durabilityFailure: "durability operation failed",
+	rollbackAnchorDegraded: "a rollback-anchor replica was unavailable or misconfigured during the latest sample window",
     telemetryDeliveryDropped: "telemetry delivery replaced",
     transportBusy: "transport concurrency busy",
     rpcOutcomeUnknown: "RPC outcome unknown",
@@ -100,7 +101,7 @@
   }
 
   function update(sample) {
-    if (!sample || sample.version !== 10) return;
+    if (!sample || sample.version !== 11) return;
     const stats = sample.stats;
     const rates = sample.rates;
     const storage = stats.storage;
@@ -134,6 +135,16 @@
 
     text("readers", `${number(storage.activeReaders)} readers`);
     text("physical-pages", number(storage.physicalPages));
+	text("physical-generation", number(storage.generation));
+	const rollbackSequenceLag = storage.rollbackProtected && storage.commitSequence > storage.rollbackAnchorSequence ? storage.commitSequence - storage.rollbackAnchorSequence : 0;
+	const rollbackGenerationLag = storage.rollbackProtected && storage.generation > storage.rollbackAnchorGeneration ? storage.generation - storage.rollbackAnchorGeneration : 0;
+	text("rollback-protection", storage.rollbackProtected ? "active · external anchor" : "disabled");
+	text("rollback-anchor", storage.rollbackProtected ? `${number(storage.rollbackAnchorSequence)} sequence · ${number(storage.rollbackAnchorGeneration)} generation` : "not configured");
+	text("rollback-anchor-lag", storage.rollbackProtected ? (rollbackSequenceLag || rollbackGenerationLag ? `${number(rollbackSequenceLag)} sequence · ${number(rollbackGenerationLag)} generation` : "in sync") : "not applicable");
+	text("rollback-anchor-failures", number(storage.rollbackAnchorFailures));
+	const anchorStore = storage.rollbackAnchorStore || {};
+	text("rollback-anchor-backend", storage.rollbackProtected ? `${number(anchorStore.replicas)} replicas · quorum ${number(anchorStore.quorum)} · ${number(anchorStore.endpointFailures)} endpoint failures · ${number(anchorStore.configurationFailures)} configuration failures` : "not applicable");
+	text("rollback-anchor-latency", storage.rollbackProtected ? `${duration(storage.rollbackAnchorMaxLatencyNanos)} max · ${duration(storage.rollbackAnchorTimeoutNanos)} timeout` : "not applicable");
 	text("storage-quota", storage.storageMaxBytes ? `${bytes(storage.storageUsedBytes)} / ${bytes(storage.storageMaxBytes)}${storage.storageByteOverage ? ` · ${bytes(storage.storageByteOverage)} over` : ""}` : "not applicable");
 	text("storage-limit-rejections", number(storage.storageLimitRejections));
     text("reusable-pages", number(storage.reusablePages));
@@ -336,7 +347,7 @@
     const historyResponse = await request("/v1/stats/history");
     if (!historyResponse.ok) throw new Error(historyResponse.status === 401 ? "Invalid admin token" : `Admin API returned ${historyResponse.status}`);
     const history = await historyResponse.json();
-    if (history.version !== 10 || !Array.isArray(history.samples)) throw new Error("Unsupported admin protocol");
+    if (history.version !== 11 || !Array.isArray(history.samples)) throw new Error("Unsupported admin protocol");
     samples.length = 0;
     history.samples.forEach(update);
     login.hidden = true;

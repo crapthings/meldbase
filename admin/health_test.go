@@ -76,6 +76,18 @@ func TestAssessHealthReportsRecentStorageLimitRejection(t *testing.T) {
 	}
 }
 
+func TestAssessHealthReportsRecentRollbackAnchorFailure(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	previous := Sample{Stats: meldbase.DBStats{StartedAt: started}}
+	current := previous
+	current.Stats.Storage.RollbackAnchorFailures = 1
+	current.Stats.Storage.RollbackAnchorStore.EndpointFailures = 1
+	health := assessHealth(&previous, current)
+	if health.Durability != HealthDegraded || health.Overall != HealthDegraded || !health.Signals.DurabilityFailure || !health.Signals.RollbackAnchorDegraded {
+		t.Fatalf("rollback anchor health=%+v", health)
+	}
+}
+
 func TestAssessHealthDegradesForPersistentIndexBuildOperatorStates(t *testing.T) {
 	current := Sample{Stats: meldbase.DBStats{
 		IndexBuilds: meldbase.IndexBuildStats{Persistent: 1, PersistentFailed: 1},

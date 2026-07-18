@@ -19,7 +19,7 @@ const instrumentationName = "github.com/crapthings/meldbase/integrations/otel"
 
 // SchemaVersion identifies the fixed aggregate instrument contract. It is
 // independent of the admin JSON schema and OpenTelemetry API version.
-const SchemaVersion uint32 = 7
+const SchemaVersion uint32 = 8
 
 type InstrumentKind string
 
@@ -323,6 +323,43 @@ var intDescriptors = []intDescriptor{
 	{name: "meldbase.recovery.wal_replayed", description: "Complete V1 WAL records replayed at startup.", unit: "{record}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Recovery.WALRecordsReplayed) }},
 	{name: "meldbase.recovery.wal_tail_removed", description: "Provably incomplete V1 WAL tail bytes removed at startup.", unit: "By", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Recovery.WALTailBytesRemoved) }},
 	{name: "meldbase.commit.sequence", description: "Current logical commit sequence.", unit: "{commit}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.CommitSequence) }},
+	{name: "meldbase.storage.generation", description: "Current physical V2 publication generation.", unit: "{generation}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.Generation) }},
+	{name: "meldbase.storage.rollback.protected", description: "Whether acknowledged V2 commits are gated by an external rollback anchor.", unit: "1", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(boolValue(s.Stats.Storage.RollbackProtected)) }},
+	{name: "meldbase.storage.rollback.anchor.sequence", description: "Last rollback-anchor sequence durably read back in this process.", unit: "{commit}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.RollbackAnchorSequence) }},
+	{name: "meldbase.storage.rollback.anchor.generation", description: "Last rollback-anchor generation durably read back in this process.", unit: "{generation}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.RollbackAnchorGeneration) }},
+	{name: "meldbase.storage.rollback.anchor.lag", description: "Logical commits by which the database is ahead of its rollback anchor.", unit: "{commit}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) {
+		if s.Stats.Storage.RollbackProtected && s.Stats.Storage.CommitSequence > s.Stats.Storage.RollbackAnchorSequence {
+			return available(s.Stats.Storage.CommitSequence - s.Stats.Storage.RollbackAnchorSequence)
+		}
+		return available(0)
+	}},
+	{name: "meldbase.storage.rollback.anchor.generation_lag", description: "Physical generations by which the database is ahead of its rollback anchor.", unit: "{generation}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) {
+		if s.Stats.Storage.RollbackProtected && s.Stats.Storage.Generation > s.Stats.Storage.RollbackAnchorGeneration {
+			return available(s.Stats.Storage.Generation - s.Stats.Storage.RollbackAnchorGeneration)
+		}
+		return available(0)
+	}},
+	{name: "meldbase.storage.rollback.anchor.failure", description: "Rollback-anchor durable save or read-back failures.", unit: "{failure}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.RollbackAnchorFailures) }},
+	{name: "meldbase.storage.rollback.anchor.replica", description: "Configured rollback-anchor replicas.", unit: "{replica}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.RollbackAnchorStore.Replicas) }},
+	{name: "meldbase.storage.rollback.anchor.quorum", description: "Rollback-anchor replicas required for a majority.", unit: "{replica}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.RollbackAnchorStore.Quorum) }},
+	{name: "meldbase.storage.rollback.anchor.store.load", description: "Rollback-anchor store load operations.", unit: "{operation}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.RollbackAnchorStore.Loads) }},
+	{name: "meldbase.storage.rollback.anchor.store.advance", description: "Rollback-anchor store advance operations.", unit: "{operation}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.RollbackAnchorStore.Advances) }},
+	{name: "meldbase.storage.rollback.anchor.endpoint.failure", description: "Rollback-anchor endpoint failures observed before an operation completed.", unit: "{failure}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) {
+		return available(s.Stats.Storage.RollbackAnchorStore.EndpointFailures)
+	}},
+	{name: "meldbase.storage.rollback.anchor.quorum.failure", description: "Rollback-anchor operations that failed to reach quorum.", unit: "{failure}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) {
+		return available(s.Stats.Storage.RollbackAnchorStore.QuorumFailures)
+	}},
+	{name: "meldbase.storage.rollback.anchor.conflict", description: "Rollback-anchor incomparable-history or identity conflicts.", unit: "{conflict}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.RollbackAnchorStore.Conflicts) }},
+	{name: "meldbase.storage.rollback.anchor.authentication.failure", description: "Rollback-anchor authentication failures.", unit: "{failure}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) {
+		return available(s.Stats.Storage.RollbackAnchorStore.AuthenticationFailures)
+	}},
+	{name: "meldbase.storage.rollback.anchor.protocol.failure", description: "Rollback-anchor protocol validation failures.", unit: "{failure}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) {
+		return available(s.Stats.Storage.RollbackAnchorStore.ProtocolFailures)
+	}},
+	{name: "meldbase.storage.rollback.anchor.configuration.failure", description: "Rollback-anchor static configuration or member identity failures.", unit: "{failure}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) {
+		return available(s.Stats.Storage.RollbackAnchorStore.ConfigurationFailures)
+	}},
 	{name: "meldbase.collection.count", description: "Current collections.", unit: "{collection}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Collections) }},
 	{name: "meldbase.document.count", description: "Current documents.", unit: "{document}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Documents) }},
 	{name: "meldbase.index.count", description: "Current secondary indexes.", unit: "{index}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Indexes) }},
@@ -447,6 +484,13 @@ var floatDescriptors = []floatDescriptor{
 	}},
 	{name: "meldbase.storage.commit.time", description: "Accumulated V2 storage commit time.", unit: "s", kind: floatCounter, read: func(s admin.Sample) (float64, bool) { return seconds(s.Stats.Storage.CommitNanos), true }},
 	{name: "meldbase.storage.commit.max_duration", description: "Maximum V2 storage commit duration.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return durationSeconds(s.Stats.Storage.CommitMaxLatency), true }},
+	{name: "meldbase.storage.rollback.anchor.time", description: "Accumulated synchronous rollback-anchor update time.", unit: "s", kind: floatCounter, read: func(s admin.Sample) (float64, bool) { return seconds(s.Stats.Storage.RollbackAnchorNanos), true }},
+	{name: "meldbase.storage.rollback.anchor.max_duration", description: "Maximum synchronous rollback-anchor update duration.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) {
+		return durationSeconds(s.Stats.Storage.RollbackAnchorMaxLatency), true
+	}},
+	{name: "meldbase.storage.rollback.anchor.timeout", description: "Configured deadline for each rollback-anchor interaction.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) {
+		return durationSeconds(s.Stats.Storage.RollbackAnchorTimeout), true
+	}},
 	{name: "meldbase.backup.last_duration", description: "Duration of the last physical V2 backup attempt.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return durationSeconds(s.Stats.Backup.LastDuration), true }},
 	{name: "meldbase.cache.page.hit_ratio", description: "Latest sampled V2 page-cache hit ratio.", unit: "1", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return s.Rates.PageCacheHitRatio, s.Rates.Valid }},
 	{name: "meldbase.cache.document.hit_ratio", description: "Latest sampled decoded-document-cache hit ratio.", unit: "1", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return s.Rates.DocumentCacheHitRatio, s.Rates.Valid }},

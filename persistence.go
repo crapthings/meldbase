@@ -84,9 +84,12 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 	}
 	switch format {
 	case StorageFormatV1:
+		if rollbackProtectionConfigured(options.V2RollbackProtection) {
+			return nil, ErrInvalidRollbackProtection
+		}
 		return OpenV1WithOptions(path, V1Options{Checkpoint: options.V1Checkpoint, Recovery: options.Recovery, ResourceLimits: options.ResourceLimits})
 	case StorageFormatV2:
-		return OpenV2WithOptions(path, V2Options{Recovery: options.Recovery, CommitRetention: options.V2CommitRetention, ResourceLimits: options.ResourceLimits, StorageLimits: options.V2StorageLimits})
+		return OpenV2WithOptions(path, V2Options{Recovery: options.Recovery, CommitRetention: options.V2CommitRetention, ResourceLimits: options.ResourceLimits, StorageLimits: options.V2StorageLimits, RollbackProtection: options.V2RollbackProtection})
 	case StorageFormatUnknown:
 		// A missing main file beside any V1 WAL may represent an incomplete
 		// restore or operator mistake. Never create a V2 main file that would
@@ -96,7 +99,7 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return nil, statErr
 		}
-		return OpenV2WithOptions(path, V2Options{Recovery: options.Recovery, CommitRetention: options.V2CommitRetention, ResourceLimits: options.ResourceLimits, StorageLimits: options.V2StorageLimits})
+		return OpenV2WithOptions(path, V2Options{Recovery: options.Recovery, CommitRetention: options.V2CommitRetention, ResourceLimits: options.ResourceLimits, StorageLimits: options.V2StorageLimits, RollbackProtection: options.V2RollbackProtection})
 	default:
 		return nil, ErrCorrupt
 	}
