@@ -54,17 +54,18 @@ type (
 )
 
 const (
-	ProtocolVersion                 = internal.ProtocolVersion
-	RPCIdempotencyExecute           = internal.RPCIdempotencyExecute
-	RPCIdempotencyReplayResult      = internal.RPCIdempotencyReplayResult
-	RPCIdempotencyReplayError       = internal.RPCIdempotencyReplayError
-	RPCIdempotencyInProgress        = internal.RPCIdempotencyInProgress
-	RPCIdempotencyOutcomeUnknown    = internal.RPCIdempotencyOutcomeUnknown
-	RPCIdempotencyConflict          = internal.RPCIdempotencyConflict
-	CollectionAccessCollaborative   = internal.CollectionAccessCollaborative
-	CollectionAccessOwner           = internal.CollectionAccessOwner
-	CollectionAccessRPCOnly         = internal.CollectionAccessRPCOnly
-	CollectionAccessManifestVersion = internal.CollectionAccessManifestVersion
+	ProtocolVersion                   = internal.ProtocolVersion
+	RPCIdempotencyExecute             = internal.RPCIdempotencyExecute
+	RPCIdempotencyReplayResult        = internal.RPCIdempotencyReplayResult
+	RPCIdempotencyReplayError         = internal.RPCIdempotencyReplayError
+	RPCIdempotencyInProgress          = internal.RPCIdempotencyInProgress
+	RPCIdempotencyOutcomeUnknown      = internal.RPCIdempotencyOutcomeUnknown
+	RPCIdempotencyConflict            = internal.RPCIdempotencyConflict
+	CollectionAccessCollaborative     = internal.CollectionAccessCollaborative
+	CollectionAccessOwner             = internal.CollectionAccessOwner
+	CollectionAccessRPCOnly           = internal.CollectionAccessRPCOnly
+	CollectionAccessManifestVersion   = internal.CollectionAccessManifestVersion
+	CollectionAccessManifestSchemaURL = internal.CollectionAccessManifestSchemaURL
 )
 
 var (

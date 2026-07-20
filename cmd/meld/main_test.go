@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/crapthings/meldbase/core"
+	meldserver "github.com/crapthings/meldbase/server"
 )
 
 func TestDurabilityCheckExercisesTargetDirectoryAndCleansUp(t *testing.T) {
@@ -660,7 +661,7 @@ func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 		}
 	}
 	accessPolicy, err := os.ReadFile(accessPolicyPath)
-	if err != nil || !strings.Contains(string(accessPolicy), `"workspaceField": "workspaceId"`) ||
+	if err != nil || !strings.Contains(string(accessPolicy), `"$schema": "`+meldserver.CollectionAccessManifestSchemaURL+`"`) || !strings.Contains(string(accessPolicy), `"workspaceField": "workspaceId"`) ||
 		!strings.Contains(string(accessPolicy), `"collection": "projects"`) || !strings.Contains(string(accessPolicy), `"mode": "collaborative"`) {
 		t.Fatalf("access policy=%s err=%v", accessPolicy, err)
 	}

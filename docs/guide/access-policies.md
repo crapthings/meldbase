@@ -25,6 +25,7 @@ meld serve \
 
 ```json
 {
+  "$schema": "https://crapthings.github.io/meldbase/schemas/collection-access-manifest-v1.schema.json",
   "version": 1,
   "workspaceField": "workspaceId",
   "collections": [
@@ -69,8 +70,9 @@ membership resolver.
 
 For editor autocomplete, CI checks, or AI-generated configuration, the
 versioned [JSON Schema](/schemas/collection-access-manifest-v1.schema.json) is
-published with the documentation. It catches the portable manifest shape; the
-server's strict parser remains the final authority for every semantic check.
+published with the documentation. Add the shown `"$schema"` line to opt into
+editor autocomplete. It catches the portable manifest shape; the server's
+strict parser remains the final authority for every semantic check.
 
 ### Optional field boundary
 

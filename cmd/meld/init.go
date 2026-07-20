@@ -105,7 +105,8 @@ func runInit(args []string, stdout, stderr io.Writer) error {
 	}
 	accessPolicyPath := filepath.Join(configDirectory, "access-policy.json")
 	accessPolicy, err := json.MarshalIndent(meldserver.CollectionAccessManifest{
-		Version: meldserver.CollectionAccessManifestVersion, WorkspaceField: *workspaceField, Collections: collectionAccess,
+		SchemaURL: meldserver.CollectionAccessManifestSchemaURL,
+		Version:   meldserver.CollectionAccessManifestVersion, WorkspaceField: *workspaceField, Collections: collectionAccess,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode collection access policy: %w", err)

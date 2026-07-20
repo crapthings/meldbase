@@ -206,6 +206,7 @@ func TestCollectionAccessModesEnforceOwnerAndRPCOnlyBoundaries(t *testing.T) {
 
 func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 	manifest, err := ParseCollectionAccessManifestJSON([]byte(`{
+		"$schema": "https://crapthings.github.io/meldbase/schemas/collection-access-manifest-v1.schema.json",
 		"version": 1,
 		"workspaceField": "workspaceId",
 		"collections": [
@@ -218,13 +219,14 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	config, err := manifest.WorkspaceAuthorizerConfig()
-	if err != nil || len(config.CollectionAccess) != 3 || config.CollectionAccess[1].Fields == nil || len(config.CollectionAccess[1].Fields.UpdatePaths) != 1 {
+	if err != nil || manifest.SchemaURL != CollectionAccessManifestSchemaURL || len(config.CollectionAccess) != 3 || config.CollectionAccess[1].Fields == nil || len(config.CollectionAccess[1].Fields.UpdatePaths) != 1 {
 		t.Fatalf("manifest config=%+v err=%v", config, err)
 	}
 	for _, input := range []string{
 		`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"private_notes","mode":"owner"}]}`,
 		`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative","unexpected":true}]}`,
 		`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"rpc_only","fields":{"resultFields":["title"]}}]}`,
+		`{"$schema":"https://example.test/other.json","version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative"}]}`,
 		`{"version":2,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative"}]}`,
 	} {
 		if _, err := ParseCollectionAccessManifestJSON([]byte(input)); err == nil {

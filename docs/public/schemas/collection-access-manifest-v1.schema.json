@@ -11,6 +11,10 @@
     "collections"
   ],
   "properties": {
+    "$schema": {
+      "const": "https://crapthings.github.io/meldbase/schemas/collection-access-manifest-v1.schema.json",
+      "description": "Optional editor and tooling metadata. When supplied, Meldbase requires this exact versioned URL."
+    },
     "version": {
       "const": 1,
       "description": "The only currently supported manifest version."
