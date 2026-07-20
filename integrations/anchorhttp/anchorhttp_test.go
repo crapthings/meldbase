@@ -668,10 +668,23 @@ func TestDatabaseRecoversCommitAfterQuorumResponsesAreLost(t *testing.T) {
 	if err != nil || len(checks) != 3 {
 		t.Fatalf("post-recovery checks=%+v err=%v", checks, err)
 	}
+	converged := 0
 	for _, check := range checks {
-		if check.State != ReplicaAvailable || !check.Exists || check.Anchor.MinimumCommitSequence != 2 || check.Anchor.MinimumGeneration != 3 {
-			t.Fatalf("post-recovery member did not converge: %+v", check)
+		if check.State == ReplicaAvailable && check.Exists && check.Anchor.MinimumCommitSequence == 2 && check.Anchor.MinimumGeneration == 3 {
+			converged++
+			continue
 		}
+		// Advance returns after a durable majority and cancels outstanding
+		// requests. A healthy member may therefore still expose the prior
+		// anchor immediately after the commit; it must never expose a future or
+		// different database anchor.
+		if check.State != ReplicaAvailable || !check.Exists || check.Anchor.DatabaseID != reopened.DatabaseIdentity() ||
+			check.Anchor.MinimumCommitSequence > 2 || check.Anchor.MinimumGeneration > 3 {
+			t.Fatalf("post-recovery member has an invalid anchor: %+v", check)
+		}
+	}
+	if converged < 2 {
+		t.Fatalf("post-recovery quorum did not converge: checks=%+v", checks)
 	}
 }
 
