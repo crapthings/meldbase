@@ -686,8 +686,34 @@ go run ./cmd/meld serve \
 ```
 
 `--dev-no-auth` grants every request full access and is intentionally required;
-it is not a production authentication mode. A production embedding supplies the
-server `Authenticator` and `Authorizer` implementations itself.
+it is not a production authentication mode. For the built-in production path,
+configure JWT verification and the collections that are scoped to a current
+workspace. A token must carry `sub`, an expiring `exp`, the configured `iss` and
+`aud`, plus `workspace_id` (or the claim selected by `--jwt-workspace-claim`):
+
+```sh
+go run ./cmd/meld serve \
+  --db ./app.meld \
+  --addr :8080 \
+  --jwt-jwks-url https://identity.example/.well-known/jwks.json \
+  --jwt-issuer https://identity.example/ \
+  --jwt-audience meldbase-api \
+  --workspace-collections projects,tasks,comments \
+  --workspace-field workspaceId
+```
+
+The JWKS endpoint must use HTTPS and RS256 keys are cached for a bounded period.
+For a first-party identity service, `--jwt-hs256-secret-file` may be used instead
+of `--jwt-jwks-url`; the file must contain at least 32 random bytes. The two
+modes are mutually exclusive.
+
+For every configured collection, the server injects
+`workspaceId == token.workspace_id` into reads, subscriptions, updates and
+deletes. It overwrites that field on inserts and rejects updates to it. The
+client never sends a trusted workspace selector. Collections not listed in
+`--workspace-collections` fail closed. Applications embedding the public Go
+`server` package can supply custom `Authenticator` and `Authorizer`
+implementations for more specialized rules.
 
 The development server can exercise the same fail-closed V2 anchor lifecycle.
 On the first audited provisioning only, use `--rollback-anchor-init`; omit it on

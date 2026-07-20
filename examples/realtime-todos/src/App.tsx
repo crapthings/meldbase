@@ -10,7 +10,8 @@ interface Todo extends Document {
 }
 
 const baseUrl = import.meta.env.VITE_MELDBASE_URL ?? "http://localhost:8080";
-const client = new MeldbaseClient({ baseUrl });
+const accessToken = import.meta.env.VITE_MELDBASE_TOKEN;
+const client = new MeldbaseClient({ baseUrl, ...(accessToken ? { accessToken } : {}) });
 const todos = client.collection<Todo>("todos");
 const openTodos = todos.find(
   { completed: false },
@@ -73,6 +74,7 @@ export function App() {
           <span className="connection-dot" />
           <span>{statusLabel(status)}</span>
         </div>
+        {accessToken ? <p className="identity-note">Current workspace is selected by the signed access token.</p> : null}
       </section>
 
       <section className="workspace" aria-labelledby="todos-title">
@@ -124,7 +126,7 @@ export function App() {
         ) : null}
 
         <footer className="workspace-footer">
-          <span>Snapshot transport · data-only query AST</span>
+          <span>{accessToken ? "JWT workspace scope · snapshot transport" : "Snapshot transport · data-only query AST"}</span>
           <code>{baseUrl}</code>
         </footer>
       </section>

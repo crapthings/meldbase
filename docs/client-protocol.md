@@ -50,6 +50,14 @@ Insert authorization separately validates client-writable fields, then applies
 server-owned fields such as tenant and owner after validation. Client values can
 never override those fields.
 
+The built-in workspace authorizer is the standard multi-tenant policy: the
+authenticated JWT contributes the active `workspace_id`, while a configured
+collection stores a server-owned `workspaceId` field. The handler injects its
+equality constraint into every read and subscription before pagination, sets it
+on insert, and denies any update path at or below that field. A browser SDK may
+therefore query a collection normally; it must not be given a separate,
+client-chosen tenant parameter. Switching workspaces means obtaining a new JWT.
+
 Update and delete authorization recompile the data-only mutation on the server,
 apply the server-owned row predicate, validate writable paths, and enforce a
 separate `MaxAffected` bound. That bound is checked while the engine holds its

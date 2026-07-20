@@ -302,6 +302,13 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	address := flags.String("addr", ":8080", "HTTP listen address")
 	realtimeURL := flags.String("public-realtime-url", "", "public ws(s) URL ending in /v1/realtime")
 	devNoAuth := flags.Bool("dev-no-auth", false, "explicitly allow all requests; development only")
+	jwtHS256SecretFile := flags.String("jwt-hs256-secret-file", "", "private file containing a 32+ byte HS256 JWT secret")
+	jwtJWKSURL := flags.String("jwt-jwks-url", "", "HTTPS OIDC JSON Web Key Set URL for RS256 JWT verification")
+	jwtIssuer := flags.String("jwt-issuer", "", "required JWT issuer value")
+	jwtAudience := flags.String("jwt-audience", "", "required JWT audience value")
+	jwtWorkspaceClaim := flags.String("jwt-workspace-claim", "workspace_id", "JWT claim containing the active workspace ID")
+	workspaceCollections := flags.String("workspace-collections", "", "comma-separated collections isolated by the active workspace")
+	workspaceField := flags.String("workspace-field", "workspaceId", "server-owned document field containing the workspace ID")
 	adminAddress := flags.String("admin-addr", "", "optional loopback address for the secured embedded admin dashboard")
 	adminDiagnostics := flags.Bool("admin-diagnostics", false, "record bounded slow/failure diagnostics for the admin dashboard")
 	adminDiagnosticsAll := flags.Bool("admin-diagnostics-all", false, "record every query/commit; short development sessions only")
@@ -340,8 +347,20 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if (*rollbackAnchorPath != "" || remoteAnchor.enabled()) && *rollbackAnchorTimeout <= 0 {
 		return errors.New("--rollback-anchor-timeout must be positive")
 	}
-	if !*devNoAuth {
-		return errors.New("no production auth provider is configured; pass --dev-no-auth only for local development")
+	if *devNoAuth && (*jwtHS256SecretFile != "" || *jwtJWKSURL != "") {
+		return errors.New("--dev-no-auth and production JWT authentication flags are mutually exclusive")
+	}
+	if !*devNoAuth && (*jwtHS256SecretFile == "" && *jwtJWKSURL == "") {
+		return errors.New("configure --jwt-hs256-secret-file or --jwt-jwks-url for production auth, or pass --dev-no-auth only for local development")
+	}
+	if *jwtHS256SecretFile != "" && *jwtJWKSURL != "" {
+		return errors.New("--jwt-hs256-secret-file and --jwt-jwks-url are mutually exclusive")
+	}
+	if !*devNoAuth && (*jwtIssuer == "" || *jwtAudience == "") {
+		return errors.New("--jwt-issuer and --jwt-audience are required with production JWT auth")
+	}
+	if !*devNoAuth && *workspaceCollections == "" {
+		return errors.New("--workspace-collections is required with production JWT auth")
 	}
 	adminToken := ""
 	if (*adminDiagnostics || *adminDiagnosticsAll || *adminMetrics) && *adminAddress == "" {
@@ -401,6 +420,40 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	var authenticator meldserver.Authenticator
+	var authorizer meldserver.Authorizer
+	var rpcAuthorizer meldserver.RPCAuthorizer
+	if *devNoAuth {
+		access := devAccess{}
+		authenticator, authorizer, rpcAuthorizer = access, access, access
+	} else {
+		if *jwtHS256SecretFile != "" {
+			secret, readErr := os.ReadFile(*jwtHS256SecretFile)
+			if readErr != nil {
+				_ = db.Close()
+				return fmt.Errorf("read JWT HS256 secret: %w", readErr)
+			}
+			authenticator, err = meldserver.NewHS256JWTAuthenticator(meldserver.HS256JWTAuthenticatorConfig{
+				Secret: secret, Issuer: *jwtIssuer, Audience: *jwtAudience, WorkspaceClaim: *jwtWorkspaceClaim,
+			})
+		} else {
+			authenticator, err = meldserver.NewRS256JWKSAuthenticator(meldserver.RS256JWKSAuthenticatorConfig{
+				JWKSURL: *jwtJWKSURL, Issuer: *jwtIssuer, Audience: *jwtAudience, WorkspaceClaim: *jwtWorkspaceClaim,
+			})
+		}
+		if err != nil {
+			_ = db.Close()
+			return err
+		}
+		workspaceAccess, policyErr := meldserver.NewWorkspaceAuthorizer(meldserver.WorkspaceAuthorizerConfig{
+			Collections: splitCommaList(*workspaceCollections), WorkspaceField: *workspaceField,
+		})
+		if policyErr != nil {
+			_ = db.Close()
+			return policyErr
+		}
+		authorizer, rpcAuthorizer = workspaceAccess, workspaceAccess
+	}
 	var workerHub *meldserver.WorkerHub
 	var idempotency meldserver.RPCIdempotencyStore
 	var rpcMethodResolver meldserver.RPCMethodResolver
@@ -437,11 +490,11 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		queryPolicyResolver = workerHub
 	}
 	handler, err := meldserver.New(meldserver.Config{
-		DB: db, Authenticator: devAccess{}, Authorizer: devAccess{}, PublicRealtimeURL: *realtimeURL,
+		DB: db, Authenticator: authenticator, Authorizer: authorizer, PublicRealtimeURL: *realtimeURL,
 		OriginPatterns:     []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
 		AllowedHTTPOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"}, MaxBodyBytes: 1 << 20,
 		RPCMethodResolver: rpcMethodResolver, RPCTransactionalMethodResolver: rpcTransactionalMethodResolver, QueryPolicyResolver: queryPolicyResolver,
-		RPCIdempotencyStore: idempotency, RPCAuthorizer: devAccess{},
+		RPCIdempotencyStore: idempotency, RPCAuthorizer: rpcAuthorizer,
 	})
 	if err != nil {
 		_ = db.Close()
@@ -542,7 +595,11 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 			_ = workerServer.Shutdown(shutdown)
 		}
 	}()
-	fmt.Fprintf(stdout, "Meldbase listening on http://%s (development auth disabled)\n", listener.Addr())
+	if *devNoAuth {
+		fmt.Fprintf(stdout, "Meldbase listening on http://%s (UNSAFE development auth disabled)\n", listener.Addr())
+	} else {
+		fmt.Fprintf(stdout, "Meldbase listening on http://%s (JWT workspace isolation enabled)\n", listener.Addr())
+	}
 	serveErr := httpServer.Serve(listener)
 	var adminErr error
 	if adminServer != nil {

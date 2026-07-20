@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/crapthings/meldbase"
 )
@@ -56,6 +57,7 @@ type UpdatePolicy struct {
 	QueryPolicy
 	AllowAllUpdatePaths bool
 	AllowedUpdatePaths  map[string]struct{}
+	DeniedUpdatePaths   map[string]struct{}
 	MaxAffected         int
 }
 
@@ -96,6 +98,7 @@ func freezeInsertPolicy(policy InsertPolicy) InsertPolicy {
 func freezeUpdatePolicy(policy UpdatePolicy) UpdatePolicy {
 	policy.QueryPolicy = freezeQueryPolicy(policy.QueryPolicy)
 	policy.AllowedUpdatePaths = cloneStringSet(policy.AllowedUpdatePaths)
+	policy.DeniedUpdatePaths = cloneStringSet(policy.DeniedUpdatePaths)
 	return policy
 }
 
@@ -191,6 +194,11 @@ func intersectStringSets(firstAll bool, first map[string]struct{}, secondAll boo
 }
 
 func applyUpdatePolicy(query meldbase.QuerySpec, mutation meldbase.MutationSpec, policy UpdatePolicy) (meldbase.QuerySpec, error) {
+	for _, path := range mutation.Paths() {
+		if policyPathDenied(path, policy.DeniedUpdatePaths) {
+			return meldbase.QuerySpec{}, ErrForbidden
+		}
+	}
 	if !policy.AllowAllUpdatePaths {
 		for _, path := range mutation.Paths() {
 			if _, allowed := policy.AllowedUpdatePaths[path]; !allowed {
@@ -199,6 +207,15 @@ func applyUpdatePolicy(query meldbase.QuerySpec, mutation meldbase.MutationSpec,
 		}
 	}
 	return applyMutationQueryPolicy(query, policy.QueryPolicy, policy.MaxAffected)
+}
+
+func policyPathDenied(path string, denied map[string]struct{}) bool {
+	for prefix := range denied {
+		if path == prefix || strings.HasPrefix(path, prefix+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func applyDeletePolicy(query meldbase.QuerySpec, policy DeletePolicy) (meldbase.QuerySpec, error) {

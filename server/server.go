@@ -40,6 +40,12 @@ type (
 	WorkerAuthenticator            = internal.WorkerAuthenticator
 	WorkerHubConfig                = internal.WorkerHubConfig
 	WorkerHub                      = internal.WorkerHub
+	HS256JWTAuthenticatorConfig    = internal.HS256JWTAuthenticatorConfig
+	HS256JWTAuthenticator          = internal.HS256JWTAuthenticator
+	RS256JWKSAuthenticatorConfig   = internal.RS256JWKSAuthenticatorConfig
+	RS256JWKSAuthenticator         = internal.RS256JWKSAuthenticator
+	WorkspaceAuthorizerConfig      = internal.WorkspaceAuthorizerConfig
+	WorkspaceAuthorizer            = internal.WorkspaceAuthorizer
 	WorkerHubStats                 = internal.WorkerHubStats
 )
 
@@ -59,6 +65,18 @@ var (
 )
 
 func New(config Config) (*Handler, error) { return internal.New(config) }
+
+func NewHS256JWTAuthenticator(config HS256JWTAuthenticatorConfig) (*HS256JWTAuthenticator, error) {
+	return internal.NewHS256JWTAuthenticator(config)
+}
+
+func NewRS256JWKSAuthenticator(config RS256JWKSAuthenticatorConfig) (*RS256JWKSAuthenticator, error) {
+	return internal.NewRS256JWKSAuthenticator(config)
+}
+
+func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthorizer, error) {
+	return internal.NewWorkspaceAuthorizer(config)
+}
 
 func NewDurableRPCIdempotencyStore(db *meldbase.DB) (DurableRPCIdempotencyStore, error) {
 	return internal.NewDurableRPCIdempotencyStore(db)

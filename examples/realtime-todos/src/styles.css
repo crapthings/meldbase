@@ -37,6 +37,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .connection { display: inline-flex; align-items: center; gap: 9px; margin-top: 32px; padding: 9px 13px; border: 1px solid rgba(38, 58, 48, .14); border-radius: 999px; color: #66706a; font: 500 12px ui-monospace, "SFMono-Regular", Consolas, monospace; background: rgba(255,255,255,.35); }
 .connection-dot { width: 7px; height: 7px; border-radius: 50%; background: #9a7b55; box-shadow: 0 0 0 4px rgba(154, 123, 85, .12); }
 .connection.is-live .connection-dot { background: #2b8b55; box-shadow: 0 0 0 4px rgba(43, 139, 85, .12); }
+.identity-note { max-width: 420px; margin: 13px 0 0; color: #68736c; font-size: 13px; line-height: 1.55; }
 
 .workspace { overflow: hidden; border: 1px solid rgba(30, 48, 39, .11); border-radius: 30px; background: rgba(250, 252, 248, .88); box-shadow: 0 30px 90px rgba(38, 59, 46, .14); backdrop-filter: blur(22px); }
 .workspace-header { display: flex; align-items: center; justify-content: space-between; padding: 34px 36px 24px; }
