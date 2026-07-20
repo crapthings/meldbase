@@ -4,7 +4,7 @@ import (
 	"math/bits"
 	"testing"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 // modelCoordinate intentionally does not use RollbackAnchor or production

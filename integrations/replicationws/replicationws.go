@@ -13,7 +13,7 @@ import (
 	"net/url"
 
 	"github.com/coder/websocket"
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 	"github.com/crapthings/meldbase/integrations/replicationauth"
 )
 

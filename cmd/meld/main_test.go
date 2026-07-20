@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 func TestDurabilityCheckExercisesTargetDirectoryAndCleansUp(t *testing.T) {

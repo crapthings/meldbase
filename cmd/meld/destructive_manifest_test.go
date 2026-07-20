@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
 )
 

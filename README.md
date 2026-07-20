@@ -36,10 +36,10 @@ poisoning the database.
 
 ## Installation
 
-The Go module is published from:
+The database core is published from the `core` package:
 
 ```sh
-go get github.com/crapthings/meldbase@latest
+go get github.com/crapthings/meldbase/core@latest
 ```
 
 Before placing production-like data on a target volume, run the non-destructive
@@ -240,6 +240,8 @@ registry until an npm release is announced.
 ## Go quick start
 
 ```go
+import meldbase "github.com/crapthings/meldbase/core"
+
 db, err := meldbase.Open("app.meld")
 if err != nil { log.Fatal(err) }
 defer db.Close()
@@ -278,6 +280,10 @@ err = db.RunWriteTransaction(ctx, func(tx *meldbase.WriteTransaction) error {
   return err
 })
 ```
+
+The Go core moved from the repository root to `core/` in the alpha line. Update
+existing imports from `github.com/crapthings/meldbase` to
+`github.com/crapthings/meldbase/core`.
 
 Compound queries use a contiguous left prefix: equality fields followed by at
 most one range field. A missing first field omits a document; a missing suffix

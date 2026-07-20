@@ -9,7 +9,7 @@ import (
 )
 
 func TestSharedQueryConformanceCorpus(t *testing.T) {
-	data, err := os.ReadFile("testdata/query-conformance.json")
+	data, err := os.ReadFile("../testdata/query-conformance.json")
 	if err != nil {
 		t.Fatal(err)
 	}

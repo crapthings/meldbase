@@ -15,7 +15,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 type destructivePowerReceiptFlags []string

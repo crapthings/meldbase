@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 type durabilityCheckResult struct {

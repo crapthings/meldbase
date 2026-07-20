@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 var (

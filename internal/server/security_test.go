@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {

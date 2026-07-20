@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 func TestFetchRequiresActualVerifiedMTLSClientCertificate(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"flag"
 	"io"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 func runInspect(args []string, stdout, stderr io.Writer) error {

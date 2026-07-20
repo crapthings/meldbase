@@ -8,7 +8,7 @@ import (
 )
 
 func TestSharedMutationConformanceCorpus(t *testing.T) {
-	data, err := os.ReadFile("testdata/mutation-conformance.json")
+	data, err := os.ReadFile("../testdata/mutation-conformance.json")
 	if err != nil {
 		t.Fatal(err)
 	}

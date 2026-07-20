@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 func TestDurableRPCIdempotencyReplaysAfterDatabaseReopen(t *testing.T) {

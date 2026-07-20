@@ -11,7 +11,7 @@ The dependency direction is:
 
 ```text
 server / SDK
-    -> reactive query coordinator
+    -> core reactive query coordinator
         -> planner and execution
             -> transactions and catalog
                 -> indexes and record store

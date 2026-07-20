@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 const destructiveProcessReceiptSchema uint32 = 2

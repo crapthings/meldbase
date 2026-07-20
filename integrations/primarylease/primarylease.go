@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 const (

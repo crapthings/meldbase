@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase/core"
 )
 
 // DurableConsumerPromotionReadiness is a first-party readiness check for a
