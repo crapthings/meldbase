@@ -373,6 +373,31 @@ func TestRealtimeOriginPatternsRejectUntrustedBrowserAndAllowConfiguredClient(t 
 	defer loopback.CloseNow()
 }
 
+func TestRealtimeConfiguredSchemePatternRejectsSameHostWrongScheme(t *testing.T) {
+	_, handler, server := newTestServer(t)
+	host := strings.TrimPrefix(server.URL, "http://")
+	handler.config.OriginPatterns = []string{"https://" + host}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	wrongSchemeTicket := obtainTicket(t, server.URL)
+	_, response, err := websocket.Dial(ctx, wrongSchemeTicket.URL, &websocket.DialOptions{HTTPHeader: http.Header{
+		"origin": []string{"http://" + host},
+	}})
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("same-host wrong-scheme err=%v response=%v", err, response)
+	}
+
+	allowedTicket := obtainTicket(t, server.URL)
+	connection, response, err := websocket.Dial(ctx, allowedTicket.URL, &websocket.DialOptions{HTTPHeader: http.Header{
+		"origin": []string{"https://" + host},
+	}})
+	if err != nil {
+		t.Fatalf("same-host configured scheme err=%v response=%v", err, response)
+	}
+	defer connection.CloseNow()
+}
+
 func TestLivenessAndReadinessHaveDistinctFailStopSemantics(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	for _, path := range []string{"/health", "/readyz"} {

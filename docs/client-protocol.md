@@ -200,7 +200,9 @@ This lets a deployment keep ticket-issuing HTTP endpoints on an exact allowlist
 while configuring a distinct realtime-origin boundary. CORS is a browser
 boundary, not a replacement for authentication or row/field authorization.
 Realtime patterns may match a host or a full scheme+host; use a full
-scheme+host when the browser scheme must be pinned.
+scheme+host when the browser scheme must be pinned. Once configured, the
+realtime patterns are a strict allowlist even when the Origin host equals the
+WebSocket request host.
 
 The remote SDK requests delta mode. The server first delivers one atomic
 `snapshot`, followed by strictly ordered `delta` frames. The SDK applies those

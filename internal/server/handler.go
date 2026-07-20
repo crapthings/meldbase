@@ -344,6 +344,10 @@ type socketSubscription struct {
 }
 
 func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
+	if !configuredRealtimeOriginAllowed(r, h.config.OriginPatterns) {
+		writeError(w, http.StatusForbidden, "origin_forbidden")
+		return
+	}
 	connection, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: h.config.OriginPatterns, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
@@ -401,6 +405,34 @@ func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
 		default:
 		}
 	}
+}
+
+// configuredRealtimeOriginAllowed makes a configured OriginPatterns list a
+// strict browser allowlist. coder/websocket deliberately accepts a request
+// whose Origin host equals the request host before consulting patterns; that is
+// useful as its default, but would defeat a scheme+host pattern such as
+// "https://app.example". An empty list keeps the library's default same-host
+// behavior for programmatic users that did not configure a browser boundary.
+func configuredRealtimeOriginAllowed(request *http.Request, patterns []string) bool {
+	origin := request.Header.Get("origin")
+	if origin == "" || len(patterns) == 0 {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	for _, pattern := range patterns {
+		target := parsed.Host
+		if strings.Contains(pattern, "://") {
+			target = parsed.Scheme + "://" + parsed.Host
+		}
+		matched, err := path.Match(strings.ToLower(pattern), strings.ToLower(target))
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *socketSession) handleMessage(raw []byte) error {
