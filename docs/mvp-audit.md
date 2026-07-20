@@ -25,7 +25,7 @@ distinguishes first-stage acceptance from later product claims.
 | Durable RPC idempotency | Alpha path complete | canonical principal/request hashing; fail-closed HTTP/WebSocket behavior; V2 private System tree with CAS, overflow values and bounded pruning; optimistic transactional point methods with atomic business/result publication; concurrent/conflict/reopen/compaction/reclamation and ENOSPC crash-boundary tests |
 | Public optimistic write transaction | Alpha path complete | V2 multi-collection point overlay with read-your-writes, compiled updates, unique-index value swaps, atomic canonical point-read-set CAS, disjoint-commit concurrency, callback-time entry/byte admission, one reactive token, reopen proof and fixed terminal observability; V1 fails explicitly without changing its frozen WAL grammar |
 | Reconnect and secure fallback | Complete | context-bound signed tokens, explicit `resumed`/`resync_required`, Go server and TS reconnect tests |
-| Historical delta resume | Alpha path complete | Default-new V2, explicit `OpenV2`, real server reconnect and Snapshot N + ordered N+1 delta replay are integration/race tested; detected legacy V1 safely resynchronizes |
+| Historical delta resume | Alpha path complete | Default-new V2, explicit `Open`, real server reconnect and Snapshot N + ordered N+1 delta replay are integration/race tested; detected legacy V1 safely resynchronizes |
 | Native JS/TS and React clients | Complete | `sdk/client`, `sdk/react`, shared query/mutation corpora, immutable cross-language protocol-v1 frame/capability contract and React external-store test |
 | Server JavaScript method/publication SDK | Alpha path complete | private authenticated WorkerHub; single-owner method and Go-predeclared collection registration; typed ordinary/transactional method frames including negotiated compiled updates; data-only policy constraints intersected in Go; lease revocation; Go-owned point transactions; reconnect/cancel and real/fake-socket protocol tests |
 | Runnable demo and realtime todo example | Complete | `cmd/meld`, `examples/realtime-todos`, CLI test and Vite production build |
@@ -69,8 +69,7 @@ than downgrading through the other Meta slot. A deterministic full business
 graph fixture reaches all current PageTypes and proves reader open/audit,
 historical reconstruction and advance/reopen behavior. This is a format
 compatibility contract, not evidence of power-loss correctness on every target
-filesystem. `Open` detects existing V1/V2
-without migration and creates new V2 databases; explicit `OpenV2` remains
-available, and an open V1 DB can create a separately audited V2 copy with
-`MigrateToV2`. Broader migration/crash matrices and operational tooling remain
-necessary before a production-ready claim.
+filesystem. `Open` creates and opens the sole current format. Historical alpha
+files require an offline export/import with their original build. Broader crash
+matrices and operational tooling remain necessary before a production-ready
+claim.

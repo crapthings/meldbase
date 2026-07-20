@@ -18,7 +18,7 @@ import (
 func BenchmarkV2ConcurrentIndependentCommits(b *testing.B) {
 	for _, parallelism := range []int{1, 4, 16} {
 		b.Run(fmt.Sprintf("parallelism_%d", parallelism), func(b *testing.B) {
-			db, err := OpenV2(filepath.Join(b.TempDir(), "commits.meld2"))
+			db, err := Open(filepath.Join(b.TempDir(), "commits.meld2"))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -63,11 +63,11 @@ func BenchmarkV2PublicInsertPair(b *testing.B) {
 			name = "coordinated_group"
 		}
 		b.Run(name, func(b *testing.B) {
-			options := V2Options{}
+			options := OpenOptions{}
 			if grouped {
 				options.CommitCoordinator = V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}
 			}
-			db, err := OpenV2WithOptions(filepath.Join(b.TempDir(), "public-pair.meld2"), options)
+			db, err := OpenWithOptions(filepath.Join(b.TempDir(), "public-pair.meld2"), options)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -158,11 +158,11 @@ func BenchmarkV2PublicWriteTransactionPair(b *testing.B) {
 			name = "coordinated_group"
 		}
 		b.Run(name, func(b *testing.B) {
-			options := V2Options{}
+			options := OpenOptions{}
 			if grouped {
 				options.CommitCoordinator = V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}
 			}
-			db, err := OpenV2WithOptions(filepath.Join(b.TempDir(), "public-transaction-pair.meld2"), options)
+			db, err := OpenWithOptions(filepath.Join(b.TempDir(), "public-transaction-pair.meld2"), options)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -243,7 +243,7 @@ func BenchmarkV2PublicWriteTransactionPair(b *testing.B) {
 func BenchmarkV2SharedRealtimeFanout(b *testing.B) {
 	for _, subscribers := range []int{1, 100} {
 		b.Run(fmt.Sprintf("subscribers_%d", subscribers), func(b *testing.B) {
-			db, err := OpenV2(filepath.Join(b.TempDir(), "realtime.meld2"))
+			db, err := Open(filepath.Join(b.TempDir(), "realtime.meld2"))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -297,7 +297,7 @@ func BenchmarkV2SharedRealtimeFanout(b *testing.B) {
 // bounded and independent of a writer; each document's canonical byte size is
 // intentionally charged once even when it matches every view.
 func BenchmarkV2ReactiveViewRebuild(b *testing.B) {
-	db, err := OpenV2(filepath.Join(b.TempDir(), "reactive-rebuild.meld2"))
+	db, err := Open(filepath.Join(b.TempDir(), "reactive-rebuild.meld2"))
 	if err != nil {
 		b.Fatal(err)
 	}

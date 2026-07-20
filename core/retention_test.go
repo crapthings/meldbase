@@ -18,7 +18,7 @@ func TestPublicV2CommitRetentionPolicyBoundsNormalHistory(t *testing.T) {
 		t.Fatalf("public/internal retention byte defaults drifted: %d/%d", DefaultV2CommitRetentionMaxBytes, storagev2.DefaultCommitRetentionMaxBytes)
 	}
 	path := filepath.Join(t.TempDir(), "public-retention.meld2")
-	db, err := OpenV2WithOptions(path, V2Options{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestPublicV2CommitRetentionPolicyBoundsNormalHistory(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenWithOptions(path, OpenOptions{V2CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	reopened, err := OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestPublicV2CommitRetentionPolicyBoundsNormalHistory(t *testing.T) {
 func TestPublicV2CommitRetentionByteBudget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-retention-bytes.meld2")
 	policy := V2CommitRetentionPolicy{MaxCommits: 100, MaxBytes: 500}
-	db, err := OpenV2WithOptions(path, V2Options{CommitRetention: policy})
+	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: policy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestPublicV2CommitRetentionByteBudget(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenWithOptions(path, OpenOptions{V2CommitRetention: policy})
+	reopened, err := OpenWithOptions(path, OpenOptions{CommitRetention: policy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestPublicV2CommitRetentionByteBudget(t *testing.T) {
 }
 
 func TestV2ReplayDeliveryTimeoutReleasesRetentionLease(t *testing.T) {
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "replay-timeout.meld2"), V2Options{
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "replay-timeout.meld2"), OpenOptions{
 		CommitRetention:       V2CommitRetentionPolicy{MaxCommits: 2},
 		ReplayDeliveryTimeout: 20 * time.Millisecond,
 	})
@@ -138,13 +138,13 @@ func TestV2ReplayDeliveryTimeoutReleasesRetentionLease(t *testing.T) {
 
 func TestV2ReplayDeliveryTimeoutValidation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-replay-timeout.meld2")
-	if db, err := OpenV2WithOptions(path, V2Options{ReplayDeliveryTimeout: time.Nanosecond}); db != nil || !errors.Is(err, ErrInvalidReplayDeliveryTimeout) {
+	if db, err := OpenWithOptions(path, OpenOptions{ReplayDeliveryTimeout: time.Nanosecond}); db != nil || !errors.Is(err, ErrInvalidReplayDeliveryTimeout) {
 		t.Fatalf("too-short timeout db=%v err=%v", db, err)
 	}
-	if db, err := OpenV2WithOptions(path, V2Options{ReplayDeliveryTimeout: time.Minute + time.Nanosecond}); db != nil || !errors.Is(err, ErrInvalidReplayDeliveryTimeout) {
+	if db, err := OpenWithOptions(path, OpenOptions{ReplayDeliveryTimeout: time.Minute + time.Nanosecond}); db != nil || !errors.Is(err, ErrInvalidReplayDeliveryTimeout) {
 		t.Fatalf("too-long timeout db=%v err=%v", db, err)
 	}
-	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "generic-replay-timeout.meld2"), OpenOptions{V2ReplayDeliveryTimeout: 20 * time.Millisecond})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "generic-replay-timeout.meld2"), OpenOptions{ReplayDeliveryTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

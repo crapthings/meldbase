@@ -12,7 +12,7 @@ import (
 )
 
 func TestDurableConsumerPromotionReadinessRequiresExactDurableAckAndSourcePosition(t *testing.T) {
-	source, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "source.meld2"))
+	source, err := meldbase.Open(filepath.Join(t.TempDir(), "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

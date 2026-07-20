@@ -16,7 +16,7 @@ import (
 )
 
 func TestHandlerStreamsOneDurablyAcknowledgedBatch(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "source.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestHandlerRejectsConcurrentSessionForAuthorizedConsumer(t *testing.T) {
 
 func TestReceiveAppliesPrimaryWebSocketTailToFollower(t *testing.T) {
 	directory := t.TempDir()
-	source, err := meldbase.OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestReceiveAppliesPrimaryWebSocketTailToFollower(t *testing.T) {
 	if _, err := source.BackupV2(context.Background(), filepath.Join(directory, "bootstrap.meld2")); err != nil {
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), meldbase.V2Options{})
+	follower, err := meldbase.OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), meldbase.OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestReceiveAppliesPrimaryWebSocketTailToFollower(t *testing.T) {
 
 func TestReceiveAcknowledgesBootstrapCoveredBatchesBeforeApplyingTail(t *testing.T) {
 	directory := t.TempDir()
-	source, err := meldbase.OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestReceiveAcknowledgesBootstrapCoveredBatchesBeforeApplyingTail(t *testing
 	if _, err := source.BackupV2(context.Background(), filepath.Join(directory, "bootstrap.meld2")); err != nil {
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), meldbase.V2Options{})
+	follower, err := meldbase.OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), meldbase.OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

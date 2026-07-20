@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestIndexBuildLimitsRejectAtomicallyAcrossEngines(t *testing.T) {
+func TestIndexBuildLimitsRejectAtomically(t *testing.T) {
 	constructors := map[string]func(*testing.T) (*DB, string){
 		"memory": func(t *testing.T) (*DB, string) {
 			db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{MaxIndexBuildEntries: 2}})
@@ -20,17 +20,9 @@ func TestIndexBuildLimitsRejectAtomicallyAcrossEngines(t *testing.T) {
 			}
 			return db, ""
 		},
-		"v1": func(t *testing.T) (*DB, string) {
-			path := filepath.Join(t.TempDir(), "database.meld")
-			db, err := OpenV1WithOptions(path, V1Options{ResourceLimits: ResourceLimits{MaxIndexBuildEntries: 2}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			return db, path
-		},
-		"v2": func(t *testing.T) (*DB, string) {
+		"durable": func(t *testing.T) (*DB, string) {
 			path := filepath.Join(t.TempDir(), "database.meld2")
-			db, err := OpenV2WithOptions(path, V2Options{ResourceLimits: ResourceLimits{MaxIndexBuildEntries: 2}})
+			db, err := OpenWithOptions(path, OpenOptions{ResourceLimits: ResourceLimits{MaxIndexBuildEntries: 2}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -47,10 +39,8 @@ func TestIndexBuildLimitsRejectAtomicallyAcrossEngines(t *testing.T) {
 			}
 			sequence := db.Stats().CommitSequence
 			var before []byte
-			var beforeWAL []byte
 			if path != "" {
 				before, _ = os.ReadFile(path)
-				beforeWAL, _ = os.ReadFile(path + ".wal")
 			}
 			if err := items.CreateIndex(context.Background(), "by_value", []IndexField{{Field: "value", Order: 1}}, IndexOptions{}); !errors.Is(err, ErrResourceLimit) {
 				t.Fatalf("CreateIndex error=%v", err)
@@ -65,12 +55,6 @@ func TestIndexBuildLimitsRejectAtomicallyAcrossEngines(t *testing.T) {
 				after, err := os.ReadFile(path)
 				if err != nil || !bytes.Equal(before, after) {
 					t.Fatalf("rejected index changed durable file: equal=%v err=%v", bytes.Equal(before, after), err)
-				}
-				if name == "v1" {
-					afterWAL, err := os.ReadFile(path + ".wal")
-					if err != nil || !bytes.Equal(beforeWAL, afterWAL) {
-						t.Fatalf("rejected index changed WAL: equal=%v err=%v", bytes.Equal(beforeWAL, afterWAL), err)
-					}
 				}
 			}
 			if _, err := items.InsertOne(context.Background(), Document{"value": Int(4)}); err != nil {
@@ -248,7 +232,7 @@ func TestReactiveViewByteLimitUsesCanonicalDocumentBytes(t *testing.T) {
 }
 
 func TestV2ReplayReactiveViewResourceLimitTerminatesAndReleasesLease(t *testing.T) {
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "replay-view-limit.meld2"), V2Options{
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "replay-view-limit.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxReactiveViewDocuments: 1, MaxReactiveViewBytes: 1024},
 	})
 	if err != nil {

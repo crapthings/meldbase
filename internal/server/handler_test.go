@@ -1010,7 +1010,7 @@ func TestRealtimeResumedSubscriptionHonorsPolicyLeaseRevocation(t *testing.T) {
 }
 
 func TestRealtimeV2ResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "server-v2.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "server-v2.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

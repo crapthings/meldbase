@@ -13,7 +13,7 @@ import (
 
 func TestV2OnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online.meld")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestV2OnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err = OpenV2(path)
+	db, err = Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestV2OnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
 
 func TestV2OnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online-compound.meld")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestV2OnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err = OpenV2(path)
+	db, err = Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestV2OnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 }
 
 func TestV2IndexBuildStatsAttributeBindingRetentionPressure(t *testing.T) {
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "build-retention.meld"), V2Options{
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "build-retention.meld"), OpenOptions{
 		CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2},
 	})
 	if err != nil {
@@ -186,7 +186,7 @@ func TestV2IndexBuildStatsAttributeBindingRetentionPressure(t *testing.T) {
 }
 
 func TestV2OnlineIndexBuildCatchesWriteRacingFinalization(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "finalize-race.meld"))
+	db, err := Open(filepath.Join(t.TempDir(), "finalize-race.meld"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestV2OnlineIndexBuildCatchesWriteRacingFinalization(t *testing.T) {
 }
 
 func TestV2OnlineIndexBuildCancellationAndAbort(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "abort.meld"))
+	db, err := Open(filepath.Join(t.TempDir(), "abort.meld"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestOnlineIndexBuildRequiresV2AndIDRoundTrips(t *testing.T) {
 }
 
 func TestV2OnlineUniqueBuildRejectsOnlyAtomicPublication(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "unique.meld"))
+	db, err := Open(filepath.Join(t.TempDir(), "unique.meld"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestV2OnlineUniqueBuildRejectsOnlyAtomicPublication(t *testing.T) {
 }
 
 func TestV2OnlineIndexBuildResourceRejectionPreservesDurableCursor(t *testing.T) {
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "bounded.meld"), V2Options{ResourceLimits: ResourceLimits{
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded.meld"), OpenOptions{ResourceLimits: ResourceLimits{
 		MaxIndexBuildEntries: 1,
 	}})
 	if err != nil {

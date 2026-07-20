@@ -21,7 +21,7 @@ func TestAssessHealthSeparatesStatePressureAndWindowEvents(t *testing.T) {
 	current.Stats.Realtime.PendingBatches = 50
 	current.Stats.Realtime.QueueOverflows = 1
 	current.Stats.Realtime.SlowConsumers = 1
-	current.Stats.Durability.CheckpointFailures = 1
+	current.Stats.Storage.RollbackAnchorFailures = 1
 	current.Sampler.DroppedDeliveries = 3
 	health := assessHealth(&previous, current)
 	if health.Overall != HealthDegraded || health.Realtime != HealthDegraded || health.Durability != HealthDegraded ||

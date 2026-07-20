@@ -268,7 +268,7 @@ func runDestructiveProcessWorker(args []string, stderr io.Writer) error {
 		return err
 	}
 	defer ledger.Close()
-	db, err := meldbase.OpenV2(*databasePath)
+	db, err := meldbase.Open(*databasePath)
 	if err != nil {
 		return err
 	}
@@ -307,7 +307,7 @@ func waitForDestructiveKill() {
 }
 
 func seedDestructiveProcessDatabase(path string) (uint64, error) {
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		return 0, err
 	}
@@ -403,7 +403,7 @@ func readDestructiveLedger(path string) (confirmed, prepared uint64, raw []byte,
 }
 
 func recoverDestructiveCounter(path string) (uint64, bool, error) {
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		return 0, false, err
 	}

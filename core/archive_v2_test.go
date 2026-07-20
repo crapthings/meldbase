@@ -12,7 +12,7 @@ func TestBeginV2ArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
 	archivePath := filepath.Join(directory, "archive.meld2")
-	db, err := OpenV2(sourcePath)
+	db, err := Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestBeginV2ArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 	if bootstrap.CheckpointToken != 1 || bootstrap.SnapshotToken != 1 || bootstrap.Backup.CommitSequence != 1 || bootstrap.Backup.DatabaseIDHex == "" {
 		t.Fatalf("bootstrap=%+v", bootstrap)
 	}
-	backup, err := OpenV2(archivePath)
+	backup, err := Open(archivePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestBeginV2ArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 
 func TestBeginV2ArchiveRejectsExistingDestinationBeforeCreatingCheckpoint(t *testing.T) {
 	directory := t.TempDir()
-	db, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

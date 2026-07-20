@@ -105,14 +105,12 @@ func (store *v2DurableStore) refreshIndexBuildStats() {
 	store.indexBuildStats.Store(&stats)
 }
 
-// OpenV2 explicitly creates or opens Storage V2. It never interprets or
-// migrates a V1 file. Open performs read-only format selection when callers
-// want to support both generations.
-func OpenV2(path string) (*DB, error) {
-	return OpenV2WithOptions(path, V2Options{})
+// Open creates or opens a Meldbase durable database in the current format.
+func Open(path string) (*DB, error) {
+	return OpenWithOptions(path, OpenOptions{})
 }
 
-func OpenV2WithOptions(path string, options V2Options) (*DB, error) {
+func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 	if err := validateRecoveryMode(options.Recovery); err != nil {
 		return nil, err
 	}

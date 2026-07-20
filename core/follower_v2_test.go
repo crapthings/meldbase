@@ -25,7 +25,7 @@ func (authority *testPromotionAuthority) AuthorizeFollowerPromotion(_ context.Co
 
 func TestV2FollowerAppliesArchiveTailInOrderAndRejectsWrites(t *testing.T) {
 	directory := t.TempDir()
-	source, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestV2FollowerAppliesArchiveTailInOrderAndRejectsWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tail.Close()
-	follower, err := OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), V2Options{})
+	follower, err := OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestV2FollowerAppliesArchiveTailInOrderAndRejectsWrites(t *testing.T) {
 
 func TestV2FollowerPromotionRequiresMatchingExternalFence(t *testing.T) {
 	directory := t.TempDir()
-	source, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestV2FollowerPromotionRequiresMatchingExternalFence(t *testing.T) {
 	if _, err := source.BackupV2(context.Background(), filepath.Join(directory, "bootstrap.meld2")); err != nil {
 		t.Fatal(err)
 	}
-	follower, err := OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), V2Options{})
+	follower, err := OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestV2FollowerPromotionRequiresMatchingExternalFence(t *testing.T) {
 	if err := follower.Close(); err != nil {
 		t.Fatal(err)
 	}
-	follower, err = OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), V2Options{PrimaryWriteFence: nonBindingPrimaryWriteFence{}})
+	follower, err = OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), OpenOptions{PrimaryWriteFence: nonBindingPrimaryWriteFence{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestV2FollowerPromotionRequiresMatchingExternalFence(t *testing.T) {
 	}
 	bindErr := errors.New("local epoch store unavailable")
 	bindFailure := &recordingPrimaryWriteFence{bindErr: bindErr}
-	follower, err = OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), V2Options{PrimaryWriteFence: bindFailure})
+	follower, err = OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), OpenOptions{PrimaryWriteFence: bindFailure})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestV2FollowerPromotionRequiresMatchingExternalFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFence := &recordingPrimaryWriteFence{}
-	follower, err = OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), V2Options{PrimaryWriteFence: writeFence})
+	follower, err = OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), OpenOptions{PrimaryWriteFence: writeFence})
 	if err != nil {
 		t.Fatal(err)
 	}

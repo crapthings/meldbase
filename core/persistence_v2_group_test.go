@@ -12,7 +12,7 @@ import (
 )
 
 func TestCommitV2ChangeBatchesLockedPublishesOrderedLogicalBatches(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "db-group.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "db-group.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestCommitV2ChangeBatchesLockedPublishesOrderedLogicalBatches(t *testing.T)
 }
 
 func TestCommitV2ChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "db-group-preconditions.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "db-group-preconditions.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,7 @@ import (
 
 func TestVerifyV2FileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestVerifyV2FileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.SchemaVersion != 3 || !report.Verified || !report.IndexContentsVerified || !report.IndexBuildContentsVerified || report.Format != StorageFormatV2 || report.Revision != 3 ||
+	if report.SchemaVersion != 3 || !report.Verified || !report.IndexContentsVerified || !report.IndexBuildContentsVerified || report.Format != StorageFormatCurrent || report.Revision != 3 ||
 		report.DatabaseIDHex != hex.EncodeToString(identity[:]) || report.CommitSequence != sequence ||
 		report.RequiredFeatures&storagev2.RequiredFeatureCompoundIndexes == 0 ||
 		report.FileBytes != uint64(len(before)) || report.PhysicalPages < report.CommittedPhysicalPages ||
@@ -71,7 +71,7 @@ func TestVerifyV2FileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 
 func TestVerifyV2FileAuditsCompoundAndPartialIndexContents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify-compound.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestVerifyV2FileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 
 func TestVerifyV2FileTreatsReadyUniqueConflictAsValidPrivateState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify-private-unique-conflict.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,23 +207,12 @@ func TestVerifyV2FileTreatsReadyUniqueConflictAsValidPrivateState(t *testing.T) 
 
 func TestVerifyV2FileRejectsUnsupportedAndCanceledInputs(t *testing.T) {
 	directory := t.TempDir()
-	v1Path := filepath.Join(directory, "legacy.meld")
-	v1, err := OpenV1(v1Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := v1.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := VerifyV2File(context.Background(), v1Path); !errors.Is(err, ErrVerificationUnsupported) {
-		t.Fatalf("V1 verification error=%v", err)
-	}
 	if _, err := VerifyV2File(context.Background(), filepath.Join(directory, "missing")); !errors.Is(err, ErrVerificationUnsupported) {
 		t.Fatalf("missing verification error=%v", err)
 	}
 
 	v2Path := filepath.Join(directory, "cancel.meld2")
-	v2, err := OpenV2(v2Path)
+	v2, err := Open(v2Path)
 	if err != nil {
 		t.Fatal(err)
 	}

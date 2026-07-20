@@ -18,7 +18,7 @@ func TestPublicV2StorageQuotaIsSafeAdmissionRejection(t *testing.T) {
 		t.Fatalf("public/internal V2 page size drifted: %d/%d", V2PageSize, storagev2.PageSize)
 	}
 	path := filepath.Join(t.TempDir(), "quota.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestPublicV2StorageQuotaIsSafeAdmissionRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err = OpenV2WithOptions(path, V2Options{StorageLimits: V2StorageLimits{MaxFileBytes: used}})
+	db, err = OpenWithOptions(path, OpenOptions{StorageLimits: V2StorageLimits{MaxFileBytes: used}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestPublicV2StorageQuotaIsSafeAdmissionRejection(t *testing.T) {
 		t.Fatalf("quota rejection poisoned close: %v", err)
 	}
 
-	db, err = OpenV2(path)
+	db, err = Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestPublicV2StorageQuotaIsSafeAdmissionRejection(t *testing.T) {
 
 func TestPublicInvalidV2StorageQuotaDoesNotCreateFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-quota.meld2")
-	_, err := OpenV2WithOptions(path, V2Options{StorageLimits: V2StorageLimits{MaxFileBytes: 2*V2PageSize + 1}})
+	_, err := OpenWithOptions(path, OpenOptions{StorageLimits: V2StorageLimits{MaxFileBytes: 2*V2PageSize + 1}})
 	if !errors.Is(err, ErrInvalidResourceLimits) {
 		t.Fatalf("invalid quota error=%v", err)
 	}

@@ -121,7 +121,7 @@ func TestSignedLeaseGuardBindsFollowerPromotionAndExpiresWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory := t.TempDir()
-	source, err := meldbase.OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestSignedLeaseGuardBindsFollowerPromotionAndExpiresWrites(t *testing.T) {
 	if _, err := source.BackupV2(context.Background(), bootstrap); err != nil {
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(bootstrap, meldbase.V2Options{PrimaryWriteFence: guard})
+	follower, err := meldbase.OpenV2Follower(bootstrap, meldbase.OpenOptions{PrimaryWriteFence: guard})
 	if err != nil {
 		t.Fatal(err)
 	}

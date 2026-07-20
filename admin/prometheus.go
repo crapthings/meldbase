@@ -34,7 +34,7 @@ func MarshalPrometheus(sample Sample) []byte {
 	writePrometheusFamily(&output, "meldbase_writes_disabled", "Whether a fail-stop durability error has disabled database writes.", "gauge", gaugeBool(stats.WritesDisabled))
 	writePrometheusFamily(&output, "meldbase_health_status", "Derived component health: 0 healthy, 1 degraded, 2 critical.", "gauge", healthPrometheusSamples(sample.Health)...)
 	writePrometheusFamily(&output, "meldbase_database_info", "Static information about the sampled database engine.", "gauge", prometheusSample{labels: `{engine="` + safeEngine(stats) + `"}`, value: "1"})
-	writePrometheusFamily(&output, "meldbase_recovery_performed", "Whether startup selected a fallback, removed a provable tail, replayed WAL, or degraded an optional accelerator.", "gauge", gaugeBool(stats.Recovery.Recovered))
+	writePrometheusFamily(&output, "meldbase_recovery_performed", "Whether startup selected a fallback, removed a provable tail, or degraded an optional accelerator.", "gauge", gaugeBool(stats.Recovery.Recovered))
 	writePrometheusFamily(&output, "meldbase_recovery_fallback_to_older_root", "Whether startup selected an older valid Meta root after rejecting a newer root.", "gauge", gaugeBool(stats.Recovery.FallbackToOlderRoot))
 	writePrometheusFamily(&output, "meldbase_recovery_meta_redundancy_degraded", "Whether fewer redundant Meta roots than expected survived startup validation.", "gauge", gaugeBool(stats.Recovery.MetaRedundancyDegraded))
 	writePrometheusFamily(&output, "meldbase_recovery_acceleration_degraded", "Whether startup discarded an optional acceleration structure.", "gauge", gaugeBool(stats.Recovery.AccelerationDegraded))
@@ -43,8 +43,6 @@ func MarshalPrometheus(sample Sample) []byte {
 		labeledUint(`{validation="root"}`, uint64(stats.Recovery.RootValidMetaSlots)),
 	)
 	writePrometheusFamily(&output, "meldbase_recovery_main_tail_bytes_removed", "Provably incomplete main-file tail bytes removed at startup.", "gauge", gaugeUint(stats.Recovery.MainTailBytesRemoved))
-	writePrometheusFamily(&output, "meldbase_recovery_wal_records_replayed", "Complete V1 WAL records replayed at startup.", "gauge", gaugeUint(stats.Recovery.WALRecordsReplayed))
-	writePrometheusFamily(&output, "meldbase_recovery_wal_tail_bytes_removed", "Provably incomplete V1 WAL tail bytes removed at startup.", "gauge", gaugeUint(stats.Recovery.WALTailBytesRemoved))
 	writePrometheusFamily(&output, "meldbase_uptime_seconds", "Database process-session uptime in seconds.", "gauge", gaugeDuration(stats.Uptime))
 	writePrometheusFamily(&output, "meldbase_commit_sequence", "Current durable or in-memory commit sequence.", "gauge", gaugeUint(stats.CommitSequence))
 	writePrometheusFamily(&output, "meldbase_collections", "Current number of collections.", "gauge", gaugeUint(stats.Collections))
@@ -176,20 +174,6 @@ func MarshalPrometheus(sample Sample) []byte {
 		writePrometheusFamily(&output, "meldbase_worker_policy_busy_total", "Worker publication policy evaluations rejected by pending budgets.", "counter", counterUint(server.Worker.PolicyBusy))
 		writePrometheusFamily(&output, "meldbase_worker_policy_invalidations_total", "Durably committed worker publication generation changes.", "counter", counterUint(server.Worker.PolicyInvalidations))
 	}
-
-	writePrometheusFamily(&output, "meldbase_wal_appends_total", "Successful V1 WAL appends in this process session.", "counter", counterUint(stats.Durability.WALAppends))
-	writePrometheusFamily(&output, "meldbase_wal_payload_bytes_total", "Payload bytes appended to the V1 WAL.", "counter", counterUint(stats.Durability.WALPayloadBytes))
-	writePrometheusFamily(&output, "meldbase_wal_current_bytes", "Current V1 WAL length in bytes.", "gauge", gaugeUint(stats.Durability.WALCurrentBytes))
-	writePrometheusFamily(&output, "meldbase_wal_current_commits", "Current V1 WAL commits newer than the checkpoint.", "gauge", gaugeUint(stats.Durability.WALCurrentCommits))
-	writePrometheusFamily(&output, "meldbase_wal_append_failures_total", "Failed V1 WAL appends in this process session.", "counter", counterUint(stats.Durability.WALAppendFailures))
-	writePrometheusFamily(&output, "meldbase_wal_append_duration_seconds_total", "Accumulated V1 WAL append duration in seconds.", "counter", counterNanos(stats.Durability.WALAppendNanos))
-	writePrometheusFamily(&output, "meldbase_wal_append_max_duration_seconds", "Maximum V1 WAL append duration observed in this process session.", "gauge", gaugeDuration(stats.Durability.WALAppendMaxLatency))
-	writePrometheusFamily(&output, "meldbase_checkpoint_attempts_total", "V1 physical checkpoint attempts in this process session.", "counter", counterUint(stats.Durability.CheckpointAttempts))
-	writePrometheusFamily(&output, "meldbase_checkpoints_completed_total", "Completed V1 physical checkpoints in this process session.", "counter", counterUint(stats.Durability.CheckpointsCompleted))
-	writePrometheusFamily(&output, "meldbase_checkpoint_failures_total", "Failed V1 physical checkpoints in this process session.", "counter", counterUint(stats.Durability.CheckpointFailures))
-	writePrometheusFamily(&output, "meldbase_automatic_checkpoints_total", "V1 checkpoints triggered by the bounded WAL policy.", "counter", counterUint(stats.Durability.AutomaticCheckpoints))
-	writePrometheusFamily(&output, "meldbase_checkpoint_duration_seconds_total", "Accumulated successful V1 checkpoint duration in seconds.", "counter", counterNanos(stats.Durability.CheckpointNanos))
-	writePrometheusFamily(&output, "meldbase_checkpoint_max_duration_seconds", "Maximum successful V1 checkpoint duration in this process session.", "gauge", gaugeDuration(stats.Durability.CheckpointMaxLatency))
 
 	writePrometheusFamily(&output, "meldbase_storage_page_size_bytes", "Storage page size in bytes.", "gauge", gaugeUint(stats.Storage.PageSize))
 	writePrometheusFamily(&output, "meldbase_storage_generation", "Current physical V2 publication generation.", "gauge", gaugeUint(stats.Storage.Generation))

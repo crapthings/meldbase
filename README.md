@@ -10,23 +10,21 @@ MongoDB protocol or behavior clone.
 The current implementation contains a typed Go engine, crash-recoverable
 copy-on-write storage with a durable Commit Log, ordered compound B+Tree indexes, shared
 incremental reactive views and deltas, a Go/TypeScript query contract, and a
-secured HTTP/WebSocket reactive server. `Open` creates new databases with the
-single-file V2 engine and detects existing V1/V2 files without migration.
-`OpenV1` remains available for deliberate legacy-format creation.
+secured HTTP/WebSocket reactive server. `Open` creates and opens the single
+supported current-format database file.
 
-It is still early-stage: the V2 Meta negotiation envelope fails closed on
+It is still early-stage: the Meta negotiation envelope fails closed on
 unsupported revisions/features, and byte-exact cross-release fixtures now pin
 all current revision-3 PageTypes in a reachable multi-level business graph.
-Migration of existing V1 databases is explicit, and broader filesystem/platform
-durability evidence remains incomplete. B+Tree deletion uses local borrow/merge, while V2
+Older alpha database files are intentionally unsupported; export any personal
+test data before upgrading. Broader filesystem/platform durability evidence
+remains incomplete. B+Tree deletion uses local borrow/merge, while
 physical nodes split by encoded bytes and expose structural write counters. New
-default databases use one main file; legacy V1 databases retain their `.wal`
-sidecar. V1 bounds that WAL with a default 64 MiB/10,000-commit automatic
-checkpoint policy; V2 checkpoints every COW commit directly.
-V2 also retains a bounded 10,000-commit / 256 MiB logical replay window by
+databases use one main file and every COW commit is directly checkpointed. The
+engine retains a bounded 10,000-commit / 256 MiB logical replay window by
 default, while active replay leases safely pin required history and expose
 retention pressure.
-All engines enforce canonical document/transaction resource limits before
+The database enforces canonical document/transaction resource limits before
 publication. V2 point transactions additionally admit tracked entries and
 retained base/current overlay bytes while the callback runs, preventing a
 read-heavy callback from growing unbounded before commit.
@@ -162,7 +160,7 @@ anchor, err := meldbase.NewFileRollbackAnchorStore("/trusted/app.anchor")
 if err != nil {
 	return err
 }
-db, err := meldbase.OpenV2WithOptions("/data/app.meld", meldbase.V2Options{
+db, err := meldbase.OpenWithOptions("/data/app.meld", meldbase.OpenOptions{
 	RollbackProtection: meldbase.V2RollbackProtection{
 		AnchorStore:      anchor,
 		InitializeAnchor: true, // audited first provisioning only
@@ -212,9 +210,9 @@ opening or locking the database:
 go run ./cmd/meld inspect --db app.meld --require-compatible
 ```
 
-The JSON reports V1/V2, revision, generation, commit sequence, required and
+The JSON reports the current format, revision, generation, commit sequence, required and
 optional feature bits, database identity, valid Meta slots and whether this
-reader is compatible. A checksum-valid future V2 revision is reported rather
+reader is compatible. A checksum-valid future revision is reported rather
 than misclassified as corruption; the compatibility gate exits with an error
 after emitting the JSON.
 
@@ -288,10 +286,9 @@ existing imports from `github.com/crapthings/meldbase` to
 Compound queries use a contiguous left prefix: equality fields followed by at
 most one range field. A missing first field omits a document; a missing suffix
 is represented internally so prefix queries remain complete without creating a
-unique-key conflict. Uniqueness applies only to complete tuples. Legacy V1
-deliberately rejects compound and descending definitions.
+unique-key conflict. Uniqueness applies only to complete tuples.
 
-`RunWriteTransaction` reads one immutable V2 snapshot, supports `GetOne`,
+`RunWriteTransaction` reads one immutable durable snapshot, supports `GetOne`,
 `Find`, `InsertOne`, `ReplaceOne`, `UpdateOne` and `DeleteOne`, and publishes
 all effective changes under one commit token. `Find` uses the same compiled
 query syntax and sees earlier writes from its callback. It installs a durable
@@ -303,8 +300,7 @@ collection. Candidate count and bytes are bounded by the transaction resource
 limits. A callback error or `ErrWriteConflict` publishes nothing; a no-op does
 not advance the sequence. Keep callbacks short: do not retain the transaction,
 call normal database methods, perform network I/O or create external side
-effects. Legacy V1 and the in-memory engine return
-`ErrWriteTransactionUnsupported`.
+effects. The in-memory engine returns `ErrWriteTransactionUnsupported`.
 
 The TypeScript remote client also provides typed request/response RPC. HTTP is
 the default for work that does not need a realtime connection:
@@ -373,23 +369,7 @@ The example also owns visibility for `orders`: it exposes only rows whose
 Go must predeclare `orders` through `--worker-publications`; if the worker is
 offline, queries to that managed collection fail closed.
 
-V1-to-V2 migration is explicit and never overwrites its destination:
-
-```go
-format, err := meldbase.DetectStorageFormat("app.meld")
-if err != nil { log.Fatal(err) }
-if format == meldbase.StorageFormatV1 {
-  if err := db.MigrateToV2(ctx, "app-v2.meld"); err != nil {
-    log.Fatal(err)
-  }
-}
-```
-
-Migration preserves empty collections, document insertion order and index
-definitions, but intentionally assigns a new database identity. Existing V1
-realtime resume tokens therefore resynchronize instead of crossing formats.
-
-V2 can compact live state into a separately verified file without overwriting
+The database can compact live state into a separately verified file without overwriting
 the source. It pins one source snapshot briefly, then copies and verifies it
 without blocking later commits; writes that finish after that snapshot are not
 included in the compacted file:
@@ -466,18 +446,6 @@ They default to memory-only pool installation so the final writer pause is O(1).
 Set `PersistFreeSpace: true` only when restart acceleration is worth an explicit
 physical maintenance/fsync step.
 
-Deliberate legacy V1 deployments can tune or disable its synchronous automatic
-checkpoint policy:
-
-```go
-db, err := meldbase.OpenV1WithOptions("legacy.meld", meldbase.V1Options{
-  Checkpoint: meldbase.V1CheckpointPolicy{
-    MaxWALBytes:   128 << 20,
-    MaxWALCommits: 20_000,
-  },
-})
-```
-
 Either threshold triggers. The triggering business commit is already durable;
 checkpoint maintenance does not advance the logical commit sequence.
 
@@ -503,7 +471,7 @@ before automatic crash-tail removal and does not replace the offline semantic
 index verifier:
 
 ```go
-db, err := meldbase.OpenV2WithOptions("app.meld2", meldbase.V2Options{
+db, err := meldbase.OpenWithOptions("app.meld2", meldbase.OpenOptions{
   RequireGraphAudit: true,
 })
 ```
@@ -585,10 +553,9 @@ go run ./cmd/meld index-build abort --db app.meld2 --id <build-id>
 `resume` never hides a uniqueness or resource failure: it exits unsuccessfully,
 and `list` can inspect the still-private task before an explicit abort. These are
 local file-management commands, not unauthenticated HTTP administration routes.
-Compaction inherits the source V2 quota. Use `CompactToV2WithOptions` or
-`MigrateToV2WithOptions` with `V2DestinationOptions` when a rewritten file needs
-a different quota or index-build budget; an undersized destination is never
-published.
+Compaction inherits the source quota. Use `CompactToV2WithOptions` with
+`V2DestinationOptions` when a rewritten file needs a different quota or
+index-build budget; an undersized destination is never published.
 
 ## TypeScript SDK
 

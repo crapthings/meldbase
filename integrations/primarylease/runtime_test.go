@@ -67,8 +67,8 @@ func TestOpenV2PrimaryRejectsConflictingFenceOrFollower(t *testing.T) {
 	}
 	client := &renewalClient{grant: func(context.Context, [16]byte, uint64) (primarylease.Grant, error) { return primarylease.Grant{}, nil }}
 	for _, options := range []primarylease.PrimaryV2Options{
-		{PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a"}, RenewalClient: client, V2Options: meldbase.V2Options{PrimaryWriteFence: unrelatedRuntimeFence{}}},
-		{PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a"}, RenewalClient: client, V2Options: meldbase.V2Options{Follower: true}},
+		{PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a"}, RenewalClient: client, OpenOptions: meldbase.OpenOptions{PrimaryWriteFence: unrelatedRuntimeFence{}}},
+		{PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a"}, RenewalClient: client, OpenOptions: meldbase.OpenOptions{Follower: true}},
 		{PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a"}},
 	} {
 		if runtime, err := primarylease.OpenV2Primary(filepath.Join(t.TempDir(), "invalid.meld2"), options); runtime != nil || !errors.Is(err, primarylease.ErrPrimaryRuntimeConfiguration) {

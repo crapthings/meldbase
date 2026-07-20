@@ -10,7 +10,7 @@ import (
 
 func TestDurableCollectionChangesPersistAcrossReopenAndRequireAck(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "durable-collection-changes.meld2")
-	db, err := OpenV2WithOptions(path, V2Options{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestDurableCollectionChangesPersistAcrossReopenAndRequireAck(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	db, err = OpenV2WithOptions(path, V2Options{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err = OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestDurableCollectionChangesRejectUnsupportedAndUnsafeArguments(t *testing.
 	if subscription, err := memory.CreateDurableCollectionChanges(context.Background(), "archive", "items", 0, 1); subscription != nil || !errors.Is(err, ErrDurableConsumerUnsupported) {
 		t.Fatalf("memory durable consumer subscription=%v err=%v", subscription, err)
 	}
-	db, err := OpenV2(filepath.Join(t.TempDir(), "durable-invalid.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "durable-invalid.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

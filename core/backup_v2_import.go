@@ -90,8 +90,8 @@ func ImportV2PhysicalBackup(ctx context.Context, source io.Reader, destination s
 	if err := contextError(ctx); err != nil {
 		return BackupV2Result{}, err
 	}
-	if err := publishMigrationFile(temporaryPath, destination, migrationPublishOps{link: os.Link, remove: os.Remove, syncDirectory: syncDirectory}); err != nil {
-		if errors.Is(err, ErrMigrationDestinationExists) {
+	if err := publishNewFile(temporaryPath, destination, publishFileOps{link: os.Link, remove: os.Remove, syncDirectory: syncDirectory}); err != nil {
+		if errors.Is(err, ErrDestinationExists) {
 			return BackupV2Result{}, ErrBackupDestinationExists
 		}
 		return BackupV2Result{}, err

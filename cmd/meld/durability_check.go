@@ -366,7 +366,7 @@ func checkProbeRename(directory string) error {
 
 func checkProbeDatabase(directory string) error {
 	path := filepath.Join(directory, "probe.meld")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		return err
 	}
@@ -382,7 +382,7 @@ func checkProbeDatabase(directory string) error {
 	if err != nil || closeErr != nil {
 		return errors.Join(err, closeErr)
 	}
-	reopened, err := meldbase.OpenV2(path)
+	reopened, err := meldbase.Open(path)
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func TestReplicationSourceSessionBindsHelloInFlightAndDurableAck(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "source.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

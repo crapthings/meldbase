@@ -9,7 +9,7 @@ import (
 )
 
 func TestV2MaintenanceRunsOnlineAndStops(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "maintenance.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "maintenance.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestV2MaintenanceValidationAndDBCloseLifecycle(t *testing.T) {
 		t.Fatalf("memory maintenance error=%v", err)
 	}
 
-	db, err := OpenV2(filepath.Join(t.TempDir(), "maintenance-close.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "maintenance-close.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

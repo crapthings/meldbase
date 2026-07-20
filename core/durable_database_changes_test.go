@@ -10,7 +10,7 @@ import (
 
 func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "durable-database-changes.meld2")
-	db, err := OpenV2WithOptions(path, V2Options{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing
 		t.Fatal(err)
 	}
 
-	db, err = OpenV2WithOptions(path, V2Options{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err = OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestDurableDatabaseChangesRejectUnsupportedAndInvalidArguments(t *testing.T
 	if subscription, err := memory.CreateDurableDatabaseChanges(context.Background(), "follower", 0, 1); subscription != nil || !errors.Is(err, ErrDurableConsumerUnsupported) {
 		t.Fatalf("memory durable database subscription=%v err=%v", subscription, err)
 	}
-	db, err := OpenV2(filepath.Join(t.TempDir(), "invalid-database-feed.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "invalid-database-feed.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

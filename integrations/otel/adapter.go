@@ -320,8 +320,6 @@ var intDescriptors = []intDescriptor{
 	{name: "meldbase.recovery.meta.checksum_valid", description: "Checksum-valid Meta slots observed at startup.", unit: "{slot}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(uint64(s.Stats.Recovery.ChecksumValidMetaSlots)) }},
 	{name: "meldbase.recovery.meta.root_valid", description: "Root-valid Meta slots observed at startup.", unit: "{slot}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(uint64(s.Stats.Recovery.RootValidMetaSlots)) }},
 	{name: "meldbase.recovery.main_tail_removed", description: "Provably incomplete main-file tail bytes removed at startup.", unit: "By", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Recovery.MainTailBytesRemoved) }},
-	{name: "meldbase.recovery.wal_replayed", description: "Complete V1 WAL records replayed at startup.", unit: "{record}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Recovery.WALRecordsReplayed) }},
-	{name: "meldbase.recovery.wal_tail_removed", description: "Provably incomplete V1 WAL tail bytes removed at startup.", unit: "By", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Recovery.WALTailBytesRemoved) }},
 	{name: "meldbase.commit.sequence", description: "Current logical commit sequence.", unit: "{commit}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.CommitSequence) }},
 	{name: "meldbase.primary_write_fence.configured", description: "Whether an external V2 primary-write fence was configured at open.", unit: "1", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(boolValue(s.Stats.PrimaryWriteFence.Configured)) }},
 	{name: "meldbase.primary_write_fence.enforced", description: "Whether the external V2 primary-write fence currently guards local writes.", unit: "1", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(boolValue(s.Stats.PrimaryWriteFence.Enforced)) }},
@@ -438,15 +436,6 @@ var intDescriptors = []intDescriptor{
 	{name: "meldbase.realtime.incremental.batch", description: "Commit batches applied incrementally.", unit: "{batch}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Realtime.IncrementalBatches) }},
 	{name: "meldbase.realtime.full_recompute", description: "Full reactive view recomputations.", unit: "{event}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Realtime.FullViewRecomputes) }},
 	{name: "meldbase.realtime.delta.delivery", description: "Reactive delta deliveries.", unit: "{delivery}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Realtime.DeltaDeliveries) }},
-	{name: "meldbase.wal.current.size", description: "Current V1 WAL length.", unit: "By", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.WALCurrentBytes) }},
-	{name: "meldbase.wal.current.commit", description: "Current V1 WAL commits newer than checkpoint.", unit: "{commit}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.WALCurrentCommits) }},
-	{name: "meldbase.wal.append", description: "Successful V1 WAL appends.", unit: "{append}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.WALAppends) }},
-	{name: "meldbase.wal.payload", description: "Payload bytes appended to V1 WAL.", unit: "By", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.WALPayloadBytes) }},
-	{name: "meldbase.wal.append.failure", description: "Failed V1 WAL appends.", unit: "{event}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.WALAppendFailures) }},
-	{name: "meldbase.checkpoint.attempt", description: "V1 checkpoint attempts.", unit: "{checkpoint}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.CheckpointAttempts) }},
-	{name: "meldbase.checkpoint.completed", description: "Completed V1 checkpoints.", unit: "{checkpoint}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.CheckpointsCompleted) }},
-	{name: "meldbase.checkpoint.failure", description: "Failed V1 checkpoints.", unit: "{checkpoint}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.CheckpointFailures) }},
-	{name: "meldbase.checkpoint.automatic", description: "V1 checkpoints triggered automatically.", unit: "{checkpoint}", kind: intCounter, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Durability.AutomaticCheckpoints) }},
 	{name: "meldbase.storage.physical.page", description: "Current physical page high-water count.", unit: "{page}", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.PhysicalPages) }},
 	{name: "meldbase.storage.size", description: "Current physical file high-water bytes.", unit: "By", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.StorageUsedBytes) }},
 	{name: "meldbase.storage.max_size", description: "Configured physical file high-water quota.", unit: "By", kind: intGauge, read: func(s admin.Sample) (uint64, bool) { return available(s.Stats.Storage.StorageMaxBytes) }},
@@ -497,14 +486,6 @@ var intDescriptors = []intDescriptor{
 var floatDescriptors = []floatDescriptor{
 	{name: "meldbase.index.build.duration.last", description: "Duration of the last index build.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return durationSeconds(s.Stats.IndexBuilds.LastDuration), true }},
 	{name: "meldbase.index.build.duration.max", description: "Maximum index-build duration in this process session.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return durationSeconds(s.Stats.IndexBuilds.MaxDuration), true }},
-	{name: "meldbase.wal.append.time", description: "Accumulated V1 WAL append time.", unit: "s", kind: floatCounter, read: func(s admin.Sample) (float64, bool) { return seconds(s.Stats.Durability.WALAppendNanos), true }},
-	{name: "meldbase.wal.append.max_duration", description: "Maximum V1 WAL append duration.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) {
-		return durationSeconds(s.Stats.Durability.WALAppendMaxLatency), true
-	}},
-	{name: "meldbase.checkpoint.time", description: "Accumulated successful V1 checkpoint time.", unit: "s", kind: floatCounter, read: func(s admin.Sample) (float64, bool) { return seconds(s.Stats.Durability.CheckpointNanos), true }},
-	{name: "meldbase.checkpoint.max_duration", description: "Maximum successful V1 checkpoint duration.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) {
-		return durationSeconds(s.Stats.Durability.CheckpointMaxLatency), true
-	}},
 	{name: "meldbase.storage.commit.time", description: "Accumulated V2 storage commit time.", unit: "s", kind: floatCounter, read: func(s admin.Sample) (float64, bool) { return seconds(s.Stats.Storage.CommitNanos), true }},
 	{name: "meldbase.storage.commit.max_duration", description: "Maximum V2 storage commit duration.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return durationSeconds(s.Stats.Storage.CommitMaxLatency), true }},
 	{name: "meldbase.storage.rollback.anchor.time", description: "Accumulated synchronous rollback-anchor update time.", unit: "s", kind: floatCounter, read: func(s admin.Sample) (float64, bool) { return seconds(s.Stats.Storage.RollbackAnchorNanos), true }},

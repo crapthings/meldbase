@@ -19,7 +19,7 @@ func TestV2RequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
 		t.Skip("Unix mode bits are not a Windows security boundary")
 	}
 	path := filepath.Join(t.TempDir(), "private-mode.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,15 +29,15 @@ func TestV2RequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
 	if err := os.Chmod(path, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if strict, err := OpenV2WithOptions(path, V2Options{RequirePrivateFileMode: true}); strict != nil || !errors.Is(err, ErrInsecureFileMode) {
+	if strict, err := OpenWithOptions(path, OpenOptions{RequirePrivateFileMode: true}); strict != nil || !errors.Is(err, ErrInsecureFileMode) {
 		t.Fatalf("strict V2 open db=%v err=%v", strict, err)
 	}
-	if strict, err := OpenWithOptions(path, OpenOptions{V2RequirePrivateFileMode: true}); strict != nil || !errors.Is(err, ErrInsecureFileMode) {
+	if strict, err := OpenWithOptions(path, OpenOptions{RequirePrivateFileMode: true}); strict != nil || !errors.Is(err, ErrInsecureFileMode) {
 		t.Fatalf("strict format-neutral open db=%v err=%v", strict, err)
 	}
 	// Default opening remains compatible with intentionally group-managed
 	// deployment files; strict mode never chmods an operator-owned artifact.
-	compatible, err := OpenV2(path)
+	compatible, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,81 +50,11 @@ func TestV2RequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
 	if err := os.Chmod(path, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	strict, err := OpenV2WithOptions(path, V2Options{RequirePrivateFileMode: true})
+	strict, err := OpenWithOptions(path, OpenOptions{RequirePrivateFileMode: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer strict.Close()
-}
-
-func TestRecoveryReportV1AccountsForCheckpointReplayAndProvableTails(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "recovery-v1.meld")
-	db, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if report := db.RecoveryReport(); report.SchemaVersion != 1 || report.Engine != "v1" || !report.Created || report.Recovered {
-		t.Fatalf("created report=%+v", report)
-	}
-	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
-		t.Fatal(err)
-	}
-	// Simulate process loss: release test file descriptors without the graceful
-	// Close checkpoint/reset path.
-	if err := db.store.close(); err != nil {
-		t.Fatal(err)
-	}
-	mainTail := []byte("partial-main-page")
-	walTail := []byte("partial-wal-frame")
-	appendRecoveryTail(t, path, mainTail)
-	appendRecoveryTail(t, path+".wal", walTail)
-	mainBefore := mustReadRecoveryFile(t, path)
-	walBefore := mustReadRecoveryFile(t, path+".wal")
-	if strict, err := OpenV1WithOptions(path, V1Options{Recovery: RecoveryRequireClean}); !errors.Is(err, ErrRecoveryRequired) || strict != nil {
-		t.Fatalf("strict V1 open db=%v err=%v", strict, err)
-	}
-	if got := mustReadRecoveryFile(t, path); !bytes.Equal(got, mainBefore) {
-		t.Fatal("strict V1 open modified the main file")
-	}
-	if got := mustReadRecoveryFile(t, path+".wal"); !bytes.Equal(got, walBefore) {
-		t.Fatal("strict V1 open modified the WAL")
-	}
-
-	reopened, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	report := reopened.RecoveryReport()
-	if report.SchemaVersion != 1 || report.Engine != "v1" || report.Created || !report.Recovered ||
-		report.CommitSequenceBefore != 0 || report.CommitSequenceAfter != 1 || report.WALRecordsReplayed != 1 ||
-		report.MainTailBytesRemoved != uint64(len(mainTail)) || report.WALTailBytesRemoved != uint64(len(walTail)) {
-		t.Fatalf("recovery report=%+v", report)
-	}
-	if reopened.Stats().Recovery != report {
-		t.Fatalf("stats recovery=%+v want=%+v", reopened.Stats().Recovery, report)
-	}
-}
-
-func TestRequireCleanRejectsCompleteV1WALReplayWithoutModifyingFiles(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "strict-wal-v1.meld")
-	db, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.store.close(); err != nil {
-		t.Fatal(err)
-	}
-	mainBefore, walBefore := mustReadRecoveryFile(t, path), mustReadRecoveryFile(t, path+".wal")
-	if strict, err := OpenWithOptions(path, OpenOptions{Recovery: RecoveryRequireClean}); !errors.Is(err, ErrRecoveryRequired) || strict != nil {
-		t.Fatalf("strict format-neutral open db=%v err=%v", strict, err)
-	}
-	if !bytes.Equal(mustReadRecoveryFile(t, path), mainBefore) || !bytes.Equal(mustReadRecoveryFile(t, path+".wal"), walBefore) {
-		t.Fatal("strict WAL replay check modified storage")
-	}
 }
 
 func TestRecoveryReportIsImmutableAndAllocationFree(t *testing.T) {
@@ -152,7 +82,7 @@ func BenchmarkRecoveryReport(b *testing.B) {
 
 func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "recovery-v2.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,14 +141,14 @@ func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := mustReadRecoveryFile(t, path)
-	if strict, err := OpenV2WithOptions(path, V2Options{Recovery: RecoveryRequireClean}); !errors.Is(err, ErrRecoveryRequired) || strict != nil {
+	if strict, err := OpenWithOptions(path, OpenOptions{Recovery: RecoveryRequireClean}); !errors.Is(err, ErrRecoveryRequired) || strict != nil {
 		t.Fatalf("strict V2 open db=%v err=%v", strict, err)
 	}
 	if got := mustReadRecoveryFile(t, path); !bytes.Equal(got, before) {
 		t.Fatal("strict V2 open modified the file")
 	}
 
-	reopened, err := OpenV2(path)
+	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +163,7 @@ func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
 
 func TestPublicV2GraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-graph-audit.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,10 +219,10 @@ func TestPublicV2GraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T)
 		open func() (*DB, error)
 	}{
 		{name: "explicit-v2", open: func() (*DB, error) {
-			return OpenV2WithOptions(path, V2Options{RequireGraphAudit: true})
+			return OpenWithOptions(path, OpenOptions{RequireGraphAudit: true})
 		}},
 		{name: "format-neutral", open: func() (*DB, error) {
-			return OpenWithOptions(path, OpenOptions{V2RequireGraphAudit: true})
+			return OpenWithOptions(path, OpenOptions{RequireGraphAudit: true})
 		}},
 	}
 	for _, opener := range openers {
@@ -337,12 +267,6 @@ func TestRecoveryModeRejectsUnknownValues(t *testing.T) {
 	if db, err := OpenWithOptions(path, OpenOptions{Recovery: RecoveryMode(255)}); err == nil || db != nil {
 		t.Fatalf("invalid format-neutral mode db=%v err=%v", db, err)
 	}
-	if db, err := OpenV1WithOptions(path, V1Options{Recovery: RecoveryMode(255)}); err == nil || db != nil {
-		t.Fatalf("invalid V1 mode db=%v err=%v", db, err)
-	}
-	if db, err := OpenV2WithOptions(path, V2Options{Recovery: RecoveryMode(255)}); err == nil || db != nil {
-		t.Fatalf("invalid V2 mode db=%v err=%v", db, err)
-	}
 }
 
 func TestRequireCleanAllowsCreationAndCleanReopen(t *testing.T) {
@@ -357,7 +281,7 @@ func TestRequireCleanAllowsCreationAndCleanReopen(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenV2WithOptions(path, V2Options{Recovery: RecoveryRequireClean})
+	reopened, err := OpenWithOptions(path, OpenOptions{Recovery: RecoveryRequireClean})
 	if err != nil {
 		t.Fatal(err)
 	}

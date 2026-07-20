@@ -15,34 +15,8 @@ const (
 	RecoveryRequireClean
 )
 
-// OpenOptions configures format-neutral Open. V1Checkpoint is ignored for V2;
-// V2 retention/replay/storage fields are ignored for V1, while
-// V2RollbackProtection is rejected for V1 so a requested safety boundary is
-// never silently absent.
+// OpenOptions configures the current durable storage format.
 type OpenOptions struct {
-	Recovery                RecoveryMode
-	V1Checkpoint            V1CheckpointPolicy
-	V2CommitRetention       V2CommitRetentionPolicy
-	V2ReplayDeliveryTimeout time.Duration
-	V2CommitCoordinator     V2CommitCoordinatorOptions
-	ResourceLimits          ResourceLimits
-	V2StorageLimits         V2StorageLimits
-	V2RollbackProtection    V2RollbackProtection
-	// V2RequireGraphAudit performs a structural full-graph audit before a V2
-	// open succeeds. It is ignored for V1, whose recovery has a distinct WAL
-	// validation contract.
-	V2RequireGraphAudit bool
-	// V2RequirePrivateFileMode rejects an existing V2 database that grants
-	// group or other Unix permission bits. It is ignored for V1.
-	V2RequirePrivateFileMode bool
-	// V2PrimaryWriteFence is forwarded only when Open selects V2. Open rejects
-	// an existing legacy V1 file when this boundary is requested, so a caller
-	// cannot silently lose primary-fence enforcement through format detection.
-	V2PrimaryWriteFence V2PrimaryWriteFence
-}
-
-// V2Options configures explicitly selected Storage V2 opening.
-type V2Options struct {
 	Recovery              RecoveryMode
 	CommitRetention       V2CommitRetentionPolicy
 	ReplayDeliveryTimeout time.Duration
@@ -50,22 +24,22 @@ type V2Options struct {
 	ResourceLimits        ResourceLimits
 	StorageLimits         V2StorageLimits
 	RollbackProtection    V2RollbackProtection
-	// RequireGraphAudit rejects a V2 database at startup when any page
+	// RequireGraphAudit rejects a database at startup when any page
 	// protected by the current or fallback Meta root is structurally invalid.
 	// It is intentionally opt-in because audit cost grows with database size.
 	// This does not replace the offline semantic index verifier.
 	RequireGraphAudit bool
-	// RequirePrivateFileMode rejects a V2 file with group/world permission
+	// RequirePrivateFileMode rejects a database file with group/world permission
 	// bits instead of silently changing operator-owned permissions.
 	RequirePrivateFileMode bool
 	// PrimaryWriteFence optionally proves that this local database still holds
-	// external primary authority before every business V2 commit. It is not
+	// external primary authority before every business commit. It is not
 	// consulted by a read-only follower applying an already validated source
 	// batch. The guard must be local, non-blocking and safe for concurrent use;
 	// controller I/O/lease renewal belongs outside Meldbase's writer lock.
 	PrimaryWriteFence V2PrimaryWriteFence
 	// Follower marks this local open as a replica. Normal application writes
-	// fail with ErrReplicaReadOnly; only V2Follower.Apply may advance it.
+	// fail with ErrReplicaReadOnly; only Follower.Apply may advance it.
 	Follower bool
 }
 
@@ -283,6 +257,6 @@ func (db *DB) RecoveryReport() RecoveryReport {
 func finalizeRecoveryReport(report RecoveryReport) RecoveryReport {
 	report.SchemaVersion = 1
 	report.Recovered = report.FallbackToOlderRoot || report.MetaRedundancyDegraded || report.MainTailBytesRemoved != 0 ||
-		report.WALRecordsReplayed != 0 || report.WALTailBytesRemoved != 0 || report.AccelerationDegraded
+		report.AccelerationDegraded
 	return report
 }

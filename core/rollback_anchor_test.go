@@ -193,7 +193,7 @@ func TestV2RollbackAnchorRejectsAcknowledgedSnapshotRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
+	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestV2RollbackAnchorRejectsAcknowledgedSnapshotRollback(t *testing.T) {
 		t.Fatalf("anchor=%+v exists=%t err=%v", state, exists, err)
 	}
 
-	db, err = OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
+	db, err = OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestV2RollbackAnchorRejectsAcknowledgedSnapshotRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rolledBack, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
+	rolledBack, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
 	if !errors.Is(err, ErrRollbackDetected) || rolledBack != nil {
 		t.Fatalf("rollback db=%v err=%v", rolledBack, err)
 	}
@@ -258,7 +258,7 @@ func TestV2RollbackAnchorRejectsAcknowledgedMaintenanceGenerationRollback(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
+	db, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestV2RollbackAnchorRejectsAcknowledgedMaintenanceGenerationRollback(t *tes
 	if err := os.WriteFile(path, stale, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if opened, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}}); !errors.Is(err, ErrRollbackDetected) || opened != nil {
+	if opened, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}}); !errors.Is(err, ErrRollbackDetected) || opened != nil {
 		t.Fatalf("maintenance rollback opened=%v err=%v", opened, err)
 	}
 }
@@ -296,7 +296,7 @@ func TestV2RollbackAnchorTracksIndexBuildAndReclamationGenerations(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
+	db, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func assertRollbackAnchorCurrent(t *testing.T, db *DB, store RollbackAnchorStore
 
 func TestV2RollbackAnchorFailureIsFailStopAndRecoversAheadDatabase(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "anchor-failure.meld")
-	seed, err := OpenV2(databasePath)
+	seed, err := Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestV2RollbackAnchorFailureIsFailStopAndRecoversAheadDatabase(t *testing.T)
 		t.Fatal(err)
 	}
 	store := &testRollbackAnchorStore{anchor: RollbackAnchor{DatabaseID: identity, MinimumGeneration: generation}, exists: true, saveErr: errors.New("injected anchor fsync failure")}
-	db, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
+	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestV2RollbackAnchorFailureIsFailStopAndRecoversAheadDatabase(t *testing.T)
 		t.Fatalf("close error=%v", err)
 	}
 	store.saveErr = nil
-	reopened, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
+	reopened, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestV2RollbackAnchorFailureIsFailStopAndRecoversAheadDatabase(t *testing.T)
 
 func TestV2RollbackAnchorCoversStandaloneSystemRecordCommit(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "anchor-system.meld")
-	seed, err := OpenV2(databasePath)
+	seed, err := Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestV2RollbackAnchorCoversStandaloneSystemRecordCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &testRollbackAnchorStore{anchor: RollbackAnchor{DatabaseID: identity, MinimumGeneration: generation}, exists: true}
-	db, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
+	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestV2RollbackAnchorCoversStandaloneSystemRecordCommit(t *testing.T) {
 
 func TestV2RollbackAnchorMissingRequiresExplicitInitialization(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "existing.meld")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,14 +437,14 @@ func TestV2RollbackAnchorMissingRequiresExplicitInitialization(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &testRollbackAnchorStore{}
-	if opened, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: store}}); !errors.Is(err, ErrRollbackAnchorRequired) || opened != nil {
+	if opened, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: store}}); !errors.Is(err, ErrRollbackAnchorRequired) || opened != nil {
 		t.Fatalf("opened=%v err=%v", opened, err)
 	}
 }
 
 func TestV2RollbackAnchorOperationTimeoutIsFailStop(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "timeout.meld")
-	seed, err := OpenV2(path)
+	seed, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestV2RollbackAnchorOperationTimeoutIsFailStop(t *testing.T) {
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: store, OperationTimeout: 20 * time.Millisecond}})
+	db, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: store, OperationTimeout: 20 * time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +480,7 @@ func TestV2RollbackAnchorOpenTimeoutAndInvalidOptions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "open-timeout.meld")
 	store := &blockingLoadRollbackAnchorStore{done: make(chan struct{})}
 	started := time.Now()
-	opened, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: store, OperationTimeout: 20 * time.Millisecond}})
+	opened, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: store, OperationTimeout: 20 * time.Millisecond}})
 	if !errors.Is(err, ErrRollbackAnchor) || !errors.Is(err, context.DeadlineExceeded) || opened != nil || time.Since(started) > time.Second {
 		t.Fatalf("opened=%v err=%v duration=%s", opened, err, time.Since(started))
 	}
@@ -497,7 +497,7 @@ func TestV2RollbackAnchorOpenTimeoutAndInvalidOptions(t *testing.T) {
 		{OperationTimeout: -time.Second, AnchorStore: &testRollbackAnchorStore{}},
 		{InitializeAnchor: true},
 	} {
-		if db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "invalid.meld"), V2Options{RollbackProtection: protection}); !errors.Is(err, ErrInvalidRollbackProtection) || db != nil {
+		if db, err := OpenWithOptions(filepath.Join(t.TempDir(), "invalid.meld"), OpenOptions{RollbackProtection: protection}); !errors.Is(err, ErrInvalidRollbackProtection) || db != nil {
 			t.Fatalf("protection=%+v db=%v err=%v", protection, db, err)
 		}
 	}
@@ -505,7 +505,7 @@ func TestV2RollbackAnchorOpenTimeoutAndInvalidOptions(t *testing.T) {
 
 func TestV2RollbackStaticGuardsMapPublicErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guarded.meld")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,29 +513,14 @@ func TestV2RollbackStaticGuardsMapPublicErrors(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if opened, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{MinimumCommitSequence: 1}}); !errors.Is(err, ErrRollbackDetected) || opened != nil {
+	if opened, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{MinimumCommitSequence: 1}}); !errors.Is(err, ErrRollbackDetected) || opened != nil {
 		t.Fatalf("stale opened=%v err=%v", opened, err)
 	}
-	if opened, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{MinimumGeneration: 2}}); !errors.Is(err, ErrRollbackDetected) || opened != nil {
+	if opened, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{MinimumGeneration: 2}}); !errors.Is(err, ErrRollbackDetected) || opened != nil {
 		t.Fatalf("generation opened=%v err=%v", opened, err)
 	}
 	identity[0]++
-	if opened, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{ExpectedDatabaseID: identity}}); !errors.Is(err, ErrDatabaseIdentity) || opened != nil {
+	if opened, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{ExpectedDatabaseID: identity}}); !errors.Is(err, ErrDatabaseIdentity) || opened != nil {
 		t.Fatalf("identity opened=%v err=%v", opened, err)
-	}
-}
-
-func TestFormatNeutralOpenRejectsV2RollbackProtectionForV1(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy.meld")
-	db, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	opened, err := OpenWithOptions(path, OpenOptions{V2RollbackProtection: V2RollbackProtection{MinimumCommitSequence: 1}})
-	if !errors.Is(err, ErrInvalidRollbackProtection) || opened != nil {
-		t.Fatalf("opened=%v err=%v", opened, err)
 	}
 }

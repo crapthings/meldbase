@@ -212,13 +212,13 @@ func openIndexBuildDatabase(path string) (*meldbase.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if info.Format != meldbase.StorageFormatV2 {
+	if info.Format != meldbase.StorageFormatCurrent {
 		return nil, fmt.Errorf("index-build requires an existing V2 database: %w", meldbase.ErrIndexBuildUnsupported)
 	}
 	if !info.ReaderCompatible {
 		return nil, meldbase.ErrUnsupportedFormat
 	}
-	return meldbase.OpenV2(path)
+	return meldbase.Open(path)
 }
 
 func indexBuildCommandContext(timeout time.Duration) (context.Context, context.CancelFunc, error) {

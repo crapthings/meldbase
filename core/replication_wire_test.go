@@ -64,7 +64,7 @@ func TestReplicationFrameRejectsMalformedOrAmbiguousInput(t *testing.T) {
 
 func TestReplicationWireBatchDrivesFollower(t *testing.T) {
 	directory := t.TempDir()
-	source, err := OpenV2(directory + "/source.meld2")
+	source, err := Open(directory + "/source.meld2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestReplicationWireBatchDrivesFollower(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	follower, err := OpenV2Follower(directory+"/bootstrap.meld2", V2Options{})
+	follower, err := OpenV2Follower(directory+"/bootstrap.meld2", OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

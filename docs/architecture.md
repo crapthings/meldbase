@@ -221,10 +221,9 @@ fresh snapshot as resumed history.
 
 ### Storage format and V2 integration boundary
 
-`Open` performs read-only family detection: existing V1 remains V1, existing V2
-remains V2, and a missing/empty path creates V2. An orphan legacy WAL, unknown
-non-empty file or mixed-family file fails closed. `OpenV1` and `OpenV2` are the
-explicit format-specific entry points; no opener performs implicit migration.
+`Open` creates or opens the sole current copy-on-write format. A missing/empty
+path creates it; an unknown non-empty file fails closed. Historical alpha
+formats require offline export/import and are never implicitly migrated.
 
 V2 is the default-new copy-on-write page engine. It
 persists primary records, per-collection secondary-index catalogs and the
@@ -284,7 +283,7 @@ mutating them; an unknown non-empty or mixed-family file fails closed.
 revision/features/identity without acquiring the writer lock. Its compatibility
 bit is a negotiation result, not a substitute for structural validation.
 Normal V2 open validates the selected Meta/root and required catalog metadata,
-not every protected page. `V2Options.RequireGraphAudit` is the explicit startup
+not every protected page. `OpenOptions.RequireGraphAudit` is the explicit startup
 mode that walks both protected graphs before serving; it is structural only and
 is intentionally opt-in because its cost grows with database size.
 `VerifyV2File` occupies the explicit offline layer between them: a shared-lock,
@@ -310,13 +309,6 @@ with openable database fixtures and rejects any PageType that has no revision-3
 artifact. Codec evidence and reachable full-graph compatibility remain separate
 claims: the former catches byte/type drift; the latter must also prove traversal,
 recovery and future-writer advancement.
-`DB.MigrateToV2` takes a consistent read lock over an open V1 database, writes a
-private V2 file, performs reachability and semantic reopen audits, and publishes
-it with a no-overwrite filesystem link. Empty collections, insertion order,
-typed documents and index definitions are preserved. The destination receives a
-new database identity, so every old V1 resume token is explicitly invalid rather
-than reinterpreted against unrelated V2 sequence numbers.
-
 Unsorted V2 COLLSCAN cursors are lazy and own a bounded snapshot pin until
 exhaustion, limit completion, error, context cancellation or explicit `Close`.
 Indexed and sorted plans retain the correct materializing fallback. Manual

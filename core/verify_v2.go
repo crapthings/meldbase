@@ -50,7 +50,7 @@ func VerifyV2File(ctx context.Context, path string) (V2VerificationReport, error
 	if err != nil {
 		return V2VerificationReport{}, err
 	}
-	if info.Format != StorageFormatV2 {
+	if info.Format != StorageFormatCurrent {
 		return V2VerificationReport{}, ErrVerificationUnsupported
 	}
 	if !info.ReaderCompatible {
@@ -65,7 +65,7 @@ func VerifyV2File(ctx context.Context, path string) (V2VerificationReport, error
 		return V2VerificationReport{}, fmt.Errorf("%w: invalid verification result", ErrCorrupt)
 	}
 	return V2VerificationReport{
-		SchemaVersion: 3, Verified: true, Format: StorageFormatV2, Revision: storagev2.FormatVersion,
+		SchemaVersion: 3, Verified: true, Format: StorageFormatCurrent, Revision: storagev2.FormatVersion,
 		DatabaseIDHex: hex.EncodeToString(meta.DatabaseID[:]), MetaGeneration: meta.Generation,
 		CommitSequence: meta.CommitSequence, OldestRetainedSequence: meta.OldestRetainedSequence,
 		RequiredFeatures: meta.RequiredFeatures, OptionalFeatures: meta.OptionalFeatures,

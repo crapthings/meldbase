@@ -140,14 +140,12 @@ export function storageRows(sample: AdminSample | undefined) {
 
 export function durabilityRows(sample: AdminSample | undefined) {
   const stats = object(valueAt(sample, "stats"));
-  const storage = object(stats.storage);
   const recovery = object(stats.recovery);
   const limits = object(stats.resourceLimits);
   const maintenance = object(stats.maintenance);
   return [
-    { label: "Commit max", value: duration(stats.commitMaxNanos) }, { label: "V1 WAL size", value: bytes(storage.walBytes) },
-    { label: "Automatic checkpoints", value: count(storage.automaticCheckpoints) }, { label: "Checkpoint failures", value: count(storage.checkpointFailures) }, { label: "Checkpoint max", value: duration(storage.checkpointMaxNanos) },
-    { label: "Startup recovery", value: recovery.recovered ? "recovered" : "clean" }, { label: "Meta roots", value: `${count(recovery.validMetaRoots)} valid` }, { label: "Removed crash tails", value: bytes(recovery.removedTailBytes) }, { label: "WAL replay", value: count(recovery.walRecordsReplayed) },
+    { label: "Commit max", value: duration(stats.commitMaxNanos) },
+    { label: "Startup recovery", value: recovery.recovered ? "recovered" : "clean" }, { label: "Meta roots", value: `${count(recovery.validMetaRoots)} valid` }, { label: "Removed crash tails", value: bytes(recovery.removedTailBytes) },
     { label: "Document limit", value: bytes(limits.maxDocumentBytes) }, { label: "Transaction limit", value: bytes(limits.maxTransactionBytes) }, { label: "Index build limit", value: bytes(limits.maxIndexBuildBytes) }, { label: "Resource rejections", value: count(limits.rejections) },
     { label: "Write transactions", value: count(stats.writeTransactions) }, { label: "Write conflicts", value: count(stats.writeTransactionConflicts) }, { label: "Write aborts", value: count(stats.writeTransactionAborts) },
     { label: "Index builds", value: `${count(stats.indexBuildsActive)} active / ${count(stats.indexBuildsFailed)} failed` }, { label: "Durable index builds", value: `${count(stats.persistentIndexBuildsActive)} active` }, { label: "Last index build", value: duration(stats.indexBuildLastNanos) }, { label: "Max index build", value: duration(stats.indexBuildMaxNanos) },

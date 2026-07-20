@@ -12,7 +12,7 @@ import (
 
 func TestDurablePolicyGenerationStoreSurvivesReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "policy-generation.meld2")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestDurablePolicyGenerationStoreSurvivesReopen(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := meldbase.OpenV2(path)
+	reopened, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

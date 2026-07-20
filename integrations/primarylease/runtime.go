@@ -15,11 +15,11 @@ import (
 var ErrPrimaryRuntimeConfiguration = errors.New("meldbase primary lease: invalid primary runtime configuration")
 
 // PrimaryV2Options assembles one V2 primary with the exact Guard instance that
-// its Renewer will update. V2Options remains available for storage settings,
+// its Renewer will update. OpenOptions remains available for storage settings,
 // but PrimaryWriteFence and Follower are owned by this constructor and must be
 // left unset/false.
 type PrimaryV2Options struct {
-	V2Options       meldbase.V2Options
+	OpenOptions     meldbase.OpenOptions
 	PublicKey       ed25519.PublicKey
 	GuardOptions    GuardOptions
 	RenewalClient   RenewalClient
@@ -42,16 +42,16 @@ type PrimaryRuntime struct {
 // not contact the controller or start a goroutine; callers choose the startup
 // ordering and context by calling Renew or Run.
 func OpenV2Primary(path string, options PrimaryV2Options) (*PrimaryRuntime, error) {
-	if options.RenewalClient == nil || options.V2Options.PrimaryWriteFence != nil || options.V2Options.Follower {
+	if options.RenewalClient == nil || options.OpenOptions.PrimaryWriteFence != nil || options.OpenOptions.Follower {
 		return nil, ErrPrimaryRuntimeConfiguration
 	}
 	guard, err := NewGuard(options.PublicKey, options.GuardOptions)
 	if err != nil {
 		return nil, err
 	}
-	v2 := options.V2Options
+	v2 := options.OpenOptions
 	v2.PrimaryWriteFence = guard
-	db, err := meldbase.OpenV2WithOptions(path, v2)
+	db, err := meldbase.OpenWithOptions(path, v2)
 	if err != nil {
 		return nil, err
 	}

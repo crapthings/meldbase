@@ -100,7 +100,7 @@
   order and commit-image replay through the live incremental transition engine.
 - [x] Server replay-source contract and `resumed` handshake, with explicit safe
   resync on unavailable, retained-out, corrupt, or policy-revoked history.
-- [x] Explicit alpha `OpenV2` engine/server integration, atomic persistent
+- [x] Explicit alpha `Open` engine/server integration, atomic persistent
   secondary indexes, reopen audit, and real historical query deltas after
   reconnect.
 - [x] Allocation-free DB/V2 statistics for query, realtime, durability, physical
@@ -139,7 +139,7 @@
 - [x] Pinned V2 query snapshots with direct Primary lookup, streaming Secondary
   and collection iterators, bounded decoded-document LRU, and no rebuilt query
   B+Trees on open.
-- [x] Metadata-only `OpenV2`: mutation selection, CreateIndex construction,
+- [x] Metadata-only `Open`: mutation selection, CreateIndex construction,
   SnapshotQuery and initial/resync Reactive Views read pinned storage snapshots;
   live CRUD never grows a full decoded-document mirror.
 - [x] Persistent insertion-Order tree, insertion-position Secondary suffixes,

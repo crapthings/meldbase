@@ -38,7 +38,7 @@ func (subscription *QueryReplaySubscription) Close() {
 	}
 }
 
-// v2QueryReplaySource backs the explicit alpha OpenV2 path. It remains internal
+// v2QueryReplaySource backs the explicit alpha Open path. It remains internal
 // so callers depend on the transport-independent QueryReplaySource contract,
 // not Storage V2 implementation details.
 type v2QueryReplaySource struct {

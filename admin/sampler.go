@@ -287,7 +287,6 @@ func deriveRates(previous, current meldbase.DBStats) Rates {
 	rates.DocumentsReturnedPerSecond, _ = delta(previous.Queries.DocumentsReturned, current.Queries.DocumentsReturned)
 	rates.PublishedChangesPerSecond, _ = delta(previous.Realtime.PublishedChanges, current.Realtime.PublishedChanges)
 	rates.DeltaDeliveriesPerSecond, _ = delta(previous.Realtime.DeltaDeliveries, current.Realtime.DeltaDeliveries)
-	rates.WALBytesPerSecond, _ = delta(previous.Durability.WALPayloadBytes, current.Durability.WALPayloadBytes)
 	rates.PageCacheHitRatio = hitRatio(current.Storage.PageCache.Hits, current.Storage.PageCache.Misses)
 	rates.DocumentCacheHitRatio = hitRatio(current.Storage.DocumentCache.Hits, current.Storage.DocumentCache.Misses)
 	return rates

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"math"
 	"regexp"
 	"strings"
 	"sync"
@@ -36,8 +35,6 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		`meldbase_recovery_meta_slots{validation="checksum"} 2`,
 		`meldbase_recovery_meta_slots{validation="root"} 1`,
 		`meldbase_recovery_main_tail_bytes_removed 17`,
-		`meldbase_recovery_wal_records_replayed 3`,
-		`meldbase_recovery_wal_tail_bytes_removed 11`,
 		`meldbase_query_plan_total{stage="collection_scan"} 3`,
 		`meldbase_query_plan_total{stage="index_scan"} 4`,
 		`meldbase_query_plan_total{stage="id_lookup"} 5`,
@@ -110,10 +107,6 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		`meldbase_realtime_dispatch_batch_capacity 1024`,
 		`meldbase_realtime_dispatch_change_capacity 8192`,
 		`meldbase_realtime_dispatch_byte_capacity 67108864`,
-		`meldbase_wal_current_bytes 8192`,
-		`meldbase_wal_current_commits 2`,
-		`meldbase_checkpoints_completed_total 5`,
-		`meldbase_automatic_checkpoints_total 4`,
 		`meldbase_diagnostics_operations_observed_total{kind="query"} 23`,
 		`meldbase_rpc_requests_total 41`,
 		`meldbase_rpc_active 2`,
@@ -135,9 +128,6 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 			t.Fatalf("missing metric %q", expected)
 		}
 	}
-	if strings.Contains(text, "meldbase_wal_append_duration_seconds_total -") {
-		t.Fatal("uint64 nanosecond counter overflowed through time.Duration")
-	}
 	validatePrometheusText(t, text)
 }
 
@@ -155,9 +145,8 @@ func representativePrometheusSample() Sample {
 			Uptime: 3*time.Second + 250*time.Millisecond, Durable: true, WritesDisabled: true,
 			CommitSequence: 2, Collections: 3, Documents: 4, Indexes: 5, ActiveChangeWatchers: 6,
 			Recovery: meldbase.RecoveryReport{
-				SchemaVersion: 1, Engine: "v1", Recovered: true, FallbackToOlderRoot: true,
+				SchemaVersion: 1, Engine: "v2", Recovered: true, FallbackToOlderRoot: true,
 				ChecksumValidMetaSlots: 2, RootValidMetaSlots: 1, MainTailBytesRemoved: 17,
-				WALRecordsReplayed: 3, WALTailBytesRemoved: 11,
 			},
 			Commits: meldbase.CommitStats{Total: 7, Changes: 8},
 			CommitCoordinator: meldbase.V2CommitCoordinatorStats{
@@ -178,12 +167,6 @@ func representativePrometheusSample() Sample {
 				DispatchBatchCapacity: 1024, DispatchChangeCapacity: 8192, DispatchByteCapacity: 67108864,
 				QueueOverflows: 6, SlowConsumers: 7, IncrementalBatches: 8,
 				FullViewRecomputes: 9, DeltaDeliveries: 10,
-			},
-			Durability: meldbase.DurabilityStats{
-				WALAppends: 3, WALPayloadBytes: 4096, WALCurrentBytes: 8192, WALCurrentCommits: 2, WALAppendFailures: 1,
-				WALAppendNanos: math.MaxUint64, WALAppendMaxLatency: 4 * time.Millisecond,
-				CheckpointAttempts: 7, CheckpointsCompleted: 5, CheckpointFailures: 2, AutomaticCheckpoints: 4,
-				CheckpointNanos: 12_000_000, CheckpointMaxLatency: 7 * time.Millisecond,
 			},
 			Storage: meldbase.StorageStats{
 				Engine: "secret_engine", PageSize: 16_384, PhysicalPages: 101,

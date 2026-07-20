@@ -442,7 +442,7 @@ func BenchmarkStatsSnapshotDiagnosticsEnabled(b *testing.B) {
 }
 
 func BenchmarkV2StatsSnapshot(b *testing.B) {
-	db, err := OpenV2(filepath.Join(b.TempDir(), "stats.meld2"))
+	db, err := Open(filepath.Join(b.TempDir(), "stats.meld2"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -458,7 +458,7 @@ func BenchmarkV2StatsSnapshot(b *testing.B) {
 }
 
 func BenchmarkV2StatsSnapshotWithPersistentIndexBuilds(b *testing.B) {
-	db, err := OpenV2(filepath.Join(b.TempDir(), "stats-builds.meld2"))
+	db, err := Open(filepath.Join(b.TempDir(), "stats-builds.meld2"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -573,7 +573,7 @@ func BenchmarkDiagnosticHookModes(b *testing.B) {
 }
 
 func BenchmarkV2StorageBackedPointQuery(b *testing.B) {
-	db, err := OpenV2(filepath.Join(b.TempDir(), "point-query.meld2"))
+	db, err := Open(filepath.Join(b.TempDir(), "point-query.meld2"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func BenchmarkV2StorageBackedPointQuery(b *testing.B) {
 }
 
 func BenchmarkV2StorageBackedCompiledPointQuery(b *testing.B) {
-	db, err := OpenV2(filepath.Join(b.TempDir(), "compiled-point-query.meld2"))
+	db, err := Open(filepath.Join(b.TempDir(), "compiled-point-query.meld2"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -638,7 +638,7 @@ func BenchmarkV2StorageBackedCompiledPointQuery(b *testing.B) {
 }
 
 func BenchmarkV2StreamingCollectionScanFirstTen(b *testing.B) {
-	db, err := OpenV2(filepath.Join(b.TempDir(), "streaming-scan.meld2"))
+	db, err := Open(filepath.Join(b.TempDir(), "streaming-scan.meld2"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -697,10 +697,10 @@ func benchmarkCollection(b *testing.B, count int, indexed bool) (*DB, *Collectio
 	return db, collection
 }
 
-func BenchmarkDurableCheckpointOneThousandDocuments(b *testing.B) {
+func BenchmarkDurableSyncOneThousandDocuments(b *testing.B) {
 	for iteration := 0; iteration < b.N; iteration++ {
 		path := filepath.Join(b.TempDir(), fmt.Sprintf("checkpoint-%d.meld", iteration))
-		db, err := OpenV1(path)
+		db, err := Open(path)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -725,7 +725,7 @@ func BenchmarkV2CreateIndexTenThousandDocuments(b *testing.B) {
 	b.StopTimer()
 	for iteration := 0; iteration < b.N; iteration++ {
 		path := filepath.Join(b.TempDir(), fmt.Sprintf("index-build-%d.meld2", iteration))
-		db, err := OpenV2(path)
+		db, err := Open(path)
 		if err != nil {
 			b.Fatal(err)
 		}

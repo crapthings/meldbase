@@ -17,7 +17,7 @@ func TestCompactToV2PublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testin
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
 	destinationPath := filepath.Join(directory, "compact.meld2")
-	db, err := OpenV2(sourcePath)
+	db, err := Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestCompactToV2PublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testin
 		t.Fatalf("temporary compaction files=%v err=%v", matches, err)
 	}
 
-	compacted, err := OpenV2(destinationPath)
+	compacted, err := Open(destinationPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestCompactToV2PublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testin
 
 func TestCompactToV2DestinationQuotaFailsWithoutPublication(t *testing.T) {
 	directory := t.TempDir()
-	db, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestCompactToV2DestinationQuotaFailsWithoutPublication(t *testing.T) {
 
 func TestCompactToV2IndexBuildLimitFailsWithoutPublication(t *testing.T) {
 	directory := t.TempDir()
-	db, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestCompactToV2IndexBuildLimitFailsWithoutPublication(t *testing.T) {
 
 func TestCompactToV2FailsClosedWithoutOverwriting(t *testing.T) {
 	directory := t.TempDir()
-	db, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestCompactToV2FailsClosedWithoutOverwriting(t *testing.T) {
 
 func TestCompactToV2PinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 	directory := t.TempDir()
-	db, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestCompactToV2PinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 	if value, _ := current["value"].StringValue(); value != "after" {
 		t.Fatalf("source value=%q", value)
 	}
-	compactedDB, err := OpenV2(destination)
+	compactedDB, err := Open(destination)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestCompactToV2PinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 
 func TestV2CloseWaitsForPinnedCompactionSnapshot(t *testing.T) {
 	directory := t.TempDir()
-	db, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestV2CloseWaitsForPinnedCompactionSnapshot(t *testing.T) {
 		t.Fatal("Close did not resume after compaction")
 	}
 	store.testCompactionSnapshotHook = nil
-	compactedDB, err := OpenV2(destination)
+	compactedDB, err := Open(destination)
 	if err != nil {
 		t.Fatalf("compacted destination was not durable before Close: %v", err)
 	}

@@ -56,7 +56,7 @@ func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 		"meldbase.health.realtime": 1, "meldbase.database.write_disabled": 0,
 		"meldbase.recovery.performed": 1, "meldbase.recovery.fallback": 1,
 		"meldbase.recovery.meta.checksum_valid": 2, "meldbase.recovery.meta.root_valid": 1,
-		"meldbase.recovery.main_tail_removed": 17, "meldbase.recovery.wal_replayed": 3,
+		"meldbase.recovery.main_tail_removed":     17,
 		"meldbase.primary_write_fence.configured": 1, "meldbase.primary_write_fence.enforced": 1,
 		"meldbase.primary_write_fence.check": 9, "meldbase.primary_write_fence.rejection": 2,
 		"meldbase.query.count": 11, "meldbase.realtime.queue.overflow": 2,
@@ -72,8 +72,7 @@ func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 		"meldbase.resource.transaction.max": 4096, "meldbase.resource.transaction.change.max": 8,
 		"meldbase.index.build.failed_persistent": 2, "meldbase.index.build.retention_lease.active": 1,
 		"meldbase.index.build.retention.pressure": 1,
-		"meldbase.wal.current.size":               4096, "meldbase.checkpoint.automatic": 3,
-		"meldbase.storage.physical.page": 101, "meldbase.storage.transaction.rejected": 4,
+		"meldbase.storage.physical.page":          101, "meldbase.storage.transaction.rejected": 4,
 		"meldbase.storage.generation": 20, "meldbase.storage.rollback.protected": 1,
 		"meldbase.storage.rollback.anchor.sequence": 17, "meldbase.storage.rollback.anchor.lag": 1,
 		"meldbase.storage.rollback.anchor.generation": 19, "meldbase.storage.rollback.anchor.generation_lag": 1,
@@ -102,7 +101,6 @@ func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]float64{
-		"meldbase.wal.append.time":                      0.009,
 		"meldbase.storage.commit.max_duration":          0.004,
 		"meldbase.storage.rollback.anchor.time":         0.006,
 		"meldbase.storage.rollback.anchor.max_duration": 0.003,
@@ -206,7 +204,7 @@ func representativeSample() admin.Sample {
 			CommitSequence: 17, Collections: 3, Documents: 31, Indexes: 4,
 			Recovery: meldbase.RecoveryReport{
 				SchemaVersion: 1, Engine: "v2", Recovered: true, FallbackToOlderRoot: true,
-				ChecksumValidMetaSlots: 2, RootValidMetaSlots: 1, MainTailBytesRemoved: 17, WALRecordsReplayed: 3,
+				ChecksumValidMetaSlots: 2, RootValidMetaSlots: 1, MainTailBytesRemoved: 17,
 			},
 			Commits: meldbase.CommitStats{Total: 9, Changes: 13},
 			CommitCoordinator: meldbase.V2CommitCoordinatorStats{
@@ -222,10 +220,6 @@ func representativeSample() admin.Sample {
 				WatcherPendingBytes: 7, WatcherByteCapacity: 134217728,
 				DispatchPendingBatches: 2, DispatchPendingChanges: 3, DispatchPendingBytes: 4,
 				DispatchBatchCapacity: 1024, DispatchChangeCapacity: 8192, DispatchByteCapacity: 67108864,
-			},
-			Durability: meldbase.DurabilityStats{
-				WALAppends: 8, WALCurrentBytes: 4096, WALCurrentCommits: 2, WALAppendNanos: 9_000_000,
-				CheckpointAttempts: 4, CheckpointsCompleted: 3, AutomaticCheckpoints: 3,
 			},
 			Storage: meldbase.StorageStats{
 				Generation: 20, CommitSequence: 18, RollbackProtected: true, RollbackAnchorSequence: 17, RollbackAnchorGeneration: 19,

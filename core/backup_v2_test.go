@@ -16,7 +16,7 @@ func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testi
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
 	destinationPath := filepath.Join(directory, "backup.meld2")
-	db, err := OpenV2(sourcePath)
+	db, err := Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Bytes != uint64(len(sourceBytes)) || result.Pages*storageFormatPageSize != uint64(len(sourceBytes)) ||
+	if result.Bytes != uint64(len(sourceBytes)) || result.Pages*V2PageSize != uint64(len(sourceBytes)) ||
 		result.CommitSequence != sourceSequence || result.DatabaseIDHex != hex.EncodeToString(sourceIdentity[:]) ||
 		result.SHA256 != hex.EncodeToString(sourceDigest[:]) {
 		t.Fatalf("backup result=%+v", result)
@@ -63,7 +63,7 @@ func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testi
 	if matches, err := filepath.Glob(filepath.Join(directory, ".backup.meld2.backup-*")); err != nil || len(matches) != 0 {
 		t.Fatalf("temporary backups=%v err=%v", matches, err)
 	}
-	backup, err := OpenV2(destinationPath)
+	backup, err := Open(destinationPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testi
 	if _, err := items.UpdateOne(context.Background(), Filter{"_id": id}, Update{"$set": map[string]any{"value": int64(13)}}); err != nil {
 		t.Fatal(err)
 	}
-	unchanged, err := OpenV2(destinationPath)
+	unchanged, err := Open(destinationPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testi
 func TestBackupV2FailsClosedWithoutOverwrite(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
-	db, err := OpenV2(sourcePath)
+	db, err := Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,21 +148,13 @@ func TestBackupV2FailsClosedWithoutOverwrite(t *testing.T) {
 	if _, err := memory.BackupV2(context.Background(), filepath.Join(directory, "memory")); !errors.Is(err, ErrBackupUnsupported) {
 		t.Fatalf("memory backup error=%v", err)
 	}
-	v1, err := OpenV1(filepath.Join(directory, "v1.meld"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer v1.Close()
-	if _, err := v1.BackupV2(context.Background(), filepath.Join(directory, "v1-backup")); !errors.Is(err, ErrBackupUnsupported) {
-		t.Fatalf("V1 backup error=%v", err)
-	}
 }
 
 func TestBackupV2PreservesResumableShadowIndexBuild(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source-build.meld2")
 	backupPath := filepath.Join(directory, "backup-build.meld2")
-	db, err := OpenV2(sourcePath)
+	db, err := Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +176,7 @@ func TestBackupV2PreservesResumableShadowIndexBuild(t *testing.T) {
 	if _, err := db.BackupV2(context.Background(), backupPath); err != nil {
 		t.Fatal(err)
 	}
-	backup, err := OpenV2(backupPath)
+	backup, err := Open(backupPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,7 @@ import (
 
 func TestDurableRPCIdempotencyReplaysAfterDatabaseReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rpc-idempotency.meld2")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestDurableRPCIdempotencyReplaysAfterDatabaseReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := meldbase.OpenV2(path)
+	reopened, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestDurableRPCIdempotencyReplaysAfterDatabaseReopen(t *testing.T) {
 
 func TestDurableRPCIdempotencySequencesBusinessWriteAndTerminalRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rpc-business-write.meld2")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestDurableRPCIdempotencySequencesBusinessWriteAndTerminalRecord(t *testing
 		t.Fatal(err)
 	}
 
-	reopened, err := meldbase.OpenV2(path)
+	reopened, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestDurableRPCIdempotencySequencesBusinessWriteAndTerminalRecord(t *testing
 
 func TestTransactionalRPCPublishesBusinessWriteAndResultInOneCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transactional-rpc.meld2")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestTransactionalRPCPublishesBusinessWriteAndResultInOneCommit(t *testing.T
 		t.Fatal(err)
 	}
 
-	reopened, err := meldbase.OpenV2(path)
+	reopened, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestTransactionalRPCPublishesBusinessWriteAndResultInOneCommit(t *testing.T
 }
 
 func TestTransactionalRPCRollsBackWritesBeforePersistingApplicationError(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "transactional-error.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-error.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestTransactionalRPCRollsBackWritesBeforePersistingApplicationError(t *test
 }
 
 func TestTransactionalRPCNoopUsesTerminalOnlyCompletion(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "transactional-noop.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-noop.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestTransactionalRPCNoopUsesTerminalOnlyCompletion(t *testing.T) {
 }
 
 func TestTransactionalRPCUsesSameAtomicPathOverWebSocket(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "transactional-websocket.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-websocket.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestTransactionalRPCUsesSameAtomicPathOverWebSocket(t *testing.T) {
 }
 
 func TestTransactionalRPCPersistsOptimisticConflictWithoutPartialWrites(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "transactional-conflict.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-conflict.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestTransactionalRPCPersistsOptimisticConflictWithoutPartialWrites(t *testi
 
 func TestDurableRPCIdempotencyPendingFromOldSessionBecomesUnknown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old-session.meld2")
-	database, err := meldbase.OpenV2(path)
+	database, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestDurableRPCIdempotencyPendingFromOldSessionBecomesUnknown(t *testing.T) 
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	database, err = meldbase.OpenV2(path)
+	database, err = meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestDurableRPCIdempotencyPendingFromOldSessionBecomesUnknown(t *testing.T) 
 }
 
 func TestDurableRPCIdempotencyClaimIsLinearizableUnderConcurrency(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "concurrent.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "concurrent.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestDurableRPCIdempotencyClaimIsLinearizableUnderConcurrency(t *testing.T) 
 }
 
 func TestDurableRPCIdempotencyRetentionNeverStealsPendingClaims(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "retention.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "retention.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +464,7 @@ func TestDurableRPCIdempotencyRetentionNeverStealsPendingClaims(t *testing.T) {
 }
 
 func TestDurableRPCIdempotencyPrunesOnlyExpiredTerminalRecords(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "prune.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "prune.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +540,7 @@ func TestDurableRPCIdempotencyPrunesOnlyExpiredTerminalRecords(t *testing.T) {
 }
 
 func TestDurableRPCIdempotencyPruneCursorPreventsStarvation(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "prune-cursor.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "prune-cursor.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ func TestDurableRPCIdempotencyPruneCursorPreventsStarvation(t *testing.T) {
 
 func TestDurableRPCIdempotencySurvivesCompaction(t *testing.T) {
 	directory := t.TempDir()
-	db, err := meldbase.OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +597,7 @@ func TestDurableRPCIdempotencySurvivesCompaction(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	compacted, err := meldbase.OpenV2(destination)
+	compacted, err := meldbase.Open(destination)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,29 +611,21 @@ func TestDurableRPCIdempotencySurvivesCompaction(t *testing.T) {
 	}
 }
 
-func TestDurableRPCIdempotencyRejectsMemoryAndV1Databases(t *testing.T) {
+func TestDurableRPCIdempotencyRejectsMemoryDatabase(t *testing.T) {
 	memory := meldbase.New()
 	defer memory.Close()
 	if _, err := NewDurableRPCIdempotencyStore(memory); err == nil {
 		t.Fatal("memory database accepted durable idempotency")
 	}
-	v1, err := meldbase.OpenV1(filepath.Join(t.TempDir(), "legacy.meld"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer v1.Close()
-	if _, err := NewDurableRPCIdempotencyStore(v1); err == nil {
-		t.Fatal("V1 database accepted durable idempotency")
-	}
 }
 
 func TestTransactionalRPCRegistrationRequiresMatchingBuiltInV2Store(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "transactional-config.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-config.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	other, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "other.meld2"))
+	other, err := meldbase.Open(filepath.Join(t.TempDir(), "other.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ certificate containing:
 - `NotBefore` and `NotAfter`.
 
 The database process installs that certificate into a `primarylease.Guard` and
-passes the guard as `V2Options.PrimaryWriteFence`. The normal write path does
+passes the guard as `OpenOptions.PrimaryWriteFence`. The normal write path does
 no controller RPC: it checks the installed signature-derived lease, database
 identity, source sequence and expiry locally. No installed or expired
 certificate means `ErrPrimaryWriteFence` before storage mutation.
@@ -32,7 +32,7 @@ if err != nil { /* configuration failure */ }
 // Delivered over an authenticated control channel by the controller.
 if err := guard.Install(controllerCertificate); err != nil { /* stay closed */ }
 
-db, err := meldbase.OpenV2WithOptions(path, meldbase.V2Options{
+db, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{
     PrimaryWriteFence: guard,
 })
 ```

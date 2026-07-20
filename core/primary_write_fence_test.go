@@ -52,7 +52,7 @@ func (fence *recordingPrimaryWriteFence) boundPromotions() []FollowerPromotionFe
 
 func TestV2PrimaryWriteFenceRejectsBusinessCommitWithoutPoisoningDatabase(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{err: errors.New("primary lease expired")}
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "fenced.meld2"), V2Options{PrimaryWriteFence: fence})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced.meld2"), OpenOptions{PrimaryWriteFence: fence})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestV2PrimaryWriteFenceRejectsBusinessCommitWithoutPoisoningDatabase(t *tes
 
 func TestV2PrimaryWriteFenceGuardsEveryGroupedLogicalSequence(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{}
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "fenced-group.meld2"), V2Options{PrimaryWriteFence: fence})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced-group.meld2"), OpenOptions{PrimaryWriteFence: fence})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestV2PrimaryWriteFenceGuardsEveryGroupedLogicalSequence(t *testing.T) {
 
 func TestV2PrimaryWriteFenceGuardsIndexBuildVisibilityCommit(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{}
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "fenced-index-build.meld2"), V2Options{PrimaryWriteFence: fence})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced-index-build.meld2"), OpenOptions{PrimaryWriteFence: fence})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestV2PrimaryWriteFenceGuardsIndexBuildVisibilityCommit(t *testing.T) {
 
 func TestV2PrimaryWriteFenceGuardsStandaloneSystemRecordCommit(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{err: errors.New("primary lease expired")}
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "fenced-system.meld2"), V2Options{PrimaryWriteFence: fence})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced-system.meld2"), OpenOptions{PrimaryWriteFence: fence})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestV2PrimaryWriteFenceGuardsStandaloneSystemRecordCommit(t *testing.T) {
 
 func TestV2PrimaryWriteFenceGuardsInitialDurableConsumerControlCommit(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{err: errors.New("primary lease expired")}
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "fenced-consumer.meld2"), V2Options{PrimaryWriteFence: fence})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced-consumer.meld2"), OpenOptions{PrimaryWriteFence: fence})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestV2PrimaryWriteFenceGuardsInitialDurableConsumerControlCommit(t *testing
 
 func TestV2FollowerApplyBypassesPrimaryWriteFence(t *testing.T) {
 	directory := t.TempDir()
-	source, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestV2FollowerApplyBypassesPrimaryWriteFence(t *testing.T) {
 	if _, err := source.BackupV2(context.Background(), bootstrap); err != nil {
 		t.Fatal(err)
 	}
-	follower, err := OpenV2Follower(bootstrap, V2Options{PrimaryWriteFence: &recordingPrimaryWriteFence{err: errors.New("not primary")}})
+	follower, err := OpenV2Follower(bootstrap, OpenOptions{PrimaryWriteFence: &recordingPrimaryWriteFence{err: errors.New("not primary")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,23 +267,9 @@ func TestV2FollowerApplyBypassesPrimaryWriteFence(t *testing.T) {
 	}
 }
 
-func TestFormatDetectionDoesNotSilentlyDropPrimaryWriteFenceForV1(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy.meld")
-	legacy, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := legacy.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if opened, err := OpenWithOptions(path, OpenOptions{V2PrimaryWriteFence: &recordingPrimaryWriteFence{}}); opened != nil || !errors.Is(err, ErrUnsupportedFormat) {
-		t.Fatalf("fenced V1 format detection db=%v err=%v", opened, err)
-	}
-}
-
 func TestFormatDetectionForwardsPrimaryWriteFenceToV2(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{err: errors.New("lease absent")}
-	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "new-v2.meld2"), OpenOptions{V2PrimaryWriteFence: fence})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "new-v2.meld2"), OpenOptions{PrimaryWriteFence: fence})
 	if err != nil {
 		t.Fatal(err)
 	}

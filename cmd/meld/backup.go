@@ -45,14 +45,14 @@ func runBackup(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if info.Format != meldbase.StorageFormatV2 {
+	if info.Format != meldbase.StorageFormatCurrent {
 		return fmt.Errorf("backup source must be an existing V2 database: %w", meldbase.ErrBackupUnsupported)
 	}
 	if !info.ReaderCompatible {
 		return meldbase.ErrUnsupportedFormat
 	}
 
-	db, err := meldbase.OpenV2(*source)
+	db, err := meldbase.Open(*source)
 	if err != nil {
 		return err
 	}

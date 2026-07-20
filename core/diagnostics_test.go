@@ -174,7 +174,7 @@ func TestDiagnosticsConcurrentSnapshotAndClose(t *testing.T) {
 }
 
 func TestV2StreamingCursorRecordsExecutionLifecycle(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "diagnostics.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "diagnostics.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

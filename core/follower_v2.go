@@ -62,10 +62,10 @@ type FollowerPromotionFenceBinder interface {
 // OpenV2Follower opens a physical archive/bootstrap copy as a replica. Normal
 // public mutations on DB return ErrReplicaReadOnly; use Apply to advance the
 // next source token. The returned DB remains fully queryable and reactive.
-func OpenV2Follower(path string, options V2Options) (*V2Follower, error) {
+func OpenV2Follower(path string, options OpenOptions) (*V2Follower, error) {
 	options.Follower = true
 	options.CommitCoordinator = V2CommitCoordinatorOptions{}
-	db, err := OpenV2WithOptions(path, options)
+	db, err := OpenWithOptions(path, options)
 	if err != nil {
 		return nil, err
 	}

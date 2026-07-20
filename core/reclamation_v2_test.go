@@ -16,7 +16,7 @@ func TestReclamationConflictMapsToPublicSentinel(t *testing.T) {
 }
 
 func TestReclaimV2PagesProtectsLazyCursorAndExportsBoundedStats(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "public-reclaim.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "public-reclaim.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestReclaimV2PagesRejectsUnsupportedAndCancelled(t *testing.T) {
 	if _, err := memory.ReclaimV2Pages(context.Background()); !errors.Is(err, ErrReclamationUnsupported) {
 		t.Fatalf("memory reclaim error=%v", err)
 	}
-	db, err := OpenV2(filepath.Join(t.TempDir(), "cancel-reclaim.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "cancel-reclaim.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestReclaimV2PagesRejectsUnsupportedAndCancelled(t *testing.T) {
 }
 
 func TestReclaimV2PagesOnlinePublishesReusablePool(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "online-public-reclaim.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "online-public-reclaim.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestReclaimV2PagesOnlinePublishesReusablePool(t *testing.T) {
 }
 
 func TestReclaimV2PagesOnlineMemoryOnlyAvoidsPhysicalMaintenanceGeneration(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "memory-only-reclaim.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "memory-only-reclaim.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

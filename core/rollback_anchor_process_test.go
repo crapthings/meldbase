@@ -54,7 +54,7 @@ func TestV2RollbackAnchorProcessKillWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
+	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestV2RollbackAnchorProcessKillWindow(t *testing.T) {
 	if err != nil || verification.CommitSequence != 1 || !verification.Verified {
 		t.Fatalf("physical commit verification=%+v err=%v", verification, err)
 	}
-	reopened, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
+	reopened, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestV2RollbackAnchorGroupProcessKillWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
+	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestV2RollbackAnchorGroupProcessKillWindow(t *testing.T) {
 	if err != nil || verification.CommitSequence != 2 || !verification.Verified {
 		t.Fatalf("physical group verification=%+v err=%v", verification, err)
 	}
-	reopened, err := OpenV2WithOptions(databasePath, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
+	reopened, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func runRollbackAnchorProcessChild(t *testing.T, directory string) {
 		t.Fatal(err)
 	}
 	store := &blockingRollbackAnchorStore{delegate: anchor, marker: filepath.Join(directory, "anchor-pending")}
-	db, err := OpenV2WithOptions(filepath.Join(directory, "database.meld"), V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
+	db, err := OpenWithOptions(filepath.Join(directory, "database.meld"), OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func runRollbackAnchorGroupProcessChild(t *testing.T, directory string) {
 		t.Fatal(err)
 	}
 	store := &blockingRollbackAnchorStore{delegate: anchor, marker: filepath.Join(directory, "group-anchor-pending")}
-	db, err := OpenV2WithOptions(filepath.Join(directory, "database.meld"), V2Options{
+	db, err := OpenWithOptions(filepath.Join(directory, "database.meld"), OpenOptions{
 		CommitCoordinator:  V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second},
 		RollbackProtection: V2RollbackProtection{AnchorStore: store},
 	})

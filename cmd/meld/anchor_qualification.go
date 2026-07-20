@@ -220,7 +220,7 @@ func runAnchorQualificationProbe(args []string, stdout, stderr io.Writer) error 
 	}
 	databaseOpen := "not-attempted"
 	if *phase == "recovered" || *phase == "rollback-rejected" {
-		opened, openErr := meldbase.OpenV2WithOptions(*databasePath, meldbase.V2Options{RollbackProtection: meldbase.V2RollbackProtection{AnchorStore: store, OperationTimeout: *timeout}})
+		opened, openErr := meldbase.OpenWithOptions(*databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{AnchorStore: store, OperationTimeout: *timeout}})
 		if *phase == "rollback-rejected" {
 			if !errors.Is(openErr, meldbase.ErrRollbackDetected) || opened != nil {
 				if opened != nil {

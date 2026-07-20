@@ -125,7 +125,7 @@ func TestDurabilityCheckRejectsNonDirectory(t *testing.T) {
 
 func TestInspectCommandReportsCompatibleFormatAsJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.meld")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,14 +140,14 @@ func TestInspectCommandReportsCompatibleFormatAsJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.Format != meldbase.StorageFormatV2 || info.Revision != 3 || !info.ReaderCompatible || info.DatabaseIDHex == "" {
+	if info.Format != meldbase.StorageFormatCurrent || info.Revision != 3 || !info.ReaderCompatible || info.DatabaseIDHex == "" {
 		t.Fatalf("inspect info=%+v", info)
 	}
 }
 
 func TestIndexBuildCommandStartListResumeLifecycle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index-build.meld2")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestIndexBuildCommandStartListResumeLifecycle(t *testing.T) {
 		t.Fatalf("resumed=%+v err=%v output=%s", resumed, err, stdout.String())
 	}
 
-	published, err := meldbase.OpenV2(path)
+	published, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestIndexBuildCommandStartListResumeLifecycle(t *testing.T) {
 
 func TestIndexBuildCommandLeavesUniqueConflictInspectableThenAborts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index-build-conflict.meld2")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestIndexBuildCommandLeavesUniqueConflictInspectableThenAborts(t *testing.T
 	}
 }
 
-func TestIndexBuildCommandRejectsUnsafeArgumentsAndNonV2(t *testing.T) {
+func TestIndexBuildCommandRejectsUnsafeArguments(t *testing.T) {
 	var output bytes.Buffer
 	if err := run([]string{"index-build"}, &output, &output); err == nil {
 		t.Fatal("missing action accepted")
@@ -272,17 +272,6 @@ func TestIndexBuildCommandRejectsUnsafeArgumentsAndNonV2(t *testing.T) {
 	}
 	if err := run([]string{"index-build", "abort", "--db", "missing", "--id", strings.Repeat("01", 16), "--timeout", "-1s"}, &output, &output); err == nil || !strings.Contains(err.Error(), "must not be negative") {
 		t.Fatalf("negative timeout=%v", err)
-	}
-	v1Path := filepath.Join(t.TempDir(), "legacy.meld")
-	v1, err := meldbase.OpenV1(v1Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := v1.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := run([]string{"index-build", "list", "--db", v1Path}, &output, &output); !errors.Is(err, meldbase.ErrIndexBuildUnsupported) {
-		t.Fatalf("V1 list=%v", err)
 	}
 }
 
@@ -301,7 +290,7 @@ func TestInspectCommandCompatibilityGateOutputsBeforeFailure(t *testing.T) {
 
 func TestVerifyCommandProducesFullReadOnlyAuditJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify.meld2")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +313,7 @@ func TestVerifyCommandProducesFullReadOnlyAuditJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if !report.Verified || report.SchemaVersion != 3 || !report.IndexContentsVerified || !report.IndexBuildContentsVerified || report.Format != meldbase.StorageFormatV2 ||
+	if !report.Verified || report.SchemaVersion != 3 || !report.IndexContentsVerified || !report.IndexBuildContentsVerified || report.Format != meldbase.StorageFormatCurrent ||
 		report.ReachablePages == 0 || report.SHA256 == "" {
 		t.Fatalf("verify report=%+v", report)
 	}
@@ -336,7 +325,7 @@ func TestVerifyCommandProducesFullReadOnlyAuditJSON(t *testing.T) {
 
 func TestVerifyCommandReportsActiveWriterLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "locked.meld2")
-	db, err := meldbase.OpenV2(path)
+	db, err := meldbase.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +340,7 @@ func TestBackupCommandPublishesVerifiedRestoreArtifactJSON(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
 	destination := filepath.Join(directory, "backup.meld2")
-	db, err := meldbase.OpenV2(source)
+	db, err := meldbase.Open(source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +366,7 @@ func TestBackupCommandPublishesVerifiedRestoreArtifactJSON(t *testing.T) {
 		result.Pages == 0 || result.CommitSequence != sequence || result.DatabaseIDHex == "" || result.SHA256 == "" {
 		t.Fatalf("backup result=%+v", result)
 	}
-	backup, err := meldbase.OpenV2(destination)
+	backup, err := meldbase.Open(destination)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,11 +379,11 @@ func TestBackupCommandPublishesVerifiedRestoreArtifactJSON(t *testing.T) {
 	}
 }
 
-func TestBackupCommandFailsClosedForExistingDestinationAndNonV2Source(t *testing.T) {
+func TestBackupCommandFailsClosedForExistingDestination(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
 	destination := filepath.Join(directory, "owner")
-	db, err := meldbase.OpenV2(source)
+	db, err := meldbase.Open(source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,17 +401,6 @@ func TestBackupCommandFailsClosedForExistingDestinationAndNonV2Source(t *testing
 		t.Fatalf("destination=%q err=%v", contents, err)
 	}
 
-	v1Path := filepath.Join(directory, "legacy.meld")
-	v1, err := meldbase.OpenV1(v1Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := v1.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := run([]string{"backup", "--db", v1Path, "--out", filepath.Join(directory, "invalid")}, &output, &output); !errors.Is(err, meldbase.ErrBackupUnsupported) {
-		t.Fatalf("V1 backup error=%v", err)
-	}
 }
 
 func TestRestoreCommandImportsVerifiedPhysicalBackup(t *testing.T) {
@@ -431,7 +409,7 @@ func TestRestoreCommandImportsVerifiedPhysicalBackup(t *testing.T) {
 	artifact := filepath.Join(directory, "backup.meld2")
 	receiptPath := filepath.Join(directory, "backup.json")
 	restored := filepath.Join(directory, "restored.meld2")
-	db, err := meldbase.OpenV2(source)
+	db, err := meldbase.Open(source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +441,7 @@ func TestRestoreCommandImportsVerifiedPhysicalBackup(t *testing.T) {
 	if result.SchemaVersion != 1 || result.ArtifactKind != physicalV2RestoreArtifact || result.CommitSequence != sequence || result.DatabaseIDHex == "" {
 		t.Fatalf("restore result=%+v", result)
 	}
-	reopened, err := meldbase.OpenV2(restored)
+	reopened, err := meldbase.Open(restored)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +465,7 @@ func TestRestoreCommandFailsClosedForExistingDestinationAndInvalidReceipt(t *tes
 	artifact := filepath.Join(directory, "backup.meld2")
 	receiptPath := filepath.Join(directory, "backup.json")
 	destination := filepath.Join(directory, "destination.meld2")
-	db, err := meldbase.OpenV2(source)
+	db, err := meldbase.Open(source)
 	if err != nil {
 		t.Fatal(err)
 	}

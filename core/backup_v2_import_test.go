@@ -15,7 +15,7 @@ func TestImportV2PhysicalBackupVerifiesBeforeNoOverwritePublication(t *testing.T
 	sourcePath := filepath.Join(directory, "source.meld2")
 	artifactPath := filepath.Join(directory, "artifact.meld2")
 	destinationPath := filepath.Join(directory, "follower-bootstrap.meld2")
-	source, err := OpenV2(sourcePath)
+	source, err := Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestImportV2PhysicalBackupVerifiesBeforeNoOverwritePublication(t *testing.T
 	if err != nil || !bytes.Equal(destination, artifact) {
 		t.Fatalf("imported bytes=%d err=%v", len(destination), err)
 	}
-	follower, err := OpenV2Follower(destinationPath, V2Options{RequireGraphAudit: true})
+	follower, err := OpenV2Follower(destinationPath, OpenOptions{RequireGraphAudit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func assertOwnerPrivateStorageArtifact(t *testing.T, path string) {
 
 func TestImportV2PhysicalBackupRejectsBadStreamAndPreservesDestination(t *testing.T) {
 	directory := t.TempDir()
-	source, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

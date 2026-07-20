@@ -18,7 +18,7 @@ import (
 
 func TestFetchImportsVerifiedHTTPSBootstrap(t *testing.T) {
 	directory := t.TempDir()
-	source, err := meldbase.OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestFetchImportsVerifiedHTTPSBootstrap(t *testing.T) {
 	if bootstrap.SnapshotToken != bootstrap.Backup.CommitSequence || bootstrap.CheckpointToken > bootstrap.SnapshotToken || bootstrap.Backup.Bytes == 0 {
 		t.Fatalf("bootstrap=%+v", bootstrap)
 	}
-	follower, err := meldbase.OpenV2Follower(destination, meldbase.V2Options{RequireGraphAudit: true})
+	follower, err := meldbase.OpenV2Follower(destination, meldbase.OpenOptions{RequireGraphAudit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestFetchImportsVerifiedHTTPSBootstrap(t *testing.T) {
 
 func TestFetchBootstrapHandsOffToSameDurableWSSConsumer(t *testing.T) {
 	directory := t.TempDir()
-	source, err := meldbase.OpenV2(filepath.Join(directory, "source.meld2"))
+	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestFetchBootstrapHandsOffToSameDurableWSSConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(bootstrapPath, meldbase.V2Options{RequireGraphAudit: true})
+	follower, err := meldbase.OpenV2Follower(bootstrapPath, meldbase.OpenOptions{RequireGraphAudit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestFetchRejectsInsecureOrMalformedBootstrapBeforePublication(t *testing.T)
 
 func TestSourceRejectsPlainHTTPAndConcurrentConsumer(t *testing.T) {
 	directory := t.TempDir()
-	db, err := meldbase.OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

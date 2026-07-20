@@ -419,7 +419,7 @@ key/fingerprint conflicts, and turns interrupted claims into
 `rpc_outcome_unknown` rather than rerunning them. The built-in store is explicit:
 
 ```go
-db, err := meldbase.OpenV2("app.meld2")
+db, err := meldbase.Open("app.meld2")
 if err != nil { log.Fatal(err) }
 
 idempotency, err := server.NewDurableRPCIdempotencyStore(db)

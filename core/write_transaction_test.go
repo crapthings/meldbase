@@ -13,7 +13,7 @@ import (
 )
 
 func TestMeldbaseSystemWriteCommitsPointMutationsAndTerminalAtomically(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "atomic-write.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "atomic-write.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestMeldbaseSystemWriteCommitsPointMutationsAndTerminalAtomically(t *testin
 }
 
 func TestMeldbaseSystemWriteRollsBackOnCASMismatchAndHandlerError(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "atomic-rollback.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "atomic-rollback.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestMeldbaseSystemWriteRollsBackOnCASMismatchAndHandlerError(t *testing.T) 
 }
 
 func TestMeldbaseSystemWriteSharesOverlayAndSystemByteBudget(t *testing.T) {
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "shared-overlay-system-budget.meld2"), V2Options{
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "shared-overlay-system-budget.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxDocumentBytes: 256, MaxTransactionBytes: 300, MaxTransactionChanges: 4},
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func TestMeldbaseSystemWriteSharesOverlayAndSystemByteBudget(t *testing.T) {
 }
 
 func TestMeldbaseSystemWriteDoesNotHoldWriterLockAndRejectsStaleSnapshot(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "atomic-conflict.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "atomic-conflict.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestMeldbaseSystemWriteDoesNotHoldWriterLockAndRejectsStaleSnapshot(t *test
 }
 
 func TestMeldbaseSystemWriteReadOnlyResultRejectsStaleSnapshot(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "atomic-read-conflict.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "atomic-read-conflict.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

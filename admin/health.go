@@ -122,9 +122,7 @@ func assessHealth(previous *Sample, current Sample) HealthStatus {
 	if previous != nil && sameDatabaseSession(previous.Stats, current.Stats) {
 		health.Signals.ReactiveQueueOverflow = increased(previous.Stats.Realtime.QueueOverflows, current.Stats.Realtime.QueueOverflows)
 		health.Signals.SlowConsumer = increased(previous.Stats.Realtime.SlowConsumers, current.Stats.Realtime.SlowConsumers)
-		health.Signals.DurabilityFailure = increased(previous.Stats.Durability.WALAppendFailures, current.Stats.Durability.WALAppendFailures) ||
-			increased(previous.Stats.Durability.CheckpointFailures, current.Stats.Durability.CheckpointFailures) ||
-			increased(previous.Stats.Storage.RollbackAnchorFailures, current.Stats.Storage.RollbackAnchorFailures)
+		health.Signals.DurabilityFailure = increased(previous.Stats.Storage.RollbackAnchorFailures, current.Stats.Storage.RollbackAnchorFailures)
 		health.Signals.RollbackAnchorDegraded = increased(previous.Stats.Storage.RollbackAnchorStore.EndpointFailures, current.Stats.Storage.RollbackAnchorStore.EndpointFailures) ||
 			increased(previous.Stats.Storage.RollbackAnchorStore.ConfigurationFailures, current.Stats.Storage.RollbackAnchorStore.ConfigurationFailures)
 		health.Signals.StorageLimitRejected = increased(previous.Stats.Storage.StorageLimitRejections, current.Stats.Storage.StorageLimitRejections)

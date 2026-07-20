@@ -120,7 +120,7 @@ func (db *DB) backupV2WithStoreLocked(ctx context.Context, absoluteDestination s
 	if auditErr != nil {
 		return result, mapStorageV2Error(auditErr)
 	}
-	verified, err := OpenV2(temporaryPath)
+	verified, err := Open(temporaryPath)
 	if err != nil {
 		return result, err
 	}
@@ -134,10 +134,10 @@ func (db *DB) backupV2WithStoreLocked(ctx context.Context, absoluteDestination s
 	if err := contextError(ctx); err != nil {
 		return result, err
 	}
-	if err := publishMigrationFile(temporaryPath, absoluteDestination, migrationPublishOps{
+	if err := publishNewFile(temporaryPath, absoluteDestination, publishFileOps{
 		link: os.Link, remove: os.Remove, syncDirectory: syncDirectory,
 	}); err != nil {
-		if errors.Is(err, ErrMigrationDestinationExists) {
+		if errors.Is(err, ErrDestinationExists) {
 			return result, ErrBackupDestinationExists
 		}
 		return result, err

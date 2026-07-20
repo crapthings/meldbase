@@ -14,7 +14,7 @@ import (
 
 func TestRunWriteTransactionCommitsMultiCollectionUniqueSwapAndOneReactiveBatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-write-transaction.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestRunWriteTransactionCommitsMultiCollectionUniqueSwapAndOneReactiveBatch(
 		t.Fatal(err)
 	}
 
-	db, err = OpenV2(path)
+	db, err = Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestRunWriteTransactionCommitsMultiCollectionUniqueSwapAndOneReactiveBatch(
 }
 
 func TestRunWriteTransactionNoopRollbackLifetimeAndResourceLimit(t *testing.T) {
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "bounded-write-transaction.meld2"), V2Options{
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded-write-transaction.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxTransactionChanges: 1},
 	})
 	if err != nil {
@@ -175,7 +175,7 @@ func TestRunWriteTransactionNoopRollbackLifetimeAndResourceLimit(t *testing.T) {
 }
 
 func TestRunWriteTransactionBoundsReadSetEntriesBeforeCommit(t *testing.T) {
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "bounded-read-set.meld2"), V2Options{
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded-read-set.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxTransactionChanges: 1},
 	})
 	if err != nil {
@@ -208,7 +208,7 @@ func TestRunWriteTransactionBoundsReadSetEntriesBeforeCommit(t *testing.T) {
 
 func TestRunWriteTransactionBoundsRetainedOverlayBytesWithoutCumulativeUpdates(t *testing.T) {
 	limits := ResourceLimits{MaxDocumentBytes: 256, MaxTransactionBytes: 300, MaxTransactionChanges: 4}
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "bounded-overlay-bytes.meld2"), V2Options{ResourceLimits: limits})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded-overlay-bytes.meld2"), OpenOptions{ResourceLimits: limits})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestRunWriteTransactionBoundsRetainedOverlayBytesWithoutCumulativeUpdates(t
 }
 
 func TestRunWriteTransactionDoesNotHoldWriterLockAndRejectsPointConflict(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "public-write-conflict.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "public-write-conflict.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestRunWriteTransactionDoesNotHoldWriterLockAndRejectsPointConflict(t *test
 }
 
 func TestRunWriteTransactionAllowsDisjointConcurrentCommit(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "public-write-disjoint.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "public-write-disjoint.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestRunWriteTransactionAllowsDisjointConcurrentCommit(t *testing.T) {
 }
 
 func TestRunWriteTransactionFindRejectsCollectionPhantomAndSeesOwnWrites(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "public-range-transaction.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "public-range-transaction.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestRunWriteTransactionFindRejectsCollectionPhantomAndSeesOwnWrites(t *test
 }
 
 func TestRunWriteTransactionFindFenceSurvivesCommitCoordinator(t *testing.T) {
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "coordinated-range-transaction.meld2"), V2Options{
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "coordinated-range-transaction.meld2"), OpenOptions{
 		CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond},
 	})
 	if err != nil {
@@ -484,7 +484,7 @@ func mustCompileTransactionUpdate(t *testing.T, update Update) MutationSpec {
 
 func TestRunWriteTransactionMaintainsIndexCreatedAfterSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-write-concurrent-index.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +526,7 @@ func TestRunWriteTransactionMaintainsIndexCreatedAfterSnapshot(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err = OpenV2(path)
+	db, err = Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func TestRunWriteTransactionMaintainsIndexCreatedAfterSnapshot(t *testing.T) {
 }
 
 func TestRunWriteTransactionReadOnlySnapshotRejectsConcurrentCommit(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "public-read-conflict.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "public-read-conflict.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +574,7 @@ func TestRunWriteTransactionReadOnlySnapshotRejectsConcurrentCommit(t *testing.T
 }
 
 func TestRunWriteTransactionReadOnlyAllowsDisjointConcurrentCommit(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "public-read-disjoint.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "public-read-disjoint.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +609,7 @@ func TestRunWriteTransactionReadOnlyAllowsDisjointConcurrentCommit(t *testing.T)
 }
 
 func TestRunWriteTransactionPanicClosesAndAccountsAbort(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "public-write-panic.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "public-write-panic.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,28 +638,20 @@ func TestRunWriteTransactionPanicClosesAndAccountsAbort(t *testing.T) {
 	}
 }
 
-func TestRunWriteTransactionRejectsUnsupportedEnginesAndCanceledContext(t *testing.T) {
+func TestRunWriteTransactionRejectsMemoryAndCanceledContext(t *testing.T) {
 	memory := New()
 	defer memory.Close()
 	if err := memory.RunWriteTransaction(context.Background(), func(*WriteTransaction) error { return nil }); !errors.Is(err, ErrWriteTransactionUnsupported) {
 		t.Fatalf("memory err=%v", err)
 	}
-	v1, err := OpenV1(filepath.Join(t.TempDir(), "legacy.meld"))
+	db, err := Open(filepath.Join(t.TempDir(), "canceled.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer v1.Close()
-	if err := v1.RunWriteTransaction(context.Background(), func(*WriteTransaction) error { return nil }); !errors.Is(err, ErrWriteTransactionUnsupported) {
-		t.Fatalf("V1 err=%v", err)
-	}
-	v2, err := OpenV2(filepath.Join(t.TempDir(), "canceled.meld2"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer v2.Close()
+	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := v2.RunWriteTransaction(ctx, func(*WriteTransaction) error { return nil }); !errors.Is(err, context.Canceled) {
+	if err := db.RunWriteTransaction(ctx, func(*WriteTransaction) error { return nil }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled err=%v", err)
 	}
 }

@@ -167,10 +167,10 @@ func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, op
 	if err != nil {
 		return err
 	}
-	if err := publishMigrationFile(temporaryPath, absoluteDestination, migrationPublishOps{
+	if err := publishNewFile(temporaryPath, absoluteDestination, publishFileOps{
 		link: os.Link, remove: os.Remove, syncDirectory: syncDirectory,
 	}); err != nil {
-		if errors.Is(err, ErrMigrationDestinationExists) {
+		if errors.Is(err, ErrDestinationExists) {
 			return ErrCompactionDestinationExists
 		}
 		return err
@@ -193,7 +193,7 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 		if err := contextError(ctx); err != nil {
 			return err
 		}
-		transactionID, err := newMigrationTransactionID()
+		transactionID, err := newSnapshotTransactionID()
 		if err != nil {
 			return err
 		}
@@ -206,13 +206,13 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 		if err != nil {
 			return mapStorageV2Error(err)
 		}
-		pending := make([]storagev2.DocumentMutation, 0, migrationDocumentBatchCount)
+		pending := make([]storagev2.DocumentMutation, 0, snapshotDocumentBatchCount)
 		pendingBytes := 0
 		flush := func() error {
 			if len(pending) == 0 {
 				return nil
 			}
-			transactionID, err := newMigrationTransactionID()
+			transactionID, err := newSnapshotTransactionID()
 			if err != nil {
 				return err
 			}
@@ -227,7 +227,7 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 				return err
 			}
 			record := iterator.Record()
-			if len(pending) > 0 && (len(pending) == migrationDocumentBatchCount || pendingBytes+len(record.Document) > migrationDocumentBatchBytes) {
+			if len(pending) > 0 && (len(pending) == snapshotDocumentBatchCount || pendingBytes+len(record.Document) > snapshotDocumentBatchBytes) {
 				if err := flush(); err != nil {
 					_ = iterator.Close()
 					return err
@@ -276,7 +276,7 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 			if err := errors.Join(iteratorErr, closeErr); err != nil {
 				return err
 			}
-			transactionID, err := newMigrationTransactionID()
+			transactionID, err := newSnapshotTransactionID()
 			if err != nil {
 				return err
 			}
@@ -297,7 +297,7 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 		if err := contextError(ctx); err != nil {
 			return err
 		}
-		transactionID, err := newMigrationTransactionID()
+		transactionID, err := newSnapshotTransactionID()
 		if err != nil {
 			return err
 		}

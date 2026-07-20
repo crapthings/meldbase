@@ -213,40 +213,6 @@ func TestStatsTrackReactiveLifecycle(t *testing.T) {
 	}
 }
 
-func TestDurabilityStatsAreSessionScoped(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "stats.meld")
-	db, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"value": String("durable")}); err != nil {
-		t.Fatal(err)
-	}
-	stats := db.Stats()
-	if !stats.Durable || stats.Durability.WALAppends != 1 || stats.Durability.WALPayloadBytes == 0 ||
-		stats.Durability.WALCurrentBytes == 0 || stats.Durability.WALCurrentCommits != 1 ||
-		stats.Durability.WALAppendMaxLatency <= 0 || stats.Durability.CheckpointAttempts != 0 {
-		t.Fatalf("durability stats: %+v", stats)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	recovered := reopened.Stats()
-	if recovered.CommitSequence != 1 || recovered.Documents != 1 {
-		t.Fatalf("recovered state stats: %+v", recovered)
-	}
-	if recovered.Commits.Total != 0 || recovered.Durability.WALAppends != 0 || recovered.Durability.WALCurrentBytes != 0 ||
-		recovered.Durability.WALCurrentCommits != 0 || recovered.Durability.CheckpointAttempts != 0 {
-		t.Fatalf("session counters included recovery: %+v", recovered)
-	}
-}
-
 func TestStatsSnapshotIsAllocationFreeForMemoryAndV2(t *testing.T) {
 	memory := New()
 	defer memory.Close()
@@ -254,7 +220,7 @@ func TestStatsSnapshotIsAllocationFreeForMemoryAndV2(t *testing.T) {
 		t.Fatalf("memory Stats allocations=%v, want 0", allocations)
 	}
 
-	v2, err := OpenV2(filepath.Join(t.TempDir(), "stats.meld2"))
+	v2, err := Open(filepath.Join(t.TempDir(), "stats.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

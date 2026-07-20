@@ -124,7 +124,7 @@ remains a separate release gate.
    recovery plus historical replay from retained intermediate Catalog roots.
    Flush-error qualification remains part of the later physical campaign.
 3. **Implemented, opt-in:** V2 now exposes `V2CommitCoordinatorOptions` on
-   `OpenV2WithOptions` and format-neutral `OpenWithOptions`. It is disabled by
+   `OpenWithOptions` and format-neutral `OpenWithOptions`. It is disabled by
    default. When enabled, ordinary `Collection.InsertMany`, filter
    `UpdateOne/UpdateMany`, filter `DeleteOne/DeleteMany`, and completed public
    `RunWriteTransaction` calls enter a

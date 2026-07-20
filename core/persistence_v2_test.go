@@ -16,7 +16,7 @@ import (
 
 func TestOpenV2PersistsCRUDIndexesOrderAndIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-v2.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestOpenV2PersistsCRUDIndexesOrderAndIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenV2(path)
+	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestOpenV2PersistsCRUDIndexesOrderAndIdentity(t *testing.T) {
 
 func TestOpenV2PersistsCompoundIndexCRUDAndPlanner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compound-v2.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestOpenV2PersistsCompoundIndexCRUDAndPlanner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenV2(path)
+	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestOpenV2PersistsCompoundIndexCRUDAndPlanner(t *testing.T) {
 }
 
 func TestOpenV2ProvidesGapFreeQueryReplay(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "public-v2-replay.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "public-v2-replay.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestOpenV2ProvidesGapFreeQueryReplay(t *testing.T) {
 }
 
 func TestColdV2ReactiveSubscriptionPinsSnapshotWithoutBlockingWriter(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "cold-reactive.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "cold-reactive.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestColdV2ReactiveSubscriptionPinsSnapshotWithoutBlockingWriter(t *testing.
 }
 
 func TestWarmV2ReactiveRecomputePinsSnapshotWithoutBlockingWriter(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "warm-reactive.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "warm-reactive.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestWarmV2ReactiveRecomputePinsSnapshotWithoutBlockingWriter(t *testing.T) 
 
 func TestV2UpdateChangedPathsReachWatchersAndDurableCommitLog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "changed-paths.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestV2UpdateChangedPathsReachWatchersAndDurableCommitLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenV2(path)
+	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestV2UpdateChangedPathsReachWatchersAndDurableCommitLog(t *testing.T) {
 
 func TestOpenV2StatsTrackRejectedTransactionAndResetOnReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-v2-stats.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +454,7 @@ func TestOpenV2StatsTrackRejectedTransactionAndResetOnReopen(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenV2(path)
+	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestOpenV2DetectsCorruptPersistentIndexWhenRead(t *testing.T) {
 	if _, err := VerifyV2File(context.Background(), path); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("semantic verifier accepted wrong index key: %v", err)
 	}
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestOpenV2DetectsCorruptPersistentIndexWhenRead(t *testing.T) {
 }
 
 func TestOpenV2QueriesUsePinnedStorageSnapshotNotMemoryMirror(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "storage-query.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "storage-query.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestOpenV2QueriesUsePinnedStorageSnapshotNotMemoryMirror(t *testing.T) {
 
 func TestOpenV2CreateIndexAndMutationsDoNotReadDocumentMirror(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage-mutations.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +629,7 @@ func TestOpenV2CreateIndexAndMutationsDoNotReadDocumentMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenV2(path)
+	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +640,7 @@ func TestOpenV2CreateIndexAndMutationsDoNotReadDocumentMirror(t *testing.T) {
 }
 
 func TestOpenV2ReactiveInitializationAndResyncDoNotReadDocumentMirror(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "storage-reactive.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "storage-reactive.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -712,7 +712,7 @@ func TestOpenV2ReactiveInitializationAndResyncDoNotReadDocumentMirror(t *testing
 
 func TestOpenV2KeepsLargeCollectionMetadataOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "metadata-only.meld2")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -737,7 +737,7 @@ func TestOpenV2KeepsLargeCollectionMetadataOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenV2(path)
+	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -751,12 +751,12 @@ func TestOpenV2KeepsLargeCollectionMetadataOnly(t *testing.T) {
 		t.Fatalf("reopened physical counts=%+v", stats)
 	}
 	if stats.Storage.DocumentCache.Entries != 0 || stats.Storage.DocumentCache.Bytes != 0 || stats.Storage.DocumentCache.Misses != 0 {
-		t.Fatalf("OpenV2 decoded documents into cache: %+v", stats.Storage.DocumentCache)
+		t.Fatalf("Open decoded documents into cache: %+v", stats.Storage.DocumentCache)
 	}
 }
 
 func TestOpenV2CreateIndexScanHonorsContextBeforePublication(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "cancel-index.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "cancel-index.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -783,7 +783,7 @@ func TestOpenV2CreateIndexScanHonorsContextBeforePublication(t *testing.T) {
 }
 
 func TestOpenV2CreateIndexScansWithoutBlockingWritesAndRetriesSnapshot(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "optimistic-index.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "optimistic-index.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -850,7 +850,7 @@ func TestOpenV2CreateIndexScansWithoutBlockingWritesAndRetriesSnapshot(t *testin
 }
 
 func TestOpenV2CreateIndexBoundsContinuousWriteConflictsWithoutPublication(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "conflicted-index.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "conflicted-index.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -883,7 +883,7 @@ func TestOpenV2CreateIndexBoundsContinuousWriteConflictsWithoutPublication(t *te
 }
 
 func TestOpenV2OversizedIndexKeyIsValidationErrorNotFatal(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "oversized-index-key.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "oversized-index-key.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -904,7 +904,7 @@ func TestOpenV2OversizedIndexKeyIsValidationErrorNotFatal(t *testing.T) {
 }
 
 func TestOpenV2FindStreamsInsertionOrderCOLLSCANAndReleasesPins(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "streaming-cursor.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "streaming-cursor.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

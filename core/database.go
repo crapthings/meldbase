@@ -33,8 +33,8 @@ type IndexDefinition struct {
 	Order       int
 	Unique      bool
 	// Fields is the ordered definition for compound/descending indexes. Field
-	// and Order remain the compatibility mirror of Fields[0] for V1 records and
-	// existing callers; new code must use indexDefinitionFields.
+	// and Order remain the compatibility mirror of Fields[0] for existing
+	// callers; new code must use indexDefinitionFields.
 	Fields []IndexField
 }
 
@@ -88,7 +88,6 @@ type DB struct {
 	nextWatcher               uint64
 	watchers                  map[uint64]*changeWatcher
 	pendingWatcherBytes       uint64 // protected by feedMu
-	store                     *durableStore
 	durability                durabilityBackend
 	replaySource              QueryReplaySource
 	querySource               querySnapshotSource
@@ -250,7 +249,7 @@ func (db *DB) Close() error {
 }
 func (db *DB) Collection(name string) *Collection { return &Collection{db: db, name: name} }
 
-// DatabaseID returns the stable, non-secret V2/V1 database namespace used to
+// DatabaseID returns the stable, non-secret database namespace used to
 // bind resume and replication protocols. It is not an authentication token.
 func (db *DB) DatabaseID() [16]byte {
 	if db == nil {

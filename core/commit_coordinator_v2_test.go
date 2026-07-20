@@ -12,7 +12,7 @@ import (
 
 func openV2WithCommitCoordinator(t *testing.T, options V2CommitCoordinatorOptions) *DB {
 	t.Helper()
-	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "coordinator.meld2"), V2Options{CommitCoordinator: options})
+	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "coordinator.meld2"), OpenOptions{CommitCoordinator: options})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +569,7 @@ func TestV2CommitCoordinatorOptionsAreExplicit(t *testing.T) {
 	if _, err := normalizeV2CommitCoordinatorOptions(V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 1}); !errors.Is(err, ErrInvalidCommitCoordinatorOptions) {
 		t.Fatalf("invalid batch error=%v", err)
 	}
-	db, err := OpenV2(filepath.Join(t.TempDir(), "default.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "default.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestV2CommitCoordinatorOptionsAreExplicit(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	anchored, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "anchor.meld2"), V2Options{
+	anchored, err := OpenWithOptions(filepath.Join(t.TempDir(), "anchor.meld2"), OpenOptions{
 		CommitCoordinator:  V2CommitCoordinatorOptions{Enabled: true},
 		RollbackProtection: V2RollbackProtection{AnchorStore: &testRollbackAnchorStore{}, InitializeAnchor: true},
 	})
@@ -600,7 +600,7 @@ func TestV2CommitCoordinatorAnchorsWholeGroupAndRejectsRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(path, V2Options{
+	db, err := OpenWithOptions(path, OpenOptions{
 		CommitCoordinator:  V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second},
 		RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true},
 	})
@@ -663,14 +663,14 @@ func TestV2CommitCoordinatorAnchorsWholeGroupAndRejectsRollback(t *testing.T) {
 	if err := os.WriteFile(path, before, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if rolledBack, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}}); rolledBack != nil || !errors.Is(err, ErrRollbackDetected) {
+	if rolledBack, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}}); rolledBack != nil || !errors.Is(err, ErrRollbackDetected) {
 		t.Fatalf("rollback db=%v err=%v", rolledBack, err)
 	}
 }
 
 func TestV2CommitCoordinatorAnchorAcknowledgementFailureIsFailStop(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "anchored-group-failure.meld2")
-	seed, err := OpenV2(path)
+	seed, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -680,7 +680,7 @@ func TestV2CommitCoordinatorAnchorAcknowledgementFailureIsFailStop(t *testing.T)
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(path, V2Options{
+	db, err := OpenWithOptions(path, OpenOptions{
 		CommitCoordinator:  V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second},
 		RollbackProtection: V2RollbackProtection{AnchorStore: anchor},
 	})
@@ -739,7 +739,7 @@ func TestV2CommitCoordinatorAnchorAcknowledgementFailureIsFailStop(t *testing.T)
 		t.Fatalf("close error=%v", err)
 	}
 	anchor.saveThenErr = nil
-	reopened, err := OpenV2WithOptions(path, V2Options{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
+	reopened, err := OpenWithOptions(path, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -755,7 +755,7 @@ func TestV2CommitCoordinatorAnchorAcknowledgementFailureIsFailStop(t *testing.T)
 }
 
 func TestV2DuplicateDocumentIDIsLogicalAndDoesNotDisableWrites(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "duplicate-id.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "duplicate-id.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -824,7 +824,7 @@ func TestV2CommitCoordinatorCloseDrainsOwnedGroupBeforeFileClose(t *testing.T) {
 
 func TestV2CommitCoordinatorGroupsIndependentUpdateAndDelete(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mutation-group.meld2")
-	seed, err := OpenV2(path)
+	seed, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,7 +837,7 @@ func TestV2CommitCoordinatorGroupsIndependentUpdateAndDelete(t *testing.T) {
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(path, V2Options{CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}})
+	db, err := OpenWithOptions(path, OpenOptions{CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -907,7 +907,7 @@ func TestV2CommitCoordinatorGroupsIndependentUpdateAndDelete(t *testing.T) {
 
 func TestV2CommitCoordinatorReevaluatesConflictingUpdatesInAdmissionOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mutation-conflict.meld2")
-	seed, err := OpenV2(path)
+	seed, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,7 +918,7 @@ func TestV2CommitCoordinatorReevaluatesConflictingUpdatesInAdmissionOrder(t *tes
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(path, V2Options{CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}})
+	db, err := OpenWithOptions(path, OpenOptions{CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -984,7 +984,7 @@ func TestV2CommitCoordinatorReevaluatesConflictingUpdatesInAdmissionOrder(t *tes
 
 func TestV2CommitCoordinatorMutationCancellationReturnsReconciliationResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mutation-cancel.meld2")
-	seed, err := OpenV2(path)
+	seed, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,7 +995,7 @@ func TestV2CommitCoordinatorMutationCancellationReturnsReconciliationResult(t *t
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenV2WithOptions(path, V2Options{CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond}})
+	db, err := OpenWithOptions(path, OpenOptions{CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
 	}

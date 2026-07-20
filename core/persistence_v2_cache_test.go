@@ -101,7 +101,7 @@ func TestV2DocumentCacheConcurrentAccessRemainsBounded(t *testing.T) {
 }
 
 func TestOpenV2DocumentCacheNeverLeaksMutableOrStaleDocuments(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "document-cache.meld2"))
+	db, err := Open(filepath.Join(t.TempDir(), "document-cache.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

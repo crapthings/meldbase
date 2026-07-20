@@ -156,7 +156,7 @@ func TestWorkerHubCapabilityDiscoveryIsOptInAndFixed(t *testing.T) {
 }
 
 func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "worker-transaction.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "worker-transaction.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 }
 
 func TestWorkerTransactionUpdateRejectsAmbiguousAndMalformedFrames(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "worker-update-validation.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "worker-update-validation.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

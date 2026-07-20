@@ -402,7 +402,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		openOptions.V2RollbackProtection = meldbase.V2RollbackProtection{
+		openOptions.RollbackProtection = meldbase.V2RollbackProtection{
 			AnchorStore: anchor, InitializeAnchor: *rollbackAnchorInit, OperationTimeout: *rollbackAnchorTimeout,
 		}
 	} else if remoteAnchor.enabled() {
@@ -412,7 +412,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		}
 		anchorTransport = transport
 		defer anchorTransport.CloseIdleConnections()
-		openOptions.V2RollbackProtection = meldbase.V2RollbackProtection{
+		openOptions.RollbackProtection = meldbase.V2RollbackProtection{
 			AnchorStore: anchor, InitializeAnchor: *rollbackAnchorInit, OperationTimeout: *rollbackAnchorTimeout,
 		}
 	}

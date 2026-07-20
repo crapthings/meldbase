@@ -176,7 +176,7 @@ unsafe boolean switch.
 
 ## Optional primary write fence
 
-`V2Options.PrimaryWriteFence` gives a primary process a local fail-closed
+`OpenOptions.PrimaryWriteFence` gives a primary process a local fail-closed
 enforcement point for its external controller. Before every business V2 commit
 (including each logical member of a coordinator group, durable index-build
 visibility publication, a standalone private system-record commit, and the

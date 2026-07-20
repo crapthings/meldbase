@@ -23,7 +23,7 @@ import (
 
 func TestFetchRequiresActualVerifiedMTLSClientCertificate(t *testing.T) {
 	directory := t.TempDir()
-	db, err := meldbase.OpenV2(filepath.Join(directory, "source.meld2"))
+	db, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}

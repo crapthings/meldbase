@@ -83,6 +83,24 @@ type CommitStats struct {
 	Changes uint64 `json:"changes"`
 }
 
+// DurabilityStats is retained in the admin wire contract. Current-format
+// databases do not use a WAL or checkpoints, so every field is zero.
+type DurabilityStats struct {
+	WALAppends           uint64        `json:"walAppends"`
+	WALPayloadBytes      uint64        `json:"walPayloadBytes"`
+	WALCurrentBytes      uint64        `json:"walCurrentBytes"`
+	WALCurrentCommits    uint64        `json:"walCurrentCommits"`
+	WALAppendFailures    uint64        `json:"walAppendFailures"`
+	WALAppendNanos       uint64        `json:"walAppendNanos"`
+	WALAppendMaxLatency  time.Duration `json:"walAppendMaxLatencyNanos"`
+	CheckpointAttempts   uint64        `json:"checkpointAttempts"`
+	CheckpointsCompleted uint64        `json:"checkpointsCompleted"`
+	CheckpointFailures   uint64        `json:"checkpointFailures"`
+	AutomaticCheckpoints uint64        `json:"automaticCheckpoints"`
+	CheckpointNanos      uint64        `json:"checkpointNanos"`
+	CheckpointMaxLatency time.Duration `json:"checkpointMaxLatencyNanos"`
+}
+
 // V2CommitCoordinatorStats is a fixed-cardinality snapshot of the optional
 // V2 write-admission scheduler. It is included in DBStats and the versioned
 // admin schema, so applications can alert on admission pressure without
@@ -166,22 +184,6 @@ type RealtimeStats struct {
 	SnapshotsEmitted       uint64 `json:"snapshotsEmitted"`
 	DocumentsEmitted       uint64 `json:"documentsEmitted"`
 	SlowConsumers          uint64 `json:"slowConsumers"`
-}
-
-type DurabilityStats struct {
-	WALAppends           uint64        `json:"walAppends"`
-	WALPayloadBytes      uint64        `json:"walPayloadBytes"`
-	WALCurrentBytes      uint64        `json:"walCurrentBytes"`
-	WALCurrentCommits    uint64        `json:"walCurrentCommits"`
-	WALAppendFailures    uint64        `json:"walAppendFailures"`
-	WALAppendNanos       uint64        `json:"walAppendNanos"`
-	WALAppendMaxLatency  time.Duration `json:"walAppendMaxLatencyNanos"`
-	CheckpointAttempts   uint64        `json:"checkpointAttempts"`
-	CheckpointsCompleted uint64        `json:"checkpointsCompleted"`
-	CheckpointFailures   uint64        `json:"checkpointFailures"`
-	AutomaticCheckpoints uint64        `json:"automaticCheckpoints"`
-	CheckpointNanos      uint64        `json:"checkpointNanos"`
-	CheckpointMaxLatency time.Duration `json:"checkpointMaxLatencyNanos"`
 }
 
 // StorageStats describes the selected physical backend. Session counters reset
@@ -307,11 +309,6 @@ type dbMetrics struct {
 	pendingReactiveBatches, pendingReactiveChanges        atomic.Uint64
 	pendingReactiveBytes                                  atomic.Uint64
 	sharedDeltas, deltaDeliveries, deltaOperations        atomic.Uint64
-
-	walAppends, walPayloadBytes, walCurrentBytes, walCurrentCommits atomic.Uint64
-	walAppendFailures, walAppendNanos, walAppendMaxNanos            atomic.Uint64
-	checkpointAttempts, checkpointsCompleted, checkpointFailures    atomic.Uint64
-	automaticCheckpoints, checkpointNanos, checkpointMaxNanos       atomic.Uint64
 
 	v2CommitAttempts, v2CommittedTransactions          atomic.Uint64
 	v2RejectedTransactions, v2CommitNanos              atomic.Uint64
@@ -507,18 +504,6 @@ func (db *DB) Stats() DBStats {
 	if diagnostics := db.diagnostics.Load(); diagnostics != nil {
 		stats.Diagnostics = diagnostics.Stats()
 	}
-	stats.Durability = DurabilityStats{
-		WALAppends:          db.metrics.walAppends.Load(),
-		WALPayloadBytes:     db.metrics.walPayloadBytes.Load(),
-		WALCurrentBytes:     db.metrics.walCurrentBytes.Load(),
-		WALCurrentCommits:   db.metrics.walCurrentCommits.Load(),
-		WALAppendFailures:   db.metrics.walAppendFailures.Load(),
-		WALAppendNanos:      db.metrics.walAppendNanos.Load(),
-		WALAppendMaxLatency: time.Duration(db.metrics.walAppendMaxNanos.Load()),
-		CheckpointAttempts:  db.metrics.checkpointAttempts.Load(), CheckpointsCompleted: db.metrics.checkpointsCompleted.Load(),
-		CheckpointFailures: db.metrics.checkpointFailures.Load(), AutomaticCheckpoints: db.metrics.automaticCheckpoints.Load(),
-		CheckpointNanos: db.metrics.checkpointNanos.Load(), CheckpointMaxLatency: time.Duration(db.metrics.checkpointMaxNanos.Load()),
-	}
 	stats.Storage.CommitAttempts = db.metrics.v2CommitAttempts.Load()
 	stats.Storage.CommittedTransactions = db.metrics.v2CommittedTransactions.Load()
 	stats.Storage.RejectedTransactions = db.metrics.v2RejectedTransactions.Load()
@@ -545,9 +530,6 @@ func (db *DB) recordLiveCommit(batch ChangeBatch) {
 	}
 	db.metrics.commits.Add(1)
 	db.metrics.commitChanges.Add(uint64(len(batch.Changes)))
-	if db.store != nil {
-		db.store.maybeCheckpointDB(db)
-	}
 }
 
 // initializeLogicalStats performs the one allowed catalog walk while a DB is

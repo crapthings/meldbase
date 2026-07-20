@@ -9,7 +9,7 @@ import (
 )
 
 func TestIndexBuildSchedulerCompletesDurableBuild(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "scheduler.meld"))
+	db, err := Open(filepath.Join(t.TempDir(), "scheduler.meld"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestIndexBuildSchedulerCompletesDurableBuild(t *testing.T) {
 
 func TestIndexBuildSchedulerMarksTerminalFailureAndSkipsIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "failed-scheduler.meld")
-	db, err := OpenV2(path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestIndexBuildSchedulerMarksTerminalFailureAndSkipsIt(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err = OpenV2(path)
+	db, err = Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestIndexBuildSchedulerMarksTerminalFailureAndSkipsIt(t *testing.T) {
 }
 
 func TestIndexBuildSchedulerStopYieldsWithoutFailingBuild(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "stop-scheduler.meld"))
+	db, err := Open(filepath.Join(t.TempDir(), "stop-scheduler.meld"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestIndexBuildSchedulerStopYieldsWithoutFailingBuild(t *testing.T) {
 }
 
 func TestIndexBuildSchedulerRejectsInvalidAndOverlappingStarts(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "scheduler-options.meld"))
+	db, err := Open(filepath.Join(t.TempDir(), "scheduler-options.meld"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestIndexBuildSchedulerRejectsInvalidAndOverlappingStarts(t *testing.T) {
 }
 
 func TestIndexBuildSchedulerTimeSlicesRoundRobinWithoutStarvation(t *testing.T) {
-	db, err := OpenV2(filepath.Join(t.TempDir(), "scheduler-fairness.meld"))
+	db, err := Open(filepath.Join(t.TempDir(), "scheduler-fairness.meld"))
 	if err != nil {
 		t.Fatal(err)
 	}

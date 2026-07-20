@@ -151,7 +151,7 @@ func syntheticAnchorQualificationReceipt(phase string, started time.Time, public
 		GOOS: "linux", GOARCH: "amd64", GoVersion: "go1.23", StartedAt: started, FinishedAt: started.Add(time.Second),
 		ConfigurationID: strings.Repeat("c", 64), ExternalEvidenceSHA256: strings.Repeat(string(rune('1'+anchorQualificationPhaseIndex(phase))), 64), Replicas: 3, Quorum: 2, Members: members, AvailableMembers: available, UnavailableMembers: unavailable,
 		QuorumLoad: quorumLoad, AnchorExists: anchorExists, AnchorSequence: anchorSequence, AnchorGeneration: anchorGeneration,
-		Database:         meldbase.V2VerificationReport{SchemaVersion: 3, Verified: true, Format: meldbase.StorageFormatV2, Revision: 3, DatabaseIDHex: strings.Repeat("01", 16), MetaGeneration: databaseGeneration, CommitSequence: databaseSequence, IndexContentsVerified: true, IndexBuildContentsVerified: true, SHA256: strings.Repeat("d", 64)},
+		Database:         meldbase.V2VerificationReport{SchemaVersion: 3, Verified: true, Format: meldbase.StorageFormatCurrent, Revision: 3, DatabaseIDHex: strings.Repeat("01", 16), MetaGeneration: databaseGeneration, CommitSequence: databaseSequence, IndexContentsVerified: true, IndexBuildContentsVerified: true, SHA256: strings.Repeat("d", 64)},
 		DatabaseRelation: relation, DatabaseOpen: opened, Passed: true, SigningPublicKey: base64.StdEncoding.EncodeToString(publicKey),
 	}
 }

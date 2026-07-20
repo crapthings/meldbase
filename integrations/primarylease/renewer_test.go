@@ -143,7 +143,7 @@ func TestRenewerRunCancellationRevokesLocalGuard(t *testing.T) {
 }
 
 func TestRenewerRejectsMissingFenceOrInvalidIntervals(t *testing.T) {
-	db, err := meldbase.OpenV2(filepath.Join(t.TempDir(), "unfenced.meld2"))
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "unfenced.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func renewalFixture(t *testing.T) (*meldbase.DB, *primarylease.Guard, *primaryle
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := meldbase.OpenV2WithOptions(filepath.Join(t.TempDir(), "renew.meld2"), meldbase.V2Options{PrimaryWriteFence: guard})
+	db, err := meldbase.OpenWithOptions(filepath.Join(t.TempDir(), "renew.meld2"), meldbase.OpenOptions{PrimaryWriteFence: guard})
 	if err != nil {
 		t.Fatal(err)
 	}

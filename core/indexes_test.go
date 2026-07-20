@@ -1,17 +1,13 @@
 package meldbase
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
-	btree "github.com/crapthings/meldbase/internal/index"
 )
 
 func TestIndexedRangeQueriesMatchCollectionScanAcrossRandomData(t *testing.T) {
@@ -374,23 +370,6 @@ func TestCompoundIndexRejectsOversizedCanonicalTupleAcrossBuildAndInsert(t *test
 	}
 }
 
-func TestV1RejectsCompoundAndDescendingIndexes(t *testing.T) {
-	db, err := OpenV1(filepath.Join(t.TempDir(), "legacy.meld"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	items := db.Collection("items")
-	for name, fields := range map[string][]IndexField{
-		"compound":   {{Field: "a", Order: 1}, {Field: "b", Order: 1}},
-		"descending": {{Field: "a", Order: -1}},
-	} {
-		if err := items.CreateIndex(context.Background(), name, fields, IndexOptions{}); !errors.Is(err, ErrCompoundIndexUnsupported) {
-			t.Fatalf("%s error = %v", name, err)
-		}
-	}
-}
-
 func TestIndexRangeScanAndExactMixedNumericUniqueness(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -426,136 +405,5 @@ func TestIndexRangeScanAndExactMixedNumericUniqueness(t *testing.T) {
 	}
 	if _, err := values.InsertOne(context.Background(), Document{"n": Float(10)}); !errors.Is(err, ErrDuplicateKey) {
 		t.Fatalf("numeric duplicate error = %v", err)
-	}
-}
-
-func TestIndexDefinitionAndContentsRecoverFromWALAndCheckpoint(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "indexed.meld")
-	db, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	users := db.Collection("users")
-	if _, err := users.InsertOne(context.Background(), Document{"email": String("a@example.com")}); err != nil {
-		t.Fatal(err)
-	}
-	if err := users.CreateIndex(context.Background(), "users_email", []IndexField{{Field: "email", Order: 1}}, IndexOptions{Unique: true}); err != nil {
-		t.Fatal(err)
-	}
-	crashClose(t, db)
-	recovered, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	explain, err := recovered.Collection("users").Explain(context.Background(), Filter{"email": "a@example.com"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if explain.Stage != "IXSCAN" {
-		t.Fatalf("WAL index explain = %+v", explain)
-	}
-	if err := recovered.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	explain, err = reopened.Collection("users").Explain(context.Background(), Filter{"email": "a@example.com"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if explain.Stage != "IXSCAN" {
-		t.Fatalf("checkpoint index explain = %+v", explain)
-	}
-	if _, err := reopened.Collection("users").InsertOne(context.Background(), Document{"email": String("a@example.com")}); !errors.Is(err, ErrDuplicateKey) {
-		t.Fatalf("reopened unique error = %v", err)
-	}
-}
-
-func TestUniqueIndexBatchUpdateRecoversWithoutFalseIntermediateConflict(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "batch.meld")
-	db, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	values := db.Collection("values")
-	for _, number := range []int64{1, 2} {
-		if _, err := values.InsertOne(context.Background(), Document{"n": Int(number)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := values.CreateIndex(context.Background(), "values_n", []IndexField{{Field: "n", Order: 1}}, IndexOptions{Unique: true}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := values.UpdateMany(context.Background(), Filter{}, Update{"$inc": map[string]any{"n": int64(1)}}); err != nil {
-		t.Fatal(err)
-	}
-	crashClose(t, db)
-	recovered, err := OpenV1(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer recovered.Close()
-	cursor, err := recovered.Collection("values").Find(context.Background(), Filter{}, QueryOptions{Sort: []SortField{{Path: "n", Direction: 1}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	documents, _ := cursor.All(context.Background())
-	got := []int64{}
-	for _, document := range documents {
-		number, _ := document["n"].Int64()
-		got = append(got, number)
-	}
-	if !reflect.DeepEqual(got, []int64{2, 3}) {
-		t.Fatalf("numbers = %v", got)
-	}
-}
-
-func TestSnapshotRestoresPersistedBTreeTopologyInsteadOfRebuilding(t *testing.T) {
-	db := New()
-	t.Cleanup(func() { _ = db.Close() })
-	collection := db.Collection("items")
-	ids := make([]DocumentID, 200)
-	for number := range ids {
-		id, err := collection.InsertOne(context.Background(), Document{"n": Int(int64(number))})
-		if err != nil {
-			t.Fatal(err)
-		}
-		ids[number] = id
-	}
-	if err := collection.CreateIndex(context.Background(), "items_n", []IndexField{{Field: "n", Order: 1}}, IndexOptions{Unique: true}); err != nil {
-		t.Fatal(err)
-	}
-	// Give the valid tree a topology that differs from rebuilding in document
-	// insertion order. Persistence must retain these nodes, not infer them again.
-	reordered := btree.New()
-	for number := len(ids) - 1; number >= 0; number-- {
-		key, err := encodeIndexKey(Int(int64(number)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		reordered.Insert(key, ids[number][:])
-	}
-	db.collections["items"].indexes["items_n"].tree = reordered
-	before, err := reordered.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := encodeSnapshot(db.collections)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := decodeSnapshot(snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	after, err := decoded["items"].indexes["items_n"].tree.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(before, after) {
-		t.Fatal("B+Tree topology was rebuilt instead of restored")
 	}
 }
