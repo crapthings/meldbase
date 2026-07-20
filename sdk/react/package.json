@@ -1,6 +1,6 @@
 {
   "name": "@meldbase/react",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "description": "Thin React adapter for Meldbase live queries",
   "license": "Apache-2.0",
   "repository": {
