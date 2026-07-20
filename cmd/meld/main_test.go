@@ -665,6 +665,11 @@ func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 		!strings.Contains(string(accessPolicy), `"collection": "projects"`) || !strings.Contains(string(accessPolicy), `"mode": "collaborative"`) {
 		t.Fatalf("access policy=%s err=%v", accessPolicy, err)
 	}
+	var policyValidation bytes.Buffer
+	if err := run([]string{"access-policy", "validate", "--file", accessPolicyPath}, &policyValidation, &policyValidation); err != nil ||
+		!strings.Contains(policyValidation.String(), `"$schema": "`+meldserver.CollectionAccessManifestSchemaURL+`"`) {
+		t.Fatalf("generated access policy validation=%s err=%v", policyValidation.String(), err)
+	}
 	secret, err := os.ReadFile(filepath.Join(root, "secrets", "jwt-hs256.secret"))
 	if err != nil || len(strings.TrimSpace(string(secret))) < 32 {
 		t.Fatalf("secret bytes=%d err=%v", len(secret), err)
