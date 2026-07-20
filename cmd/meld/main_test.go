@@ -5,11 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/crapthings/meldbase"
 )
@@ -542,6 +546,35 @@ func TestServeRequiresExplicitUnsafeDevelopmentMode(t *testing.T) {
 	err := run([]string{"serve", "--db", filepath.Join(t.TempDir(), "data.meld")}, &output, &output)
 	if err == nil || !strings.Contains(err.Error(), "--dev-no-auth") {
 		t.Fatalf("serve error = %v", err)
+	}
+}
+
+func TestServeWithoutWorkerControlStartsAndStopsCleanly(t *testing.T) {
+	const childEnvironment = "MELDBASE_TEST_SERVE_WITHOUT_WORKER_CHILD"
+	if os.Getenv(childEnvironment) == "1" {
+		err := run([]string{
+			"serve", "--db", os.Getenv("MELDBASE_TEST_SERVE_DB"), "--addr", "127.0.0.1:0", "--dev-no-auth",
+		}, os.Stdout, os.Stderr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	command := exec.Command(os.Args[0], "-test.run=^TestServeWithoutWorkerControlStartsAndStopsCleanly$")
+	command.Env = append(os.Environ(), childEnvironment+"=1", "MELDBASE_TEST_SERVE_DB="+filepath.Join(t.TempDir(), "data.meld2"))
+	var output bytes.Buffer
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("serve exited before shutdown signal: %v\n%s", err, output.String())
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("serve without worker control: %v\n%s", err, output.String())
 	}
 }
 

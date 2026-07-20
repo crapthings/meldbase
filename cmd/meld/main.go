@@ -403,6 +403,8 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	}
 	var workerHub *meldserver.WorkerHub
 	var idempotency meldserver.RPCIdempotencyStore
+	var rpcMethodResolver meldserver.RPCMethodResolver
+	var rpcTransactionalMethodResolver meldserver.RPCTransactionalMethodResolver
 	if *workerAddress != "" {
 		workerAuthenticator, err := meldserver.NewWorkerTokenAuthenticator(workerToken)
 		if err != nil {
@@ -427,6 +429,8 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 			_ = db.Close()
 			return err
 		}
+		rpcMethodResolver = workerHub
+		rpcTransactionalMethodResolver = workerHub
 	}
 	var queryPolicyResolver meldserver.QueryPolicyResolver
 	if len(publicationCollections) > 0 {
@@ -436,7 +440,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		DB: db, Authenticator: devAccess{}, Authorizer: devAccess{}, PublicRealtimeURL: *realtimeURL,
 		OriginPatterns:     []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
 		AllowedHTTPOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"}, MaxBodyBytes: 1 << 20,
-		RPCMethodResolver: workerHub, RPCTransactionalMethodResolver: workerHub, QueryPolicyResolver: queryPolicyResolver,
+		RPCMethodResolver: rpcMethodResolver, RPCTransactionalMethodResolver: rpcTransactionalMethodResolver, QueryPolicyResolver: queryPolicyResolver,
 		RPCIdempotencyStore: idempotency, RPCAuthorizer: devAccess{},
 	})
 	if err != nil {
