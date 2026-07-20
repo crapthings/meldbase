@@ -87,14 +87,15 @@ until an application-owned TLS proxy is in place.
 For a Linux host using systemd, the repository includes a conservative local
 service template in [`deploy/single-node/systemd`](https://github.com/crapthings/meldbase/tree/main/deploy/single-node/systemd).
 Its launcher forces both listeners to loopback, requires a real admin token and
-JWT/workspace settings, runs as an unprivileged `meldbase` user and permits
-writes only under `/var/lib/meldbase`. It is intentionally not a public-network
-TLS termination recipe.
+JWT/collection-policy settings, runs as an unprivileged `meldbase` user and
+permits writes only under `/var/lib/meldbase`. It is intentionally not a
+public-network TLS termination recipe.
 
 ```sh
-sudo useradd --system --home-dir /var/lib/meldbase --shell /usr/sbin/nologin meldbase
+sudo useradd --system --user-group --home-dir /var/lib/meldbase --shell /usr/sbin/nologin meldbase
 sudo install -d -o meldbase -g meldbase -m 0750 /var/lib/meldbase/data
 sudo install -d -o root -g meldbase -m 0750 /etc/meldbase
+sudo install -d -o root -g root -m 0755 /usr/local/libexec/meldbase
 sudo install -m 0755 deploy/single-node/systemd/meldbase-single-node /usr/local/libexec/meldbase/meldbase-single-node
 sudo install -m 0640 deploy/single-node/systemd/meldbase.env.example /etc/meldbase/meldbase.env
 sudo install -o root -g meldbase -m 0640 deploy/single-node/systemd/access-policy.json.example /etc/meldbase/access-policy.json
