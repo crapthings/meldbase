@@ -205,7 +205,8 @@ func TestEmbeddedDashboardIsOptInAndContainsNoData(t *testing.T) {
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Meldbase Observatory") ||
-		!strings.Contains(response.Body.String(), "Derived engine state") {
+		!strings.Contains(response.Body.String(), "Operator Console") || !strings.Contains(response.Body.String(), "/assets/app.js") ||
+		!strings.Contains(response.Body.String(), "id=\"root\"") {
 		t.Fatalf("dashboard status=%d body=%s", response.Code, response.Body.String())
 	}
 	if strings.Contains(response.Body.String(), testAdminToken) || !strings.Contains(response.Header().Get("Content-Security-Policy"), "connect-src 'self'") {
@@ -218,9 +219,10 @@ func TestEmbeddedDashboardIsOptInAndContainsNoData(t *testing.T) {
 	script := response.Body.String()
 	version := strconv.FormatUint(uint64(SchemaVersion), 10)
 	if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/javascript") ||
-		!strings.Contains(script, "sample.version !== "+version) || !strings.Contains(script, "history.version !== "+version) ||
-		!strings.Contains(script, "rollbackAnchorGeneration") || !strings.Contains(script, "rollback-anchor-backend") ||
-		!strings.Contains(script, "commitCoordinator") || !strings.Contains(script, "commit-coordinator-pending") {
+		!strings.Contains(script, "Unsupported admin protocol") || !strings.Contains(script, "/v1/stats/stream") ||
+		!strings.Contains(script, "/v1/diagnostics") || !strings.Contains(script, "Authorization") ||
+		!strings.Contains(script, "rollbackAnchorGeneration") || !strings.Contains(script, "commitCoordinator") ||
+		!strings.Contains(script, version) {
 		t.Fatalf("dashboard script status=%d headers=%v", response.Code, response.Header())
 	}
 

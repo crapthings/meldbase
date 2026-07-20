@@ -243,12 +243,32 @@ choose the bind address, TLS and shutdown policy explicitly. The handler exposes
 - `GET /metrics` — optional Prometheus text-format aggregate metrics.
 
 With `ServeDashboard: true`, `GET /` and its two embedded assets provide the
-developer Observatory panel. The static shell is intentionally readable without
-credentials and contains no database state. The user enters the bearer token in
-the page; JavaScript keeps it only in tab memory and sends it in API headers. The
-stats, history and stream endpoints remain authenticated. The page has no remote
-fonts, scripts, analytics or other network dependencies and is protected by a
-restrictive Content Security Policy.
+developer Observatory panel. It is a local React operator console, with a
+sidebar for overview, storage, realtime, transport and diagnostics. React Router
+uses hash routes so the Go handler needs no client-side fallback; Zustand keeps
+the bearer token, connection state and bounded live samples in tab memory. The
+static shell is intentionally readable without credentials and contains no
+database state. The user enters the bearer token in the page; JavaScript sends
+it only in API headers. By default it is held only in memory. An explicit
+"Remember in this tab" choice persists only the token in `sessionStorage`, so a
+page refresh reconnects but closing the tab or clicking Disconnect removes it.
+The dashboard never uses `localStorage` for the token. The stats, history and
+stream endpoints remain authenticated. The page has no remote fonts, scripts,
+analytics or other network dependencies and is protected by a restrictive
+Content Security Policy.
+
+The editable dashboard source is `admin/dashboard-ui` (Vite, React and
+Tailwind). Build it before changing the embedded assets:
+
+```sh
+pnpm run build:dashboard
+pnpm run check:dashboard
+```
+
+Vite emits `admin/dashboard/index.html`, `app.js` and `style.css`; the Go
+package embeds exactly those files. CI verifies those generated assets are
+current. Node and Vite are build-time tools only—the released database process
+still serves the dashboard directly.
 
 The development CLI can launch the same panel on a separate loopback listener:
 
