@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crapthings.github.io/meldbase/schemas/collection-access-manifest-v1.schema.json",
+  "title": "Meldbase collection access manifest v1",
+  "description": "A declarative, server-enforced generic client data API policy. Meldbase validates this manifest strictly at server startup; this schema supports editors, CI, and generated configuration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "workspaceField",
+    "collections"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "The only currently supported manifest version."
+    },
+    "workspaceField": {
+      "$ref": "#/$defs/simpleField"
+    },
+    "collections": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/collectionAccess"
+      }
+    }
+  },
+  "$defs": {
+    "simpleField": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]{0,127}$",
+      "description": "A simple server-owned field or collection name."
+    },
+    "documentField": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A top-level document field. The server also rejects dots, reserved JavaScript prototype fields, invalid UTF-8, and other invalid names."
+    },
+    "documentPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "A document path. The server validates every path segment and rejects _id paths in policy declarations."
+    },
+    "fieldList": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/documentField"
+      }
+    },
+    "pathList": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/documentPath"
+      }
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "queryPaths": {
+          "$ref": "#/$defs/pathList"
+        },
+        "resultFields": {
+          "$ref": "#/$defs/fieldList"
+        },
+        "inputFields": {
+          "$ref": "#/$defs/fieldList"
+        },
+        "updatePaths": {
+          "$ref": "#/$defs/pathList"
+        }
+      }
+    },
+    "collectionAccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collection",
+        "mode"
+      ],
+      "properties": {
+        "collection": {
+          "$ref": "#/$defs/simpleField"
+        },
+        "mode": {
+          "enum": [
+            "collaborative",
+            "owner",
+            "rpc_only"
+          ]
+        },
+        "ownerField": {
+          "$ref": "#/$defs/simpleField"
+        },
+        "fields": {
+          "$ref": "#/$defs/fields"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "owner"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "ownerField"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "ownerField"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "rpc_only"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "fields"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

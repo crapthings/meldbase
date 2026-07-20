@@ -67,6 +67,11 @@ and operation allowance for that simulated principal. It is a static review
 tool: it does not validate a JWT, open a database, or evaluate a custom role or
 membership resolver.
 
+For editor autocomplete, CI checks, or AI-generated configuration, the
+versioned [JSON Schema](/schemas/collection-access-manifest-v1.schema.json) is
+published with the documentation. It catches the portable manifest shape; the
+server's strict parser remains the final authority for every semantic check.
+
 ### Optional field boundary
 
 `fields` is a composable restriction, not another access mode. Each omitted
