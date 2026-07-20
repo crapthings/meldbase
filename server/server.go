@@ -46,17 +46,24 @@ type (
 	RS256JWKSAuthenticator         = internal.RS256JWKSAuthenticator
 	WorkspaceAuthorizerConfig      = internal.WorkspaceAuthorizerConfig
 	WorkspaceAuthorizer            = internal.WorkspaceAuthorizer
+	CollectionAccessMode           = internal.CollectionAccessMode
+	CollectionAccess               = internal.CollectionAccess
+	CollectionAccessManifest       = internal.CollectionAccessManifest
 	WorkerHubStats                 = internal.WorkerHubStats
 )
 
 const (
-	ProtocolVersion              = internal.ProtocolVersion
-	RPCIdempotencyExecute        = internal.RPCIdempotencyExecute
-	RPCIdempotencyReplayResult   = internal.RPCIdempotencyReplayResult
-	RPCIdempotencyReplayError    = internal.RPCIdempotencyReplayError
-	RPCIdempotencyInProgress     = internal.RPCIdempotencyInProgress
-	RPCIdempotencyOutcomeUnknown = internal.RPCIdempotencyOutcomeUnknown
-	RPCIdempotencyConflict       = internal.RPCIdempotencyConflict
+	ProtocolVersion                 = internal.ProtocolVersion
+	RPCIdempotencyExecute           = internal.RPCIdempotencyExecute
+	RPCIdempotencyReplayResult      = internal.RPCIdempotencyReplayResult
+	RPCIdempotencyReplayError       = internal.RPCIdempotencyReplayError
+	RPCIdempotencyInProgress        = internal.RPCIdempotencyInProgress
+	RPCIdempotencyOutcomeUnknown    = internal.RPCIdempotencyOutcomeUnknown
+	RPCIdempotencyConflict          = internal.RPCIdempotencyConflict
+	CollectionAccessCollaborative   = internal.CollectionAccessCollaborative
+	CollectionAccessOwner           = internal.CollectionAccessOwner
+	CollectionAccessRPCOnly         = internal.CollectionAccessRPCOnly
+	CollectionAccessManifestVersion = internal.CollectionAccessManifestVersion
 )
 
 var (
@@ -76,6 +83,10 @@ func NewRS256JWKSAuthenticator(config RS256JWKSAuthenticatorConfig) (*RS256JWKSA
 
 func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthorizer, error) {
 	return internal.NewWorkspaceAuthorizer(config)
+}
+
+func ParseCollectionAccessManifestJSON(data []byte) (CollectionAccessManifest, error) {
+	return internal.ParseCollectionAccessManifestJSON(data)
 }
 
 func NewDurableRPCIdempotencyStore(db *meldbase.DB) (DurableRPCIdempotencyStore, error) {

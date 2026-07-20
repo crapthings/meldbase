@@ -527,6 +527,29 @@ func TestServeRequiresExplicitUnsafeDevelopmentMode(t *testing.T) {
 	}
 }
 
+func TestServeRejectsInvalidCollectionAccessManifestBeforeOpeningDatabase(t *testing.T) {
+	directory := t.TempDir()
+	secretPath := filepath.Join(directory, "jwt.secret")
+	if err := os.WriteFile(secretPath, []byte("0123456789abcdef0123456789abcdef"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "access-policy.json")
+	if err := os.WriteFile(manifestPath, []byte(`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"unknown"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err := run([]string{
+		"serve", "--db", filepath.Join(directory, "app.meld"), "--jwt-hs256-secret-file", secretPath,
+		"--jwt-issuer", "identity", "--jwt-audience", "app", "--access-policy-file", manifestPath,
+	}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "collection access manifest") {
+		t.Fatalf("invalid manifest error=%v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(directory, "app.meld")); !os.IsNotExist(statErr) {
+		t.Fatalf("invalid manifest opened database: %v", statErr)
+	}
+}
+
 func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "meldbase-local")
 	var output bytes.Buffer
@@ -550,13 +573,14 @@ func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 	for _, expected := range []string{
 		"MELDBASE_DB='" + filepath.Join(root, "data", "app.meld") + "'",
 		"MELDBASE_JWT_ISSUER='https://identity.example/'", "MELDBASE_JWT_AUDIENCE='app-api'",
-		"MELDBASE_WORKSPACE_COLLECTIONS='projects,tasks'", "MELDBASE_ADMIN_TOKEN='",
+		"MELDBASE_ACCESS_POLICY_FILE='" + filepath.Join(root, "config", "access-policy.json") + "'", "MELDBASE_ADMIN_TOKEN='",
 	} {
 		if !strings.Contains(string(config), expected) {
 			t.Fatalf("config missing %q:\n%s", expected, config)
 		}
 	}
-	for _, path := range []string{configPath, filepath.Join(root, "secrets", "jwt-hs256.secret")} {
+	accessPolicyPath := filepath.Join(root, "config", "access-policy.json")
+	for _, path := range []string{configPath, accessPolicyPath, filepath.Join(root, "secrets", "jwt-hs256.secret")} {
 		info, err := os.Stat(path)
 		if err != nil {
 			t.Fatal(err)
@@ -565,12 +589,17 @@ func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 			t.Fatalf("mode for %s = %o, want 600", path, info.Mode().Perm())
 		}
 	}
+	accessPolicy, err := os.ReadFile(accessPolicyPath)
+	if err != nil || !strings.Contains(string(accessPolicy), `"workspaceField": "workspaceId"`) ||
+		!strings.Contains(string(accessPolicy), `"collection": "projects"`) || !strings.Contains(string(accessPolicy), `"mode": "collaborative"`) {
+		t.Fatalf("access policy=%s err=%v", accessPolicy, err)
+	}
 	secret, err := os.ReadFile(filepath.Join(root, "secrets", "jwt-hs256.secret"))
 	if err != nil || len(strings.TrimSpace(string(secret))) < 32 {
 		t.Fatalf("secret bytes=%d err=%v", len(secret), err)
 	}
 	launcher, err := os.ReadFile(filepath.Join(root, "start.sh"))
-	if err != nil || !strings.Contains(string(launcher), "--admin-metrics") || !strings.Contains(string(launcher), "--workspace-collections") {
+	if err != nil || !strings.Contains(string(launcher), "--admin-metrics") || !strings.Contains(string(launcher), "--access-policy-file") {
 		t.Fatalf("launcher=%q err=%v", launcher, err)
 	}
 	if !strings.Contains(output.String(), "Start it with: "+filepath.Join(root, "start.sh")) ||

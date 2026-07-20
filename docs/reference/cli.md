@@ -29,11 +29,15 @@ explicitly supplied for local development. Choose exactly one verifier:
 - `--jwt-hs256-secret-file <private-file>` for a first-party HS256 issuer;
 - `--jwt-jwks-url <https-url>` for RS256 OIDC/JWKS verification.
 
-Both modes also require `--jwt-issuer`, `--jwt-audience`, and
-`--workspace-collections`. The server derives the principal's active workspace
-from `workspace_id` by default; use `--jwt-workspace-claim` only when your
-issuer uses another claim name. `--workspace-field` defaults to `workspaceId`
-and remains server-owned for every configured collection.
+Both modes also require `--jwt-issuer`, `--jwt-audience`, and either
+`--workspace-collections` or `--access-policy-file`. The first is the
+compatible shorthand for collaborative workspace collections. The strict,
+versioned JSON manifest can additionally declare owner-only and RPC-only
+collections; see [collection access policies](../guide/access-policies).
+The server derives the principal's active workspace from `workspace_id` by
+default; use `--jwt-workspace-claim` only when your issuer uses another claim
+name. `--workspace-field` defaults to `workspaceId` for the shorthand form and
+remains server-owned for every configured collection.
 
 The optional embedded dashboard uses `MELDBASE_ADMIN_TOKEN`, with a minimum of
 32 bytes, and must bind to a loopback `--admin-addr`. See

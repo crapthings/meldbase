@@ -25,6 +25,7 @@ export default defineConfig({
             { text: "Getting started", link: "/guide/getting-started" },
             { text: "Build a live todo app", link: "/guide/realtime-todos" },
             { text: "Identity and workspaces", link: "/guide/identity-and-workspaces" },
+            { text: "Collection access policies", link: "/guide/access-policies" },
           ],
         },
       ],

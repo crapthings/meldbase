@@ -65,6 +65,11 @@ The client can use ordinary queries. It should not send a tenant selector, and
 it cannot escape the injected constraint by adding a conflicting filter. The
 same rule applies to realtime snapshots and deltas.
 
+For a developer- and tool-readable declaration that can also express
+owner-only and RPC-only collections, use the versioned
+[collection access manifest](./access-policies). The older flag form above is
+the compatible shorthand for collaborative workspace collections.
+
 A workspace is a logical security boundary in one database file; it is not a
 SQLite file, MongoDB database, or independently backed-up physical partition.
 Choose separate Meldbase instances only when you need distinct operational
@@ -95,10 +100,11 @@ Use one verifier mode per server:
   receives only public signing keys from an HTTPS JWKS endpoint, while the
   identity service retains its private key.
 
-Both modes require `--jwt-issuer`, `--jwt-audience`, and
-`--workspace-collections`. Do not pass `--dev-no-auth` outside disposable local
-development, and never serve the API or operator dashboard directly on a public
-interface without an application-owned TLS boundary.
+Both modes require `--jwt-issuer`, `--jwt-audience`, and either
+`--workspace-collections` or `--access-policy-file`. Do not pass `--dev-no-auth`
+outside disposable local development, and never serve the API or operator
+dashboard directly on a public interface without an application-owned TLS
+boundary.
 
 ## Verify the boundary
 

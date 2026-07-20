@@ -97,6 +97,120 @@ func TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites(t *testing
 	}
 }
 
+func TestCollectionAccessModesEnforceOwnerAndRPCOnlyBoundaries(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{Secret: secret, Clock: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{
+		WorkspaceField: "workspaceId",
+		CollectionAccess: []CollectionAccess{
+			{Collection: "tasks", Mode: CollectionAccessCollaborative},
+			{Collection: "private_notes", Mode: CollectionAccessOwner, OwnerField: "ownerId"},
+			{Collection: "payroll", Mode: CollectionAccessRPCOnly},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := meldbase.New()
+	handler, err := New(Config{
+		DB: db, Authenticator: authenticator, Authorizer: authorizer, PublicRealtimeURL: "ws://placeholder.invalid/v1/realtime",
+		TicketTTL: time.Minute, ResumeTokenKey: []byte("0123456789abcdef0123456789abcdef"), MaxBodyBytes: 1 << 16,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(handler)
+	t.Cleanup(func() { api.Close(); _ = db.Close() })
+	privateNotes := db.Collection("private_notes")
+	insertWorkspaceOwnedDocument(t, privateNotes, "team-a", "user-a", "visible")
+	insertWorkspaceOwnedDocument(t, privateNotes, "team-a", "user-b", "other-owner")
+	insertWorkspaceOwnedDocument(t, privateNotes, "team-b", "user-a", "other-workspace")
+	tokenA := signedHS256JWT(t, secret, map[string]any{"sub": "user-a", "workspace_id": "team-a", "exp": now.Add(time.Minute).Unix()})
+
+	query := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/query", tokenA, `{"version":1,"query":{"version":1,"where":{"op":"true"}}}`)
+	defer query.Body.Close()
+	if query.StatusCode != http.StatusOK {
+		t.Fatalf("owner query status=%d", query.StatusCode)
+	}
+	var queried struct {
+		Documents []json.RawMessage `json:"documents"`
+	}
+	if err := json.NewDecoder(query.Body).Decode(&queried); err != nil {
+		t.Fatal(err)
+	}
+	if len(queried.Documents) != 1 {
+		t.Fatalf("owner query returned %d documents, want 1", len(queried.Documents))
+	}
+	visible, err := meldbase.UnmarshalWireDocument(queried.Documents[0], meldbase.DefaultQueryLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title, _ := visible["title"].StringValue(); title != "visible" {
+		t.Fatalf("owner query title=%q", title)
+	}
+
+	forgedInsert := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/documents", tokenA, `{"version":1,"document":{"t":"object","v":[["workspaceId",{"t":"string","v":"team-b"}],["ownerId",{"t":"string","v":"user-b"}],["title",{"t":"string","v":"created"}]]}}`)
+	if forgedInsert.StatusCode != http.StatusCreated {
+		forgedInsert.Body.Close()
+		t.Fatalf("owner insert status=%d", forgedInsert.StatusCode)
+	}
+	forgedInsert.Body.Close()
+	created, err := privateNotes.FindOne(context.Background(), meldbase.Filter{"title": "created"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace, _ := created["workspaceId"].StringValue(); workspace != "team-a" {
+		t.Fatalf("created workspace=%q", workspace)
+	}
+	if owner, _ := created["ownerId"].StringValue(); owner != "user-a" {
+		t.Fatalf("created owner=%q", owner)
+	}
+
+	forgedUpdate := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/mutations", tokenA, `{"version":1,"action":"updateMany","query":{"version":1,"where":{"op":"true"}},"update":{"version":1,"operations":[{"op":"set","path":"ownerId","value":{"t":"string","v":"user-b"}}]}}`)
+	forgedUpdate.Body.Close()
+	if forgedUpdate.StatusCode != http.StatusForbidden {
+		t.Fatalf("owner update status=%d", forgedUpdate.StatusCode)
+	}
+
+	rpcOnly := postWorkspaceRequest(t, api.URL+"/v1/collections/payroll/query", tokenA, `{"version":1,"query":{"version":1,"where":{"op":"true"}}}`)
+	rpcOnly.Body.Close()
+	if rpcOnly.StatusCode != http.StatusForbidden {
+		t.Fatalf("rpc-only query status=%d", rpcOnly.StatusCode)
+	}
+}
+
+func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
+	manifest, err := ParseCollectionAccessManifestJSON([]byte(`{
+		"version": 1,
+		"workspaceField": "workspaceId",
+		"collections": [
+			{"collection": "tasks", "mode": "collaborative"},
+			{"collection": "private_notes", "mode": "owner", "ownerField": "ownerId"},
+			{"collection": "payroll", "mode": "rpc_only"}
+		]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := manifest.WorkspaceAuthorizerConfig()
+	if err != nil || len(config.CollectionAccess) != 3 {
+		t.Fatalf("manifest config=%+v err=%v", config, err)
+	}
+	for _, input := range []string{
+		`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"private_notes","mode":"owner"}]}`,
+		`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative","unexpected":true}]}`,
+		`{"version":2,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative"}]}`,
+	} {
+		if _, err := ParseCollectionAccessManifestJSON([]byte(input)); err == nil {
+			t.Fatalf("manifest %s was accepted", input)
+		}
+	}
+}
+
 func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -282,6 +396,15 @@ func TestJWTWorkspacePrincipalIsForwardedToTrustedWorkerRPC(t *testing.T) {
 func insertWorkspaceDocument(t *testing.T, collection *meldbase.Collection, workspace, title string) {
 	t.Helper()
 	if _, err := collection.InsertOne(context.Background(), meldbase.Document{"workspaceId": meldbase.String(workspace), "title": meldbase.String(title)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertWorkspaceOwnedDocument(t *testing.T, collection *meldbase.Collection, workspace, owner, title string) {
+	t.Helper()
+	if _, err := collection.InsertOne(context.Background(), meldbase.Document{
+		"workspaceId": meldbase.String(workspace), "ownerId": meldbase.String(owner), "title": meldbase.String(title),
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
