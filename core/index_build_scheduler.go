@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
+	storagev2 "github.com/crapthings/meldbase/internal/storage"
 )
 
 const (

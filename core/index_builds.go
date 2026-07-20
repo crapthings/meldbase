@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
+	storagev2 "github.com/crapthings/meldbase/internal/storage"
 )
 
 // IndexBuildID identifies one durable, resumable Storage V2 index build.

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
+	storagev2 "github.com/crapthings/meldbase/internal/storage"
 )
 
 func TestV2OnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {

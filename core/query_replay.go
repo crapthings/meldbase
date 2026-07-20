@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
+	storagev2 "github.com/crapthings/meldbase/internal/storage"
 )
 
 // QueryReplaySource atomically reconstructs a query at afterToken and tails

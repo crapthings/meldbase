@@ -7,7 +7,7 @@ import (
 	"errors"
 	"sync"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
+	storagev2 "github.com/crapthings/meldbase/internal/storage"
 )
 
 // DurableChangeBatch is one globally ordered Commit Log position projected to
