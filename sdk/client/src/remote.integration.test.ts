@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
@@ -11,17 +12,22 @@ import type { Document, WebSocketLike } from "./index.js";
 
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
 const execFileAsync = promisify(execFile);
+const productionSecret = "0123456789abcdef0123456789abcdef";
 
-async function startDevelopmentServer(): Promise<{ readonly baseURL: string; stop(): Promise<void> }> {
+type RunningServer = { readonly baseURL: string; stop(): Promise<void> };
+
+async function startServer(command: (directory: string) => Promise<string[]>): Promise<RunningServer> {
   const directory = await mkdtemp(`${tmpdir()}/meldbase-client-integration-`);
   const binary = `${directory}/meld`;
+  let args: string[];
   try {
+    args = await command(directory);
     await execFileAsync("go", ["build", "-o", binary, "./cmd/meld"], { cwd: repository });
   } catch (error) {
     await rm(directory, { recursive: true, force: true });
     throw error;
   }
-  const child = spawn(binary, ["serve", "--db", `${directory}/app.meld`, "--addr", "127.0.0.1:0", "--dev-no-auth"], {
+  const child = spawn(binary, args, {
     cwd: repository,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -68,6 +74,36 @@ async function startDevelopmentServer(): Promise<{ readonly baseURL: string; sto
   };
 }
 
+function startDevelopmentServer(): Promise<RunningServer> {
+  return startServer(async (directory) => ["serve", "--db", `${directory}/app.meld`, "--addr", "127.0.0.1:0", "--dev-no-auth"]);
+}
+
+function signedProductionJWT(workspace: string): string {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const unsigned = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({
+    iss: "https://identity.example/", aud: "app-api", sub: "integration-user", workspace_id: workspace,
+    exp: Math.floor(Date.now() / 1000) + 60,
+  })}`;
+  return `${unsigned}.${createHmac("sha256", productionSecret).update(unsigned).digest("base64url")}`;
+}
+
+function startProductionServer(): Promise<RunningServer> {
+  return startServer(async (directory) => {
+    const secretPath = `${directory}/jwt.secret`;
+    const policyPath = `${directory}/access-policy.json`;
+    await writeFile(secretPath, productionSecret, { mode: 0o600 });
+    await writeFile(policyPath, JSON.stringify({
+      version: 1, workspaceField: "workspaceId", collections: [{ collection: "todos", mode: "collaborative" }],
+    }), { mode: 0o600 });
+    return [
+      "serve", "--db", `${directory}/app.meld`, "--addr", "127.0.0.1:0",
+      "--jwt-hs256-secret-file", secretPath,
+      "--jwt-issuer", "https://identity.example/", "--jwt-audience", "app-api",
+      "--access-policy-file", policyPath,
+    ];
+  });
+}
+
 async function waitFor(predicate: () => boolean, description: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (!predicate()) {
@@ -106,6 +142,42 @@ test("TypeScript remote client interoperates with the live Go HTTP and realtime 
     unsubscribe();
   } finally {
     client.close();
+    await server.stop();
+  }
+});
+
+test("TypeScript client preserves JWT workspace isolation against the live Go server", { timeout: 30_000 }, async () => {
+  const server = await startProductionServer();
+  const clientA = new MeldbaseClient({
+    baseUrl: server.baseURL, accessToken: () => signedProductionJWT("team-a"),
+    webSocketFactory: (url) => new WebSocket(url) as unknown as WebSocketLike,
+  });
+  const clientB = new MeldbaseClient({
+    baseUrl: server.baseURL, accessToken: () => signedProductionJWT("team-b"),
+    webSocketFactory: (url) => new WebSocket(url) as unknown as WebSocketLike,
+  });
+  try {
+    const todosA = clientA.collection<Document>("todos");
+    const todosB = clientB.collection<Document>("todos");
+    const snapshotsA: string[][] = [];
+    const snapshotsB: string[][] = [];
+    const unsubscribeA = todosA.find().subscribe((documents) => { snapshotsA.push(documents.map((document) => document._id)); });
+    const unsubscribeB = todosB.find().subscribe((documents) => { snapshotsB.push(documents.map((document) => document._id)); });
+    await waitFor(() => snapshotsA.length > 0 && snapshotsB.length > 0, "initial workspace snapshots");
+    assert.deepEqual(snapshotsA[0], []);
+    assert.deepEqual(snapshotsB[0], []);
+
+    const inserted = await todosA.insertOne({ title: "team-a only", done: false });
+    await waitFor(() => snapshotsA.some((snapshot) => snapshot.includes(inserted._id)), "the scoped realtime delta");
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    assert.equal(snapshotsB.every((snapshot) => snapshot.length === 0), true);
+    assert.deepEqual(await todosB.find().fetch(), []);
+
+    unsubscribeA();
+    unsubscribeB();
+  } finally {
+    clientA.close();
+    clientB.close();
     await server.stop();
   }
 });
