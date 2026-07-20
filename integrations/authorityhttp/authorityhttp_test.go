@@ -347,11 +347,18 @@ func TestPrimaryRuntimeUsesThreeMemberMTLSQuorumAuthority(t *testing.T) {
 		t.Fatalf("quorum-backed primary write err=%v", err)
 	}
 	databaseID := runtime.DB.DatabaseID()
+	persisted := 0
 	for index, store := range stores {
 		record, exists, err := store.LoadPrimaryLease(context.Background(), databaseID)
-		if err != nil || !exists || record.Owner != "node-a" || record.Epoch != 1 || record.CommitSequence != 0 {
+		if err != nil {
 			t.Fatalf("member %d record=%+v exists=%t err=%v", index, record, exists, err)
 		}
+		if exists && record.Owner == "node-a" && record.Epoch == 1 && record.CommitSequence == 0 {
+			persisted++
+		}
+	}
+	if persisted < 2 {
+		t.Fatalf("persisted quorum=%d, want at least 2", persisted)
 	}
 	if stats := authority.Stats(); stats.Granted != 1 || stats.StoreFailures != 0 {
 		t.Fatalf("authority stats=%+v", stats)

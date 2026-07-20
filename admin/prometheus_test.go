@@ -309,11 +309,12 @@ func TestMarshalPrometheusAllocationAndCapacityBudget(t *testing.T) {
 	if len(output) == 0 || len(output) > prometheusInitialCapacity {
 		t.Fatalf("rendered bytes=%d initial capacity=%d", len(output), prometheusInitialCapacity)
 	}
-	// Go 1.23 materializes more strconv temporaries than the current toolchain
-	// (50 versus 33 in this fixture). Keep one cross-version budget that still
-	// catches a regression above the observed fixed-schema renderer.
-	if allocations := testing.AllocsPerRun(1_000, func() { _ = MarshalPrometheus(sample) }); allocations > 50 {
-		t.Fatalf("Prometheus render allocations=%v, budget=50", allocations)
+	// Go 1.23 materializes more strconv temporaries than the current toolchain,
+	// and race instrumentation adds one more (51 versus 33 in this fixture).
+	// Keep one cross-mode budget that still catches a regression above the
+	// observed fixed-schema renderer.
+	if allocations := testing.AllocsPerRun(1_000, func() { _ = MarshalPrometheus(sample) }); allocations > 51 {
+		t.Fatalf("Prometheus render allocations=%v, budget=51", allocations)
 	}
 }
 
