@@ -14,7 +14,7 @@ imported into a new database.
 | Durable storage | One checksummed COW file with dual Meta pages, catalog roots, Commit Log retention, reopen recovery and offline verification. | `core`, `internal/storage`, `cmd/meld verify` |
 | Documents and indexes | Closed document values, CRUD, bounded filters and updates, ordered compound/unique indexes, explain plans and persistent index builds. | `core/*_test.go`, `docs/query.md`, `docs/compound-indexes.md` |
 | Realtime | Ordered live queries, bounded queues, authenticated HTTP tickets, WebSocket snapshots/deltas and safe resumptions. | `core/reactive*`, `internal/server` |
-| Tenant isolation | HS256 or JWKS JWT verification maps `sub` and `workspace_id` to a principal. The workspace authorizer injects the server-owned field on inserts and intersects reads, updates, deletes and subscriptions. | `internal/server/auth_*.go`, `internal/server/workspace_authorizer_test.go` |
+| Tenant and direct-API isolation | HS256 or JWKS JWT verification maps `sub` and `workspace_id` to a principal. A strict, versioned collection-access manifest provides collaborative, owner-only, or RPC-only surfaces; optional field limits only narrow query paths, results, inserts, and updates. The server owns workspace/owner fields, intersects reads, writes, and subscriptions, and never lets a client select a trusted tenant. | `internal/server/auth_*.go`, `internal/server/workspace_authorizer*.go`, `cmd/meld/access_policy.go` |
 | SDKs | Go API plus TypeScript client, React adapter and server-worker SDK share typed request/query contracts. | `sdk/client`, `sdk/react`, `sdk/server` |
 | Operations | Health probes, authenticated admin dashboard and metrics, diagnostics, inspect, verify, backup, restore and a single-node backup/restore drill. | `admin`, `cmd/meld`, `docs/single-node-deployment.md` |
 | Resource limits | Bounded request/query/result, transaction, index-build, retention, page-cache and physical-file usage with aggregate telemetry. | `core/resource_limits.go`, `docs/observability.md` |
@@ -24,6 +24,9 @@ imported into a new database.
 - A tenant is an application identity boundary, not a second database file.
   The server derives it from a verified token; clients never provide a trusted
   tenant selector.
+- Built-in collection access is intentionally a small generic-data policy, not
+  an account, role, or membership system. Dynamic read visibility can narrow it;
+  role-dependent writes remain in an application `Authorizer` or explicit RPC.
 - The embedded dashboard is an operator surface. It does not own business users,
   schedule backups or expose public administration endpoints.
 - Physical backup preserves database identity and is a recovery artifact, not an

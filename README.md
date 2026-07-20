@@ -18,9 +18,9 @@ layer—not a hosted MongoDB clone, an ORM, or a distributed database to operate
   required for the embedded path.
 - **Keep reads live.** The same query model powers local collections, server
   fetches, and ordered realtime updates.
-- **Own the boundary.** JWT workspace isolation is enforced by the server from
-  verified claims, while your application keeps ownership of users, roles, and
-  identity.
+- **Own the boundary.** A declarative collection policy enforces JWT-derived
+  workspace and owner scope; your application keeps ownership of users, roles,
+  and identity.
 - **Operate with evidence.** Health probes, an authenticated dashboard,
   physical backup/restore, offline verification, and a single-node runbook are
   part of the project—not afterthoughts.
@@ -83,7 +83,7 @@ MELDBASE_BIN="$(pwd)/meld" ./meldbase-local/start.sh
 
 The API starts on `127.0.0.1:8080` and the embedded operator dashboard on
 `127.0.0.1:9091`. Your identity service signs the JWTs; the server verifies
-them and applies the configured workspace boundary. See the
+them and applies the configured collection-access boundary. See the
 [single-node guide](docs/single-node-deployment.md) for token requirements,
 dashboard access, reverse-proxy boundaries, backups, recovery drills, and
 upgrades.
@@ -95,7 +95,7 @@ upgrades.
 | Product data | Typed documents, CRUD, safe filters and updates, compound and unique indexes. |
 | Live UI | Reactive queries with snapshots, ordered deltas, resume tokens, and a React adapter. |
 | Application API | HTTP fetch/mutation endpoints plus ticket-authenticated WebSocket realtime. |
-| Tenant boundary | JWT-derived `workspace_id` scoping for configured collections; clients never choose a trusted tenant. |
+| Tenant boundary | JWT-derived workspace/owner scoping, optional field limits, and RPC-only collections; clients never choose a trusted tenant. |
 | Business logic | Typed RPC, durable idempotency, and an optional authenticated Node.js worker boundary. |
 | Operations | `/livez`, `/readyz`, authenticated metrics/dashboard, inspect, verify, backup, restore, and restore drills. |
 
@@ -149,7 +149,9 @@ your Go process                    your application boundary
 The embedded core is useful on its own. Add the server only when another
 process, browser, or service needs access. The server does not become your user
 directory: it trusts a verified identity provider, derives a principal and
-workspace from the token, and constrains configured business collections.
+workspace from the token, and constrains configured business collections. The
+[collection access guide](docs/guide/access-policies.md) describes the small,
+declarative policy surface and where application business authorization begins.
 
 ## Use it when
 
