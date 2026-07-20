@@ -419,6 +419,19 @@ go run ./cmd/meld inspect --db app-backup.meld2 --require-compatible
 go run ./cmd/meld verify --db app-backup.meld2 --timeout 10m
 ```
 
+Restore requires the JSON receipt emitted by `backup` and always writes a new,
+previously absent database file:
+
+```sh
+go run ./cmd/meld backup --db app.meld2 --out app-backup.meld2 --timeout 10m > app-backup.receipt.json
+go run ./cmd/meld restore --in app-backup.meld2 --receipt app-backup.receipt.json --out app-restored.meld2 --timeout 10m
+go run ./cmd/meld verify --db app-restored.meld2 --timeout 10m
+```
+
+For the complete single-node data-directory check, health probes, dashboard,
+backup/restore drill and upgrade runbook, see
+[single-node deployment and recovery](docs/single-node-deployment.md).
+
 The destination must not exist. The library blocks source writes for the copy
 duration while allowing readers; the CLI must acquire the database's exclusive
 process lock, so it is intended for an offline source. A physical backup is a

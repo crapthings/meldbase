@@ -421,6 +421,105 @@ func TestBackupCommandFailsClosedForExistingDestinationAndNonV2Source(t *testing
 	}
 }
 
+func TestRestoreCommandImportsVerifiedPhysicalBackup(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source.meld2")
+	artifact := filepath.Join(directory, "backup.meld2")
+	receiptPath := filepath.Join(directory, "backup.json")
+	restored := filepath.Join(directory, "restored.meld2")
+	db, err := meldbase.OpenV2(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("items").InsertOne(context.Background(), meldbase.Document{"value": meldbase.Int(7)}); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	identity := db.DatabaseIdentity()
+	sequence := db.Stats().CommitSequence
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var backupOutput, stderr bytes.Buffer
+	if err := run([]string{"backup", "--db", source, "--out", artifact}, &backupOutput, &stderr); err != nil {
+		t.Fatalf("backup error=%v stderr=%s", err, stderr.String())
+	}
+	if err := os.WriteFile(receiptPath, backupOutput.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var restoreOutput bytes.Buffer
+	if err := run([]string{"restore", "--in", artifact, "--receipt", receiptPath, "--out", restored, "--timeout", "10s"}, &restoreOutput, &stderr); err != nil {
+		t.Fatalf("restore error=%v stderr=%s", err, stderr.String())
+	}
+	var result backupCommandResult
+	if err := json.Unmarshal(restoreOutput.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.SchemaVersion != 1 || result.ArtifactKind != physicalV2RestoreArtifact || result.CommitSequence != sequence || result.DatabaseIDHex == "" {
+		t.Fatalf("restore result=%+v", result)
+	}
+	reopened, err := meldbase.OpenV2(restored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if reopened.DatabaseIdentity() != identity || reopened.Stats().CommitSequence != sequence {
+		t.Fatalf("restored identity/sequence=%x/%d", reopened.DatabaseIdentity(), reopened.Stats().CommitSequence)
+	}
+	resultSet, err := reopened.Collection("items").Find(context.Background(), meldbase.Filter{"value": 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := resultSet.All(context.Background())
+	if err != nil || len(items) != 1 {
+		t.Fatalf("restored items=%v err=%v", items, err)
+	}
+}
+
+func TestRestoreCommandFailsClosedForExistingDestinationAndInvalidReceipt(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source.meld2")
+	artifact := filepath.Join(directory, "backup.meld2")
+	receiptPath := filepath.Join(directory, "backup.json")
+	destination := filepath.Join(directory, "destination.meld2")
+	db, err := meldbase.OpenV2(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var backupOutput, output bytes.Buffer
+	if err := run([]string{"backup", "--db", source, "--out", artifact}, &backupOutput, &output); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(receiptPath, backupOutput.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destination, []byte("owner"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"restore", "--in", artifact, "--receipt", receiptPath, "--out", destination}, &output, &output); !errors.Is(err, meldbase.ErrBackupDestinationExists) {
+		t.Fatalf("existing destination error=%v", err)
+	}
+	if contents, err := os.ReadFile(destination); err != nil || string(contents) != "owner" {
+		t.Fatalf("destination=%q err=%v", contents, err)
+	}
+	if err := os.WriteFile(receiptPath, []byte(`{"schemaVersion":1,"artifactKind":"wrong"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"restore", "--in", artifact, "--receipt", receiptPath, "--out", filepath.Join(directory, "unused.meld2")}, &output, &output); err == nil || !strings.Contains(err.Error(), "receipt") {
+		t.Fatalf("invalid receipt error=%v", err)
+	}
+	if err := os.WriteFile(receiptPath, backupOutput.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"restore", "--in", artifact, "--receipt", receiptPath, "--out", artifact}, &output, &output); err == nil || !strings.Contains(err.Error(), "different paths") {
+		t.Fatalf("matching source/destination error=%v", err)
+	}
+}
+
 func TestDemoExercisesDurabilityIndexUpdateAndReactiveQuery(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	path := filepath.Join(t.TempDir(), "demo.meld")
