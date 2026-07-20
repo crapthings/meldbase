@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 usage() {
   cat <<'EOF'
@@ -46,7 +47,7 @@ if [[ -e "$out_dir" ]]; then
   exit 2
 fi
 
-mkdir "$out_dir"
+mkdir -m 700 "$out_dir"
 artifact="$out_dir/physical-backup.meld"
 receipt="$out_dir/backup-receipt.json"
 restored="$out_dir/restored.meld"

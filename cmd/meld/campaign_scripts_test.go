@@ -184,3 +184,74 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		t.Fatalf("environment example=%q err=%v", environment, err)
 	}
 }
+
+func TestSingleNodeBackupRestoreDrillRetainsPrivateEvidenceInOrder(t *testing.T) {
+	repository, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	database := filepath.Join(directory, "source.meld")
+	if err := os.WriteFile(database, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(directory, "calls")
+	binary := filepath.Join(directory, "fake-meld")
+	fake := `#!/bin/sh
+set -eu
+printf '%s|' "$@" >> "$MELDBASE_CALLS"
+printf '\n' >> "$MELDBASE_CALLS"
+out=''
+previous=''
+for argument in "$@"; do
+  if [ "$previous" = '--out' ]; then out="$argument"; break; fi
+  previous="$argument"
+done
+case "$1" in
+  backup|restore) : > "$out"; printf '{"version":1}\n' ;;
+  *) printf '{"version":1}\n' ;;
+esac
+`
+	if err := os.WriteFile(binary, []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	evidence := filepath.Join(directory, "rehearsal")
+	command := exec.Command("bash", filepath.Join(repository, "scripts", "single-node-backup-restore-drill.sh"),
+		"--meld", binary, "--db", database, "--out-dir", evidence, "--timeout", "7s", "--max-bytes", "123")
+	command.Env = append(os.Environ(), "MELDBASE_CALLS="+calls)
+	raw, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("drill: %v\n%s", err, raw)
+	}
+	if !strings.Contains(string(raw), "Backup and restore drill passed") {
+		t.Fatalf("drill output=%q", raw)
+	}
+	info, err := os.Stat(evidence)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatalf("evidence directory info=%v err=%v", info, err)
+	}
+	for _, name := range []string{
+		"source-inspect.json", "source-verify.json", "physical-backup.meld", "backup-receipt.json",
+		"restored.meld", "restore-receipt.json", "restored-inspect.json", "restored-verify.json",
+	} {
+		if info, err := os.Stat(filepath.Join(evidence, name)); err != nil || info.IsDir() {
+			t.Fatalf("evidence %s info=%v err=%v", name, info, err)
+		}
+	}
+	got, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	want := []string{
+		"inspect|--db|" + database + "|--require-compatible|",
+		"verify|--db|" + database + "|--timeout|7s|",
+		"backup|--db|" + database + "|--out|" + filepath.Join(evidence, "physical-backup.meld") + "|--timeout|7s|",
+		"restore|--in|" + filepath.Join(evidence, "physical-backup.meld") + "|--receipt|" + filepath.Join(evidence, "backup-receipt.json") + "|--out|" + filepath.Join(evidence, "restored.meld") + "|--timeout|7s|--max-bytes|123|",
+		"inspect|--db|" + filepath.Join(evidence, "restored.meld") + "|--require-compatible|",
+		"verify|--db|" + filepath.Join(evidence, "restored.meld") + "|--timeout|7s|",
+	}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("drill calls=%q want=%q", lines, want)
+	}
+}
