@@ -48,7 +48,7 @@ type rpcIdempotencyRecord struct {
 	errorStatus int
 }
 
-// NewDurableRPCIdempotencyStore creates the built-in V2-backed store. Memory
+// NewDurableRPCIdempotencyStore creates the built-in -backed store. Memory
 // databases and V1 files are rejected rather than receiving a non-durable
 // fallback.
 func NewDurableRPCIdempotencyStore(db *meldbase.DB) (DurableRPCIdempotencyStore, error) {
@@ -57,7 +57,7 @@ func NewDurableRPCIdempotencyStore(db *meldbase.DB) (DurableRPCIdempotencyStore,
 	}
 	backend := db.MeldbaseSystemRecordBackend()
 	if backend == nil {
-		return nil, errors.New("meldbase server: durable RPC idempotency requires an open V2 database")
+		return nil, errors.New("meldbase server: durable RPC idempotency requires an open database")
 	}
 	return &durableRPCIdempotencyStore{backend: backend, db: db}, nil
 }

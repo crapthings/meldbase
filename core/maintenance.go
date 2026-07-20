@@ -9,16 +9,16 @@ import (
 )
 
 const (
-	defaultV2MaintenanceInterval = 5 * time.Minute
-	defaultV2MaintenanceTimeout  = time.Minute
-	minV2MaintenanceDuration     = 10 * time.Millisecond
-	maxV2MaintenanceInterval     = 24 * time.Hour
-	maxV2MaintenanceTimeout      = time.Hour
+	defaultMaintenanceInterval = 5 * time.Minute
+	defaultMaintenanceTimeout  = time.Minute
+	minMaintenanceDuration     = 10 * time.Millisecond
+	maxMaintenanceInterval     = 24 * time.Hour
+	maxMaintenanceTimeout      = time.Hour
 )
 
-// V2MaintenanceOptions configures an explicit default-off maintenance loop.
+// MaintenanceOptions configures an explicit default-off maintenance loop.
 // Every run uses online optimistic reclamation; runs never overlap.
-type V2MaintenanceOptions struct {
+type MaintenanceOptions struct {
 	Interval       time.Duration
 	Timeout        time.Duration
 	MaxAttempts    int
@@ -28,7 +28,7 @@ type V2MaintenanceOptions struct {
 	PersistFreeSpace bool
 }
 
-type V2MaintenanceStats struct {
+type MaintenanceStats struct {
 	Runs         uint64
 	Completed    uint64
 	Conflicts    uint64
@@ -38,10 +38,10 @@ type V2MaintenanceStats struct {
 	LastError    string
 }
 
-// V2Maintenance owns one background reclamation loop. Stop is idempotent and
+// Maintenance owns one background reclamation loop. Stop is idempotent and
 // waits for an active scan to observe cancellation. Closing the DB also stops
 // the loop through the DB lifecycle channel.
-type V2Maintenance struct {
+type Maintenance struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
 	stopOnce     sync.Once
@@ -55,7 +55,7 @@ type V2Maintenance struct {
 	lastError    string
 }
 
-func (db *DB) StartV2Maintenance(parent context.Context, options V2MaintenanceOptions) (*V2Maintenance, error) {
+func (db *DB) StartMaintenance(parent context.Context, options MaintenanceOptions) (*Maintenance, error) {
 	if db == nil {
 		return nil, ErrReclamationUnsupported
 	}
@@ -64,30 +64,30 @@ func (db *DB) StartV2Maintenance(parent context.Context, options V2MaintenanceOp
 	}
 	interval := options.Interval
 	if interval == 0 {
-		interval = defaultV2MaintenanceInterval
+		interval = defaultMaintenanceInterval
 	}
 	timeout := options.Timeout
 	if timeout == 0 {
-		timeout = defaultV2MaintenanceTimeout
+		timeout = defaultMaintenanceTimeout
 	}
-	if interval < minV2MaintenanceDuration || interval > maxV2MaintenanceInterval ||
-		timeout < minV2MaintenanceDuration || timeout > maxV2MaintenanceTimeout ||
+	if interval < minMaintenanceDuration || interval > maxMaintenanceInterval ||
+		timeout < minMaintenanceDuration || timeout > maxMaintenanceTimeout ||
 		options.MaxAttempts < 0 || options.MaxAttempts > 32 {
 		return nil, ErrInvalidReclamationOptions
 	}
 	db.mu.RLock()
-	_, v2 := db.durability.(*v2DurableStore)
+	_, store := db.durability.(*durableStore)
 	closed := db.closed
 	closedCh := db.closedCh
 	db.mu.RUnlock()
-	if !v2 {
+	if !store {
 		return nil, ErrReclamationUnsupported
 	}
 	if closed {
 		return nil, ErrClosed
 	}
 	ctx, cancel := context.WithCancel(parent)
-	handle := &V2Maintenance{cancel: cancel, done: make(chan struct{})}
+	handle := &Maintenance{cancel: cancel, done: make(chan struct{})}
 	go func() {
 		select {
 		case <-closedCh:
@@ -99,7 +99,7 @@ func (db *DB) StartV2Maintenance(parent context.Context, options V2MaintenanceOp
 	return handle, nil
 }
 
-func (maintenance *V2Maintenance) run(ctx context.Context, db *DB, interval, timeout time.Duration, maxAttempts int, immediately, persistFreeSpace bool) {
+func (maintenance *Maintenance) run(ctx context.Context, db *DB, interval, timeout time.Duration, maxAttempts int, immediately, persistFreeSpace bool) {
 	defer close(maintenance.done)
 	delay := interval
 	if immediately {
@@ -118,12 +118,12 @@ func (maintenance *V2Maintenance) run(ctx context.Context, db *DB, interval, tim
 	}
 }
 
-func (maintenance *V2Maintenance) runOnce(parent context.Context, db *DB, timeout time.Duration, maxAttempts int, persistFreeSpace bool) {
+func (maintenance *Maintenance) runOnce(parent context.Context, db *DB, timeout time.Duration, maxAttempts int, persistFreeSpace bool) {
 	maintenance.runs.Add(1)
 	maintenance.active.Store(true)
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(parent, timeout)
-	_, err := db.ReclaimV2PagesWithOptions(ctx, ReclaimV2Options{
+	_, err := db.ReclaimPagesWithOptions(ctx, ReclaimOptions{
 		Online: true, MaxAttempts: maxAttempts, MemoryOnly: !persistFreeSpace,
 	})
 	cancel()
@@ -146,7 +146,7 @@ func (maintenance *V2Maintenance) runOnce(parent context.Context, db *DB, timeou
 	}
 }
 
-func (maintenance *V2Maintenance) Stop() {
+func (maintenance *Maintenance) Stop() {
 	if maintenance == nil {
 		return
 	}
@@ -154,7 +154,7 @@ func (maintenance *V2Maintenance) Stop() {
 	<-maintenance.done
 }
 
-func (maintenance *V2Maintenance) Done() <-chan struct{} {
+func (maintenance *Maintenance) Done() <-chan struct{} {
 	if maintenance == nil {
 		closed := make(chan struct{})
 		close(closed)
@@ -163,14 +163,14 @@ func (maintenance *V2Maintenance) Done() <-chan struct{} {
 	return maintenance.done
 }
 
-func (maintenance *V2Maintenance) Stats() V2MaintenanceStats {
+func (maintenance *Maintenance) Stats() MaintenanceStats {
 	if maintenance == nil {
-		return V2MaintenanceStats{}
+		return MaintenanceStats{}
 	}
 	maintenance.lastMu.Lock()
 	lastError := maintenance.lastError
 	maintenance.lastMu.Unlock()
-	return V2MaintenanceStats{
+	return MaintenanceStats{
 		Runs: maintenance.runs.Load(), Completed: maintenance.completed.Load(),
 		Conflicts: maintenance.conflicts.Load(), Failed: maintenance.failed.Load(),
 		Active: maintenance.active.Load(), LastDuration: time.Duration(maintenance.lastDuration.Load()), LastError: lastError,

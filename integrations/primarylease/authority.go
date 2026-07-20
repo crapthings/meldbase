@@ -137,13 +137,13 @@ type GrantRequest struct {
 // epoch fencing alone cannot prove that an asynchronous follower contains all
 // writes from the former primary.
 type PromotionReadiness interface {
-	VerifyV2FollowerPromotion(context.Context, meldbase.FollowerPromotionRequest, LeaseRecord, bool) error
+	VerifyFollowerPromotion(context.Context, meldbase.FollowerPromotionRequest, LeaseRecord, bool) error
 }
 
 // PromotionReadinessFunc adapts a function to PromotionReadiness.
 type PromotionReadinessFunc func(context.Context, meldbase.FollowerPromotionRequest, LeaseRecord, bool) error
 
-func (function PromotionReadinessFunc) VerifyV2FollowerPromotion(ctx context.Context, request meldbase.FollowerPromotionRequest, record LeaseRecord, exists bool) error {
+func (function PromotionReadinessFunc) VerifyFollowerPromotion(ctx context.Context, request meldbase.FollowerPromotionRequest, record LeaseRecord, exists bool) error {
 	if function == nil {
 		return ErrLeasePromotionReadiness
 	}
@@ -239,7 +239,7 @@ func (authority *Authority) grant(ctx context.Context, request GrantRequest, rea
 		}
 		if readiness != nil {
 			promotionRequest := meldbase.FollowerPromotionRequest{DatabaseID: request.DatabaseID, CommitSequence: request.CommitSequence}
-			if err := readiness.VerifyV2FollowerPromotion(ctx, promotionRequest, current, exists); err != nil {
+			if err := readiness.VerifyFollowerPromotion(ctx, promotionRequest, current, exists); err != nil {
 				authority.metrics.promotionReadinessRejected.Add(1)
 				return Grant{}, errors.Join(ErrLeasePromotionReadiness, err)
 			}

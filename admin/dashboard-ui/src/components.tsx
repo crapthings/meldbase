@@ -9,7 +9,7 @@ type IconName = "overview" | "storage" | "realtime" | "transport" | "diagnostics
 function Icon({ name }: { name: IconName }): ReactNode {
   const paths: Record<IconName, ReactNode> = {
     overview: <><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z" /></>,
-    storage: <><ellipse cx="12" cy="5" rx="7" ry="3" /><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7" /></>,
+   storage: <><ellipse cx="12" cy="5" rx="7" ry="3" /><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7" /></>,
     realtime: <><path d="M4 18a11 11 0 0 1 16 0M7 15a7 7 0 0 1 10 0M10 12a3 3 0 0 1 4 0" /><circle cx="12" cy="19" r="1" /></>,
     transport: <><path d="M7 7h10v10H7zM4 12H2m20 0h-2M12 4V2m0 20v-2" /><path d="M10 10h4v4h-4z" /></>,
     diagnostics: <><path d="M9 3h6l1 2h3v16H5V5h3l1-2Z" /><path d="M9 12h6M9 16h4" /></>,
@@ -75,12 +75,12 @@ export function HealthBanner({ sample }: { sample?: AdminSample }) {
   const health = sample?.health;
   const level = health?.overall ?? "unavailable";
   const labels: Record<string, string> = {
-    databaseClosed: "Database closed", writesDisabled: "Writes fail-stopped", reactiveQueuePressure: "Reactive queue pressure",
+   databaseClosed: "Database closed", writesDisabled: "Writes fail-stopped", reactiveQueuePressure: "Reactive queue pressure",
     reactiveQueueOverflow: "Reactive queue overflow", slowConsumer: "Slow consumer disconnected", persistentFreeSpaceDiscarded: "Persistent free map discarded",
-    commitRetentionPressure: "Commit history retention pressure", commitCoordinatorPressure: "Commit coordinator admission pressure",
-    commitCoordinatorRejected: "Commit coordinator rejected a write", primaryWriteFenceRejected: "Primary write fence rejected a write",
+   commitRetentionPressure: "Commit history retention pressure", commitCoordinatorPressure: "Commit coordinator admission pressure",
+   commitCoordinatorRejected: "Commit coordinator rejected a write", primaryWriteFenceRejected: "Primary write fence rejected a write",
     indexBuildFailed: "Index build requires attention", indexBuildRetentionPressure: "Index build pins retained history",
-    storageQuotaExhausted: "Storage quota exhausted", storageLimitRejected: "Storage limit rejected a write",
+   storageQuotaExhausted: "Storage quota exhausted", storageLimitRejected: "Storage limit rejected a write",
     durabilityFailure: "Durability operation failed", rollbackAnchorDegraded: "Rollback anchor degraded",
     telemetryDeliveryDropped: "Telemetry delivery dropped", transportBusy: "Transport concurrency busy", rpcOutcomeUnknown: "RPC outcome unknown",
     workerProtocolFailure: "Worker protocol failure",

@@ -45,7 +45,7 @@ type destructiveProcessReceipt struct {
 	CompletedTrials    int                             `json:"completedTrials"`
 	TrialDirectories   []string                        `json:"trialDirectories"`
 	Trials             []qualificationDestructiveTrial `json:"trials"`
-	Verifications      []meldbase.V2VerificationReport `json:"verifications"`
+	Verifications      []meldbase.VerificationReport   `json:"verifications"`
 }
 
 type destructiveLedgerRecord struct {
@@ -148,7 +148,7 @@ func runDestructiveProcessCheck(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(receipt)
 }
 
-func runDestructiveProcessTrial(target, artifactsRoot, executable string, ordinal int, stderr io.Writer) (artifactTrial string, trial qualificationDestructiveTrial, verification meldbase.V2VerificationReport, resultErr error) {
+func runDestructiveProcessTrial(target, artifactsRoot, executable string, ordinal int, stderr io.Writer) (artifactTrial string, trial qualificationDestructiveTrial, verification meldbase.VerificationReport, resultErr error) {
 	trialDirectory, err := os.MkdirTemp(target, fmt.Sprintf(".meldbase-process-kill-%04d-", ordinal))
 	if err != nil {
 		return "", trial, verification, err
@@ -200,7 +200,7 @@ func runDestructiveProcessTrial(target, artifactsRoot, executable string, ordina
 	if err := copyFileExclusiveDurable(filepath.Join(artifactTrial, "oracle.jsonl"), ledgerPath); err != nil {
 		return artifactTrial, trial, verification, err
 	}
-	verification, err = meldbase.VerifyV2File(context.Background(), databasePath)
+	verification, err = meldbase.VerifyFile(context.Background(), databasePath)
 	if err != nil {
 		return artifactTrial, trial, verification, err
 	}
@@ -317,7 +317,7 @@ func seedDestructiveProcessDatabase(path string) (uint64, error) {
 	if insertErr != nil || closeErr != nil {
 		return 0, errors.Join(insertErr, closeErr)
 	}
-	report, err := meldbase.VerifyV2File(context.Background(), path)
+	report, err := meldbase.VerifyFile(context.Background(), path)
 	if err != nil {
 		return 0, err
 	}

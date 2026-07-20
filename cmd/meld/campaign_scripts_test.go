@@ -105,6 +105,10 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 	}
 	directory := t.TempDir()
 	argumentsPath := filepath.Join(directory, "arguments")
+	secretPath := filepath.Join(directory, "jwt.secret")
+	if err := os.WriteFile(secretPath, []byte(strings.Repeat("s", 32)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	binary := filepath.Join(directory, "fake-meld")
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$MELDBASE_ARGUMENTS_FILE\"\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -116,6 +120,10 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 			"MELDBASE_BIN="+binary,
 			"MELDBASE_DB=/var/lib/meldbase/data/test.meld2",
 			"MELDBASE_ADMIN_TOKEN="+strings.Repeat("a", 32),
+			"MELDBASE_JWT_HS256_SECRET_FILE="+secretPath,
+			"MELDBASE_JWT_ISSUER=https://identity.example.test/",
+			"MELDBASE_JWT_AUDIENCE=meldbase-api",
+			"MELDBASE_WORKSPACE_COLLECTIONS=projects,tasks,comments",
 			"MELDBASE_ARGUMENTS_FILE="+argumentsPath,
 		)
 		command.Env = append(command.Env, extra...)
@@ -130,7 +138,9 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		t.Fatal(err)
 	}
 	want := []string{
-		"serve", "--db", "/var/lib/meldbase/data/test.meld2", "--addr", "127.0.0.1:8080", "--dev-no-auth",
+		"serve", "--db", "/var/lib/meldbase/data/test.meld2", "--addr", "127.0.0.1:8080",
+		"--jwt-hs256-secret-file", secretPath, "--jwt-issuer", "https://identity.example.test/", "--jwt-audience", "meldbase-api",
+		"--workspace-collections", "projects,tasks,comments", "--workspace-field", "workspaceId",
 		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
 	}
 	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {

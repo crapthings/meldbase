@@ -8,18 +8,18 @@ import (
 	"testing"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-func TestCommitV2ChangeBatchesLockedPublishesOrderedLogicalBatches(t *testing.T) {
+func TestCommitChangeBatchesLockedPublishesOrderedLogicalBatches(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "db-group.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil {
-		t.Fatal("missing V2 store")
+		t.Fatal("missing  store")
 	}
 	initialGeneration := store.file.Meta().Generation
 	watchContext, cancelWatch := context.WithCancel(context.Background())
@@ -40,7 +40,7 @@ func TestCommitV2ChangeBatchesLockedPublishesOrderedLogicalBatches(t *testing.T)
 		{Token: 2, Changes: []Change{{Collection: "orders", Operation: InsertOperation, DocumentID: orderID, After: &order}}},
 	}
 	db.mu.Lock()
-	err = db.commitV2ChangeBatchesLocked(context.Background(), store, batches)
+	err = db.commitDurableChangeBatchesLocked(context.Background(), store, batches)
 	db.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestCommitV2ChangeBatchesLockedPublishesOrderedLogicalBatches(t *testing.T)
 	}
 }
 
-func TestCommitV2ChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing.T) {
+func TestCommitChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "db-group-preconditions.meld2"))
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestCommitV2ChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing
 	if _, err := items.InsertMany(context.Background(), []Document{first, second}); err != nil {
 		t.Fatal(err)
 	}
-	store := db.durability.(*v2DurableStore)
+	store := db.durability.(*durableStore)
 	initialGeneration := store.file.Meta().Generation
 	firstNext := Document{"_id": ID(firstID), "n": Int(11)}
 	secondNext := Document{"_id": ID(secondID), "n": Int(22)}
@@ -100,12 +100,12 @@ func TestCommitV2ChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing
 		{Token: 2, Changes: []Change{{Collection: "items", Operation: UpdateOperation, DocumentID: firstID, Before: &firstBefore, After: &firstAfter}}},
 		{Token: 3, Changes: []Change{{Collection: "items", Operation: UpdateOperation, DocumentID: secondID, Before: &secondBefore, After: &secondAfter}}},
 	}
-	preconditions := [][]storagev2.DocumentPrecondition{
-		{testV2DocumentPrecondition(t, "items", firstID, first)},
-		{testV2DocumentPrecondition(t, "items", secondID, second)},
+	preconditions := [][]storage.DocumentPrecondition{
+		{testDocumentPrecondition(t, "items", firstID, first)},
+		{testDocumentPrecondition(t, "items", secondID, second)},
 	}
 	db.mu.Lock()
-	err = db.commitV2ChangeBatchesWithPreconditionsLocked(context.Background(), store, batches, preconditions, nil)
+	err = db.commitChangeBatchesWithPreconditionsLocked(context.Background(), store, batches, preconditions, nil)
 	db.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)
@@ -124,9 +124,9 @@ func TestCommitV2ChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing
 		{Token: 4, Changes: []Change{{Collection: "items", Operation: UpdateOperation, DocumentID: firstID, Before: &firstCurrent, After: &staleFirstAfter}}},
 		{Token: 5, Changes: []Change{{Collection: "items", Operation: UpdateOperation, DocumentID: firstID, Before: &staleSecondBefore, After: &staleSecondAfter}}},
 	}
-	staleRead := testV2DocumentPrecondition(t, "items", firstID, firstNext)
+	staleRead := testDocumentPrecondition(t, "items", firstID, firstNext)
 	db.mu.Lock()
-	err = db.commitV2ChangeBatchesWithPreconditionsLocked(context.Background(), store, staleBatches, [][]storagev2.DocumentPrecondition{{staleRead}, {staleRead}}, nil)
+	err = db.commitChangeBatchesWithPreconditionsLocked(context.Background(), store, staleBatches, [][]storage.DocumentPrecondition{{staleRead}, {staleRead}}, nil)
 	db.mu.Unlock()
 	if !errors.Is(err, ErrWriteConflict) {
 		t.Fatalf("stale group error=%v", err)
@@ -142,13 +142,13 @@ func TestCommitV2ChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing
 	}
 }
 
-func testV2DocumentPrecondition(t *testing.T, collection string, id DocumentID, document Document) storagev2.DocumentPrecondition {
+func testDocumentPrecondition(t *testing.T, collection string, id DocumentID, document Document) storage.DocumentPrecondition {
 	t.Helper()
 	encoded, err := encodeStoredDocument(document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return storagev2.DocumentPrecondition{
+	return storage.DocumentPrecondition{
 		Collection: collection, DocumentID: [16]byte(id), ExpectedExists: true, ExpectedHash: sha256.Sum256(encoded),
 	}
 }

@@ -27,7 +27,7 @@ func (f *File) CopyPhysicalToContext(ctx context.Context, destination io.Writer)
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return PhysicalCopyResult{}, errors.New("meldbase storage v2: file is closed")
+		return PhysicalCopyResult{}, errors.New("meldbase storage: file is closed")
 	}
 	if f.fatalErr != nil {
 		return PhysicalCopyResult{}, f.fatalErr

@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testing.T) {
+func TestBackupPublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
 	destinationPath := filepath.Join(directory, "backup.meld2")
@@ -37,7 +37,7 @@ func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testi
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.ReclaimV2Pages(context.Background()); err != nil {
+	if _, err := db.ReclaimPages(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	sourceBytes, err := os.ReadFile(sourcePath)
@@ -47,11 +47,11 @@ func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testi
 	sourceDigest := sha256.Sum256(sourceBytes)
 	sourceIdentity := db.DatabaseIdentity()
 	sourceSequence := db.Stats().CommitSequence
-	result, err := db.BackupV2(context.Background(), destinationPath)
+	result, err := db.Backup(context.Background(), destinationPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Bytes != uint64(len(sourceBytes)) || result.Pages*V2PageSize != uint64(len(sourceBytes)) ||
+	if result.Bytes != uint64(len(sourceBytes)) || result.Pages*PageSize != uint64(len(sourceBytes)) ||
 		result.CommitSequence != sourceSequence || result.DatabaseIDHex != hex.EncodeToString(sourceIdentity[:]) ||
 		result.SHA256 != hex.EncodeToString(sourceDigest[:]) {
 		t.Fatalf("backup result=%+v", result)
@@ -111,7 +111,7 @@ func TestBackupV2PublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testi
 	}
 }
 
-func TestBackupV2FailsClosedWithoutOverwrite(t *testing.T) {
+func TestBackupFailsClosedWithoutOverwrite(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
 	db, err := Open(sourcePath)
@@ -126,18 +126,18 @@ func TestBackupV2FailsClosedWithoutOverwrite(t *testing.T) {
 	if err := os.WriteFile(destination, []byte("owner"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.BackupV2(context.Background(), destination); !errors.Is(err, ErrBackupDestinationExists) {
+	if _, err := db.Backup(context.Background(), destination); !errors.Is(err, ErrBackupDestinationExists) {
 		t.Fatalf("existing destination error=%v", err)
 	}
 	if content, err := os.ReadFile(destination); err != nil || string(content) != "owner" {
 		t.Fatalf("destination=%q err=%v", content, err)
 	}
-	if _, err := db.BackupV2(context.Background(), sourcePath); !errors.Is(err, ErrBackupDestinationExists) {
+	if _, err := db.Backup(context.Background(), sourcePath); !errors.Is(err, ErrBackupDestinationExists) {
 		t.Fatalf("source destination error=%v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := db.BackupV2(ctx, filepath.Join(directory, "cancelled")); !errors.Is(err, context.Canceled) {
+	if _, err := db.Backup(ctx, filepath.Join(directory, "cancelled")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled error=%v", err)
 	}
 	if stats := db.Stats().Backup; stats.Attempts != 2 || stats.Completed != 0 || stats.Failed != 2 || stats.Active != 0 {
@@ -145,12 +145,12 @@ func TestBackupV2FailsClosedWithoutOverwrite(t *testing.T) {
 	}
 	memory := New()
 	defer memory.Close()
-	if _, err := memory.BackupV2(context.Background(), filepath.Join(directory, "memory")); !errors.Is(err, ErrBackupUnsupported) {
+	if _, err := memory.Backup(context.Background(), filepath.Join(directory, "memory")); !errors.Is(err, ErrBackupUnsupported) {
 		t.Fatalf("memory backup error=%v", err)
 	}
 }
 
-func TestBackupV2PreservesResumableShadowIndexBuild(t *testing.T) {
+func TestBackupPreservesResumableShadowIndexBuild(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source-build.meld2")
 	backupPath := filepath.Join(directory, "backup-build.meld2")
@@ -173,7 +173,7 @@ func TestBackupV2PreservesResumableShadowIndexBuild(t *testing.T) {
 	if err != nil || before.Phase != IndexBuildPhaseScan {
 		t.Fatalf("source build=%+v err=%v", before, err)
 	}
-	if _, err := db.BackupV2(context.Background(), backupPath); err != nil {
+	if _, err := db.Backup(context.Background(), backupPath); err != nil {
 		t.Fatal(err)
 	}
 	backup, err := Open(backupPath)

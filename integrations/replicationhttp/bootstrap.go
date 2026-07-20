@@ -1,4 +1,4 @@
-// Package replicationhttp transports a verified V2 bootstrap over HTTPS.
+// Package replicationhttp transports a verified  bootstrap over HTTPS.
 //
 // It is intentionally only the bootstrap half of replication. After an
 // import, callers attach the returned tokens to the WebSocket change-feed
@@ -69,7 +69,7 @@ type SourceConfig struct {
 	Buffer           int
 }
 
-// Source serves one exact, verified V2 artifact and establishes the source
+// Source serves one exact, verified  artifact and establishes the source
 // durable checkpoint before it is made available to the receiver.
 type Source struct {
 	db               *meldbase.DB
@@ -137,7 +137,7 @@ func (source *Source) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	}
 	defer os.RemoveAll(directory)
 	artifact := filepath.Join(directory, "bootstrap.meld2")
-	bootstrap, subscription, err := source.db.BeginV2Archive(request.Context(), consumerName, artifact, source.buffer)
+	bootstrap, subscription, err := source.db.BeginArchive(request.Context(), consumerName, artifact, source.buffer)
 	if err != nil {
 		if errors.Is(err, meldbase.ErrDurableConsumerExists) {
 			http.Error(writer, "replication bootstrap already exists; resume the durable feed or choose a new replica identity", http.StatusConflict)
@@ -167,7 +167,7 @@ func (source *Source) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	_, _ = io.Copy(writer, file)
 }
 
-func writeBootstrapHeaders(header http.Header, bootstrap meldbase.ArchiveV2Bootstrap) {
+func writeBootstrapHeaders(header http.Header, bootstrap meldbase.ArchiveBootstrap) {
 	backup := bootstrap.Backup
 	header.Set("Content-Type", "application/octet-stream")
 	header.Set("Content-Length", strconv.FormatUint(backup.Bytes, 10))
@@ -195,7 +195,7 @@ type FetchConfig struct {
 // Bootstrap is the verified artifact receipt and the durable-feed bridge
 // tokens that must be supplied to replicationws.ReceiverConfig.
 type Bootstrap struct {
-	Backup          meldbase.BackupV2Result
+	Backup          meldbase.BackupResult
 	CheckpointToken uint64
 	SnapshotToken   uint64
 }
@@ -232,7 +232,7 @@ func Fetch(ctx context.Context, config FetchConfig) (Bootstrap, error) {
 	if err != nil {
 		return Bootstrap{}, err
 	}
-	if _, err := meldbase.ImportV2PhysicalBackup(ctx, response.Body, config.Destination, bootstrap.Backup, meldbase.PhysicalBackupImportOptions{MaxBytes: config.MaxBytes}); err != nil {
+	if _, err := meldbase.ImportPhysicalBackup(ctx, response.Body, config.Destination, bootstrap.Backup, meldbase.PhysicalBackupImportOptions{MaxBytes: config.MaxBytes}); err != nil {
 		return Bootstrap{}, err
 	}
 	return bootstrap, nil
@@ -286,7 +286,7 @@ func parseBootstrapResponse(response *http.Response) (Bootstrap, error) {
 	if err != nil {
 		return Bootstrap{}, ErrInvalidBootstrapResponse
 	}
-	return Bootstrap{Backup: meldbase.BackupV2Result{Bytes: bytes, Pages: pages, CommitSequence: commitSequence, MetaGeneration: metaGeneration, DatabaseIDHex: databaseID, SHA256: digest}, CheckpointToken: checkpoint, SnapshotToken: snapshot}, nil
+	return Bootstrap{Backup: meldbase.BackupResult{Bytes: bytes, Pages: pages, CommitSequence: commitSequence, MetaGeneration: metaGeneration, DatabaseIDHex: databaseID, SHA256: digest}, CheckpointToken: checkpoint, SnapshotToken: snapshot}, nil
 }
 
 func requiredHeader(header http.Header, key string) (string, error) {

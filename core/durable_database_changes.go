@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// DurableDatabaseChangeBatch is one globally ordered V2 Commit Log position
+// DurableDatabaseChangeBatch is one globally ordered  Commit Log position
 // projected into public document and catalog events. It is the semantic source
 // for archive and single-writer-follower protocols: callers must Ack only
 // after the externally applied effect for Token is durable.
@@ -27,7 +27,7 @@ type DurableDatabaseChangeBatch struct {
 }
 
 // DurableDatabaseChangeSubscription is a crash-resumable pull/acknowledge
-// feed over the complete public V2 database. It exposes collection creation,
+// feed over the complete public database. It exposes collection creation,
 // index publication and document changes in exact Commit Log order. It does
 // not itself copy a bootstrap snapshot or apply changes to a follower; those
 // transport and ownership contracts are intentionally separate.
@@ -92,15 +92,15 @@ func (db *DB) CreateDurableDatabaseChanges(ctx context.Context, name string, aft
 	if db.closed {
 		return nil, ErrClosed
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return nil, ErrDurableConsumerUnsupported
 	}
 	// See CreateDurableCollectionChanges: the first private consumer record on
-	// an empty V2 file is a sequence-one control commit and requires current
+	// an empty file is a sequence-one control commit and requires current
 	// primary authority.
 	if db.token == 0 {
-		if err := db.validateV2PrimaryWriteFence(1); err != nil {
+		if err := db.validatePrimaryWriteFence(1); err != nil {
 			return nil, err
 		}
 	}
@@ -109,7 +109,7 @@ func (db *DB) CreateDurableDatabaseChanges(ctx context.Context, name string, aft
 		return nil, mapDurableConsumerError(err)
 	}
 	// See CreateDurableCollectionChanges: the first private durable-consumer
-	// record initializes an otherwise empty V2 file at logical sequence one.
+	// record initializes an otherwise empty file at logical sequence one.
 	if sequence := store.file.Meta().CommitSequence; sequence != db.token {
 		if sequence < db.token {
 			_ = consumer.Close()
@@ -138,7 +138,7 @@ func (db *DB) OpenDurableDatabaseChanges(ctx context.Context, name string, buffe
 		db.mu.RUnlock()
 		return nil, ErrClosed
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		db.mu.RUnlock()
 		return nil, ErrDurableConsumerUnsupported
@@ -168,14 +168,14 @@ func (db *DB) DeleteDurableDatabaseChanges(ctx context.Context, name string) err
 	if db.closed {
 		return ErrClosed
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return ErrDurableConsumerUnsupported
 	}
 	return mapDurableConsumerError(store.file.DeleteDurableCommitConsumer(durableDatabaseConsumerKey(name)))
 }
 
-func newDurableDatabaseChangeSubscription(ctx context.Context, store *v2DurableStore, consumer *storagev2.DurableCommitConsumer, buffer int) (*DurableDatabaseChangeSubscription, error) {
+func newDurableDatabaseChangeSubscription(ctx context.Context, store *durableStore, consumer *storage.DurableCommitConsumer, buffer int) (*DurableDatabaseChangeSubscription, error) {
 	if store == nil || store.file == nil || consumer == nil || buffer <= 0 || buffer > 1024 {
 		if consumer != nil {
 			_ = consumer.Close()
@@ -225,7 +225,7 @@ func newDurableDatabaseChangeSubscription(ctx context.Context, store *v2DurableS
 	return subscription, nil
 }
 
-func durableDatabaseCollectionNames(file *storagev2.File) (map[uint32]string, error) {
+func durableDatabaseCollectionNames(file *storage.File) (map[uint32]string, error) {
 	if file == nil {
 		return nil, ErrCorrupt
 	}
@@ -251,14 +251,14 @@ func durableDatabaseCollectionNames(file *storagev2.File) (map[uint32]string, er
 	return result, nil
 }
 
-func convertDurableDatabaseBatch(consumer *storagev2.DurableCommitConsumer, batch storagev2.CommitBatch, collections map[uint32]string) (DurableDatabaseChangeBatch, error) {
+func convertDurableDatabaseBatch(consumer *storage.DurableCommitConsumer, batch storage.CommitBatch, collections map[uint32]string) (DurableDatabaseChangeBatch, error) {
 	if consumer == nil || batch.Sequence == 0 || collections == nil {
 		return DurableDatabaseChangeBatch{}, ErrCorrupt
 	}
 	result := DurableDatabaseChangeBatch{Token: batch.Sequence, TransactionID: batch.TransactionID, CommittedAt: batch.CommittedAt}
 	seenDocuments := make(map[string]struct{})
 	for _, change := range batch.Changes {
-		if change.Operation == storagev2.CommitCatalog {
+		if change.Operation == storage.CommitCatalog {
 			converted, visible, err := convertDurableCatalogChange(change, collections)
 			if err != nil {
 				return DurableDatabaseChangeBatch{}, err
@@ -276,7 +276,7 @@ func convertDurableDatabaseBatch(consumer *storagev2.DurableCommitConsumer, batc
 		if err != nil {
 			return DurableDatabaseChangeBatch{}, err
 		}
-		converted, err := convertV2ReplayChange(resolved)
+		converted, err := convertReplayChange(resolved)
 		if err != nil {
 			return DurableDatabaseChangeBatch{}, err
 		}
@@ -291,7 +291,7 @@ func convertDurableDatabaseBatch(consumer *storagev2.DurableCommitConsumer, batc
 	return result, nil
 }
 
-func convertDurableCatalogChange(change storagev2.CommitChange, collections map[uint32]string) (Change, bool, error) {
+func convertDurableCatalogChange(change storage.CommitChange, collections map[uint32]string) (Change, bool, error) {
 	if change.CollectionID == 0 {
 		return Change{}, false, ErrCorrupt
 	}
@@ -322,11 +322,11 @@ func convertDurableCatalogChange(change storagev2.CommitChange, collections map[
 	if !indexNamePattern.MatchString(indexName) {
 		return Change{}, false, ErrCorrupt
 	}
-	meta, err := storagev2.DecodeIndexMeta(indexName, change.After)
+	meta, err := storage.DecodeIndexMeta(indexName, change.After)
 	if err != nil {
 		return Change{}, false, err
 	}
-	fields, err := publicV2IndexFields(meta.FieldPath, meta.Fields)
+	fields, err := publicIndexFields(meta.FieldPath, meta.Fields)
 	if err != nil || len(fields) == 0 {
 		return Change{}, false, ErrCorrupt
 	}

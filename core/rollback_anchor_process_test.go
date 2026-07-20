@@ -38,7 +38,7 @@ func (store *blockingRollbackAnchorStore) Advance(ctx context.Context, anchor Ro
 	return ctx.Err()
 }
 
-func TestV2RollbackAnchorProcessKillWindow(t *testing.T) {
+func TestRollbackAnchorProcessKillWindow(t *testing.T) {
 	if childDirectory := os.Getenv(rollbackAnchorProcessChild); childDirectory != "" {
 		runRollbackAnchorProcessChild(t, childDirectory)
 		return
@@ -54,7 +54,7 @@ func TestV2RollbackAnchorProcessKillWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
+	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestV2RollbackAnchorProcessKillWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	command := exec.Command(os.Args[0], "-test.run=^TestV2RollbackAnchorProcessKillWindow$")
+	command := exec.Command(os.Args[0], "-test.run=^TestRollbackAnchorProcessKillWindow$")
 	command.Env = append(os.Environ(), rollbackAnchorProcessChild+"="+directory)
 	var childOutput bytes.Buffer
 	command.Stdout, command.Stderr = &childOutput, &childOutput
@@ -96,11 +96,11 @@ func TestV2RollbackAnchorProcessKillWindow(t *testing.T) {
 	if err != nil || !exists || retained.MinimumCommitSequence != 0 || retained.MinimumGeneration != 1 {
 		t.Fatalf("anchor changed before kill: retained=%+v exists=%t err=%v", retained, exists, err)
 	}
-	verification, err := VerifyV2File(context.Background(), databasePath)
+	verification, err := VerifyFile(context.Background(), databasePath)
 	if err != nil || verification.CommitSequence != 1 || !verification.Verified {
 		t.Fatalf("physical commit verification=%+v err=%v", verification, err)
 	}
-	reopened, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
+	reopened, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: RollbackProtection{AnchorStore: anchor}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,12 +116,12 @@ func TestV2RollbackAnchorProcessKillWindow(t *testing.T) {
 	}
 }
 
-// TestV2RollbackAnchorGroupProcessKillWindow proves the external acknowledgement
+// TestRollbackAnchorGroupProcessKillWindow proves the external acknowledgement
 // boundary for an opt-in coordinator group. The process dies after the final
 // Meta makes both logical members durable, but before the external anchor is
 // advanced. No caller can have received success at that point; reopen must
 // retain the whole group and reconcile the anchor to the final coordinates.
-func TestV2RollbackAnchorGroupProcessKillWindow(t *testing.T) {
+func TestRollbackAnchorGroupProcessKillWindow(t *testing.T) {
 	if childDirectory := os.Getenv(rollbackAnchorGroupProcessChild); childDirectory != "" {
 		runRollbackAnchorGroupProcessChild(t, childDirectory)
 		return
@@ -137,7 +137,7 @@ func TestV2RollbackAnchorGroupProcessKillWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
+	db, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: RollbackProtection{AnchorStore: anchor, InitializeAnchor: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestV2RollbackAnchorGroupProcessKillWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	command := exec.Command(os.Args[0], "-test.run=^TestV2RollbackAnchorGroupProcessKillWindow$")
+	command := exec.Command(os.Args[0], "-test.run=^TestRollbackAnchorGroupProcessKillWindow$")
 	command.Env = append(os.Environ(), rollbackAnchorGroupProcessChild+"="+directory)
 	var childOutput bytes.Buffer
 	command.Stdout, command.Stderr = &childOutput, &childOutput
@@ -179,11 +179,11 @@ func TestV2RollbackAnchorGroupProcessKillWindow(t *testing.T) {
 	if err != nil || !exists || retained.MinimumCommitSequence != 0 || retained.MinimumGeneration != 1 {
 		t.Fatalf("anchor changed before group kill: retained=%+v exists=%t err=%v", retained, exists, err)
 	}
-	verification, err := VerifyV2File(context.Background(), databasePath)
+	verification, err := VerifyFile(context.Background(), databasePath)
 	if err != nil || verification.CommitSequence != 2 || !verification.Verified {
 		t.Fatalf("physical group verification=%+v err=%v", verification, err)
 	}
-	reopened, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: anchor}})
+	reopened, err := OpenWithOptions(databasePath, OpenOptions{RollbackProtection: RollbackProtection{AnchorStore: anchor}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func runRollbackAnchorProcessChild(t *testing.T, directory string) {
 		t.Fatal(err)
 	}
 	store := &blockingRollbackAnchorStore{delegate: anchor, marker: filepath.Join(directory, "anchor-pending")}
-	db, err := OpenWithOptions(filepath.Join(directory, "database.meld"), OpenOptions{RollbackProtection: V2RollbackProtection{AnchorStore: store}})
+	db, err := OpenWithOptions(filepath.Join(directory, "database.meld"), OpenOptions{RollbackProtection: RollbackProtection{AnchorStore: store}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,8 +224,8 @@ func runRollbackAnchorGroupProcessChild(t *testing.T, directory string) {
 	}
 	store := &blockingRollbackAnchorStore{delegate: anchor, marker: filepath.Join(directory, "group-anchor-pending")}
 	db, err := OpenWithOptions(filepath.Join(directory, "database.meld"), OpenOptions{
-		CommitCoordinator:  V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second},
-		RollbackProtection: V2RollbackProtection{AnchorStore: store},
+		CommitCoordinator:  CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second},
+		RollbackProtection: RollbackProtection{AnchorStore: store},
 	})
 	if err != nil {
 		t.Fatal(err)

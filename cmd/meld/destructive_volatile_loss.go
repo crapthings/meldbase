@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const destructiveVolatileLossSchema uint32 = 1
@@ -100,12 +100,12 @@ func runDestructiveVolatileLossSeed(args []string, stdout, stderr io.Writer) err
 	if err != nil {
 		return err
 	}
-	file, _, err := storagev2.Open(database)
+	file, _, err := storage.Open(database)
 	if err != nil {
 		return err
 	}
 	oldState := []byte("durable-old")
-	_, applyErr := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{15: 1}, Mutations: []storagev2.DocumentMutation{{Collection: "items", DocumentID: destructiveVolatileLossDocumentID, Operation: storagev2.DocumentInsert, Document: oldState}}})
+	_, applyErr := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{15: 1}, Mutations: []storage.DocumentMutation{{Collection: "items", DocumentID: destructiveVolatileLossDocumentID, Operation: storage.DocumentInsert, Document: oldState}}})
 	if err := errors.Join(applyErr, file.Close()); err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func runDestructiveVolatileLossUpdate(args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	started := time.Now().UTC()
-	file, meta, err := storagev2.Open(database)
+	file, meta, err := storage.Open(database)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func runDestructiveVolatileLossUpdate(args []string, stdout, stderr io.Writer) e
 		return errors.Join(err, errors.New("volatile-loss old state is missing"))
 	}
 	newState := []byte("acknowledged-new")
-	sequence, applyErr := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{15: 2}, Mutations: []storagev2.DocumentMutation{{Collection: "items", DocumentID: destructiveVolatileLossDocumentID, Operation: storagev2.DocumentUpdate, Document: newState}}})
+	sequence, applyErr := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{15: 2}, Mutations: []storage.DocumentMutation{{Collection: "items", DocumentID: destructiveVolatileLossDocumentID, Operation: storage.DocumentUpdate, Document: newState}}})
 	closeErr := file.Close()
 	if applyErr != nil || closeErr != nil || sequence != meta.CommitSequence+1 {
 		return errors.Join(applyErr, closeErr, errors.New("volatile-loss update was not acknowledged"))
@@ -257,14 +257,14 @@ func runDestructiveVolatileLossRecover(args []string, stdout, stderr io.Writer) 
 	if err != nil {
 		return err
 	}
-	rejected, _, _, floorErr := storagev2.OpenWithOptions(database, storagev2.OpenOptions{MinimumCommitSequence: marker.AcknowledgedCommitSequence})
+	rejected, _, _, floorErr := storage.OpenWithOptions(database, storage.OpenOptions{MinimumCommitSequence: marker.AcknowledgedCommitSequence})
 	if rejected != nil {
 		_ = rejected.Close()
 	}
-	if !errors.Is(floorErr, storagev2.ErrStaleSnapshot) {
+	if !errors.Is(floorErr, storage.ErrStaleSnapshot) {
 		return errors.Join(floorErr, errors.New("volatile-loss stale generation bypassed the monotonic floor"))
 	}
-	file, meta, err := storagev2.Open(database)
+	file, meta, err := storage.Open(database)
 	if err != nil {
 		return err
 	}
@@ -332,8 +332,8 @@ func runDestructiveVolatileLossRecoveryReady(args []string, stdout, stderr io.Wr
 	return encoder.Encode(ready)
 }
 
-func verifyDestructiveVolatileLossDatabase(path string) (storagev2.VerificationResult, error) {
-	return storagev2.VerifyPathContextWithIndexAudit(context.Background(), path, func(storagev2.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
+func verifyDestructiveVolatileLossDatabase(path string) (storage.VerificationResult, error) {
+	return storage.VerifyPathContextWithIndexAudit(context.Background(), path, func(storage.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
 		return nil, false, errors.New("volatile-loss fixture unexpectedly contains an index")
 	})
 }

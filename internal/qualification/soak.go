@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const SoakReceiptSchemaVersion uint32 = 4
@@ -207,7 +207,7 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 		}
 	}()
 	buildID := [16]byte{0xfa, 15: 1}
-	if _, err := file.BeginIndexBuild(storagev2.BeginIndexBuildTransaction{
+	if _, err := file.BeginIndexBuild(storage.BeginIndexBuildTransaction{
 		BuildID: buildID, Collection: "items", Name: "by_shadow", FieldPath: "key",
 	}); err != nil {
 		return SoakReceipt{}, err
@@ -217,7 +217,7 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 	startedAt := started.UTC()
 	requestedConcurrent := time.Duration(options.Seconds) * time.Second
 	receipt := SoakReceipt{
-		SchemaVersion: SoakReceiptSchemaVersion, FormatRevision: storagev2.FormatVersion, Engine: "v2", Profile: options.Profile,
+		SchemaVersion: SoakReceiptSchemaVersion, FormatRevision: storage.FormatVersion, Engine: "current", Profile: options.Profile,
 		RaceEnabled: RaceEnabled, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, GoVersion: runtime.Version(),
 		SourceRevision: options.SourceRevision, BuildRevision: options.BuildRevision, BuildModified: options.BuildModified,
 		Device: options.Volume.Device, FilesystemType: options.Volume.FilesystemType,
@@ -270,7 +270,7 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 		receipt.ConcurrentDuration += concurrentDuration
 		emitProgress(SoakProgressPhaseVerifying, phase+1, 0, activity)
 		var attempts int
-		var build storagev2.IndexBuildMeta
+		var build storage.IndexBuildMeta
 		var exists bool
 		err = runWithProgressHeartbeat(progressInterval, func() {
 			emitProgress(SoakProgressPhaseVerifying, phase+1, 0, activity)
@@ -285,14 +285,14 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 				return err
 			}
 			file = nil
-			verified, err := storagev2.VerifyPathContextWithIndexAudit(ctx, path, soakIndexAudit)
+			verified, err := storage.VerifyPathContextWithIndexAudit(ctx, path, soakIndexAudit)
 			if err != nil {
 				return fmt.Errorf("phase %d offline verification: %w", phase+1, err)
 			}
 			if !verified.SemanticIndexesVerified || !verified.SemanticIndexBuildsVerified || !verified.FreeSpaceValid {
 				return fmt.Errorf("phase %d offline verification is semantically incomplete", phase+1)
 			}
-			file, _, err = storagev2.Open(path)
+			file, _, err = storage.Open(path)
 			if err != nil {
 				return fmt.Errorf("phase %d reopen: %w", phase+1, err)
 			}
@@ -303,7 +303,7 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 			if err != nil {
 				return fmt.Errorf("phase %d read index build: %w", phase+1, err)
 			}
-			if !exists || build.Phase == storagev2.IndexBuildFailed {
+			if !exists || build.Phase == storage.IndexBuildFailed {
 				return fmt.Errorf("phase %d invalid index build: exists=%t phase=%d", phase+1, exists, build.Phase)
 			}
 			return nil
@@ -342,12 +342,12 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 	}
 	file = nil
 	emitProgress(SoakProgressShadowVerifying, options.Reopens, 0, soakActivity{})
-	var shadowVerified storagev2.VerificationResult
+	var shadowVerified storage.VerificationResult
 	err = runWithProgressHeartbeat(progressInterval, func() {
 		emitProgress(SoakProgressShadowVerifying, options.Reopens, 0, soakActivity{})
 	}, func() error {
 		var verifyErr error
-		shadowVerified, verifyErr = storagev2.VerifyPathContextWithIndexAudit(ctx, path, soakIndexAudit)
+		shadowVerified, verifyErr = storage.VerifyPathContextWithIndexAudit(ctx, path, soakIndexAudit)
 		return verifyErr
 	})
 	if err != nil {
@@ -359,17 +359,17 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 	receipt.SemanticIndexBuilds = true
 	emitProgress(SoakProgressShadowVerified, options.Reopens, 0, soakActivity{})
 	emitProgress(SoakProgressFinalVerifying, options.Reopens, 0, soakActivity{})
-	var verified storagev2.VerificationResult
+	var verified storage.VerificationResult
 	err = runWithProgressHeartbeat(progressInterval, func() {
 		emitProgress(SoakProgressFinalVerifying, options.Reopens, 0, soakActivity{})
 	}, func() error {
-		file, _, err = storagev2.Open(path)
+		file, _, err = storage.Open(path)
 		if err != nil {
 			return err
 		}
 		if build, exists, err := file.IndexBuild(buildID); err != nil {
 			return fmt.Errorf("read verified shadow build before abort: %w", err)
-		} else if !exists || build.Phase == storagev2.IndexBuildFailed {
+		} else if !exists || build.Phase == storage.IndexBuildFailed {
 			return fmt.Errorf("verified shadow build unavailable before abort: exists=%t phase=%d", exists, build.Phase)
 		}
 		if err := file.AbortIndexBuild(buildID); err != nil {
@@ -386,7 +386,7 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 		}
 		file = nil
 		var verifyErr error
-		verified, verifyErr = storagev2.VerifyPathContextWithIndexAudit(ctx, path, soakIndexAudit)
+		verified, verifyErr = storage.VerifyPathContextWithIndexAudit(ctx, path, soakIndexAudit)
 		return verifyErr
 	})
 	if err != nil {
@@ -435,8 +435,8 @@ func runWithProgressHeartbeat(interval time.Duration, heartbeat func(), operatio
 	}
 }
 
-func createSoakDatabase(path string, documentCount int) (*storagev2.File, []string, uint64, error) {
-	file, _, err := storagev2.Open(path)
+func createSoakDatabase(path string, documentCount int) (*storage.File, []string, uint64, error) {
+	file, _, err := storage.Open(path)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -444,14 +444,14 @@ func createSoakDatabase(path string, documentCount int) (*storagev2.File, []stri
 	transactionOrdinal := uint64(1)
 	for start := 0; start < documentCount; start += 256 {
 		end := min(start+256, documentCount)
-		mutations := make([]storagev2.DocumentMutation, 0, end-start)
+		mutations := make([]storage.DocumentMutation, 0, end-start)
 		for index := start; index < end; index++ {
 			keys[index] = soakKey(index, 0)
-			mutations = append(mutations, storagev2.DocumentMutation{
-				Collection: "items", DocumentID: soakDocumentID(index), Operation: storagev2.DocumentInsert, Document: []byte(keys[index]),
+			mutations = append(mutations, storage.DocumentMutation{
+				Collection: "items", DocumentID: soakDocumentID(index), Operation: storage.DocumentInsert, Document: []byte(keys[index]),
 			})
 		}
-		if _, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{
+		if _, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{
 			TransactionID: soakTransactionID(transactionOrdinal), Mutations: mutations,
 		}); err != nil {
 			_ = file.Close()
@@ -459,11 +459,11 @@ func createSoakDatabase(path string, documentCount int) (*storagev2.File, []stri
 		}
 		transactionOrdinal++
 	}
-	entries := make([]storagev2.IndexEntry, documentCount)
+	entries := make([]storage.IndexEntry, documentCount)
 	for index := range documentCount {
-		entries[index] = storagev2.IndexEntry{Key: []byte(keys[index]), DocumentID: soakDocumentID(index)}
+		entries[index] = storage.IndexEntry{Key: []byte(keys[index]), DocumentID: soakDocumentID(index)}
 	}
-	if _, err := file.ApplyCreateIndex(storagev2.CreateIndexTransaction{
+	if _, err := file.ApplyCreateIndex(storage.CreateIndexTransaction{
 		TransactionID: soakTransactionID(transactionOrdinal), Collection: "items", Name: "by_key",
 		FieldPath: "key", Unique: true, Entries: entries,
 	}); err != nil {
@@ -473,7 +473,7 @@ func createSoakDatabase(path string, documentCount int) (*storagev2.File, []stri
 	return file, keys, transactionOrdinal + 1, nil
 }
 
-func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, firstOrdinal uint64, buildID [16]byte, duration, progressInterval time.Duration, requireReclamationConflict bool, progress func(soakActivity, time.Duration)) (uint64, soakActivity, error) {
+func runSoakPhase(parent context.Context, file *storage.File, keys []string, firstOrdinal uint64, buildID [16]byte, duration, progressInterval time.Duration, requireReclamationConflict bool, progress func(soakActivity, time.Duration)) (uint64, soakActivity, error) {
 	ctx, cancel := context.WithTimeout(parent, duration)
 	defer cancel()
 	errorsSeen := make(chan error, 1)
@@ -516,10 +516,10 @@ func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, f
 			current := ordinal.Load()
 			index := int(current % uint64(len(keys)))
 			before, after := keys[index], soakKey(index, int(current))
-			if _, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{
-				TransactionID: soakTransactionID(current), Mutations: []storagev2.DocumentMutation{{
-					Collection: "items", DocumentID: soakDocumentID(index), Operation: storagev2.DocumentUpdate,
-					Document: []byte(after), Indexes: []storagev2.IndexMutation{{Name: "by_key", BeforeKey: []byte(before), AfterKey: []byte(after)}},
+			if _, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{
+				TransactionID: soakTransactionID(current), Mutations: []storage.DocumentMutation{{
+					Collection: "items", DocumentID: soakDocumentID(index), Operation: storage.DocumentUpdate,
+					Document: []byte(after), Indexes: []storage.IndexMutation{{Name: "by_key", BeforeKey: []byte(before), AfterKey: []byte(after)}},
 				}},
 			}); err != nil {
 				recordError(err)
@@ -556,7 +556,7 @@ func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, f
 			closeErr := snapshot.Close()
 			if readErr != nil || !exists || closeErr != nil {
 				if !exists && readErr == nil {
-					readErr = storagev2.ErrCorrupt
+					readErr = storage.ErrCorrupt
 				}
 				recordError(errors.Join(readErr, closeErr))
 				return
@@ -570,10 +570,10 @@ func runSoakPhase(parent context.Context, file *storagev2.File, keys []string, f
 		for ctx.Err() == nil {
 			reclamationAttempts.Add(1)
 			_, _, err := file.ReclaimPagesOptimisticContext(ctx, 1, false)
-			if errors.Is(err, storagev2.ErrReclamationConflict) {
+			if errors.Is(err, storage.ErrReclamationConflict) {
 				reclamationConflicts.Add(1)
 			}
-			if err != nil && !errors.Is(err, storagev2.ErrReclamationConflict) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			if err != nil && !errors.Is(err, storage.ErrReclamationConflict) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				recordError(err)
 				return
 			}
@@ -616,48 +616,48 @@ func loadSoakActivity(writes, snapshotReads, indexBuildBatches, reclamationAttem
 	}
 }
 
-func advanceSoakIndexBuild(ctx context.Context, file *storagev2.File, buildID [16]byte) (bool, error) {
+func advanceSoakIndexBuild(ctx context.Context, file *storage.File, buildID [16]byte) (bool, error) {
 	build, exists, err := file.IndexBuild(buildID)
 	if err != nil || !exists {
 		if err != nil {
 			return false, err
 		}
-		return false, storagev2.ErrIndexBuildNotFound
+		return false, storage.ErrIndexBuildNotFound
 	}
 	switch build.Phase {
-	case storagev2.IndexBuildScan:
+	case storage.IndexBuildScan:
 		opened, iterator, err := file.OpenIndexBuildScanIterator(buildID, 256)
 		if err != nil {
 			return false, err
 		}
-		entries := make([]storagev2.IndexEntry, 0, 256)
+		entries := make([]storage.IndexEntry, 0, 256)
 		last, count := opened.ScanAfter, 0
 		for iterator.Next() {
 			record := iterator.Record()
 			last = record.DocumentID
 			count++
-			entries = append(entries, storagev2.IndexEntry{Key: append([]byte(nil), record.Document...), DocumentID: record.DocumentID})
+			entries = append(entries, storage.IndexEntry{Key: append([]byte(nil), record.Document...), DocumentID: record.DocumentID})
 		}
 		if err := errors.Join(iterator.Err(), iterator.Close()); err != nil {
 			return false, err
 		}
-		_, err = file.ApplyIndexBuildScanBatch(storagev2.IndexBuildScanBatch{
+		_, err = file.ApplyIndexBuildScanBatch(storage.IndexBuildScanBatch{
 			BuildID: buildID, ExpectedScanAfter: opened.ScanAfter, ScanAfter: last, Entries: entries, Complete: count < 256,
 		})
-		if errors.Is(err, storagev2.ErrIndexBuildState) {
+		if errors.Is(err, storage.ErrIndexBuildState) {
 			return false, nil
 		}
 		return err == nil, err
-	case storagev2.IndexBuildCatchUp, storagev2.IndexBuildReady:
+	case storage.IndexBuildCatchUp, storage.IndexBuildReady:
 		return advanceSoakIndexBuildCatchUp(ctx, file, buildID)
-	case storagev2.IndexBuildFailed:
-		return false, storagev2.ErrIndexBuildState
+	case storage.IndexBuildFailed:
+		return false, storage.ErrIndexBuildState
 	default:
-		return false, storagev2.ErrCorrupt
+		return false, storage.ErrCorrupt
 	}
 }
 
-func advanceSoakIndexBuildCatchUp(ctx context.Context, file *storagev2.File, buildID [16]byte) (_ bool, resultErr error) {
+func advanceSoakIndexBuildCatchUp(ctx context.Context, file *storage.File, buildID [16]byte) (_ bool, resultErr error) {
 	opened, snapshot, err := file.OpenIndexBuildCatchUpSnapshot(buildID)
 	if err != nil {
 		return false, err
@@ -674,17 +674,17 @@ func advanceSoakIndexBuildCatchUp(ctx context.Context, file *storagev2.File, bui
 		return false, nil
 	}
 	through := min(snapshot.Sequence(), opened.AppliedSequence+64)
-	mutations := make([]storagev2.IndexBuildCatchUpMutation, 0)
+	mutations := make([]storage.IndexBuildCatchUpMutation, 0)
 	for sequence := opened.AppliedSequence + 1; sequence <= through; sequence++ {
 		commit, err := snapshot.ReadCommit(sequence)
 		if err != nil {
 			return false, err
 		}
 		for _, change := range commit.Changes {
-			if change.CollectionID != opened.CollectionID || change.Operation == storagev2.CommitCatalog {
+			if change.CollectionID != opened.CollectionID || change.Operation == storage.CommitCatalog {
 				continue
 			}
-			mutation := storagev2.IndexBuildCatchUpMutation{Sequence: sequence, DocumentID: change.DocumentID, Operation: change.Operation}
+			mutation := storage.IndexBuildCatchUpMutation{Sequence: sequence, DocumentID: change.DocumentID, Operation: change.Operation}
 			if change.BeforeRef != nil {
 				mutation.BeforeKey, err = snapshot.ReadDocumentVersion(*change.BeforeRef)
 				if err != nil {
@@ -700,16 +700,16 @@ func advanceSoakIndexBuildCatchUp(ctx context.Context, file *storagev2.File, bui
 			mutations = append(mutations, mutation)
 		}
 	}
-	_, err = file.ApplyIndexBuildCatchUpBatch(storagev2.IndexBuildCatchUpBatch{
+	_, err = file.ApplyIndexBuildCatchUpBatch(storage.IndexBuildCatchUpBatch{
 		BuildID: buildID, ExpectedAppliedSequence: opened.AppliedSequence, ThroughSequence: through, Mutations: mutations,
 	})
-	if errors.Is(err, storagev2.ErrIndexBuildState) {
+	if errors.Is(err, storage.ErrIndexBuildState) {
 		return false, nil
 	}
 	return err == nil, err
 }
 
-func verifySoakContents(file *storagev2.File, keys []string) (resultErr error) {
+func verifySoakContents(file *storage.File, keys []string) (resultErr error) {
 	snapshot, err := file.OpenSnapshot()
 	if err != nil {
 		return err
@@ -752,9 +752,9 @@ func verifySoakContents(file *storagev2.File, keys []string) (resultErr error) {
 	return nil
 }
 
-func soakIndexAudit(meta storagev2.IndexMeta, _ [16]byte, document []byte) ([]byte, bool, error) {
+func soakIndexAudit(meta storage.IndexMeta, _ [16]byte, document []byte) ([]byte, bool, error) {
 	if meta.Name != "by_key" && meta.Name != "by_shadow" {
-		return nil, false, storagev2.ErrCorrupt
+		return nil, false, storage.ErrCorrupt
 	}
 	return append([]byte(nil), document...), true, nil
 }

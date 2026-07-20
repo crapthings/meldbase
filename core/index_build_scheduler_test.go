@@ -115,7 +115,7 @@ func TestIndexBuildSchedulerStopYieldsWithoutFailingBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	entered := make(chan struct{})
-	store := db.durability.(*v2DurableStore)
+	store := db.durability.(*durableStore)
 	store.testPersistentIndexBuildBatchHook = func(ctx context.Context, _ IndexBuildID) {
 		select {
 		case <-entered:
@@ -185,7 +185,7 @@ func TestIndexBuildSchedulerTimeSlicesRoundRobinWithoutStarvation(t *testing.T) 
 		t.Fatal(err)
 	}
 	seen := make(chan IndexBuildID, 8)
-	store := db.durability.(*v2DurableStore)
+	store := db.durability.(*durableStore)
 	store.testPersistentIndexBuildBatchHook = func(ctx context.Context, id IndexBuildID) {
 		seen <- id
 		<-ctx.Done()

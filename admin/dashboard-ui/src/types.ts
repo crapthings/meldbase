@@ -7,9 +7,9 @@ export type AdminSample = {
   rates: RecordValue;
   health?: {
     overall?: string;
-    database?: string;
+   database?: string;
     durability?: string;
-    storage?: string;
+   storage?: string;
     realtime?: string;
     telemetry?: string;
     transport?: string;

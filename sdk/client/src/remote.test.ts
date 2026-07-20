@@ -16,7 +16,7 @@ class FakeSocket implements WebSocketLike {
   }
   send(data: string): void { this.sent.push(data); }
   close(code?: number, reason?: string): void { this.closed = { ...(code === undefined ? {} : { code }), ...(reason === undefined ? {} : { reason }) }; this.readyState = 3; }
-  open(): void { this.readyState = 1; this.emit("open", new Event("open")); }
+ open(): void { this.readyState = 1; this.emit("open", new Event("open")); }
   error(): void { this.emit("error", new Event("error")); }
   disconnect(): void { this.readyState = 3; this.emit("close", new Event("close")); }
   message(value: unknown): void { this.emit("message", new MessageEvent("message", { data: JSON.stringify(value) })); }
@@ -24,6 +24,7 @@ class FakeSocket implements WebSocketLike {
 }
 
 const settle = async () => { await new Promise<void>((resolve) => setTimeout(resolve, 0)); };
+const currentProtocol = { versions: [1], capabilities: ["query.delta", "query.resume", "rpc", "rpc.cancel", "rpc.idempotency"] };
 
 test("remote query uses HTTP AST and realtime ticket keeps credentials out of WebSocket URL", async () => {
   const sockets: FakeSocket[] = [];
@@ -31,7 +32,7 @@ test("remote query uses HTTP AST and realtime ticket keeps credentials out of We
   const fetcher: typeof fetch = async (input, init) => {
     const url = String(input);
     requests.push({ url, ...(init ? { init } : {}) });
-    if (url.endsWith("/v1/realtime/tickets")) return Response.json({ url: "wss://db.example/realtime", ticket: "single-use-secret" });
+    if (url.endsWith("/v1/realtime/tickets")) return Response.json({ url: "wss://db.example/realtime", ticket: "single-use-secret", protocol: currentProtocol });
     if (url.endsWith("/documents")) {
       const body = JSON.parse(init?.body as string) as { document: { v: Array<[string, { t: string; v: string }]> } };
       const id = body.document.v.find(([field]) => field === "_id")?.[1]?.v;
@@ -143,12 +144,11 @@ test("capabilities are enforced for work added after realtime authentication", a
 	client.close();
 });
 
-test("realtime protocol discovery can be required to prevent downgrade", async () => {
+test("realtime protocol discovery is required", async () => {
 	const sockets: FakeSocket[] = [];
 	let terminal: Error | undefined;
 	const client = new MeldbaseClient({
 		baseUrl: "https://db.example",
-		requireRealtimeProtocol: true,
 		fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "legacy-ticket" }),
 		webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
 	});
@@ -170,7 +170,6 @@ test("realtime safety limits must be positive safe integers", () => {
     { maxSnapshotDocuments: -1 },
     { maxDeltaOperations: Number.MAX_SAFE_INTEGER + 1 },
 		{ maxRPCArguments: 0 },
-		{ requireRealtimeProtocol: "yes" as unknown as boolean },
   ]) {
 		assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", ...options }), /(positive safe integer|must be boolean)/);
   }
@@ -233,7 +232,7 @@ test("data operations and subscriptions expose stable remote error codes", async
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
     fetch: async (input) => String(input).endsWith("/v1/realtime/tickets")
-      ? Response.json({ url: "wss://db.example/realtime", ticket: "ticket" })
+      ? Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol })
       : Response.json({ error: { code: "database_unavailable" } }, { status: 503 }),
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
   });
@@ -344,7 +343,7 @@ test("realtime RPC preserves typed values and closes a call-only socket when set
     fetch: async (input) => {
       assert.equal(String(input).endsWith("/v1/realtime/tickets"), true);
       ticketRequests += 1;
-      return Response.json({ url: "wss://db.example/realtime", ticket: "ticket" });
+      return Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol });
     },
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
   });
@@ -375,7 +374,7 @@ test("realtime RPC multiplexes with subscriptions, exposes errors, and sends can
   const sockets: FakeSocket[] = [];
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket" }),
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
   });
   const unsubscribe = client.collection("todos").find().subscribe(() => {});
@@ -421,7 +420,7 @@ test("realtime RPC disconnect reports unknown result and is never automatically 
   let tickets = 0;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++tickets}` }),
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++tickets}`, protocol: currentProtocol }),
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     reconnect: { minDelayMs: 1, maxDelayMs: 1 },
   });
@@ -447,7 +446,7 @@ test("realtime RPC socket errors fail pending calls without retrying", async () 
   let tickets = 0;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++tickets}` }),
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++tickets}`, protocol: currentProtocol }),
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     reconnect: { minDelayMs: 1, maxDelayMs: 1 },
   });
@@ -470,7 +469,7 @@ test("malformed realtime RPC terminal frames fail the shared connection closed",
   let socket: FakeSocket | undefined;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket" }),
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
     webSocketFactory: () => { socket = new FakeSocket(); return socket; },
   });
   const pending = client.call("echo", [], { transport: "realtime" });
@@ -489,12 +488,12 @@ test("ordered deltas apply strictly and listener mutation cannot corrupt client 
   let socket: FakeSocket | undefined;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket" }),
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
     webSocketFactory: () => { socket = new FakeSocket(); return socket; },
   });
   const snapshots: Document[][] = [];
   client.collection<Document>("todos").find().subscribe((documents) => {
-    snapshots.push(documents as Document[]);
+   snapshots.push(documents as Document[]);
     if (snapshots.length === 1) (documents[0] as unknown as Record<string, unknown>).value = "listener-mutated";
   });
   await settle();
@@ -537,7 +536,7 @@ test("delta token mismatch fails the realtime connection closed", async () => {
   let socket: FakeSocket | undefined;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket" }),
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
     webSocketFactory: () => { socket = new FakeSocket(); return socket; },
   });
   client.collection("todos").find().subscribe(() => {});
@@ -578,7 +577,7 @@ test("malformed or oversized deltas fail closed without partial publication", as
     let publications = 0;
     const client = new MeldbaseClient({
       baseUrl: "https://db.example",
-      fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket" }),
+      fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
       webSocketFactory: () => { socket = new FakeSocket(); return socket; },
       ...(scenario.maxDeltaOperations ? { maxDeltaOperations: scenario.maxDeltaOperations } : {}),
     });
@@ -608,7 +607,7 @@ test("malformed or oversized snapshots fail closed", async () => {
   let socket: FakeSocket | undefined;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket" }),
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
     webSocketFactory: () => { socket = new FakeSocket(); return socket; },
     maxSnapshotDocuments: 1,
   });
@@ -631,7 +630,7 @@ test("reconnect presents the last opaque token and cleanly handles resync_requir
   let ticket = 0;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++ticket}` }),
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++ticket}`, protocol: currentProtocol }),
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     reconnect: { minDelayMs: 1, maxDelayMs: 1 },
   });

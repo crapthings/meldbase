@@ -23,7 +23,7 @@ var (
 // and object semantics across Go and JavaScript.
 type RPCMethod func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error)
 
-// RPCTransactionalMethod stages point writes against a short immutable V2
+// RPCTransactionalMethod stages point writes against a short immutable
 // snapshot. A successful result and all staged writes share one durable
 // publication with the RPC idempotency terminal record after optimistic commit
 // validation.

@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrHistoryLost       = errors.New("meldbase storage v2: commit history is no longer retained")
-	ErrHistoryPinned     = errors.New("meldbase storage v2: commit history is pinned by a live replay cursor")
-	ErrNoDeliveredCommit = errors.New("meldbase storage v2: live stream has not delivered a commit")
-	ErrCursorClosed      = errors.New("meldbase storage v2: commit cursor is closed")
+	ErrHistoryLost       = errors.New("meldbase storage: commit history is no longer retained")
+	ErrHistoryPinned     = errors.New("meldbase storage: commit history is pinned by a live replay cursor")
+	ErrNoDeliveredCommit = errors.New("meldbase storage: live stream has not delivered a commit")
+	ErrCursorClosed      = errors.New("meldbase storage: commit cursor is closed")
 )
 
 // CommitCursor pins one immutable Commit Log root and replays a finite,
@@ -35,7 +35,7 @@ func (f *File) OpenCommitCursor(after uint64) (*CommitCursor, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -72,7 +72,7 @@ func (cursor *CommitCursor) Next() (CommitBatch, bool, error) {
 	cursor.file.mu.RLock()
 	defer cursor.file.mu.RUnlock()
 	if cursor.file.file == nil {
-		return CommitBatch{}, false, errors.New("meldbase storage v2: file is closed")
+		return CommitBatch{}, false, errors.New("meldbase storage: file is closed")
 	}
 	batch, err := cursor.file.readCommitUnlocked(cursor.rootPage, sequence)
 	if err != nil {

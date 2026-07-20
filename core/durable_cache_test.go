@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-func TestV2DocumentCacheIsByteAndEntryBoundedAndVersionChecked(t *testing.T) {
-	cache := newV2DocumentCache(2, 64*1024)
+func TestDocumentCacheIsByteAndEntryBoundedAndVersionChecked(t *testing.T) {
+	cache := newDocumentCache(2, 64*1024)
 	firstID, secondID, thirdID := DocumentID{1}, DocumentID{2}, DocumentID{3}
 	encode := func(id DocumentID, value int64) []byte {
 		t.Helper()
@@ -31,8 +31,8 @@ func TestV2DocumentCacheIsByteAndEntryBoundedAndVersionChecked(t *testing.T) {
 	if _, err := cache.decode("items", firstID, firstV1); err != nil {
 		t.Fatal(err)
 	}
-	firstV2 := encode(firstID, 10)
-	document, err = cache.decode("items", firstID, firstV2)
+	first := encode(firstID, 10)
+	document, err = cache.decode("items", firstID, first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestV2DocumentCacheIsByteAndEntryBoundedAndVersionChecked(t *testing.T) {
 		t.Fatalf("remove stats=%+v", stats)
 	}
 
-	tiny := newV2DocumentCache(10, 1)
+	tiny := newDocumentCache(10, 1)
 	if _, err := tiny.decode("items", firstID, firstV1); err != nil {
 		t.Fatal(err)
 	}
@@ -64,8 +64,8 @@ func TestV2DocumentCacheIsByteAndEntryBoundedAndVersionChecked(t *testing.T) {
 	}
 }
 
-func TestV2DocumentCacheConcurrentAccessRemainsBounded(t *testing.T) {
-	cache := newV2DocumentCache(8, 64*1024)
+func TestDocumentCacheConcurrentAccessRemainsBounded(t *testing.T) {
+	cache := newDocumentCache(8, 64*1024)
 	encoded := make([][]byte, 32)
 	for index := range encoded {
 		id := DocumentID{byte(index + 1)}
@@ -100,7 +100,7 @@ func TestV2DocumentCacheConcurrentAccessRemainsBounded(t *testing.T) {
 	}
 }
 
-func TestOpenV2DocumentCacheNeverLeaksMutableOrStaleDocuments(t *testing.T) {
+func TestOpenDocumentCacheNeverLeaksMutableOrStaleDocuments(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "document-cache.meld2"))
 	if err != nil {
 		t.Fatal(err)

@@ -623,7 +623,7 @@ func TestDatabaseRecoversCommitAfterQuorumResponsesAreLost(t *testing.T) {
 	}
 	store := newTestQuorumNamed(t, nodes, "ambiguous-database-commit")
 	path := filepath.Join(t.TempDir(), "ambiguous-response-loss.meld")
-	db, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{
+	db, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{
 		AnchorStore: store, InitializeAnchor: true, OperationTimeout: time.Second,
 	}})
 	if err != nil {
@@ -645,7 +645,7 @@ func TestDatabaseRecoversCommitAfterQuorumResponsesAreLost(t *testing.T) {
 		nodes[index].fault.mode.Store(faultNormal)
 	}
 
-	reopened, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{
+	reopened, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{
 		AnchorStore: store, OperationTimeout: time.Second,
 	}})
 	if err != nil {
@@ -804,7 +804,7 @@ func TestQuorumAnchorRejectsRolledBackDatabase(t *testing.T) {
 	}
 	store := newTestQuorum(t, nodes)
 	path := filepath.Join(t.TempDir(), "quorum-protected.meld")
-	db, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{AnchorStore: store, InitializeAnchor: true, OperationTimeout: time.Second}})
+	db, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{AnchorStore: store, InitializeAnchor: true, OperationTimeout: time.Second}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -829,7 +829,7 @@ func TestQuorumAnchorRejectsRolledBackDatabase(t *testing.T) {
 	if err := os.WriteFile(path, stale, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opened, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{AnchorStore: store, OperationTimeout: time.Second}})
+	opened, err := meldbase.OpenWithOptions(path, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{AnchorStore: store, OperationTimeout: time.Second}})
 	if !errors.Is(err, meldbase.ErrRollbackDetected) || opened != nil {
 		t.Fatalf("rolled-back database opened=%v err=%v", opened, err)
 	}

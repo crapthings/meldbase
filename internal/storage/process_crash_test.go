@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-const v2CrashHelperExitCode = 91
+const crashHelperExitCode = 91
 
-func TestV2AbruptProcessExitPublicationMatrix(t *testing.T) {
+func TestAbruptProcessExitPublicationMatrix(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "process-crash-base.meld2")
 	file, _, err := Open(basePath)
 	if err != nil {
@@ -54,18 +54,18 @@ func TestV2AbruptProcessExitPublicationMatrix(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestV2CrashProcessHelper$", "-test.count=1")
+			command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCrashProcessHelper$", "-test.count=1")
 			command.Env = append(os.Environ(),
-				"MELDBASE_V2_CRASH_HELPER=1",
-				"MELDBASE_V2_CRASH_PATH="+path,
-				"MELDBASE_V2_CRASH_POINT="+strconv.Itoa(int(scenario.point)),
+				"MELDBASE_CRASH_HELPER=1",
+				"MELDBASE_CRASH_PATH="+path,
+				"MELDBASE_CRASH_POINT="+strconv.Itoa(int(scenario.point)),
 			)
 			err := command.Run()
 			var exitErr *exec.ExitError
 			if ctx.Err() != nil {
 				t.Fatal(ctx.Err())
 			}
-			if !errors.As(err, &exitErr) || exitErr.ExitCode() != v2CrashHelperExitCode {
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != crashHelperExitCode {
 				t.Fatalf("helper error=%v", err)
 			}
 
@@ -97,7 +97,7 @@ func TestV2AbruptProcessExitPublicationMatrix(t *testing.T) {
 	}
 }
 
-func TestV2AbruptProcessExitGroupPublicationMatrix(t *testing.T) {
+func TestAbruptProcessExitGroupPublicationMatrix(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "process-crash-group-base.meld2")
 	file, _, err := Open(basePath)
 	if err != nil {
@@ -130,18 +130,18 @@ func TestV2AbruptProcessExitGroupPublicationMatrix(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestV2CrashGroupProcessHelper$", "-test.count=1")
+			command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCrashGroupProcessHelper$", "-test.count=1")
 			command.Env = append(os.Environ(),
-				"MELDBASE_V2_GROUP_CRASH_HELPER=1",
-				"MELDBASE_V2_CRASH_PATH="+path,
-				"MELDBASE_V2_CRASH_POINT="+strconv.Itoa(int(scenario.point)),
+				"MELDBASE_GROUP_CRASH_HELPER=1",
+				"MELDBASE_CRASH_PATH="+path,
+				"MELDBASE_CRASH_POINT="+strconv.Itoa(int(scenario.point)),
 			)
 			err := command.Run()
 			var exitErr *exec.ExitError
 			if ctx.Err() != nil {
 				t.Fatal(ctx.Err())
 			}
-			if !errors.As(err, &exitErr) || exitErr.ExitCode() != v2CrashHelperExitCode {
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != crashHelperExitCode {
 				t.Fatalf("helper error=%v", err)
 			}
 
@@ -180,22 +180,22 @@ func TestV2AbruptProcessExitGroupPublicationMatrix(t *testing.T) {
 	}
 }
 
-func TestV2CrashProcessHelper(t *testing.T) {
-	if os.Getenv("MELDBASE_V2_CRASH_HELPER") != "1" {
+func TestCrashProcessHelper(t *testing.T) {
+	if os.Getenv("MELDBASE_CRASH_HELPER") != "1" {
 		return
 	}
-	pointValue, err := strconv.Atoi(os.Getenv("MELDBASE_V2_CRASH_POINT"))
+	pointValue, err := strconv.Atoi(os.Getenv("MELDBASE_CRASH_POINT"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, _, err := Open(os.Getenv("MELDBASE_V2_CRASH_PATH"))
+	file, _, err := Open(os.Getenv("MELDBASE_CRASH_PATH"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	point := faultPoint(pointValue)
 	file.fault = func(current faultPoint) error {
 		if current == point {
-			os.Exit(v2CrashHelperExitCode)
+			os.Exit(crashHelperExitCode)
 		}
 		return nil
 	}
@@ -206,22 +206,22 @@ func TestV2CrashProcessHelper(t *testing.T) {
 	t.Fatalf("configured crash point was not reached: %v", err)
 }
 
-func TestV2CrashGroupProcessHelper(t *testing.T) {
-	if os.Getenv("MELDBASE_V2_GROUP_CRASH_HELPER") != "1" {
+func TestCrashGroupProcessHelper(t *testing.T) {
+	if os.Getenv("MELDBASE_GROUP_CRASH_HELPER") != "1" {
 		return
 	}
-	pointValue, err := strconv.Atoi(os.Getenv("MELDBASE_V2_CRASH_POINT"))
+	pointValue, err := strconv.Atoi(os.Getenv("MELDBASE_CRASH_POINT"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, _, err := Open(os.Getenv("MELDBASE_V2_CRASH_PATH"))
+	file, _, err := Open(os.Getenv("MELDBASE_CRASH_PATH"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	point := faultPoint(pointValue)
 	file.fault = func(current faultPoint) error {
 		if current == point {
-			os.Exit(v2CrashHelperExitCode)
+			os.Exit(crashHelperExitCode)
 		}
 		return nil
 	}

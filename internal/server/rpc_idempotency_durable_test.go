@@ -591,7 +591,7 @@ func TestDurableRPCIdempotencySurvivesCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(directory, "compacted.meld2")
-	if err := db.CompactToV2(context.Background(), destination); err != nil {
+	if err := db.Compact(context.Background(), destination); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -619,7 +619,7 @@ func TestDurableRPCIdempotencyRejectsMemoryDatabase(t *testing.T) {
 	}
 }
 
-func TestTransactionalRPCRegistrationRequiresMatchingBuiltInV2Store(t *testing.T) {
+func TestTransactionalRPCRegistrationRequiresMatchingBuiltInStore(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-config.meld2"))
 	if err != nil {
 		t.Fatal(err)

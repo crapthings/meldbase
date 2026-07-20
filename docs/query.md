@@ -6,7 +6,7 @@ Stored object keys cannot contain `.`, start with `$`, contain NUL, or use the
 prototype-sensitive names `__proto__`, `prototype`, and `constructor`. This keeps
 paths unambiguous across Go, JavaScript, indexes, and updates.
 
-V1 operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`,
+Supported operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`,
 `$exists`, `$and`, `$or`, and `$not`.
 
 Rules:

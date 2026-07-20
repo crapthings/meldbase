@@ -154,7 +154,7 @@ function verifyTypeScriptConsumer() {
   writeFileSync(join(consumer, "package.json"), JSON.stringify({ private: true, type: "module" }));
   writeFileSync(join(consumer, "tsconfig.json"), JSON.stringify({
     compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: true },
-    files: ["smoke.ts"],
+   files: ["smoke.ts"],
   }));
   writeFileSync(join(consumer, "smoke.ts"), `
     import { LocalCollection, type Document } from "@meldbase/client";

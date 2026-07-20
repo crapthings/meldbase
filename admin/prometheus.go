@@ -74,18 +74,18 @@ func MarshalPrometheus(sample Sample) []byte {
 
 	writePrometheusFamily(&output, "meldbase_commits_total", "Committed database transactions in this process session.", "counter", counterUint(stats.Commits.Total))
 	writePrometheusFamily(&output, "meldbase_commit_changes_total", "Logical changes in committed transactions in this process session.", "counter", counterUint(stats.Commits.Changes))
-	writePrometheusFamily(&output, "meldbase_commit_coordinator_enabled", "Whether the optional V2 commit coordinator is enabled.", "gauge", gaugeBool(stats.CommitCoordinator.Enabled))
-	writePrometheusFamily(&output, "meldbase_commit_coordinator_pending", "Current requests waiting for V2 commit-coordinator admission.", "gauge", gaugeUint(stats.CommitCoordinator.Pending))
-	writePrometheusFamily(&output, "meldbase_commit_coordinator_pending_capacity", "Fixed V2 commit-coordinator pending-request capacity.", "gauge", gaugeUint(stats.CommitCoordinator.PendingCapacity))
-	writePrometheusFamily(&output, "meldbase_commit_coordinator_admitted_total", "Requests admitted by the V2 commit coordinator.", "counter", counterUint(stats.CommitCoordinator.Admitted))
-	writePrometheusFamily(&output, "meldbase_commit_coordinator_admission_rejected_total", "Requests rejected because the V2 commit-coordinator queue was full.", "counter", counterUint(stats.CommitCoordinator.AdmissionRejected))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_enabled", "Whether the optional commit coordinator is enabled.", "gauge", gaugeBool(stats.CommitCoordinator.Enabled))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_pending", "Current requests waiting for commit-coordinator admission.", "gauge", gaugeUint(stats.CommitCoordinator.Pending))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_pending_capacity", "Fixed commit-coordinator pending-request capacity.", "gauge", gaugeUint(stats.CommitCoordinator.PendingCapacity))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_admitted_total", "Requests admitted by the commit coordinator.", "counter", counterUint(stats.CommitCoordinator.Admitted))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_admission_rejected_total", "Requests rejected because the commit-coordinator queue was full.", "counter", counterUint(stats.CommitCoordinator.AdmissionRejected))
 	writePrometheusFamily(&output, "meldbase_commit_coordinator_batches_total", "Commit-coordinator batches processed.", "counter", counterUint(stats.CommitCoordinator.Batches))
-	writePrometheusFamily(&output, "meldbase_commit_coordinator_grouped_transactions_total", "Logical requests processed in multi-member V2 commit-coordinator batches.", "counter", counterUint(stats.CommitCoordinator.GroupedTransactions))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_grouped_transactions_total", "Logical requests processed in multi-member commit-coordinator batches.", "counter", counterUint(stats.CommitCoordinator.GroupedTransactions))
 	writePrometheusFamily(&output, "meldbase_commit_coordinator_outcome_unknown_total", "Admitted requests whose caller canceled before its durable outcome was known.", "counter", counterUint(stats.CommitCoordinator.OutcomeUnknown))
-	writePrometheusFamily(&output, "meldbase_primary_write_fence_configured", "Whether an external V2 primary-write fence was configured at open.", "gauge", gaugeBool(stats.PrimaryWriteFence.Configured))
-	writePrometheusFamily(&output, "meldbase_primary_write_fence_enforced", "Whether the external V2 primary-write fence currently guards local writes.", "gauge", gaugeBool(stats.PrimaryWriteFence.Enforced))
-	writePrometheusFamily(&output, "meldbase_primary_write_fence_checks_total", "V2 primary-write fence checks before logical primary commits.", "counter", counterUint(stats.PrimaryWriteFence.Checks))
-	writePrometheusFamily(&output, "meldbase_primary_write_fence_rejections_total", "V2 primary-write fence checks that rejected a local write.", "counter", counterUint(stats.PrimaryWriteFence.Rejected))
+	writePrometheusFamily(&output, "meldbase_primary_write_fence_configured", "Whether an external primary-write fence was configured at open.", "gauge", gaugeBool(stats.PrimaryWriteFence.Configured))
+	writePrometheusFamily(&output, "meldbase_primary_write_fence_enforced", "Whether the external primary-write fence currently guards local writes.", "gauge", gaugeBool(stats.PrimaryWriteFence.Enforced))
+	writePrometheusFamily(&output, "meldbase_primary_write_fence_checks_total", "Primary-write fence checks before logical primary commits.", "counter", counterUint(stats.PrimaryWriteFence.Checks))
+	writePrometheusFamily(&output, "meldbase_primary_write_fence_rejections_total", "Primary-write fence checks that rejected a local write.", "counter", counterUint(stats.PrimaryWriteFence.Rejected))
 	writePrometheusFamily(&output, "meldbase_write_transaction_active", "Public optimistic write transaction callbacks currently active.", "gauge", gaugeUint(stats.Transactions.Active))
 	writePrometheusFamily(&output, "meldbase_write_transaction_started_total", "Public optimistic write transaction callbacks started.", "counter", counterUint(stats.Transactions.Started))
 	writePrometheusFamily(&output, "meldbase_write_transaction_outcomes_total", "Public optimistic write transaction callbacks by fixed terminal outcome.", "counter",
@@ -176,8 +176,8 @@ func MarshalPrometheus(sample Sample) []byte {
 	}
 
 	writePrometheusFamily(&output, "meldbase_storage_page_size_bytes", "Storage page size in bytes.", "gauge", gaugeUint(stats.Storage.PageSize))
-	writePrometheusFamily(&output, "meldbase_storage_generation", "Current physical V2 publication generation.", "gauge", gaugeUint(stats.Storage.Generation))
-	writePrometheusFamily(&output, "meldbase_storage_rollback_protected", "Whether acknowledged V2 commits are gated by an external rollback anchor.", "gauge", gaugeBool(stats.Storage.RollbackProtected))
+	writePrometheusFamily(&output, "meldbase_storage_generation", "Current physical publication generation.", "gauge", gaugeUint(stats.Storage.Generation))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_protected", "Whether acknowledged commits are gated by an external rollback anchor.", "gauge", gaugeBool(stats.Storage.RollbackProtected))
 	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_sequence", "Last rollback-anchor sequence durably read back in this process.", "gauge", gaugeUint(stats.Storage.RollbackAnchorSequence))
 	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_generation", "Last rollback-anchor generation durably read back in this process.", "gauge", gaugeUint(stats.Storage.RollbackAnchorGeneration))
 	rollbackLag := uint64(0)
@@ -206,11 +206,11 @@ func MarshalPrometheus(sample Sample) []byte {
 	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_duration_seconds_total", "Accumulated synchronous rollback-anchor update duration.", "counter", counterNanos(stats.Storage.RollbackAnchorNanos))
 	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_max_duration_seconds", "Maximum synchronous rollback-anchor update duration.", "gauge", gaugeDuration(stats.Storage.RollbackAnchorMaxLatency))
 	writePrometheusFamily(&output, "meldbase_storage_physical_pages", "Current physical page high-water count.", "gauge", gaugeUint(stats.Storage.PhysicalPages))
-	writePrometheusFamily(&output, "meldbase_storage_used_bytes", "Current V2 physical file high-water bytes.", "gauge", gaugeUint(stats.Storage.StorageUsedBytes))
-	writePrometheusFamily(&output, "meldbase_storage_max_bytes", "Configured V2 physical file high-water quota.", "gauge", gaugeUint(stats.Storage.StorageMaxBytes))
+	writePrometheusFamily(&output, "meldbase_storage_used_bytes", "Current physical file high-water bytes.", "gauge", gaugeUint(stats.Storage.StorageUsedBytes))
+	writePrometheusFamily(&output, "meldbase_storage_max_bytes", "Configured physical file high-water quota.", "gauge", gaugeUint(stats.Storage.StorageMaxBytes))
 	writePrometheusFamily(&output, "meldbase_storage_byte_overage", "Existing physical bytes above the configured quota.", "gauge", gaugeUint(stats.Storage.StorageByteOverage))
-	writePrometheusFamily(&output, "meldbase_storage_quota_exhausted", "Whether V2 has neither append capacity nor reusable pages.", "gauge", gaugeBool(stats.Storage.StorageQuotaExhausted))
-	writePrometheusFamily(&output, "meldbase_storage_limit_rejections_total", "V2 transactions rejected before I/O by the physical storage quota.", "counter", counterUint(stats.Storage.StorageLimitRejections))
+	writePrometheusFamily(&output, "meldbase_storage_quota_exhausted", "Whether storage has neither append capacity nor reusable pages.", "gauge", gaugeBool(stats.Storage.StorageQuotaExhausted))
+	writePrometheusFamily(&output, "meldbase_storage_limit_rejections_total", "Transactions rejected before I/O by the physical storage quota.", "counter", counterUint(stats.Storage.StorageLimitRejections))
 	writePrometheusFamily(&output, "meldbase_storage_reusable_pages", "Current process-local reusable page count.", "gauge", gaugeUint(stats.Storage.ReusablePages))
 	writePrometheusFamily(&output, "meldbase_storage_tree_splits_total", "B+Tree node splits published in this process session.", "counter", counterUint(stats.Storage.TreeSplits))
 	writePrometheusFamily(&output, "meldbase_storage_tree_merges_total", "B+Tree sibling merges published in this process session.", "counter", counterUint(stats.Storage.TreeMerges))
@@ -221,10 +221,10 @@ func MarshalPrometheus(sample Sample) []byte {
 	writePrometheusFamily(&output, "meldbase_storage_free_space_candidate_checks_total", "Candidate page headers checked while restoring persistent free space.", "counter", counterUint(stats.Storage.FreeSpaceCandidateChecks))
 	writePrometheusFamily(&output, "meldbase_storage_oldest_retained_sequence", "Oldest currently retained replay sequence.", "gauge", gaugeUint(stats.Storage.OldestRetainedSequence))
 	writePrometheusFamily(&output, "meldbase_storage_retained_commits", "Current logical commits retained for replay.", "gauge", gaugeUint(stats.Storage.RetainedCommits))
-	writePrometheusFamily(&output, "meldbase_storage_commit_retention_max", "Configured normal V2 Commit Log window.", "gauge", gaugeUint(stats.Storage.CommitRetentionMax))
+	writePrometheusFamily(&output, "meldbase_storage_commit_retention_max", "Configured normal Commit Log window.", "gauge", gaugeUint(stats.Storage.CommitRetentionMax))
 	writePrometheusFamily(&output, "meldbase_storage_commit_retention_overage", "Retained commits above the configured window.", "gauge", gaugeUint(stats.Storage.CommitRetentionOverage))
-	writePrometheusFamily(&output, "meldbase_storage_retained_commit_bytes", "Canonical logical bytes currently retained in the V2 Commit Log.", "gauge", gaugeUint(stats.Storage.RetainedCommitBytes))
-	writePrometheusFamily(&output, "meldbase_storage_commit_retention_max_bytes", "Configured normal V2 Commit Log logical-byte budget.", "gauge", gaugeUint(stats.Storage.CommitRetentionMaxBytes))
+	writePrometheusFamily(&output, "meldbase_storage_retained_commit_bytes", "Canonical logical bytes currently retained in the Commit Log.", "gauge", gaugeUint(stats.Storage.RetainedCommitBytes))
+	writePrometheusFamily(&output, "meldbase_storage_commit_retention_max_bytes", "Configured normal Commit Log logical-byte budget.", "gauge", gaugeUint(stats.Storage.CommitRetentionMaxBytes))
 	writePrometheusFamily(&output, "meldbase_storage_commit_retention_byte_overage", "Retained logical bytes above the configured budget.", "gauge", gaugeUint(stats.Storage.CommitRetentionByteOverage))
 	writePrometheusFamily(&output, "meldbase_storage_commit_retention_pressure", "Whether the configured count or byte retention budget is currently unsatisfied.", "gauge", gaugeBool(stats.Storage.RetentionPressure))
 	writePrometheusFamily(&output, "meldbase_storage_retention_pruned_commits_total", "Commit Log entries pruned by successful publications in this session.", "counter", counterUint(stats.Storage.RetentionPrunedCommits))
@@ -236,8 +236,8 @@ func MarshalPrometheus(sample Sample) []byte {
 		labeledUint(`{outcome="committed"}`, stats.Storage.CommittedTransactions),
 		labeledUint(`{outcome="rejected"}`, stats.Storage.RejectedTransactions),
 	)
-	writePrometheusFamily(&output, "meldbase_storage_commit_duration_seconds_total", "Accumulated V2 storage commit duration in seconds.", "counter", counterNanos(stats.Storage.CommitNanos))
-	writePrometheusFamily(&output, "meldbase_storage_commit_max_duration_seconds", "Maximum V2 storage commit duration observed in this process session.", "gauge", gaugeDuration(stats.Storage.CommitMaxLatency))
+	writePrometheusFamily(&output, "meldbase_storage_commit_duration_seconds_total", "Accumulated storage commit duration in seconds.", "counter", counterNanos(stats.Storage.CommitNanos))
+	writePrometheusFamily(&output, "meldbase_storage_commit_max_duration_seconds", "Maximum storage commit duration observed in this process session.", "gauge", gaugeDuration(stats.Storage.CommitMaxLatency))
 
 	writePrometheusCache(&output, "page", "capacity_pages", "resident_pages", stats.Storage.PageCache.CapacityPages, stats.Storage.PageCache.ResidentPages, stats.Storage.PageCache.Hits, stats.Storage.PageCache.Misses, stats.Storage.PageCache.Evictions)
 	writePrometheusCache(&output, "document", "capacity_entries", "entries", stats.Storage.DocumentCache.CapacityEntries, stats.Storage.DocumentCache.Entries, stats.Storage.DocumentCache.Hits, stats.Storage.DocumentCache.Misses, stats.Storage.DocumentCache.Evictions)
@@ -264,12 +264,12 @@ func MarshalPrometheus(sample Sample) []byte {
 	writePrometheusFamily(&output, "meldbase_reclamation_last_attempts", "Graph scans used by the last reclamation operation.", "gauge", gaugeUint(stats.Reclamation.LastAttempts))
 	writePrometheusFamily(&output, "meldbase_reclamation_last_online", "Whether the last reclamation used optimistic online mode.", "gauge", gaugeBool(stats.Reclamation.LastOnline))
 
-	writePrometheusFamily(&output, "meldbase_backup_active", "Current number of active physical V2 backups.", "gauge", gaugeUint(stats.Backup.Active))
-	writePrometheusFamily(&output, "meldbase_backup_attempts_total", "Physical V2 backup attempts in this process session.", "counter", counterUint(stats.Backup.Attempts))
-	writePrometheusFamily(&output, "meldbase_backup_completed_total", "Completed physical V2 backups in this process session.", "counter", counterUint(stats.Backup.Completed))
-	writePrometheusFamily(&output, "meldbase_backup_failures_total", "Failed physical V2 backups in this process session.", "counter", counterUint(stats.Backup.Failed))
-	writePrometheusFamily(&output, "meldbase_backup_last_bytes", "Bytes copied by the last physical V2 backup attempt.", "gauge", gaugeUint(stats.Backup.LastBytes))
-	writePrometheusFamily(&output, "meldbase_backup_last_duration_seconds", "Duration of the last physical V2 backup attempt in seconds.", "gauge", gaugeDuration(stats.Backup.LastDuration))
+	writePrometheusFamily(&output, "meldbase_backup_active", "Current number of active physical backups.", "gauge", gaugeUint(stats.Backup.Active))
+	writePrometheusFamily(&output, "meldbase_backup_attempts_total", "Physical backup attempts in this process session.", "counter", counterUint(stats.Backup.Attempts))
+	writePrometheusFamily(&output, "meldbase_backup_completed_total", "Completed physical backups in this process session.", "counter", counterUint(stats.Backup.Completed))
+	writePrometheusFamily(&output, "meldbase_backup_failures_total", "Failed physical backups in this process session.", "counter", counterUint(stats.Backup.Failed))
+	writePrometheusFamily(&output, "meldbase_backup_last_bytes", "Bytes copied by the last physical backup attempt.", "gauge", gaugeUint(stats.Backup.LastBytes))
+	writePrometheusFamily(&output, "meldbase_backup_last_duration_seconds", "Duration of the last physical backup attempt in seconds.", "gauge", gaugeDuration(stats.Backup.LastDuration))
 
 	writePrometheusFamily(&output, "meldbase_diagnostics_enabled", "Whether a bounded diagnostic session is currently enabled.", "gauge", gaugeBool(stats.Diagnostics.Enabled))
 	writePrometheusFamily(&output, "meldbase_diagnostics_capacity", "Configured diagnostic event-ring capacity.", "gauge", gaugeUint(stats.Diagnostics.Capacity))
@@ -370,15 +370,13 @@ func formatSeconds(value time.Duration) string {
 
 func safeEngine(stats meldbase.DBStats) string {
 	switch stats.Storage.Engine {
-	case "v2":
-		return "v2"
-	case "v1":
-		return "v1"
+	case "current":
+		return "current"
 	case "memory":
 		return "memory"
 	default:
 		if stats.Durable {
-			return "v1"
+			return "current"
 		}
 		return "memory"
 	}

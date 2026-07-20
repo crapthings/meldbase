@@ -1,18 +1,23 @@
 #!/bin/sh
 set -eu
 
-# This launcher is intentionally limited to the CLI's local development mode.
-# Keep both listeners on loopback: meld serve has no production authenticator.
+# This launcher runs the current JWT/workspace-isolated server path. Keep the
+# public listener on loopback until an application-owned TLS proxy is configured.
 : "${MELDBASE_BIN:=/usr/local/bin/meld}"
 : "${MELDBASE_DB:=/var/lib/meldbase/data/app.meld2}"
 : "${MELDBASE_ADDR:=127.0.0.1:8080}"
 : "${MELDBASE_ADMIN_ADDR:=127.0.0.1:9091}"
 : "${MELDBASE_ADMIN_TOKEN:=}"
+: "${MELDBASE_JWT_HS256_SECRET_FILE:=}"
+: "${MELDBASE_JWT_ISSUER:=}"
+: "${MELDBASE_JWT_AUDIENCE:=}"
+: "${MELDBASE_WORKSPACE_COLLECTIONS:=}"
+: "${MELDBASE_WORKSPACE_FIELD:=workspaceId}"
 
 case "$MELDBASE_ADDR" in
   127.*:*|'[::1]':*) ;;
   *)
-    printf '%s\n' 'MELDBASE_ADDR must be a loopback address while --dev-no-auth is in use' >&2
+    printf '%s\n' 'MELDBASE_ADDR must be a loopback address; place TLS at the application boundary' >&2
     exit 2
     ;;
 esac
@@ -27,11 +32,23 @@ if [ "${#MELDBASE_ADMIN_TOKEN}" -lt 32 ] || [ "$MELDBASE_ADMIN_TOKEN" = CHANGE_M
   printf '%s\n' 'MELDBASE_ADMIN_TOKEN must be a unique random token of at least 32 bytes' >&2
   exit 2
 fi
+if [ -z "$MELDBASE_JWT_HS256_SECRET_FILE" ] || [ ! -r "$MELDBASE_JWT_HS256_SECRET_FILE" ]; then
+  printf '%s\n' 'MELDBASE_JWT_HS256_SECRET_FILE must name a readable 32+ byte secret file' >&2
+  exit 2
+fi
+if [ -z "$MELDBASE_JWT_ISSUER" ] || [ -z "$MELDBASE_JWT_AUDIENCE" ] || [ -z "$MELDBASE_WORKSPACE_COLLECTIONS" ]; then
+  printf '%s\n' 'MELDBASE_JWT_ISSUER, MELDBASE_JWT_AUDIENCE and MELDBASE_WORKSPACE_COLLECTIONS are required' >&2
+  exit 2
+fi
 
 exec "$MELDBASE_BIN" serve \
   --db "$MELDBASE_DB" \
   --addr "$MELDBASE_ADDR" \
-  --dev-no-auth \
+  --jwt-hs256-secret-file "$MELDBASE_JWT_HS256_SECRET_FILE" \
+  --jwt-issuer "$MELDBASE_JWT_ISSUER" \
+  --jwt-audience "$MELDBASE_JWT_AUDIENCE" \
+  --workspace-collections "$MELDBASE_WORKSPACE_COLLECTIONS" \
+  --workspace-field "$MELDBASE_WORKSPACE_FIELD" \
   --admin-addr "$MELDBASE_ADMIN_ADDR" \
   --admin-diagnostics \
   --admin-metrics

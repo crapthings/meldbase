@@ -8,7 +8,7 @@ export function validateWorkerProtocol(
   rawDescriptor: unknown | undefined,
   requireProtocol: boolean | undefined,
   methods: ReadonlyMap<string, MethodDefinition>,
-  publications: ReadonlyMap<string, PublicationDefinition>,
+ publications: ReadonlyMap<string, PublicationDefinition>,
 ): ProtocolDescriptor | undefined {
   if (rawDescriptor === undefined) {
     if (requireProtocol) throw new MeldbaseWorkerProtocolError(["protocol.discovery"]);

@@ -235,7 +235,7 @@ func decodeRollbackAnchorRecord(record rollbackAnchorRecord) (RollbackAnchor, er
 
 func rollbackAnchorChecksum(anchor RollbackAnchor) string {
 	hash := sha256.New()
-	_, _ = hash.Write([]byte("meldbase-rollback-anchor-v2\x00"))
+	_, _ = hash.Write([]byte("meldbase-rollback-anchor-store\x00"))
 	_, _ = hash.Write(anchor.DatabaseID[:])
 	var sequence [8]byte
 	binary.BigEndian.PutUint64(sequence[:], anchor.MinimumCommitSequence)
@@ -258,7 +258,7 @@ func validRollbackAnchor(anchor RollbackAnchor) bool {
 	return !zeroDatabaseID(anchor.DatabaseID) && anchor.MinimumGeneration > 0
 }
 
-func rollbackProtectionConfigured(protection V2RollbackProtection) bool {
+func rollbackProtectionConfigured(protection RollbackProtection) bool {
 	return !zeroDatabaseID(protection.ExpectedDatabaseID) || protection.MinimumCommitSequence > 0 || protection.MinimumGeneration > 0 || protection.AnchorStore != nil || protection.InitializeAnchor || protection.OperationTimeout != 0
 }
 

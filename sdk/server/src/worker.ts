@@ -90,7 +90,7 @@ export class MeldbaseWorker {
     for (const [collection, definition] of Object.entries(options.publications ?? {})) {
       if (!COLLECTION_PATTERN.test(collection) || !definition || typeof definition.handler !== "function") throw new TypeError(`Invalid worker publication ${collection}`);
       validatePublicationOptions(definition);
-      publications.set(collection, {
+     publications.set(collection, {
         ...definition,
         queryPaths: definition.queryPaths === "*" ? "*" : Object.freeze([...definition.queryPaths]),
         resultFields: definition.resultFields === "*" ? "*" : Object.freeze([...definition.resultFields]),
@@ -190,7 +190,7 @@ export class MeldbaseWorker {
       this.#send({
         v: MELDBASE_PROTOCOL_VERSION, type: "register", workerId: this.#options.workerId,
         methods: [...this.#methods].map(([name, definition]) => ({ name, mode: definition.mode })),
-        publications: [...this.#publications].map(([collection, definition]) => ({
+       publications: [...this.#publications].map(([collection, definition]) => ({
           collection, version: definition.version, maxResults: definition.maxResults,
           queryPaths: definition.queryPaths, resultFields: definition.resultFields,
         })),

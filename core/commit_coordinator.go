@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// v2CommitCoordinator is a bounded, single-writer admission boundary for the
-// first public group-commit path: ordinary V2 collection CRUD mutations.
+// commitCoordinator is a bounded, single-writer admission boundary for the
+// first public group-commit path: ordinary  collection CRUD mutations.
 //
 // It deliberately owns neither authorization nor user callbacks. Input has
 // already been cloned/selected, validated and resource-admitted by the public
@@ -19,13 +19,13 @@ import (
 // independent of its Context: cancellation can race the final Meta
 // acknowledgement, so the caller receives an explicit reconciliation error
 // instead of an unsafe blind-retry signal.
-type v2CommitCoordinator struct {
+type commitCoordinator struct {
 	db      *DB
-	store   *v2DurableStore
-	options V2CommitCoordinatorOptions
+	store   *durableStore
+	options CommitCoordinatorOptions
 
 	mu      sync.Mutex
-	queue   []*v2CommitRequest
+	queue   []*commitRequest
 	changed chan struct{}
 	done    chan struct{}
 	stopped chan struct{}
@@ -44,36 +44,36 @@ type v2CommitCoordinator struct {
 	testBeforeCoalesce func()
 }
 
-type v2CommitResult struct {
+type commitResult struct {
 	ids    []DocumentID
 	update UpdateResult
 	delete DeleteResult
 	err    error
 }
 
-type v2CommitRequest struct {
+type commitRequest struct {
 	collection        string
 	ids               []DocumentID
 	copies            []Document
 	changes           []Change
-	readSet           []storagev2.DocumentPrecondition
-	collectionReadSet []storagev2.CollectionPrecondition
-	success           v2CommitResult
+	readSet           []storage.DocumentPrecondition
+	collectionReadSet []storage.CollectionPrecondition
+	success           commitResult
 	// fallback recomputes filter selection under db.mu after a speculative
 	// group conflict. It is nil only for an insert, whose immutable changes are
 	// already its exact original operation.
-	fallback func() v2CommitResult
+	fallback func() commitResult
 	// waitForOutcome preserves the public write-transaction contract. A callback
 	// has already run by the time its frozen point writes enter this queue, so a
 	// post-admission Context cancellation cannot safely invite a second callback
 	// execution or return an ambiguous result to a caller with no reconciliation
 	// handle. The coordinator therefore waits for its durable outcome.
 	waitForOutcome bool
-	result         chan v2CommitResult
+	result         chan commitResult
 }
 
-func newV2CommitCoordinator(db *DB, store *v2DurableStore, options V2CommitCoordinatorOptions) *v2CommitCoordinator {
-	coordinator := &v2CommitCoordinator{
+func newCommitCoordinator(db *DB, store *durableStore, options CommitCoordinatorOptions) *commitCoordinator {
+	coordinator := &commitCoordinator{
 		db: db, store: store, options: options,
 		changed: make(chan struct{}), done: make(chan struct{}), stopped: make(chan struct{}),
 	}
@@ -81,7 +81,7 @@ func newV2CommitCoordinator(db *DB, store *v2DurableStore, options V2CommitCoord
 	return coordinator
 }
 
-func (coordinator *v2CommitCoordinator) submit(
+func (coordinator *commitCoordinator) submit(
 	ctx context.Context,
 	collection string,
 	ids []DocumentID,
@@ -94,13 +94,13 @@ func (coordinator *v2CommitCoordinator) submit(
 	if err := contextError(ctx); err != nil {
 		return nil, err
 	}
-	request := &v2CommitRequest{
+	request := &commitRequest{
 		collection: collection,
 		ids:        append([]DocumentID(nil), ids...),
 		copies:     append([]Document(nil), copies...),
 		changes:    append([]Change(nil), changes...),
-		success:    v2CommitResult{ids: append([]DocumentID(nil), ids...)},
-		result:     make(chan v2CommitResult, 1),
+		success:    commitResult{ids: append([]DocumentID(nil), ids...)},
+		result:     make(chan commitResult, 1),
 	}
 	result, err := coordinator.admit(ctx, request)
 	if err != nil {
@@ -109,23 +109,23 @@ func (coordinator *v2CommitCoordinator) submit(
 	return result.ids, nil
 }
 
-func (coordinator *v2CommitCoordinator) admit(ctx context.Context, request *v2CommitRequest) (v2CommitResult, error) {
+func (coordinator *commitCoordinator) admit(ctx context.Context, request *commitRequest) (commitResult, error) {
 	if coordinator == nil || coordinator.db == nil || coordinator.store == nil || request == nil {
-		return v2CommitResult{}, ErrCorrupt
+		return commitResult{}, ErrCorrupt
 	}
 	if err := contextError(ctx); err != nil {
-		return v2CommitResult{}, err
+		return commitResult{}, err
 	}
 	coordinator.mu.Lock()
 	if coordinator.closed {
 		coordinator.mu.Unlock()
-		return v2CommitResult{}, ErrClosed
+		return commitResult{}, ErrClosed
 	}
 	if len(coordinator.queue) >= coordinator.options.MaxPending {
 		coordinator.mu.Unlock()
 		coordinator.admissionRejected.Add(1)
 		coordinator.db.metrics.resourceLimitRejections.Add(1)
-		return v2CommitResult{}, ErrResourceLimit
+		return commitResult{}, ErrResourceLimit
 	}
 	coordinator.queue = append(coordinator.queue, request)
 	coordinator.admitted.Add(1)
@@ -151,12 +151,12 @@ func (coordinator *v2CommitCoordinator) admit(ctx context.Context, request *v2Co
 	}
 }
 
-func (coordinator *v2CommitCoordinator) signalLocked() {
+func (coordinator *commitCoordinator) signalLocked() {
 	close(coordinator.changed)
 	coordinator.changed = make(chan struct{})
 }
 
-func (coordinator *v2CommitCoordinator) run() {
+func (coordinator *commitCoordinator) run() {
 	defer close(coordinator.stopped)
 	for {
 		requests, ok := coordinator.nextGroup()
@@ -170,7 +170,7 @@ func (coordinator *v2CommitCoordinator) run() {
 	}
 }
 
-func (coordinator *v2CommitCoordinator) nextGroup() ([]*v2CommitRequest, bool) {
+func (coordinator *commitCoordinator) nextGroup() ([]*commitRequest, bool) {
 	for {
 		coordinator.mu.Lock()
 		if coordinator.closed {
@@ -190,7 +190,7 @@ func (coordinator *v2CommitCoordinator) nextGroup() ([]*v2CommitRequest, bool) {
 	}
 
 	count := min(len(coordinator.queue), coordinator.options.MaxBatch)
-	requests := append([]*v2CommitRequest(nil), coordinator.queue[:count]...)
+	requests := append([]*commitRequest(nil), coordinator.queue[:count]...)
 	coordinator.queue = coordinator.queue[count:]
 	coordinator.mu.Unlock()
 	if len(requests) == coordinator.options.MaxBatch || coordinator.options.MaxDelay <= 0 {
@@ -232,7 +232,7 @@ func (coordinator *v2CommitCoordinator) nextGroup() ([]*v2CommitRequest, bool) {
 	return requests, true
 }
 
-func (coordinator *v2CommitCoordinator) commitGroup(requests []*v2CommitRequest) {
+func (coordinator *commitCoordinator) commitGroup(requests []*commitRequest) {
 	if len(requests) == 0 {
 		return
 	}
@@ -243,11 +243,11 @@ func (coordinator *v2CommitCoordinator) commitGroup(requests []*v2CommitRequest)
 	coordinator.db.mu.Lock()
 	defer coordinator.db.mu.Unlock()
 	if coordinator.db.closed {
-		coordinator.finish(requests, v2CommitResult{err: ErrClosed})
+		coordinator.finish(requests, commitResult{err: ErrClosed})
 		return
 	}
 	if coordinator.db.fatalErr != nil {
-		coordinator.finish(requests, v2CommitResult{err: coordinator.db.fatalErr})
+		coordinator.finish(requests, commitResult{err: coordinator.db.fatalErr})
 		return
 	}
 	if len(requests) == 1 {
@@ -256,22 +256,22 @@ func (coordinator *v2CommitCoordinator) commitGroup(requests []*v2CommitRequest)
 	}
 
 	batches := make([]ChangeBatch, len(requests))
-	readSets := make([][]storagev2.DocumentPrecondition, len(requests))
-	collectionReadSets := make([][]storagev2.CollectionPrecondition, len(requests))
+	readSets := make([][]storage.DocumentPrecondition, len(requests))
+	collectionReadSets := make([][]storage.CollectionPrecondition, len(requests))
 	for index, request := range requests {
 		batches[index] = ChangeBatch{Token: coordinator.db.token + uint64(index) + 1, Changes: request.changes}
 		readSets[index] = request.readSet
 		collectionReadSets[index] = request.collectionReadSet
 	}
-	err := coordinator.db.commitV2ChangeBatchesWithPreconditionsLocked(context.Background(), coordinator.store, batches, readSets, collectionReadSets)
+	err := coordinator.db.commitChangeBatchesWithPreconditionsLocked(context.Background(), coordinator.store, batches, readSets, collectionReadSets)
 	if err == nil {
 		for _, request := range requests {
 			coordinator.finishOne(request, request.success)
 		}
 		return
 	}
-	if !v2CommitLogicalConflict(err) {
-		coordinator.finish(requests, v2CommitResult{err: err})
+	if !commitLogicalConflict(err) {
+		coordinator.finish(requests, commitResult{err: err})
 		return
 	}
 
@@ -285,22 +285,22 @@ func (coordinator *v2CommitCoordinator) commitGroup(requests []*v2CommitRequest)
 			// A physical failure after a successful earlier fallback member is
 			// fail-stop. Every not-yet-run request receives that same boundary.
 			for _, remaining := range requestsAfter(requests, request) {
-				coordinator.finishOne(remaining, v2CommitResult{err: coordinator.db.fatalErr})
+				coordinator.finishOne(remaining, commitResult{err: coordinator.db.fatalErr})
 			}
 			return
 		}
 	}
 }
 
-func (coordinator *v2CommitCoordinator) stats() V2CommitCoordinatorStats {
+func (coordinator *commitCoordinator) stats() CommitCoordinatorStats {
 	if coordinator == nil {
-		return V2CommitCoordinatorStats{}
+		return CommitCoordinatorStats{}
 	}
 	coordinator.mu.Lock()
 	pending, capacity := len(coordinator.queue), coordinator.options.MaxPending
 	enabled := !coordinator.closed
 	coordinator.mu.Unlock()
-	return V2CommitCoordinatorStats{
+	return CommitCoordinatorStats{
 		Enabled: enabled, Pending: uint64(pending), PendingCapacity: uint64(capacity),
 		Admitted: coordinator.admitted.Load(), AdmissionRejected: coordinator.admissionRejected.Load(),
 		Batches: coordinator.batches.Load(), GroupedTransactions: coordinator.groupedTransactions.Load(),
@@ -308,14 +308,14 @@ func (coordinator *v2CommitCoordinator) stats() V2CommitCoordinatorStats {
 	}
 }
 
-func v2CommitLogicalConflict(err error) bool {
+func commitLogicalConflict(err error) bool {
 	return errors.Is(err, ErrDuplicateID) || errors.Is(err, ErrDuplicateKey) || errors.Is(err, ErrInvalidIndex) ||
 		errors.Is(err, ErrResourceLimit) || errors.Is(err, ErrWriteConflict)
 }
 
-func (coordinator *v2CommitCoordinator) commitFallbackLocked(request *v2CommitRequest) v2CommitResult {
+func (coordinator *commitCoordinator) commitFallbackLocked(request *commitRequest) commitResult {
 	if request == nil {
-		return v2CommitResult{err: ErrCorrupt}
+		return commitResult{err: ErrCorrupt}
 	}
 	if request.fallback != nil {
 		return request.fallback()
@@ -326,7 +326,7 @@ func (coordinator *v2CommitCoordinator) commitFallbackLocked(request *v2CommitRe
 	return result
 }
 
-func requestsAfter(requests []*v2CommitRequest, current *v2CommitRequest) []*v2CommitRequest {
+func requestsAfter(requests []*commitRequest, current *commitRequest) []*commitRequest {
 	for index, request := range requests {
 		if request == current {
 			return requests[index+1:]
@@ -335,19 +335,19 @@ func requestsAfter(requests []*v2CommitRequest, current *v2CommitRequest) []*v2C
 	return nil
 }
 
-func (coordinator *v2CommitCoordinator) finish(requests []*v2CommitRequest, result v2CommitResult) {
+func (coordinator *commitCoordinator) finish(requests []*commitRequest, result commitResult) {
 	for _, request := range requests {
 		coordinator.finishOne(request, result)
 	}
 }
 
-func (coordinator *v2CommitCoordinator) finishOne(request *v2CommitRequest, result v2CommitResult) {
+func (coordinator *commitCoordinator) finishOne(request *commitRequest, result commitResult) {
 	if request != nil {
 		request.result <- result
 	}
 }
 
-func (coordinator *v2CommitCoordinator) close() {
+func (coordinator *commitCoordinator) close() {
 	if coordinator == nil {
 		return
 	}
@@ -362,8 +362,8 @@ func (coordinator *v2CommitCoordinator) close() {
 	close(coordinator.done)
 	coordinator.signalLocked()
 	coordinator.mu.Unlock()
-	coordinator.finish(pending, v2CommitResult{err: ErrClosed})
+	coordinator.finish(pending, commitResult{err: ErrClosed})
 	// The worker may already own one admitted group. Let it finish before the
-	// V2 file is closed, preserving the durable outcome of that group.
+	// file is closed, preserving the durable outcome of that group.
 	<-coordinator.stopped
 }

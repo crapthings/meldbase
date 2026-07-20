@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestV2MaintenanceRunsOnlineAndStops(t *testing.T) {
+func TestMaintenanceRunsOnlineAndStops(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "maintenance.meld2"))
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestV2MaintenanceRunsOnlineAndStops(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	maintenance, err := db.StartV2Maintenance(context.Background(), V2MaintenanceOptions{
+	maintenance, err := db.StartMaintenance(context.Background(), MaintenanceOptions{
 		Interval: time.Hour, Timeout: 5 * time.Second, MaxAttempts: 1, RunImmediately: true,
 	})
 	if err != nil {
@@ -48,10 +48,10 @@ func TestV2MaintenanceRunsOnlineAndStops(t *testing.T) {
 	}
 }
 
-func TestV2MaintenanceValidationAndDBCloseLifecycle(t *testing.T) {
+func TestMaintenanceValidationAndDBCloseLifecycle(t *testing.T) {
 	memory := New()
 	defer memory.Close()
-	if _, err := memory.StartV2Maintenance(context.Background(), V2MaintenanceOptions{}); !errors.Is(err, ErrReclamationUnsupported) {
+	if _, err := memory.StartMaintenance(context.Background(), MaintenanceOptions{}); !errors.Is(err, ErrReclamationUnsupported) {
 		t.Fatalf("memory maintenance error=%v", err)
 	}
 
@@ -59,21 +59,21 @@ func TestV2MaintenanceValidationAndDBCloseLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, options := range []V2MaintenanceOptions{
+	for _, options := range []MaintenanceOptions{
 		{Interval: time.Millisecond, Timeout: time.Second},
 		{Interval: time.Second, Timeout: time.Millisecond},
 		{Interval: time.Second, Timeout: time.Second, MaxAttempts: 33},
 	} {
-		if _, err := db.StartV2Maintenance(context.Background(), options); !errors.Is(err, ErrInvalidReclamationOptions) {
+		if _, err := db.StartMaintenance(context.Background(), options); !errors.Is(err, ErrInvalidReclamationOptions) {
 			t.Fatalf("options=%+v error=%v", options, err)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := db.StartV2Maintenance(ctx, V2MaintenanceOptions{}); !errors.Is(err, context.Canceled) {
+	if _, err := db.StartMaintenance(ctx, MaintenanceOptions{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled maintenance error=%v", err)
 	}
-	maintenance, err := db.StartV2Maintenance(context.Background(), V2MaintenanceOptions{Interval: time.Hour, Timeout: time.Second})
+	maintenance, err := db.StartMaintenance(context.Background(), MaintenanceOptions{Interval: time.Hour, Timeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestV2MaintenanceValidationAndDBCloseLifecycle(t *testing.T) {
 		t.Fatal("DB close did not stop maintenance")
 	}
 	maintenance.Stop()
-	if _, err := db.StartV2Maintenance(context.Background(), V2MaintenanceOptions{}); !errors.Is(err, ErrClosed) {
+	if _, err := db.StartMaintenance(context.Background(), MaintenanceOptions{}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("closed DB maintenance error=%v", err)
 	}
 }

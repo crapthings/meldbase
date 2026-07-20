@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-func TestCompactToV2PublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testing.T) {
+func TestCompactToPublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
 	destinationPath := filepath.Join(directory, "compact.meld2")
@@ -66,7 +66,7 @@ func TestCompactToV2PublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testin
 	if !reflect.DeepEqual(expected, []DocumentID{second, third, first}) {
 		t.Fatalf("source order=%v", expected)
 	}
-	if err := db.CompactToV2(context.Background(), destinationPath); err != nil {
+	if err := db.Compact(context.Background(), destinationPath); err != nil {
 		t.Fatal(err)
 	}
 	if db.DatabaseIdentity() != sourceIdentity {
@@ -98,7 +98,7 @@ func TestCompactToV2PublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testin
 	if explain, err := compacted.Collection("items").Explain(context.Background(), Filter{"group": "same", "value": map[string]any{"$gte": int64(20)}}); err != nil || explain.IndexName != "group_value" || explain.Stage != "IXSCAN" {
 		t.Fatalf("compacted compound explain=%+v err=%v", explain, err)
 	}
-	if compacted.durability.(*v2DurableStore).file.Meta().RequiredFeatures&storagev2.RequiredFeatureCompoundIndexes == 0 {
+	if compacted.durability.(*durableStore).file.Meta().RequiredFeatures&storage.RequiredFeatureCompoundIndexes == 0 {
 		t.Fatal("compaction lost compound-index required feature")
 	}
 	if _, err := compacted.Collection("items").InsertOne(context.Background(), Document{"value": Int(40)}); !errors.Is(err, ErrDuplicateKey) {
@@ -113,7 +113,7 @@ func TestCompactToV2PublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testin
 	}
 }
 
-func TestCompactToV2DestinationQuotaFailsWithoutPublication(t *testing.T) {
+func TestCompactToDestinationQuotaFailsWithoutPublication(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
@@ -124,8 +124,8 @@ func TestCompactToV2DestinationQuotaFailsWithoutPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(directory, "too-small.meld2")
-	err = db.CompactToV2WithOptions(context.Background(), destination, V2DestinationOptions{
-		StorageLimits: V2StorageLimits{MaxFileBytes: 2 * storagev2.PageSize},
+	err = db.CompactWithOptions(context.Background(), destination, CompactionOptions{
+		StorageLimits: StorageLimits{MaxFileBytes: 2 * storage.PageSize},
 	})
 	if !errors.Is(err, ErrResourceLimit) {
 		t.Fatalf("compaction quota error=%v", err)
@@ -138,7 +138,7 @@ func TestCompactToV2DestinationQuotaFailsWithoutPublication(t *testing.T) {
 	}
 }
 
-func TestCompactToV2IndexBuildLimitFailsWithoutPublication(t *testing.T) {
+func TestCompactToIndexBuildLimitFailsWithoutPublication(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
@@ -153,7 +153,7 @@ func TestCompactToV2IndexBuildLimitFailsWithoutPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(directory, "limited.meld2")
-	err = db.CompactToV2WithOptions(context.Background(), destination, V2DestinationOptions{ResourceLimits: ResourceLimits{MaxIndexBuildEntries: 2}})
+	err = db.CompactWithOptions(context.Background(), destination, CompactionOptions{ResourceLimits: ResourceLimits{MaxIndexBuildEntries: 2}})
 	if !errors.Is(err, ErrResourceLimit) {
 		t.Fatalf("compaction index limit error=%v", err)
 	}
@@ -165,7 +165,7 @@ func TestCompactToV2IndexBuildLimitFailsWithoutPublication(t *testing.T) {
 	}
 }
 
-func TestCompactToV2FailsClosedWithoutOverwriting(t *testing.T) {
+func TestCompactToFailsClosedWithoutOverwriting(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
@@ -179,13 +179,13 @@ func TestCompactToV2FailsClosedWithoutOverwriting(t *testing.T) {
 	if err := os.WriteFile(destination, []byte("owner"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CompactToV2(context.Background(), destination); !errors.Is(err, ErrCompactionDestinationExists) {
+	if err := db.Compact(context.Background(), destination); !errors.Is(err, ErrCompactionDestinationExists) {
 		t.Fatalf("existing destination error=%v", err)
 	}
 	if content, err := os.ReadFile(destination); err != nil || string(content) != "owner" {
 		t.Fatalf("destination content=%q err=%v", content, err)
 	}
-	if err := db.CompactToV2(context.Background(), filepath.Join(directory, "source.meld2")); !errors.Is(err, ErrCompactionDestinationExists) {
+	if err := db.Compact(context.Background(), filepath.Join(directory, "source.meld2")); !errors.Is(err, ErrCompactionDestinationExists) {
 		t.Fatalf("source destination error=%v", err)
 	}
 	stats := db.Stats().Compaction
@@ -195,17 +195,17 @@ func TestCompactToV2FailsClosedWithoutOverwriting(t *testing.T) {
 
 	v1 := New()
 	defer v1.Close()
-	if err := v1.CompactToV2(context.Background(), filepath.Join(directory, "unsupported.meld2")); !errors.Is(err, ErrCompactionUnsupported) {
+	if err := v1.Compact(context.Background(), filepath.Join(directory, "unsupported.meld2")); !errors.Is(err, ErrCompactionUnsupported) {
 		t.Fatalf("unsupported compaction error=%v", err)
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := db.CompactToV2(cancelled, filepath.Join(directory, "cancelled.meld2")); !errors.Is(err, context.Canceled) {
+	if err := db.Compact(cancelled, filepath.Join(directory, "cancelled.meld2")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled compaction error=%v", err)
 	}
 }
 
-func TestCompactToV2PinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
+func TestCompactToPinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
@@ -217,7 +217,7 @@ func TestCompactToV2PinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := db.durability.(*v2DurableStore)
+	store := db.durability.(*durableStore)
 	snapshotPinned, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	store.testCompactionSnapshotHook = func() {
@@ -227,7 +227,7 @@ func TestCompactToV2PinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 	defer func() { store.testCompactionSnapshotHook = nil }()
 	destination := filepath.Join(directory, "compact.meld2")
 	compacted := make(chan error, 1)
-	go func() { compacted <- db.CompactToV2(context.Background(), destination) }()
+	go func() { compacted <- db.Compact(context.Background(), destination) }()
 	select {
 	case <-snapshotPinned:
 	case <-time.After(3 * time.Second):
@@ -280,7 +280,7 @@ func TestCompactToV2PinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 	}
 }
 
-func TestV2CloseWaitsForPinnedCompactionSnapshot(t *testing.T) {
+func TestCloseWaitsForPinnedCompactionSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
@@ -290,7 +290,7 @@ func TestV2CloseWaitsForPinnedCompactionSnapshot(t *testing.T) {
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	store := db.durability.(*v2DurableStore)
+	store := db.durability.(*durableStore)
 	pinned, release := make(chan struct{}), make(chan struct{})
 	store.testCompactionSnapshotHook = func() {
 		close(pinned)
@@ -298,7 +298,7 @@ func TestV2CloseWaitsForPinnedCompactionSnapshot(t *testing.T) {
 	}
 	destination := filepath.Join(directory, "compact.meld2")
 	compacted := make(chan error, 1)
-	go func() { compacted <- db.CompactToV2(context.Background(), destination) }()
+	go func() { compacted <- db.Compact(context.Background(), destination) }()
 	select {
 	case <-pinned:
 	case <-time.After(3 * time.Second):

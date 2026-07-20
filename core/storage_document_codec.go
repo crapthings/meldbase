@@ -18,7 +18,7 @@ const (
 var storedDocumentMagic = [8]byte{'M', 'E', 'L', 'D', 'D', 'O', 'C', '2'}
 
 // encodeStoredDocument wraps the canonical typed document body in a
-// self-describing Storage V2 envelope. The distinct logical/stored lengths
+// self-describing Storage  envelope. The distinct logical/stored lengths
 // reserve a compatible path for optional compression without changing the
 // typed body codec.
 func encodeStoredDocument(document Document) ([]byte, error) {

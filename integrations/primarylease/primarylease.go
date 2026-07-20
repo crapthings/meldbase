@@ -1,5 +1,5 @@
 // Package primarylease supplies a locally verifiable, short-lived primary
-// write lease for Meldbase V2 deployments.
+// write lease for Meldbase  deployments.
 //
 // It intentionally does not elect a leader or persist distributed controller
 // state. A separately operated controller must atomically fence an old owner
@@ -109,7 +109,7 @@ type GuardOptions struct {
 	Clock            func() time.Time
 }
 
-// Guard implements meldbase.V2PrimaryWriteFence and
+// Guard implements meldbase.PrimaryWriteFence and
 // meldbase.FollowerPromotionFenceBinder. Install is used for an already
 // elected primary; follower promotion binds the certificate returned by the
 // external promotion authority automatically.
@@ -137,7 +137,8 @@ type GuardLeaseStatus struct {
 }
 
 // NewGuard creates an initially closed guard. A database using it rejects all
-// V2 business writes until Install or follower promotion binds a certificate.
+//
+//	business writes until Install or follower promotion binds a certificate.
 func NewGuard(publicKey ed25519.PublicKey, options GuardOptions) (*Guard, error) {
 	if len(publicKey) != ed25519.PublicKeySize || !validOwner(options.Owner) {
 		return nil, ErrCertificate
@@ -211,10 +212,10 @@ func (guard *Guard) LeaseStatus() GuardLeaseStatus {
 	return GuardLeaseStatus{Installed: true, Epoch: certificate.Epoch, CommitSequence: certificate.CommitSequence, NotBefore: certificate.NotBefore, NotAfter: certificate.NotAfter}
 }
 
-// ValidateV2PrimaryWrite is the hot-path Meldbase fence. It performs no I/O,
+// ValidatePrimaryWrite is the hot-path Meldbase fence. It performs no I/O,
 // allocation or controller call; its only synchronization is an RLock around
 // the installed immutable certificate.
-func (guard *Guard) ValidateV2PrimaryWrite(request meldbase.PrimaryWriteFenceRequest) error {
+func (guard *Guard) ValidatePrimaryWrite(request meldbase.PrimaryWriteFenceRequest) error {
 	if guard == nil {
 		return ErrCertificate
 	}
@@ -227,9 +228,9 @@ func (guard *Guard) ValidateV2PrimaryWrite(request meldbase.PrimaryWriteFenceReq
 	return nil
 }
 
-// BindV2FollowerPromotion verifies that the authority's opaque epoch is a
+// BindFollowerPromotion verifies that the authority's opaque epoch is a
 // certificate for this exact promotion point before enabling local writes.
-func (guard *Guard) BindV2FollowerPromotion(ctx context.Context, fence meldbase.FollowerPromotionFence) error {
+func (guard *Guard) BindFollowerPromotion(ctx context.Context, fence meldbase.FollowerPromotionFence) error {
 	if err := contextError(ctx); err != nil {
 		return err
 	}
@@ -360,7 +361,7 @@ func contextError(ctx context.Context) error {
 // below Meldbase's promotion-fence epoch limit.
 func CertificateTextLimit() int { return maxCertificateText }
 
-var _ meldbase.V2PrimaryWriteFence = (*Guard)(nil)
+var _ meldbase.PrimaryWriteFence = (*Guard)(nil)
 var _ meldbase.FollowerPromotionFenceBinder = (*Guard)(nil)
 
 func (certificate Certificate) String() string {

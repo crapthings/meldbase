@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const destructiveFlushEIOResultSchema uint32 = 1
@@ -86,7 +86,7 @@ type destructiveFlushEIOWorkerResult struct {
 func runDestructiveFlushEIOWorker(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-flush-eio-worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	databasePath := flags.String("database", "", "existing seeded V2 database on the injected block device")
+	databasePath := flags.String("database", "", "existing seeded database on the injected block device")
 	readyPath := flags.String("ready", "", "new durable guest-ready receipt on the independent control device")
 	armedPath := flags.String("armed", "", "durable host-armed receipt on the independent control device")
 	outputPath := flags.String("out", "", "new fault-stage result on the independent control device")
@@ -162,7 +162,7 @@ func runDestructiveFlushEIOWorker(args []string, stdout, stderr io.Writer) error
 		return errors.New("timed out waiting for a valid flush EIO armed receipt")
 	}
 	started := time.Now().UTC()
-	file, meta, err := storagev2.Open(database)
+	file, meta, err := storage.Open(database)
 	if err != nil {
 		return err
 	}

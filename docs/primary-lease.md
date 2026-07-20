@@ -1,6 +1,6 @@
 # Primary write lease
 
-`integrations/primarylease` is a small, local enforcement component for a V2
+`integrations/primarylease` is a small, local enforcement component for a
 primary. It is designed for a real external controller, not as an in-process
 leader-election substitute.
 
@@ -108,20 +108,20 @@ expiry-plus-clock-skew handoff window as the safety rule.
 ## Primary renewal agent
 
 `primarylease.Renewer` is the optional single-primary supervisor that connects
-one V2 database, its already-configured `Guard`, and a narrow `RenewalClient`
+one database, its already-configured `Guard`, and a narrow `RenewalClient`
 (implemented by `authorityhttp.Client`). It snapshots the current committed
 sequence, requests a certificate, and installs it locally. Controller I/O
-never runs under the database writer or inside `ValidateV2PrimaryWrite`; every
+never runs under the database writer or inside `ValidatePrimaryWrite`; every
 business commit still makes only the bounded local Guard check.
 
-For normal primary startup, prefer `OpenV2Primary`. It creates the V2 database,
+For normal primary startup, prefer `OpenPrimary`. It creates the database,
 the exact `Guard` installed as its only `PrimaryWriteFence`, and the matching
 `Renewer` in one object; it rejects a caller-provided competing fence or
 follower mode. The result begins closed to writes. Call `Renew` before serving
 mutations, or run `Run` under the process supervisor. This avoids accidentally
 renewing one Guard while the database checks another one.
 
-The renewer requires a live V2 primary with its write fence currently enforced;
+The renewer requires a live primary with its write fence currently enforced;
 it rejects a read-only follower or a durability fail-stop database. `Run`
 renews immediately, then renews one third of a lease duration before expiry and
 retries controller failures at a bounded interval. A request failure leaves an
@@ -258,7 +258,7 @@ lease.
 
 - Certificates are not stored in the database file. Reopening starts closed
   until the controller delivers a current lease.
-- `Guard.ValidateV2PrimaryWrite` does not perform network I/O, disk I/O or
+- `Guard.ValidatePrimaryWrite` does not perform network I/O, disk I/O or
   callback execution.
 - A controller signing key must be kept outside the database process; key
   rotation needs a deployment-level dual-key rollout before changing guards.

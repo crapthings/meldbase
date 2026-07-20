@@ -419,7 +419,7 @@ func validateQualificationDurability(receipt durabilityCheckResult, revision str
 }
 
 func validateQualificationSoak(receipt qualificationSoakReceipt, durability durabilityCheckResult, revision string) error {
-	if receipt.SchemaVersion != 4 || receipt.FormatRevision != 3 || receipt.Engine != "v2" || receipt.Profile != "release" ||
+	if receipt.SchemaVersion != 4 || receipt.FormatRevision != 3 || receipt.Engine != "current" || receipt.Profile != "release" ||
 		!receipt.RaceEnabled || receipt.SourceRevision != revision || receipt.BuildRevision != revision || receipt.BuildModified {
 		return errors.New("requires a race-enabled clean schema-4 release receipt whose binary matches the release revision")
 	}

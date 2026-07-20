@@ -1,7 +1,7 @@
 # Replication protocol v1
 
 Replication is a trusted-server protocol, distinct from the browser realtime
-protocol. Its unit of ordering is one V2 Commit Log token, not a WebSocket
+protocol. Its unit of ordering is one Commit Log token, not a WebSocket
 message. Version 1 defines a strict JSON frame codec in `replication_wire.go`;
 the codec can run over WebSocket, QUIC or a framed RPC stream.
 
@@ -30,20 +30,20 @@ than forwarding plaintext and synthesizing peer identity headers.
 
 ## Bootstrap and tail
 
-1. The primary calls `BeginV2Archive(name, destination, buffer)`. It creates a
-   durable checkpoint before it writes and verifies the physical V2 backup.
+1. The primary calls `BeginArchive(name, destination, buffer)`. It creates a
+   durable checkpoint before it writes and verifies the physical backup.
 2. The receiver passes the authenticated byte stream and the source's
-   `BackupV2Result` receipt to `ImportV2PhysicalBackup`. The receiver-owned
+   `BackupResult` receipt to `ImportPhysicalBackup`. The receiver-owned
    byte cap, streaming SHA-256, full offline graph/index audit and no-overwrite
-   publication must all succeed before it opens the result through
-   `OpenV2Follower` and records `SnapshotToken`. A transport may not treat a
+  publication must all succeed before it opens the result through
+   `OpenFollower` and records `SnapshotToken`. A transport may not treat a
    successful download as a verified bootstrap.
 3. It drains source batches through `SnapshotToken` without applying them, then
    sends its first `ack` only after the backup is locally durable.
 4. It sends `hello(afterToken=SnapshotToken, maxBytes=...)`. The source resumes
    the named durable consumer or sends `resync_required(history_lost)` when the
    requested window no longer exists.
-5. Each later `batch` is decoded strictly and passed to `V2Follower.Apply`.
+5. Each later `batch` is decoded strictly and passed to `Follower.Apply`.
    The receiver sends `ack(token)` only after that call succeeds. The source
    advances its durable consumer checkpoint only after validating the matching,
    authenticated acknowledgement.
@@ -70,7 +70,7 @@ resync response; a stale/future/duplicate ACK cannot release history.
 
 `integrations/replicationws.Receive` is the matching follower-side client. For
 an ordinary reconnect it uses the follower's durable token as `afterToken` and
-applies every later batch before acknowledging it. For a `BeginV2Archive`
+applies every later batch before acknowledging it. For a `BeginArchive`
 bootstrap, configure both the returned `CheckpointToken` and `SnapshotToken`:
 the client consumes and acknowledges the interval
 `(CheckpointToken, SnapshotToken]` without applying it because the verified
@@ -91,7 +91,7 @@ they map a verified leaf-certificate SHA-256 fingerprint to that name, so the
 bootstrap and tail cannot use subtly different peer mappings.
 
 The handler rejects browser `Origin`s and plain HTTP, takes the same
-process-local source lease used by the WebSocket source, calls `BeginV2Archive`,
+process-local source lease used by the WebSocket source, calls `BeginArchive`,
 and returns a no-store `application/octet-stream` response. Version 1 carries
 the exact artifact receipt and bridge tokens in single-valued headers:
 
@@ -104,7 +104,7 @@ the exact artifact receipt and bridge tokens in single-valued headers:
 
 `replicationhttp.Fetch` accepts only a non-redirected `https://` URL, requires
 a real TLS response, requires a declared content length matching `Bytes`, and
-passes the stream plus receipt to `ImportV2PhysicalBackup`. Configure its
+passes the stream plus receipt to `ImportPhysicalBackup`. Configure its
 `HTTPClient` with the receiver's mTLS certificate and trusted server roots, and
 set `MaxBytes` on the receiver. It never publishes a partially downloaded file.
 After an archive has been created, a disconnect or a failed receiving audit does
@@ -137,7 +137,7 @@ are read-only and must not serve primary-side method ownership.
 
 ## Explicit non-goals
 
-V1 does not yet provide built-in TLS server deployment configuration,
+Meldbase does not provide built-in TLS termination or deployment configuration,
 compression, multi-primary conflict resolution, leader election or failover.
 `replicationhttp` and `replicationws` supply the fixed HTTPS physical-transfer
 and authenticated WSS-tail adapters. `primarylease` supplies a concrete local
@@ -149,7 +149,7 @@ durable ordering or silently retry a non-idempotent change.
 
 ## Follower promotion
 
-`V2Follower.Promote` is intentionally not an automatic failover mechanism. It
+`Follower.Promote` is intentionally not an automatic failover mechanism. It
 requires a caller-provided `FollowerPromotionAuthority` to durably certify a
 fence containing the exact local `databaseId`, current commit sequence and a
 non-empty fencing epoch. The external authority must revoke the old primary's
@@ -169,7 +169,7 @@ candidate token to agree; it deliberately refuses a partitioned/unreachable
 source unless a deployment supplies a stronger external attestation.
 
 After promotion the local database accepts ordinary writes and the
-`V2Follower` permanently rejects replication input. Leader election, health
+`Follower` permanently rejects replication input. Leader election, health
 assessment, lease revocation and client routing remain deployment/controller
 responsibilities; this API merely refuses to hide those decisions behind an
 unsafe boolean switch.
@@ -177,15 +177,15 @@ unsafe boolean switch.
 ## Optional primary write fence
 
 `OpenOptions.PrimaryWriteFence` gives a primary process a local fail-closed
-enforcement point for its external controller. Before every business V2 commit
+enforcement point for its external controller. Before every business commit
 (including each logical member of a coordinator group, durable index-build
 visibility publication, a standalone private system-record commit, and the
 sequence-one private consumer initialization of an empty source), Meldbase passes the
 database identity and exact next source sequence to
-`ValidateV2PrimaryWrite`. A rejected guard leaves the database/token unchanged
+`ValidatePrimaryWrite`. A rejected guard leaves the database/token unchanged
 and returns `ErrPrimaryWriteFence`; it is not a storage durability failure.
 
-`V2Follower.Promote` additionally requires this local guard to have been
+`Follower.Promote` additionally requires this local guard to have been
 configured when the follower was opened. A matching promotion certificate alone
 cannot make a process safely writable forever: after promotion, every local
 logical write is still checked by that guard. The guard must also implement

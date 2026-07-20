@@ -6,16 +6,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 func TestReclamationConflictMapsToPublicSentinel(t *testing.T) {
-	if err := mapStorageV2Error(storagev2.ErrReclamationConflict); !errors.Is(err, ErrReclamationConflict) || errors.Is(err, ErrCorrupt) {
+	if err := mapStorageError(storage.ErrReclamationConflict); !errors.Is(err, ErrReclamationConflict) || errors.Is(err, ErrCorrupt) {
 		t.Fatalf("mapped conflict=%v", err)
 	}
 }
 
-func TestReclaimV2PagesProtectsLazyCursorAndExportsBoundedStats(t *testing.T) {
+func TestReclaimPagesProtectsLazyCursorAndExportsBoundedStats(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-reclaim.meld2"))
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestReclaimV2PagesProtectsLazyCursorAndExportsBoundedStats(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result, err := db.ReclaimV2Pages(context.Background())
+	result, err := db.ReclaimPages(context.Background())
 	if err != nil || result.PinnedSnapshots != 1 || result.ReusablePages == 0 || !result.Persisted {
 		t.Fatalf("public reclaim=%+v err=%v", result, err)
 	}
@@ -67,7 +67,7 @@ func TestReclaimV2PagesProtectsLazyCursorAndExportsBoundedStats(t *testing.T) {
 	if err := cursor.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ReclaimV2Pages(context.Background()); err != nil {
+	if _, err := db.ReclaimPages(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if stats := db.Stats().Reclamation; stats.Attempts != 2 || stats.Completed != 2 || stats.Failed != 0 {
@@ -75,10 +75,10 @@ func TestReclaimV2PagesProtectsLazyCursorAndExportsBoundedStats(t *testing.T) {
 	}
 }
 
-func TestReclaimV2PagesRejectsUnsupportedAndCancelled(t *testing.T) {
+func TestReclaimPagesRejectsUnsupportedAndCancelled(t *testing.T) {
 	memory := New()
 	defer memory.Close()
-	if _, err := memory.ReclaimV2Pages(context.Background()); !errors.Is(err, ErrReclamationUnsupported) {
+	if _, err := memory.ReclaimPages(context.Background()); !errors.Is(err, ErrReclamationUnsupported) {
 		t.Fatalf("memory reclaim error=%v", err)
 	}
 	db, err := Open(filepath.Join(t.TempDir(), "cancel-reclaim.meld2"))
@@ -88,20 +88,20 @@ func TestReclaimV2PagesRejectsUnsupportedAndCancelled(t *testing.T) {
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := db.ReclaimV2Pages(ctx); !errors.Is(err, context.Canceled) {
+	if _, err := db.ReclaimPages(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled reclaim error=%v", err)
 	}
 	if stats := db.Stats().Reclamation; stats.Attempts != 0 || stats.Failed != 0 {
 		t.Fatalf("pre-cancel reclaim stats=%+v", stats)
 	}
 	for _, attempts := range []int{-1, 33} {
-		if _, err := db.ReclaimV2PagesWithOptions(context.Background(), ReclaimV2Options{Online: true, MaxAttempts: attempts}); !errors.Is(err, ErrInvalidReclamationOptions) {
+		if _, err := db.ReclaimPagesWithOptions(context.Background(), ReclaimOptions{Online: true, MaxAttempts: attempts}); !errors.Is(err, ErrInvalidReclamationOptions) {
 			t.Fatalf("attempts=%d error=%v", attempts, err)
 		}
 	}
 }
 
-func TestReclaimV2PagesOnlinePublishesReusablePool(t *testing.T) {
+func TestReclaimPagesOnlinePublishesReusablePool(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "online-public-reclaim.meld2"))
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestReclaimV2PagesOnlinePublishesReusablePool(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result, err := db.ReclaimV2PagesWithOptions(context.Background(), ReclaimV2Options{Online: true, MaxAttempts: 2})
+	result, err := db.ReclaimPagesWithOptions(context.Background(), ReclaimOptions{Online: true, MaxAttempts: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestReclaimV2PagesOnlinePublishesReusablePool(t *testing.T) {
 	}
 }
 
-func TestReclaimV2PagesOnlineMemoryOnlyAvoidsPhysicalMaintenanceGeneration(t *testing.T) {
+func TestReclaimPagesOnlineMemoryOnlyAvoidsPhysicalMaintenanceGeneration(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "memory-only-reclaim.meld2"))
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +148,7 @@ func TestReclaimV2PagesOnlineMemoryOnlyAvoidsPhysicalMaintenanceGeneration(t *te
 		}
 	}
 	sequenceBefore := db.Stats().Storage.CommitSequence
-	result, err := db.ReclaimV2PagesWithOptions(context.Background(), ReclaimV2Options{Online: true, MemoryOnly: true})
+	result, err := db.ReclaimPagesWithOptions(context.Background(), ReclaimOptions{Online: true, MemoryOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}

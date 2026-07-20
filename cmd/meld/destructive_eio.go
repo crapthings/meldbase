@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const destructiveEIOResultSchema uint32 = 1
@@ -63,7 +63,7 @@ type destructiveEIOWorkerResult struct {
 func runDestructiveEIOSeed(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-eio-seed", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	databasePath := flags.String("database", "", "new V2 database prepared with reusable physical pages")
+	databasePath := flags.String("database", "", "new database prepared with reusable physical pages")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -74,21 +74,21 @@ func runDestructiveEIOSeed(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	file, _, err := storagev2.Open(database)
+	file, _, err := storage.Open(database)
 	if err != nil {
 		return err
 	}
 	closeWith := func(operationErr error) error { return errors.Join(operationErr, file.Close()) }
 	value := []byte("stable-00")
-	if _, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{15: 1}, Mutations: []storagev2.DocumentMutation{{
-		Collection: "items", DocumentID: destructiveEIODocumentID, Operation: storagev2.DocumentInsert, Document: value,
+	if _, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{15: 1}, Mutations: []storage.DocumentMutation{{
+		Collection: "items", DocumentID: destructiveEIODocumentID, Operation: storage.DocumentInsert, Document: value,
 	}}}); err != nil {
 		return closeWith(err)
 	}
 	for ordinal := byte(2); ordinal <= 16; ordinal++ {
 		value = []byte(fmt.Sprintf("stable-%02d", ordinal))
-		if _, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{15: ordinal}, Mutations: []storagev2.DocumentMutation{{
-			Collection: "items", DocumentID: destructiveEIODocumentID, Operation: storagev2.DocumentUpdate, Document: value,
+		if _, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{15: ordinal}, Mutations: []storage.DocumentMutation{{
+			Collection: "items", DocumentID: destructiveEIODocumentID, Operation: storage.DocumentUpdate, Document: value,
 		}}}); err != nil {
 			return closeWith(err)
 		}
@@ -141,7 +141,7 @@ func validateDestructiveEIOSeedResult(result destructiveEIOSeedResult) error {
 func runDestructiveEIOWorker(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-eio-worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	databasePath := flags.String("database", "", "existing seeded V2 database on the injected block device")
+	databasePath := flags.String("database", "", "existing seeded database on the injected block device")
 	outputPath := flags.String("out", "", "new result path on the independent control device")
 	artifactPath := flags.String("artifact", "", "new recovered database copy on the independent control device")
 	if err := flags.Parse(args); err != nil {
@@ -171,7 +171,7 @@ func runDestructiveEIOWorker(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	started := time.Now().UTC()
-	file, meta, err := storagev2.Open(database)
+	file, meta, err := storage.Open(database)
 	if err != nil {
 		return err
 	}
@@ -214,15 +214,15 @@ func runDestructiveEIOWorker(args []string, stdout, stderr io.Writer) error {
 	return json.NewEncoder(stdout).Encode(result)
 }
 
-func applyDestructiveEIOUpdate(file *storagev2.File, transactionByte byte, value string) error {
-	_, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{15: transactionByte}, Mutations: []storagev2.DocumentMutation{{
-		Collection: "items", DocumentID: destructiveEIODocumentID, Operation: storagev2.DocumentUpdate, Document: []byte(value),
+func applyDestructiveEIOUpdate(file *storage.File, transactionByte byte, value string) error {
+	_, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{15: transactionByte}, Mutations: []storage.DocumentMutation{{
+		Collection: "items", DocumentID: destructiveEIODocumentID, Operation: storage.DocumentUpdate, Document: []byte(value),
 	}}})
 	return err
 }
 
-func verifyDestructiveEIODatabase(path string) (storagev2.VerificationResult, error) {
-	return storagev2.VerifyPathContextWithIndexAudit(context.Background(), path, func(storagev2.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
+func verifyDestructiveEIODatabase(path string) (storage.VerificationResult, error) {
+	return storage.VerifyPathContextWithIndexAudit(context.Background(), path, func(storage.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
 		return nil, false, errors.New("destructive EIO fixture unexpectedly contains an index")
 	})
 }

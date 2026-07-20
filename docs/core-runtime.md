@@ -5,23 +5,23 @@ engineering contract, not a production-readiness claim.
 
 ## Current facts
 
-V2 is a single-node copy-on-write engine. Each successful logical mutation
+Meldbase is a single-node copy-on-write engine. Each successful logical mutation
 publishes one new durable generation, advances one monotonically increasing
 commit sequence, appends one typed `CommitBatch`, and only then becomes visible
 to query, reactive, RPC-idempotency and recovery code. The physical publication
 currently has two persistence barriers: staged data/root pages are synced before
 the inactive Meta slot is written and synced.
 
-The V2 Commit Log already contains canonical document/catalog changes, typed
+The Commit Log already contains canonical document/catalog changes, typed
 before/after versions, an immutable changed-path set when the mutation compiler
 can prove one, the post-commit Catalog root and a transaction ID. It is the
 source for historical query replay. It is not a client query-delta protocol: a
 query delta is a derived, authorized view of one or more commit records.
 
 The database has one serialized write path. Shared reactive views run outside
-that path from a bounded queue. By default, an acknowledged V2 write includes
+that path from a bounded queue. By default, an acknowledged storage write includes
 one physical publication and its rollback-anchor update when configured. An
-explicitly enabled, bounded V2 CommitCoordinator can group ordinary collection
+explicitly enabled, bounded CommitCoordinator can group ordinary collection
 mutations and completed public point-write transactions into one physical
 final-Meta publication while retaining one ordered logical sequence per request.
 When rollback protection is enabled, the group's final Meta is synchronously
@@ -32,20 +32,20 @@ anchored before any member succeeds.
 1. A successful synchronous write is recoverable after process loss and is not
    acknowledged before its data and Meta publication are durable.
 2. Each accepted logical mutation receives exactly one strictly increasing
-   commit sequence. Sequence order is the order observed by the Commit Log,
+  commit sequence. Sequence order is the order observed by the Commit Log,
    reactive replay, idempotency records and rollback anchors.
 3. A failed write has no visible partial document/index/System-record state.
    An uncertain external rollback-anchor outcome remains fail-stop; it is never
    reclassified as a safe retry.
 4. Reactive work, direct watchers and network clients never run user work on a
-   storage writer. Backpressure must coalesce, resync or disconnect consumers;
+  storage writer. Backpressure must coalesce, resync or disconnect consumers;
    it must not grow memory without a bound or silently reorder commits.
    Each canonical reactive view additionally has immutable matching-member
    count and canonical-byte admission limits; a query window does not weaken
    that bound because the view may need off-window members for later ordering.
 5. The raw Commit Log remains private to the engine. Authorization, projection,
    tenant scoping and opaque resume-token chaining are applied only above it.
-6. Existing V2 files, recovery receipts and protocol-v1 frames remain readable
+6. Existing files, recovery receipts and protocol-v1 frames remain readable
    throughout this phase.
 
 ## Delivery order
@@ -54,11 +54,11 @@ anchored before any member succeeds.
 
 The checked-in benchmarks cover:
 
-- V2 concurrent independent commits, exposing the current single-writer and
+- concurrent independent commits, exposing the current single-writer and
   sync boundary;
 - public two-insert sequential versus coordinator-grouped pairs, including
   caller admission/result delivery and physical-generation accounting;
-- durable V2 reactive fan-out over one shared canonical query;
+- durable reactive fan-out over one shared canonical query;
 - the existing selective/broad-view benchmarks, which distinguish shared-view
   work from per-subscriber delivery.
 
@@ -91,10 +91,10 @@ The concrete storage/recovery constraints are in
 [CommitCoordinator design](commit-coordinator.md). In particular, the current
 two-Meta COW publication cannot safely share barriers by running ordinary
 updates unsynced; the group needs one final COW root and one final Meta publish.
-The initial V2 primitive and public admission slice now prove that shape for
+The current storage primitive and public admission slice prove that shape for
 ordinary InsertMany/filter Update/filter Delete requests and completed public
 point-write transactions. A grouped transaction contains only its frozen changes
-and exact point-read set; group conflict fallback never invokes its callback a
+and exact point-read set; group conflict handling never invokes its callback a
 second time. It remains opt-in and excludes transactional RPC terminal records,
 index builds, maintenance and special operations until each has an explicit group
 proof. The admission queue is bounded; ordinary CRUD cancellation after admission
@@ -103,7 +103,7 @@ duplicate retry. A public write transaction instead waits for its final durable
 outcome, because it has no separate reconciliation handle and must not rerun its
 callback.
 
-The group boundary carries one exact V2 point-read set per logical member. Each
+The group boundary carries one exact point-read set per logical member. Each
 set is checked against the immediately preceding logical root within the group,
 so stale updates reject the whole candidate rather than publishing a prefix.
 Filter mutation selection and result counts are now admission data; a logical
@@ -126,7 +126,7 @@ new watcher starts strictly after the current commit token, and an overloaded
 dispatcher closes non-resumable watchers with `ErrSlowConsumer`. Reactive views
 use their existing snapshot-resync path on the same overload.
 
-V2 now exposes the first public consumer boundary:
+Meldbase now exposes the first public consumer boundary:
 `CreateDurableCollectionChanges` and `OpenDurableCollectionChanges` create or
 resume a named, collection-scoped Go document feed. Every global Commit Log
 position is delivered as one batch and must be acknowledged explicitly; batches
@@ -139,7 +139,7 @@ archive image format or follower-replication protocol.
 `CreateDurableDatabaseChanges` is the corresponding database-level semantic
 stream. It carries collection creation, completed index publication and document
 changes in the same ordered token sequence, while private System records remain
-non-observable. `BeginV2Archive` now joins that stream to a verified physical
+non-observable. `BeginArchive` now joins that stream to a verified physical
 backup without a snapshot/tail gap: it first pins a named checkpoint, then
 creates the backup at `SnapshotToken`. A receiver durably stores and verifies
 that artifact, drains and acknowledges tokens through `SnapshotToken` without
@@ -147,11 +147,11 @@ applying them, and applies only later tokens. The API deliberately stops there:
 network framing, remote application, follower write exclusion, promotion and
 failover are separate protocol decisions, not claims hidden in a local backup.
 
-The local application state machine is now explicit too: `OpenV2Follower`
-opens a bootstrap copy read-only, and `V2Follower.Apply` accepts only the exact
+The local application state machine is now explicit too: `OpenFollower`
+opens a bootstrap copy read-only, and `Follower.Apply` accepts only the exact
 next `DurableDatabaseChangeBatch`. A duplicate, gap or local divergence returns
 `ErrReplicaSequence`; ordinary CRUD and index-build starts return
-`ErrReplicaReadOnly`. Catalog/document application is one target V2 commit, so
+`ErrReplicaReadOnly`. Catalog/document application is one target commit, so
 queries and reactive readers never observe a half-applied source batch. A
 publicly empty source position is represented by a private target marker solely
 to preserve token contiguity; it does not pretend to replicate source-side RPC
@@ -163,9 +163,9 @@ certificate issuance/rotation, member lifecycle, election/client routing and
 the tested partition/failover procedure; promotion itself remains deliberately
 closed without a separate history proof.
 
-For deployments that already have a controller, `V2PrimaryWriteFence` now
+For deployments that already have a controller, `PrimaryWriteFence` now
 provides the narrow local primary-side enforcement point. Its fast local
-lease/epoch check runs before each V2 business commit, including every logical
+lease/epoch check runs before each business commit, including every logical
 member in a group, and rejects a lost primary before storage mutation or token
 advance. It intentionally does not renew a lease, call a controller while the
 writer is held, select a leader or claim failover: those operations remain an
@@ -203,25 +203,25 @@ caps Commit Log pruning at the least acknowledged consumer. Its acknowledgement
 changes only the physical COW generation, never creates a logical Commit Log
 record, so it cannot form a self-consuming stream. Removing that retention pin
 is explicit; closing the process-local stream alone does not discard its durable
-checkpoint. The current V2 historical replay source also bounds a full caller buffer by
-`V2ReplayDeliveryTimeout`; it ends
+checkpoint. The current historical replay source also bounds a full caller buffer by
+`ReplayDeliveryTimeout`; it ends
 with `ErrSlowConsumer` and releases its durable replay lease instead of pinning
-the Commit Log indefinitely. Live views and V2 historical replay share the
+the Commit Log indefinitely. Live views and historical replay share the
 same `MaxReactiveViewDocuments`/`MaxReactiveViewBytes` resource admission; a
 new or growing view that exceeds either terminates with `ErrResourceLimit`
 rather than retaining an unbounded matching set.
 
-The first V2 view on an otherwise inactive collection scans a pinned storage
+The first view on an otherwise inactive collection scans a pinned storage
 snapshot outside `db.mu`. Before it is registered, the hub reacquires the read
 boundary and proves the database token is unchanged; a concurrent commit causes
-a bounded rebuild and persistent contention falls back to the established
-lock-held path. Existing V2 view groups use the same bounded snapshot-and-token
+a bounded rebuild and persistent contention uses the established lock-held
+path. Existing view groups use the same bounded snapshot-and-token
 handoff when a full recompute is needed: every view and the shared insertion
 order are swapped while that token is still protected, then subscriber delivery
 happens after the lock is released. A concurrent commit therefore retries the
 scan rather than observing a partially rebuilt view. This removes normal cold
 and warm scan write pauses without creating a snapshot/watch registration gap;
-continuous contention retains the conservative lock-held fallback.
+continuous contention retains the conservative lock-held path.
 
 ### Phase D — reactive influence routing
 

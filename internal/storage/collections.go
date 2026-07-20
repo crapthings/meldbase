@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-var ErrCollectionExists = errors.New("meldbase storage v2: collection exists")
+var ErrCollectionExists = errors.New("meldbase storage: collection exists")
 
 // CreateCollectionTransaction creates durable empty collection metadata without
 // manufacturing a document mutation. It is primarily the schema primitive used

@@ -7,11 +7,11 @@ the delta API emits one initial snapshot and later ordered transformations.
 
 Canonical queries share one Reactive View keyed by collection and effective
 `QuerySpec`. Before/after document images update persistent ordered membership
-incrementally; full recomputation is an observable fallback for queue overflow or
+incrementally; full recomputation is an observable recovery path for queue overflow or
 explicit resynchronization. One shared immutable delta is generated per changed
 view revision and then cloned only at public mutable-document boundaries.
 
-V2 Commit Log updates additionally retain a sorted, deduplicated `ChangedPaths`
+Commit Log updates retain a sorted, deduplicated `ChangedPaths`
 set whenever the mutation compiler can prove it; watcher and replay boundaries
 copy that set with their document images. Missing metadata deliberately means
 "whole document may be affected." It is not itself a query-delta routing rule:
@@ -48,7 +48,7 @@ result after every commit.
 
 ## Durable collection changes
 
-V2 also provides a Go pull/acknowledge feed for work that must survive a process
+Meldbase provides a Go pull/acknowledge feed for work that must survive a process
 restart: `CreateDurableCollectionChanges` creates a named consumer and
 `OpenDurableCollectionChanges` resumes its stored checkpoint. A consumer receives
 one `DurableChangeBatch` per global Commit Log token; a batch may contain no
@@ -65,13 +65,13 @@ follower or physical-backup wire protocol.
 For database archive or follower construction, use
 `CreateDurableDatabaseChanges` instead. Its batches include `create_collection`,
 `create_index` and document events in Commit Log order; it still omits private
-System records. `BeginV2Archive` creates a durable database checkpoint before it
+System records. `BeginArchive` creates a durable database checkpoint before it
 writes and verifies a physical backup. The returned `SnapshotToken` is the
 handoff: persist and verify the backup, consume/ack all batches through that
 token without reapplying them, then apply later batches in order. A network
 transport and remote follower are intentionally outside this local API.
 
-`OpenV2Follower` and `V2Follower.Apply` provide the local target state machine
+`OpenFollower` and `Follower.Apply` provide the local target state machine
 for that later transport. The follower stays queryable/reactive but rejects
 ordinary writes. It applies only the next durable database token, atomically,
 and rejects duplicates or gaps with `ErrReplicaSequence`.
@@ -93,14 +93,12 @@ tenant, collection, canonical policy-constrained query, policy version, and an
 expiry. A replay source must atomically reconstruct the query at N and stream
 N+1 onward. Successful resume sends a `resumed` control frame to bind a new
 server subscription ID while retaining the client's existing documents; it does
-not manufacture a replacement snapshot. V2 implements this source using
-historical CatalogRoots, replay leases and commit images. New `Open()` databases
-use V2; automatically detected existing V1 databases have no historical images
-and safely fall back to `resync_required`. Invalid,
-expired, context-mismatched, future, retained-out, corrupt or discontinuous
-history does the same on either path.
+not manufacture a replacement snapshot. The current storage engine uses
+historical CatalogRoots, replay leases and commit images. Invalid, expired,
+context-mismatched, future, retained-out, corrupt or discontinuous history
+returns `resync_required`.
 
-The WebSocket server supports both legacy snapshot mode and explicit delta mode.
+The WebSocket server supports snapshot mode and explicit delta mode.
 In delta mode, field projection/redaction occurs through a connection-local
 visibility overlay. Hidden-only document changes are suppressed and do not
 advance the opaque client token, so later visible changes remain strictly chained

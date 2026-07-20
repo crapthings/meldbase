@@ -235,7 +235,7 @@ func TestAnchorServeMTLSQuorumPartitionAndGracefulRejoin(t *testing.T) {
 		}
 		return path
 	}
-	db, err := meldbase.OpenWithOptions(databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{
+	db, err := meldbase.OpenWithOptions(databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{
 		AnchorStore: store, InitializeAnchor: true, OperationTimeout: time.Second,
 	}})
 	if err != nil {
@@ -253,7 +253,7 @@ func TestAnchorServeMTLSQuorumPartitionAndGracefulRejoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	healthyReceipt := probe("healthy", "")
-	db, err = meldbase.OpenWithOptions(databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{AnchorStore: store, OperationTimeout: time.Second}})
+	db, err = meldbase.OpenWithOptions(databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{AnchorStore: store, OperationTimeout: time.Second}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestAnchorServeMTLSQuorumPartitionAndGracefulRejoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	degradedReceipt := probe("degraded", healthyReceipt)
-	db, err = meldbase.OpenWithOptions(databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{AnchorStore: store, OperationTimeout: time.Second}})
+	db, err = meldbase.OpenWithOptions(databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{AnchorStore: store, OperationTimeout: time.Second}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestAnchorServeMTLSQuorumPartitionAndGracefulRejoin(t *testing.T) {
 	nodes[1] = start(1, nodeOneAddress)
 	nodes[2] = start(2, nodeTwoAddress)
 	recoveredReceipt := probe("recovered", minorityReceipt)
-	db, err = meldbase.OpenWithOptions(databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{
+	db, err = meldbase.OpenWithOptions(databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{
 		AnchorStore: store, OperationTimeout: time.Second,
 	}})
 	if err != nil {

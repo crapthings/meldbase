@@ -316,7 +316,7 @@ func validateDestructiveProcessReceipt(receipt destructiveProcessReceipt) error 
 		if err != nil || databaseHash != trial.DatabaseSHA256 {
 			return fmt.Errorf("process trial %d crash image is missing or mismatched", index+1)
 		}
-		actualVerification, err := meldbase.VerifyV2File(context.Background(), filepath.Join(directory, "crash-image.meld"))
+		actualVerification, err := meldbase.VerifyFile(context.Background(), filepath.Join(directory, "crash-image.meld"))
 		if err != nil || actualVerification != verification {
 			return fmt.Errorf("process trial %d crash image does not reproduce its verification report", index+1)
 		}

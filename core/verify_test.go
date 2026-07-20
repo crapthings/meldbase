@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-func TestVerifyV2FileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
+func TestVerifyFileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify.meld2")
 	db, err := Open(path)
 	if err != nil {
@@ -35,12 +35,12 @@ func TestVerifyV2FileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.ReclaimV2Pages(context.Background()); err != nil {
+	if _, err := db.ReclaimPages(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	identity := db.DatabaseIdentity()
 	sequence := db.Stats().CommitSequence
-	if _, err := VerifyV2File(context.Background(), path); !errors.Is(err, ErrDatabaseLocked) {
+	if _, err := VerifyFile(context.Background(), path); !errors.Is(err, ErrDatabaseLocked) {
 		t.Fatalf("active writer verification error=%v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -51,13 +51,13 @@ func TestVerifyV2FileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(before)
-	report, err := VerifyV2File(context.Background(), path)
+	report, err := VerifyFile(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if report.SchemaVersion != 3 || !report.Verified || !report.IndexContentsVerified || !report.IndexBuildContentsVerified || report.Format != StorageFormatCurrent || report.Revision != 3 ||
 		report.DatabaseIDHex != hex.EncodeToString(identity[:]) || report.CommitSequence != sequence ||
-		report.RequiredFeatures&storagev2.RequiredFeatureCompoundIndexes == 0 ||
+		report.RequiredFeatures&storage.RequiredFeatureCompoundIndexes == 0 ||
 		report.FileBytes != uint64(len(before)) || report.PhysicalPages < report.CommittedPhysicalPages ||
 		report.ReachablePages == 0 || report.ValidMetaSlots == 0 || report.SHA256 != hex.EncodeToString(digest[:]) ||
 		!report.PersistentFreeSpace || !report.FreeSpaceValid {
@@ -69,7 +69,7 @@ func TestVerifyV2FileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 	}
 }
 
-func TestVerifyV2FileAuditsCompoundAndPartialIndexContents(t *testing.T) {
+func TestVerifyFileAuditsCompoundAndPartialIndexContents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify-compound.meld2")
 	db, err := Open(path)
 	if err != nil {
@@ -92,15 +92,15 @@ func TestVerifyV2FileAuditsCompoundAndPartialIndexContents(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	report, err := VerifyV2File(context.Background(), path)
+	report, err := VerifyFile(context.Background(), path)
 	if err != nil || !report.Verified || !report.IndexContentsVerified || !report.IndexBuildContentsVerified || report.SchemaVersion != 3 {
 		t.Fatalf("compound verification=%+v err=%v", report, err)
 	}
 }
 
-func TestVerifyV2FileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
+func TestVerifyFileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify-index-build.meld2")
-	file, _, err := storagev2.Open(path)
+	file, _, err := storage.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,10 +117,10 @@ func TestVerifyV2FileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{
-		TransactionID: [16]byte{1}, Mutations: []storagev2.DocumentMutation{
-			{Collection: "items", DocumentID: ids[0], Operation: storagev2.DocumentInsert, Document: encoded[0]},
-			{Collection: "items", DocumentID: ids[1], Operation: storagev2.DocumentInsert, Document: encoded[1]},
+	if _, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{
+		TransactionID: [16]byte{1}, Mutations: []storage.DocumentMutation{
+			{Collection: "items", DocumentID: ids[0], Operation: storage.DocumentInsert, Document: encoded[0]},
+			{Collection: "items", DocumentID: ids[1], Operation: storage.DocumentInsert, Document: encoded[1]},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -135,49 +135,49 @@ func TestVerifyV2FileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 		}
 	}
 	buildID := [16]byte{9}
-	if _, err := file.BeginIndexBuild(storagev2.BeginIndexBuildTransaction{
+	if _, err := file.BeginIndexBuild(storage.BeginIndexBuildTransaction{
 		BuildID: buildID, Collection: "items", Name: definition.Name,
-		Fields: []storagev2.IndexField{{Path: "tenant", Direction: 1}, {Path: "score", Direction: -1}},
+		Fields: []storage.IndexField{{Path: "tenant", Direction: 1}, {Path: "score", Direction: -1}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.ApplyIndexBuildScanBatch(storagev2.IndexBuildScanBatch{
-		BuildID: buildID, ScanAfter: ids[0], Entries: []storagev2.IndexEntry{{Key: keys[0], DocumentID: ids[0]}},
+	if _, err := file.ApplyIndexBuildScanBatch(storage.IndexBuildScanBatch{
+		BuildID: buildID, ScanAfter: ids[0], Entries: []storage.IndexEntry{{Key: keys[0], DocumentID: ids[0]}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{
-		TransactionID: [16]byte{2}, Mutations: []storagev2.DocumentMutation{{
-			Collection: "items", DocumentID: ids[2], Operation: storagev2.DocumentInsert, Document: encoded[2],
+	if _, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{
+		TransactionID: [16]byte{2}, Mutations: []storage.DocumentMutation{{
+			Collection: "items", DocumentID: ids[2], Operation: storage.DocumentInsert, Document: encoded[2],
 		}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.ApplyIndexBuildScanBatch(storagev2.IndexBuildScanBatch{
+	if _, err := file.ApplyIndexBuildScanBatch(storage.IndexBuildScanBatch{
 		BuildID: buildID, ExpectedScanAfter: ids[0], ScanAfter: ids[1], Complete: true,
-		Entries: []storagev2.IndexEntry{{Key: keys[1], DocumentID: ids[1]}},
+		Entries: []storage.IndexEntry{{Key: keys[1], DocumentID: ids[1]}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	caughtUp, err := file.ApplyIndexBuildCatchUpBatch(storagev2.IndexBuildCatchUpBatch{
+	caughtUp, err := file.ApplyIndexBuildCatchUpBatch(storage.IndexBuildCatchUpBatch{
 		BuildID: buildID, ExpectedAppliedSequence: 1, ThroughSequence: 2,
-		Mutations: []storagev2.IndexBuildCatchUpMutation{{
-			Sequence: 2, DocumentID: ids[2], Operation: storagev2.CommitInsert, AfterKey: keys[2],
+		Mutations: []storage.IndexBuildCatchUpMutation{{
+			Sequence: 2, DocumentID: ids[2], Operation: storage.CommitInsert, AfterKey: keys[2],
 		}},
 	})
-	if err != nil || caughtUp.AppliedCatalogRoot < 2 || file.Meta().RequiredFeatures&storagev2.RequiredFeatureIndexBuildAppliedRoot == 0 {
+	if err != nil || caughtUp.AppliedCatalogRoot < 2 || file.Meta().RequiredFeatures&storage.RequiredFeatureIndexBuildAppliedRoot == 0 {
 		t.Fatalf("caught-up build=%+v meta=%+v err=%v", caughtUp, file.Meta(), err)
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	report, err := VerifyV2File(context.Background(), path)
+	report, err := VerifyFile(context.Background(), path)
 	if err != nil || report.SchemaVersion != 3 || !report.IndexContentsVerified || !report.IndexBuildContentsVerified {
 		t.Fatalf("index-build verification=%+v err=%v", report, err)
 	}
 }
 
-func TestVerifyV2FileTreatsReadyUniqueConflictAsValidPrivateState(t *testing.T) {
+func TestVerifyFileTreatsReadyUniqueConflictAsValidPrivateState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify-private-unique-conflict.meld2")
 	db, err := Open(path)
 	if err != nil {
@@ -199,29 +199,29 @@ func TestVerifyV2FileTreatsReadyUniqueConflictAsValidPrivateState(t *testing.T) 
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	report, err := VerifyV2File(context.Background(), path)
+	report, err := VerifyFile(context.Background(), path)
 	if err != nil || !report.IndexBuildContentsVerified {
 		t.Fatalf("private unique-conflict verification=%+v err=%v", report, err)
 	}
 }
 
-func TestVerifyV2FileRejectsUnsupportedAndCanceledInputs(t *testing.T) {
+func TestVerifyFileRejectsUnsupportedAndCanceledInputs(t *testing.T) {
 	directory := t.TempDir()
-	if _, err := VerifyV2File(context.Background(), filepath.Join(directory, "missing")); !errors.Is(err, ErrVerificationUnsupported) {
+	if _, err := VerifyFile(context.Background(), filepath.Join(directory, "missing")); !errors.Is(err, ErrVerificationUnsupported) {
 		t.Fatalf("missing verification error=%v", err)
 	}
 
-	v2Path := filepath.Join(directory, "cancel.meld2")
-	v2, err := Open(v2Path)
+	databasePath := filepath.Join(directory, "cancel.meld2")
+	store, err := Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := v2.Close(); err != nil {
+	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := VerifyV2File(ctx, v2Path); !errors.Is(err, context.Canceled) {
+	if _, err := VerifyFile(ctx, databasePath); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled verification error=%v", err)
 	}
 }

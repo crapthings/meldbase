@@ -12,7 +12,7 @@ import (
 	"syscall"
 )
 
-var ErrReclamationConflict = errors.New("meldbase storage v2: online reclamation conflicted with a commit")
+var ErrReclamationConflict = errors.New("meldbase storage: online reclamation conflicted with a commit")
 
 const maxSemanticAuditTreeViews = 1024
 
@@ -83,7 +83,7 @@ func (f *File) reachabilityUnlockedWithIndexAudit(ctx context.Context, indexAudi
 		return ReachabilityStats{}, nil, err
 	}
 	if f.file == nil {
-		return ReachabilityStats{}, nil, errors.New("meldbase storage v2: file is closed")
+		return ReachabilityStats{}, nil, errors.New("meldbase storage: file is closed")
 	}
 	walker := &reachabilityWalker{
 		file: f, ctx: ctx, pages: make(map[uint64]PageType), visiting: make(map[uint64]struct{}),
@@ -220,7 +220,7 @@ func (f *File) captureReclamationAudit() (*File, reclamationAuditToken, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return nil, reclamationAuditToken{}, errors.New("meldbase storage v2: file is closed")
+		return nil, reclamationAuditToken{}, errors.New("meldbase storage: file is closed")
 	}
 	if f.fatalErr != nil {
 		return nil, reclamationAuditToken{}, f.fatalErr

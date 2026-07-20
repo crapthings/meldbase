@@ -7,15 +7,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-func TestPublicV2StorageQuotaIsSafeAdmissionRejection(t *testing.T) {
-	if DefaultV2MaxFileBytes != storagev2.DefaultMaxFileBytes {
-		t.Fatalf("public/internal quota defaults drifted: %d/%d", DefaultV2MaxFileBytes, storagev2.DefaultMaxFileBytes)
+func TestPublicStorageQuotaIsSafeAdmissionRejection(t *testing.T) {
+	if DefaultMaxFileBytes != storage.DefaultMaxFileBytes {
+		t.Fatalf("public/internal quota defaults drifted: %d/%d", DefaultMaxFileBytes, storage.DefaultMaxFileBytes)
 	}
-	if V2PageSize != storagev2.PageSize {
-		t.Fatalf("public/internal V2 page size drifted: %d/%d", V2PageSize, storagev2.PageSize)
+	if PageSize != storage.PageSize {
+		t.Fatalf("public/internal page size drifted: %d/%d", PageSize, storage.PageSize)
 	}
 	path := filepath.Join(t.TempDir(), "quota.meld2")
 	db, err := Open(path)
@@ -31,7 +31,7 @@ func TestPublicV2StorageQuotaIsSafeAdmissionRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err = OpenWithOptions(path, OpenOptions{StorageLimits: V2StorageLimits{MaxFileBytes: used}})
+	db, err = OpenWithOptions(path, OpenOptions{StorageLimits: StorageLimits{MaxFileBytes: used}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,9 +63,9 @@ func TestPublicV2StorageQuotaIsSafeAdmissionRejection(t *testing.T) {
 	}
 }
 
-func TestPublicInvalidV2StorageQuotaDoesNotCreateFile(t *testing.T) {
+func TestPublicInvalidStorageQuotaDoesNotCreateFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-quota.meld2")
-	_, err := OpenWithOptions(path, OpenOptions{StorageLimits: V2StorageLimits{MaxFileBytes: 2*V2PageSize + 1}})
+	_, err := OpenWithOptions(path, OpenOptions{StorageLimits: StorageLimits{MaxFileBytes: 2*PageSize + 1}})
 	if !errors.Is(err, ErrInvalidResourceLimits) {
 		t.Fatalf("invalid quota error=%v", err)
 	}

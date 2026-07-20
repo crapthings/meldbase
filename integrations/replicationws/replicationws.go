@@ -177,7 +177,7 @@ func (handler *Handler) writeFrame(ctx context.Context, connection *websocket.Co
 // where callers install an mTLS HTTP client, private-network proxy or other
 // server-to-server transport identity. It must not be used for browser tokens.
 type ReceiverConfig struct {
-	Follower              *meldbase.V2Follower
+	Follower              *meldbase.Follower
 	URL                   string
 	DialOptions           *websocket.DialOptions
 	MaxFrameBytes         int

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestBeginV2ArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
+func TestBeginArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
 	archivePath := filepath.Join(directory, "archive.meld2")
@@ -17,7 +17,7 @@ func TestBeginV2ArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	bootstrap, subscription, err := db.BeginV2Archive(context.Background(), "nightly", archivePath, 2)
+	bootstrap, subscription, err := db.BeginArchive(context.Background(), "nightly", archivePath, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestBeginV2ArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 	}
 }
 
-func TestBeginV2ArchiveRejectsExistingDestinationBeforeCreatingCheckpoint(t *testing.T) {
+func TestBeginArchiveRejectsExistingDestinationBeforeCreatingCheckpoint(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
@@ -70,7 +70,7 @@ func TestBeginV2ArchiveRejectsExistingDestinationBeforeCreatingCheckpoint(t *tes
 	if err := os.WriteFile(destination, []byte("existing"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if bootstrap, subscription, err := db.BeginV2Archive(context.Background(), "nightly", destination, 1); subscription != nil || !errors.Is(err, ErrBackupDestinationExists) || bootstrap != (ArchiveV2Bootstrap{}) {
+	if bootstrap, subscription, err := db.BeginArchive(context.Background(), "nightly", destination, 1); subscription != nil || !errors.Is(err, ErrBackupDestinationExists) || bootstrap != (ArchiveBootstrap{}) {
 		t.Fatalf("existing destination bootstrap=%+v subscription=%v err=%v", bootstrap, subscription, err)
 	}
 	if db.Stats().CommitSequence != 0 {

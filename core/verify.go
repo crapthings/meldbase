@@ -5,14 +5,14 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// V2VerificationReport is a schema-versioned receipt for a full, read-only V2
+// VerificationReport is a schema-versioned receipt for a full, read-only
 // protected-page graph and published-index semantic audit. ReclaimablePages is
 // informational; verification never installs a free pool or publishes
 // maintenance metadata.
-type V2VerificationReport struct {
+type VerificationReport struct {
 	SchemaVersion              int           `json:"schemaVersion"`
 	Verified                   bool          `json:"verified"`
 	Format                     StorageFormat `json:"format"`
@@ -37,7 +37,7 @@ type V2VerificationReport struct {
 	SHA256                     string        `json:"sha256"`
 }
 
-// VerifyV2File performs an offline, non-mutating audit of an existing V2 file.
+// VerifyFile performs an offline, non-mutating audit of an existing file.
 // It takes a non-blocking shared advisory lock, so an active writer fails with
 // ErrDatabaseLocked. It never creates, truncates, repairs, reclaims, or advances
 // the database. Meta inspection alone is cheaper; this method walks every page
@@ -45,27 +45,27 @@ type V2VerificationReport struct {
 // Secondary keys from canonical Primary documents in both directions, and
 // hashes the file. Legacy caught-up builds lacking an applied CatalogRoot remain
 // readable but report IndexBuildContentsVerified=false.
-func VerifyV2File(ctx context.Context, path string) (V2VerificationReport, error) {
+func VerifyFile(ctx context.Context, path string) (VerificationReport, error) {
 	info, err := InspectStorageFormat(path)
 	if err != nil {
-		return V2VerificationReport{}, err
+		return VerificationReport{}, err
 	}
 	if info.Format != StorageFormatCurrent {
-		return V2VerificationReport{}, ErrVerificationUnsupported
+		return VerificationReport{}, ErrVerificationUnsupported
 	}
 	if !info.ReaderCompatible {
-		return V2VerificationReport{}, ErrUnsupportedFormat
+		return VerificationReport{}, ErrUnsupportedFormat
 	}
-	verified, err := storagev2.VerifyPathContextWithIndexAudit(ctx, path, auditV2IndexKey)
+	verified, err := storage.VerifyPathContextWithIndexAudit(ctx, path, auditIndexKey)
 	if err != nil {
-		return V2VerificationReport{}, mapStorageV2Error(err)
+		return VerificationReport{}, mapStorageError(err)
 	}
 	meta := verified.Meta
 	if meta.DatabaseID == ([16]byte{}) || verified.PhysicalPages < meta.PhysicalPageCount {
-		return V2VerificationReport{}, fmt.Errorf("%w: invalid verification result", ErrCorrupt)
+		return VerificationReport{}, fmt.Errorf("%w: invalid verification result", ErrCorrupt)
 	}
-	return V2VerificationReport{
-		SchemaVersion: 3, Verified: true, Format: StorageFormatCurrent, Revision: storagev2.FormatVersion,
+	return VerificationReport{
+		SchemaVersion: 3, Verified: true, Format: StorageFormatCurrent, Revision: storage.FormatVersion,
 		DatabaseIDHex: hex.EncodeToString(meta.DatabaseID[:]), MetaGeneration: meta.Generation,
 		CommitSequence: meta.CommitSequence, OldestRetainedSequence: meta.OldestRetainedSequence,
 		RequiredFeatures: meta.RequiredFeatures, OptionalFeatures: meta.OptionalFeatures,
@@ -79,8 +79,8 @@ func VerifyV2File(ctx context.Context, path string) (V2VerificationReport, error
 	}, nil
 }
 
-func auditV2IndexKey(meta storagev2.IndexMeta, id [16]byte, encoded []byte) ([]byte, bool, error) {
-	fields, err := publicV2IndexFields(meta.FieldPath, meta.Fields)
+func auditIndexKey(meta storage.IndexMeta, id [16]byte, encoded []byte) ([]byte, bool, error) {
+	fields, err := publicIndexFields(meta.FieldPath, meta.Fields)
 	if err != nil {
 		return nil, false, err
 	}

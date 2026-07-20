@@ -15,11 +15,11 @@ import (
 
 type unrelatedRuntimeFence struct{}
 
-func (unrelatedRuntimeFence) ValidateV2PrimaryWrite(meldbase.PrimaryWriteFenceRequest) error {
+func (unrelatedRuntimeFence) ValidatePrimaryWrite(meldbase.PrimaryWriteFenceRequest) error {
 	return nil
 }
 
-func TestOpenV2PrimaryWiresOnlyTheRenewedGuard(t *testing.T) {
+func TestOpenPrimaryWiresOnlyTheRenewedGuard(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func TestOpenV2PrimaryWiresOnlyTheRenewedGuard(t *testing.T) {
 	client := &renewalClient{grant: func(ctx context.Context, databaseID [16]byte, sequence uint64) (primarylease.Grant, error) {
 		return authority.Grant(ctx, primarylease.GrantRequest{DatabaseID: databaseID, Owner: "writer-a", CommitSequence: sequence})
 	}}
-	runtime, err := primarylease.OpenV2Primary(filepath.Join(t.TempDir(), "primary.meld2"), primarylease.PrimaryV2Options{
+	runtime, err := primarylease.OpenPrimary(filepath.Join(t.TempDir(), "primary.meld2"), primarylease.PrimaryOptions{
 		PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a", Clock: func() time.Time { return now }}, RenewalClient: client,
 	})
 	if err != nil {
@@ -60,18 +60,18 @@ func TestOpenV2PrimaryWiresOnlyTheRenewedGuard(t *testing.T) {
 	}
 }
 
-func TestOpenV2PrimaryRejectsConflictingFenceOrFollower(t *testing.T) {
+func TestOpenPrimaryRejectsConflictingFenceOrFollower(t *testing.T) {
 	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	client := &renewalClient{grant: func(context.Context, [16]byte, uint64) (primarylease.Grant, error) { return primarylease.Grant{}, nil }}
-	for _, options := range []primarylease.PrimaryV2Options{
+	for _, options := range []primarylease.PrimaryOptions{
 		{PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a"}, RenewalClient: client, OpenOptions: meldbase.OpenOptions{PrimaryWriteFence: unrelatedRuntimeFence{}}},
 		{PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a"}, RenewalClient: client, OpenOptions: meldbase.OpenOptions{Follower: true}},
 		{PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "writer-a"}},
 	} {
-		if runtime, err := primarylease.OpenV2Primary(filepath.Join(t.TempDir(), "invalid.meld2"), options); runtime != nil || !errors.Is(err, primarylease.ErrPrimaryRuntimeConfiguration) {
+		if runtime, err := primarylease.OpenPrimary(filepath.Join(t.TempDir(), "invalid.meld2"), options); runtime != nil || !errors.Is(err, primarylease.ErrPrimaryRuntimeConfiguration) {
 			t.Fatalf("invalid runtime=%v err=%v", runtime, err)
 		}
 	}

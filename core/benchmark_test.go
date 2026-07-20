@@ -396,7 +396,7 @@ func BenchmarkReactiveBroadFanoutTenThousand(b *testing.B) {
 	}
 }
 
-func BenchmarkStatsSnapshot(b *testing.B) {
+func BenchmarkDurableStatsSnapshot(b *testing.B) {
 	db, _ := benchmarkCollection(b, 10_000, true)
 	defer db.Close()
 	b.ReportAllocs()
@@ -441,7 +441,7 @@ func BenchmarkStatsSnapshotDiagnosticsEnabled(b *testing.B) {
 	}
 }
 
-func BenchmarkV2StatsSnapshot(b *testing.B) {
+func BenchmarkStatsSnapshot(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "stats.meld2"))
 	if err != nil {
 		b.Fatal(err)
@@ -457,7 +457,7 @@ func BenchmarkV2StatsSnapshot(b *testing.B) {
 	}
 }
 
-func BenchmarkV2StatsSnapshotWithPersistentIndexBuilds(b *testing.B) {
+func BenchmarkStatsSnapshotWithPersistentIndexBuilds(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "stats-builds.meld2"))
 	if err != nil {
 		b.Fatal(err)
@@ -572,7 +572,7 @@ func BenchmarkDiagnosticHookModes(b *testing.B) {
 	}
 }
 
-func BenchmarkV2StorageBackedPointQuery(b *testing.B) {
+func BenchmarkStorageBackedPointQuery(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "point-query.meld2"))
 	if err != nil {
 		b.Fatal(err)
@@ -606,7 +606,7 @@ func BenchmarkV2StorageBackedPointQuery(b *testing.B) {
 	}
 }
 
-func BenchmarkV2StorageBackedCompiledPointQuery(b *testing.B) {
+func BenchmarkStorageBackedCompiledPointQuery(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "compiled-point-query.meld2"))
 	if err != nil {
 		b.Fatal(err)
@@ -637,7 +637,7 @@ func BenchmarkV2StorageBackedCompiledPointQuery(b *testing.B) {
 	}
 }
 
-func BenchmarkV2StreamingCollectionScanFirstTen(b *testing.B) {
+func BenchmarkStreamingCollectionScanFirstTen(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "streaming-scan.meld2"))
 	if err != nil {
 		b.Fatal(err)
@@ -720,7 +720,7 @@ func BenchmarkDurableSyncOneThousandDocuments(b *testing.B) {
 	}
 }
 
-func BenchmarkV2CreateIndexTenThousandDocuments(b *testing.B) {
+func BenchmarkCreateIndexTenThousandDocuments(b *testing.B) {
 	b.ReportAllocs()
 	b.StopTimer()
 	for iteration := 0; iteration < b.N; iteration++ {

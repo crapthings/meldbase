@@ -42,7 +42,7 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 		{"tenant", database, Principal{Subject: "user-1", Tenant: "tenant-2"}, "items", query, "policy-v1"},
 		{"collection", database, principal, "other", query, "policy-v1"},
 		{"query", database, principal, "items", otherQuery, "policy-v1"},
-		{"policy", database, principal, "items", query, "policy-v2"},
+		{"policy", database, principal, "items", query, "policy-store"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

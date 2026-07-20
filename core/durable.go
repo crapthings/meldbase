@@ -11,14 +11,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
-// v2DurableStore adapts the page/Commit Log format to the public database API.
-type v2DurableStore struct {
-	file                     *storagev2.File
-	documents                *v2DocumentCache
+// durableStore adapts the page/Commit Log format to the public database API.
+type durableStore struct {
+	file                     *storage.File
+	documents                *documentCache
 	path                     string
 	rollbackAnchor           RollbackAnchorStore
 	databaseID               [16]byte
@@ -34,7 +34,7 @@ type v2DurableStore struct {
 	// immutable source snapshot. It is package-test-only proof that the long
 	// copy/verification phase does not hold db.mu and block writers.
 	testCompactionSnapshotHook func()
-	// testQuerySnapshotHook pauses a V2 query snapshot after its immutable
+	// testQuerySnapshotHook pauses a  query snapshot after its immutable
 	// storage root is pinned. It proves cold reactive construction scans without
 	// retaining db.mu.
 	testQuerySnapshotHook func()
@@ -43,7 +43,7 @@ type v2DurableStore struct {
 		sequence   uint64
 		collection string
 		name       string
-		entries    []storagev2.IndexEntry
+		entries    []storage.IndexEntry
 	}
 	testIndexBuildSnapshotHook        func()
 	testPersistentIndexBuildReadyHook func()
@@ -56,7 +56,7 @@ type indexBuildStatsBackend interface {
 	indexBuildDBStats() IndexBuildStats
 }
 
-func (store *v2DurableStore) indexBuildDBStats() IndexBuildStats {
+func (store *durableStore) indexBuildDBStats() IndexBuildStats {
 	if store == nil {
 		return IndexBuildStats{}
 	}
@@ -67,23 +67,23 @@ func (store *v2DurableStore) indexBuildDBStats() IndexBuildStats {
 	return *stats
 }
 
-func persistentIndexBuildStats(builds []storagev2.IndexBuildMeta) IndexBuildStats {
+func persistentIndexBuildStats(builds []storage.IndexBuildMeta) IndexBuildStats {
 	stats := IndexBuildStats{}
 	stats.Persistent = uint64(len(builds))
 	for _, build := range builds {
 		stats.PersistentEntries += build.EntryCount
 		stats.PersistentBytes += build.CanonicalBytes
 		switch build.Phase {
-		case storagev2.IndexBuildScan:
+		case storage.IndexBuildScan:
 			stats.Scanning++
-		case storagev2.IndexBuildCatchUp:
+		case storage.IndexBuildCatchUp:
 			stats.CatchingUp++
-		case storagev2.IndexBuildReady:
+		case storage.IndexBuildReady:
 			stats.Ready++
-		case storagev2.IndexBuildFailed:
+		case storage.IndexBuildFailed:
 			stats.PersistentFailed++
 		}
-		if build.Phase != storagev2.IndexBuildFailed &&
+		if build.Phase != storage.IndexBuildFailed &&
 			(stats.oldestActiveAppliedSequence == 0 || build.AppliedSequence < stats.oldestActiveAppliedSequence) {
 			stats.oldestActiveAppliedSequence = build.AppliedSequence
 		}
@@ -91,7 +91,7 @@ func persistentIndexBuildStats(builds []storagev2.IndexBuildMeta) IndexBuildStat
 	return stats
 }
 
-func (store *v2DurableStore) refreshIndexBuildStats() {
+func (store *durableStore) refreshIndexBuildStats() {
 	if store == nil || store.file == nil {
 		return
 	}
@@ -114,11 +114,11 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 	if err := validateRecoveryMode(options.Recovery); err != nil {
 		return nil, err
 	}
-	replayDeliveryTimeout, err := normalizeV2ReplayDeliveryTimeout(options.ReplayDeliveryTimeout)
+	replayDeliveryTimeout, err := normalizeReplayDeliveryTimeout(options.ReplayDeliveryTimeout)
 	if err != nil {
 		return nil, err
 	}
-	coordinatorOptions, err := normalizeV2CommitCoordinatorOptions(options.CommitCoordinator)
+	coordinatorOptions, err := normalizeCommitCoordinatorOptions(options.CommitCoordinator)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 			minimumGeneration = anchor.MinimumGeneration
 		}
 	}
-	file, meta, recovery, err := storagev2.OpenWithOptions(path, storagev2.OpenOptions{
+	file, meta, recovery, err := storage.OpenWithOptions(path, storage.OpenOptions{
 		RequireClean:              options.Recovery == RecoveryRequireClean,
 		RequireGraphAudit:         options.RequireGraphAudit,
 		RequirePrivateFileMode:    options.RequirePrivateFileMode,
@@ -180,24 +180,24 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 		MaxFileBytes:              options.StorageLimits.MaxFileBytes,
 	})
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
-	selectedStorageLimits := V2StorageLimits{MaxFileBytes: file.StorageStats().StorageMaxBytes}
+	selectedStorageLimits := StorageLimits{MaxFileBytes: file.StorageStats().StorageMaxBytes}
 	fail := func(err error) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
 	snapshot, stream, err := file.OpenSnapshotAndStream()
 	if err != nil {
-		return fail(mapStorageV2Error(err))
+		return fail(mapStorageError(err))
 	}
-	collections, err := loadV2Collections(snapshot)
+	collections, err := loadCollections(snapshot)
 	closeErr := errors.Join(snapshot.Close(), stream.Close())
 	if err != nil {
 		return fail(err)
 	}
 	if closeErr != nil {
-		return fail(mapStorageV2Error(closeErr))
+		return fail(mapStorageError(closeErr))
 	}
 	absolutePath, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -215,20 +215,20 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 			return fail(err)
 		}
 	}
-	store := &v2DurableStore{file: file, documents: newV2DocumentCache(defaultV2DocumentCacheEntries, defaultV2DocumentCacheBytes), path: absolutePath, rollbackAnchor: protection.AnchorStore, databaseID: meta.DatabaseID, rollbackAnchorTimeout: anchorTimeout}
+	store := &durableStore{file: file, documents: newDocumentCache(defaultDocumentCacheEntries, defaultDocumentCacheBytes), path: absolutePath, rollbackAnchor: protection.AnchorStore, databaseID: meta.DatabaseID, rollbackAnchorTimeout: anchorTimeout}
 	if protection.AnchorStore != nil {
 		store.rollbackAnchorGate = make(chan struct{}, 1)
 		store.rollbackAnchorGate <- struct{}{}
 		store.rollbackAnchorSequence.Store(meta.CommitSequence)
 		store.rollbackAnchorGeneration.Store(meta.Generation)
 	}
-	source := &v2QueryReplaySource{file: file, deliveryTimeout: replayDeliveryTimeout, resourceLimits: resourceLimits}
+	source := &queryReplaySource{file: file, deliveryTimeout: replayDeliveryTimeout, resourceLimits: resourceLimits}
 	db := &DB{
 		startedAt: time.Now(), closedCh: make(chan struct{}), collections: collections, watchers: make(map[uint64]*changeWatcher),
 		token: meta.CommitSequence, durability: store, replaySource: source, querySource: store,
-		databaseID: meta.DatabaseID, historyLimit: 0, resourceLimits: resourceLimits, v2StorageLimits: selectedStorageLimits,
+		databaseID: meta.DatabaseID, historyLimit: 0, resourceLimits: resourceLimits, storageLimits: selectedStorageLimits,
 		recovery: finalizeRecoveryReport(RecoveryReport{
-			Engine: "v2", Created: recovery.Created, CommitSequenceBefore: meta.CommitSequence,
+			Engine: "current", Created: recovery.Created, CommitSequenceBefore: meta.CommitSequence,
 			CommitSequenceAfter: meta.CommitSequence, SelectedMetaSlot: recovery.SelectedMetaSlot,
 			ChecksumValidMetaSlots: recovery.ChecksumValidMetaSlots, RootValidMetaSlots: recovery.RootValidMetaSlots,
 			FallbackToOlderRoot: recovery.FallbackToOlderRoot, MainTailBytesRemoved: recovery.TrailingBytesRemoved,
@@ -242,7 +242,7 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 	source.onResourceLimit = func() { db.metrics.resourceLimitRejections.Add(1) }
 	builds, err := file.IndexBuilds()
 	if err != nil {
-		return fail(mapStorageV2Error(err))
+		return fail(mapStorageError(err))
 	}
 	if len(builds) > 0 {
 		db.indexBuildReservations = make(map[string]struct{}, len(builds))
@@ -269,44 +269,44 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 	db.reactive = newReactiveHub(db)
 	db.dispatcher = newChangeDispatcher(db)
 	if coordinatorOptions.Enabled && !options.Follower {
-		db.commitCoordinator = newV2CommitCoordinator(db, store, coordinatorOptions)
+		db.commitCoordinator = newCommitCoordinator(db, store, coordinatorOptions)
 	}
 	return db, nil
 }
 
-func (store *v2DurableStore) openQuerySnapshot() (queryStorageSnapshot, error) {
+func (store *durableStore) openQuerySnapshot() (queryStorageSnapshot, error) {
 	if store == nil || store.file == nil {
 		return nil, ErrClosed
 	}
 	snapshot, err := store.file.OpenSnapshot()
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
 	if store.testQuerySnapshotHook != nil {
 		store.testQuerySnapshotHook()
 	}
-	return &v2QueryStorageSnapshot{snapshot: snapshot, documents: store.documents}, nil
+	return &durableQueryStorageSnapshot{snapshot: snapshot, documents: store.documents}, nil
 }
 
-type v2QueryStorageSnapshot struct {
-	snapshot  *storagev2.ReadSnapshot
-	documents *v2DocumentCache
+type durableQueryStorageSnapshot struct {
+	snapshot  *storage.ReadSnapshot
+	documents *documentCache
 }
 
-func (snapshot *v2QueryStorageSnapshot) Sequence() uint64 {
+func (snapshot *durableQueryStorageSnapshot) Sequence() uint64 {
 	if snapshot == nil || snapshot.snapshot == nil {
 		return 0
 	}
 	return snapshot.snapshot.Sequence()
 }
 
-func (snapshot *v2QueryStorageSnapshot) CollectionVersion(collection string) (queryStorageCollectionVersion, bool, error) {
+func (snapshot *durableQueryStorageSnapshot) CollectionVersion(collection string) (queryStorageCollectionVersion, bool, error) {
 	if snapshot == nil || snapshot.snapshot == nil {
 		return queryStorageCollectionVersion{}, false, ErrClosed
 	}
 	meta, exists, err := snapshot.snapshot.CollectionMeta(collection)
 	if err != nil {
-		return queryStorageCollectionVersion{}, false, mapStorageV2Error(err)
+		return queryStorageCollectionVersion{}, false, mapStorageError(err)
 	}
 	if !exists {
 		return queryStorageCollectionVersion{}, false, nil
@@ -317,13 +317,13 @@ func (snapshot *v2QueryStorageSnapshot) CollectionVersion(collection string) (qu
 	return queryStorageCollectionVersion{ID: meta.ID, UpdatedSequence: meta.UpdatedSequence, NextDocumentPosition: meta.NextDocumentPosition}, true, nil
 }
 
-func (snapshot *v2QueryStorageSnapshot) GetDocumentRecord(collection string, id DocumentID) (queryStorageDocument, bool, error) {
+func (snapshot *durableQueryStorageSnapshot) GetDocumentRecord(collection string, id DocumentID) (queryStorageDocument, bool, error) {
 	if snapshot == nil || snapshot.snapshot == nil {
 		return queryStorageDocument{}, false, ErrClosed
 	}
 	record, exists, err := snapshot.snapshot.GetDocumentRecord(collection, [16]byte(id))
 	if err != nil {
-		return queryStorageDocument{}, false, mapStorageV2Error(err)
+		return queryStorageDocument{}, false, mapStorageError(err)
 	}
 	if !exists {
 		snapshot.documents.remove(collection, id)
@@ -339,17 +339,17 @@ func (snapshot *v2QueryStorageSnapshot) GetDocumentRecord(collection string, id 
 	}, true, nil
 }
 
-func (snapshot *v2QueryStorageSnapshot) Indexes(collection string) ([]queryStorageIndex, error) {
+func (snapshot *durableQueryStorageSnapshot) Indexes(collection string) ([]queryStorageIndex, error) {
 	if snapshot == nil || snapshot.snapshot == nil {
 		return nil, ErrClosed
 	}
 	metas, err := snapshot.snapshot.Indexes(collection)
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
 	result := make([]queryStorageIndex, len(metas))
 	for index, meta := range metas {
-		fields, err := publicV2IndexFields(meta.FieldPath, meta.Fields)
+		fields, err := publicIndexFields(meta.FieldPath, meta.Fields)
 		if err != nil {
 			return nil, err
 		}
@@ -358,46 +358,46 @@ func (snapshot *v2QueryStorageSnapshot) Indexes(collection string) ([]queryStora
 	return result, nil
 }
 
-func (snapshot *v2QueryStorageSnapshot) OpenIndexIterator(collection, index string, start, end []byte, limit int) (queryStorageIndexIterator, error) {
+func (snapshot *durableQueryStorageSnapshot) OpenIndexIterator(collection, index string, start, end []byte, limit int) (queryStorageIndexIterator, error) {
 	if snapshot == nil || snapshot.snapshot == nil {
 		return nil, ErrClosed
 	}
 	iterator, err := snapshot.snapshot.OpenIndexIterator(collection, index, start, end, limit)
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
-	return &v2QueryStorageIndexIterator{iterator: iterator}, nil
+	return &durableQueryStorageIndexIterator{iterator: iterator}, nil
 }
 
-func (snapshot *v2QueryStorageSnapshot) OpenCollectionIterator(collection string) (queryStorageDocumentIterator, error) {
+func (snapshot *durableQueryStorageSnapshot) OpenCollectionIterator(collection string) (queryStorageDocumentIterator, error) {
 	if snapshot == nil || snapshot.snapshot == nil {
 		return nil, ErrClosed
 	}
 	iterator, err := snapshot.snapshot.OpenInsertionOrderIterator(collection, nil, nil, 0)
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
-	return &v2QueryStorageDocumentIterator{iterator: iterator, collection: collection, documents: snapshot.documents}, nil
+	return &durableQueryStorageDocumentIterator{iterator: iterator, collection: collection, documents: snapshot.documents}, nil
 }
 
-func (snapshot *v2QueryStorageSnapshot) Close() error {
+func (snapshot *durableQueryStorageSnapshot) Close() error {
 	if snapshot == nil || snapshot.snapshot == nil {
 		return nil
 	}
 	err := snapshot.snapshot.Close()
 	snapshot.snapshot = nil
-	return mapStorageV2Error(err)
+	return mapStorageError(err)
 }
 
-type v2QueryStorageIndexIterator struct {
-	iterator *storagev2.IndexIterator
+type durableQueryStorageIndexIterator struct {
+	iterator *storage.IndexIterator
 }
 
-func (iterator *v2QueryStorageIndexIterator) Next() bool {
+func (iterator *durableQueryStorageIndexIterator) Next() bool {
 	return iterator != nil && iterator.iterator != nil && iterator.iterator.Next()
 }
 
-func (iterator *v2QueryStorageIndexIterator) Entry() queryStorageIndexEntry {
+func (iterator *durableQueryStorageIndexIterator) Entry() queryStorageIndexEntry {
 	if iterator == nil || iterator.iterator == nil {
 		return queryStorageIndexEntry{}
 	}
@@ -405,34 +405,34 @@ func (iterator *v2QueryStorageIndexIterator) Entry() queryStorageIndexEntry {
 	return queryStorageIndexEntry{Key: entry.Key, Position: entry.InsertionPosition, ID: DocumentID(entry.DocumentID)}
 }
 
-func (iterator *v2QueryStorageIndexIterator) Err() error {
+func (iterator *durableQueryStorageIndexIterator) Err() error {
 	if iterator == nil || iterator.iterator == nil {
 		return ErrCorrupt
 	}
-	return mapStorageV2Error(iterator.iterator.Err())
+	return mapStorageError(iterator.iterator.Err())
 }
 
-func (iterator *v2QueryStorageIndexIterator) Close() error {
+func (iterator *durableQueryStorageIndexIterator) Close() error {
 	if iterator == nil || iterator.iterator == nil {
 		return nil
 	}
 	err := iterator.iterator.Close()
 	iterator.iterator = nil
-	return mapStorageV2Error(err)
+	return mapStorageError(err)
 }
 
-type v2QueryStorageDocumentIterator struct {
-	iterator   *storagev2.DocumentIterator
+type durableQueryStorageDocumentIterator struct {
+	iterator   *storage.DocumentIterator
 	collection string
-	documents  *v2DocumentCache
+	documents  *documentCache
 	err        error
 }
 
-func (iterator *v2QueryStorageDocumentIterator) Next() bool {
+func (iterator *durableQueryStorageDocumentIterator) Next() bool {
 	return iterator != nil && iterator.iterator != nil && iterator.err == nil && iterator.iterator.Next()
 }
 
-func (iterator *v2QueryStorageDocumentIterator) Record() queryStorageDocument {
+func (iterator *durableQueryStorageDocumentIterator) Record() queryStorageDocument {
 	if iterator == nil || iterator.iterator == nil {
 		return queryStorageDocument{}
 	}
@@ -446,39 +446,39 @@ func (iterator *v2QueryStorageDocumentIterator) Record() queryStorageDocument {
 	return queryStorageDocument{ID: id, Position: record.InsertionPosition, Encoded: record.Document, Decoded: document}
 }
 
-func (iterator *v2QueryStorageDocumentIterator) Err() error {
+func (iterator *durableQueryStorageDocumentIterator) Err() error {
 	if iterator == nil || iterator.iterator == nil {
 		return ErrCorrupt
 	}
 	if iterator.err != nil {
 		return iterator.err
 	}
-	return mapStorageV2Error(iterator.iterator.Err())
+	return mapStorageError(iterator.iterator.Err())
 }
 
-func (iterator *v2QueryStorageDocumentIterator) Close() error {
+func (iterator *durableQueryStorageDocumentIterator) Close() error {
 	if iterator == nil || iterator.iterator == nil {
 		return nil
 	}
 	err := iterator.iterator.Close()
 	iterator.iterator = nil
-	return mapStorageV2Error(err)
+	return mapStorageError(err)
 }
 
-func loadV2Collections(snapshot *storagev2.ReadSnapshot) (map[string]*collectionData, error) {
+func loadCollections(snapshot *storage.ReadSnapshot) (map[string]*collectionData, error) {
 	records, err := snapshot.Collections()
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
 	collections := make(map[string]*collectionData, len(records))
 	for _, collection := range records {
 		data := newCollectionData()
 		indexMetas, err := snapshot.Indexes(collection.Name)
 		if err != nil {
-			return nil, mapStorageV2Error(err)
+			return nil, mapStorageError(err)
 		}
 		for _, meta := range indexMetas {
-			fields, fieldsErr := publicV2IndexFields(meta.FieldPath, meta.Fields)
+			fields, fieldsErr := publicIndexFields(meta.FieldPath, meta.Fields)
 			if !indexNamePattern.MatchString(meta.Name) || fieldsErr != nil {
 				return nil, ErrCorrupt
 			}
@@ -490,19 +490,19 @@ func loadV2Collections(snapshot *storagev2.ReadSnapshot) (map[string]*collection
 	return collections, nil
 }
 
-func (store *v2DurableStore) appendDBCommit(ctx context.Context, db *DB, token uint64, changes []Change) error {
+func (store *durableStore) appendDBCommit(ctx context.Context, db *DB, token uint64, changes []Change) error {
 	_, err := store.appendDBCommitWithSystem(ctx, db, token, changes, nil, nil, nil)
 	return err
 }
 
-func (store *v2DurableStore) appendDBCommitWithSystem(
+func (store *durableStore) appendDBCommitWithSystem(
 	ctx context.Context,
 	db *DB,
 	token uint64,
 	changes []Change,
 	systems []systemrecord.Mutation,
-	preconditions []storagev2.DocumentPrecondition,
-	collectionPreconditions []storagev2.CollectionPrecondition,
+	preconditions []storage.DocumentPrecondition,
+	collectionPreconditions []storage.CollectionPrecondition,
 ) (systemrecord.Result, error) {
 	if store == nil || store.file == nil || len(changes) == 0 {
 		return systemrecord.Result{}, ErrCorrupt
@@ -510,14 +510,14 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 	if err := contextError(ctx); err != nil {
 		return systemrecord.Result{}, err
 	}
-	if err := db.validateV2PrimaryWriteFence(token); err != nil {
+	if err := db.validatePrimaryWriteFence(token); err != nil {
 		return systemrecord.Result{}, err
 	}
 	var transactionID [16]byte
 	if _, err := rand.Read(transactionID[:]); err != nil {
 		return systemrecord.Result{}, err
 	}
-	db.metrics.v2CommitAttempts.Add(1)
+	db.metrics.durableCommitAttempts.Add(1)
 	started := time.Now()
 	var sequence uint64
 	result := systemrecord.Result{}
@@ -534,7 +534,7 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 		if budget == nil {
 			budget = db.newIndexBuildBudget(db.resourceLimits)
 		}
-		var entries []storagev2.IndexEntry
+		var entries []storage.IndexEntry
 		if prepared := &store.preparedIndexBuild; prepared.active && prepared.sequence == db.token &&
 			prepared.collection == change.Collection && prepared.name == change.Index.Name {
 			entries = prepared.entries
@@ -542,13 +542,13 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 			var collectErr error
 			entries, collectErr = store.collectIndexEntries(ctx, db.token, change.Collection, *change.Index, budget)
 			if collectErr != nil {
-				db.metrics.v2RejectedTransactions.Add(1)
+				db.metrics.durableRejectedTransactions.Add(1)
 				return systemrecord.Result{}, collectErr
 			}
 		}
-		sequence, err = store.file.ApplyCreateIndex(storagev2.CreateIndexTransaction{
+		sequence, err = store.file.ApplyCreateIndex(storage.CreateIndexTransaction{
 			TransactionID: transactionID, Collection: change.Collection, Name: change.Index.Name,
-			FieldPath: change.Index.Field, Fields: storageV2IndexFields(*change.Index), Unique: change.Index.Unique, Entries: entries,
+			FieldPath: change.Index.Field, Fields: storageIndexFields(*change.Index), Unique: change.Index.Unique, Entries: entries,
 		})
 	} else {
 		documentTransaction, prepareErr := store.prepareDocumentTransaction(ctx, db, transactionID, changes, preconditions, collectionPreconditions)
@@ -560,29 +560,29 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 				sequence, err = store.file.ApplyDocumentTransaction(documentTransaction)
 				result.Applied = err == nil
 			} else {
-				storageMutations := make([]storagev2.SystemRecordMutation, len(systems))
+				storageMutations := make([]storage.SystemRecordMutation, len(systems))
 				for index, system := range systems {
-					storageMutations[index] = storagev2.SystemRecordMutation{
+					storageMutations[index] = storage.SystemRecordMutation{
 						Key: append([]byte(nil), system.Key...), ExpectedExists: system.ExpectedExists,
 						ExpectedHash: system.ExpectedHash, NewValue: append([]byte(nil), system.NewValue...),
 						Delete: system.Delete, Unconditional: system.Unconditional,
 					}
 				}
-				storageResult, applyErr := store.file.ApplyDocumentSystemTransaction(storagev2.DocumentSystemTransaction{
+				storageResult, applyErr := store.file.ApplyDocumentSystemTransaction(storage.DocumentSystemTransaction{
 					DocumentTransaction: documentTransaction, SystemRecords: storageMutations,
 				})
 				sequence, err = storageResult.Sequence, applyErr
 				result = systemrecord.Result{Applied: storageResult.Applied, Current: append([]byte(nil), storageResult.Current...)}
 				if err == nil && !result.Applied {
-					db.metrics.v2RejectedTransactions.Add(1)
+					db.metrics.durableRejectedTransactions.Add(1)
 					return result, nil
 				}
 			}
 		}
 	}
 	if err != nil {
-		db.metrics.v2RejectedTransactions.Add(1)
-		mapped := mapStorageV2Error(err)
+		db.metrics.durableRejectedTransactions.Add(1)
+		mapped := mapStorageError(err)
 		if !errors.Is(mapped, ErrDuplicateID) && !errors.Is(mapped, ErrDuplicateKey) && !errors.Is(mapped, ErrInvalidIndex) &&
 			!errors.Is(mapped, ErrResourceLimit) && !errors.Is(mapped, ErrWriteConflict) {
 			db.fatalErr = fmt.Errorf("%w: %v", ErrDurability, mapped)
@@ -591,58 +591,58 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 		return systemrecord.Result{}, mapped
 	}
 	if sequence != token {
-		db.metrics.v2RejectedTransactions.Add(1)
-		db.fatalErr = fmt.Errorf("%w: V2 commit sequence mismatch", ErrDurability)
+		db.metrics.durableRejectedTransactions.Add(1)
+		db.fatalErr = fmt.Errorf("%w: commit sequence mismatch", ErrDurability)
 		return systemrecord.Result{}, db.fatalErr
 	}
 	if store.rollbackAnchor != nil {
 		if anchorErr := store.advanceRollbackAnchor(ctx, sequence); anchorErr != nil {
-			db.metrics.v2RejectedTransactions.Add(1)
+			db.metrics.durableRejectedTransactions.Add(1)
 			db.fatalErr = fmt.Errorf("%w: committed sequence %d but %w", ErrDurability, sequence, anchorErr)
 			return systemrecord.Result{}, db.fatalErr
 		}
 	}
 	elapsed := uint64(time.Since(started))
-	db.metrics.v2CommittedTransactions.Add(1)
-	db.metrics.v2CommitNanos.Add(elapsed)
-	updateAtomicMax(&db.metrics.v2CommitMaxNanos, elapsed)
+	db.metrics.durableCommittedTransactions.Add(1)
+	db.metrics.durableCommitNanos.Add(elapsed)
+	updateAtomicMax(&db.metrics.durableCommitMaxNanos, elapsed)
 	result.Applied = true
 	return result, nil
 }
 
 // prepareDocumentTransaction converts one already-authorized logical Change
 // batch to the storage-neutral transaction form. It intentionally reads only
-// immutable schema/index definitions from db.collections; V2 document state is
+// immutable schema/index definitions from db.collections;  document state is
 // authoritative in the storage snapshot. The group publisher reuses this exact
 // conversion for every member.
-func (store *v2DurableStore) prepareDocumentTransaction(
+func (store *durableStore) prepareDocumentTransaction(
 	ctx context.Context,
 	db *DB,
 	transactionID [16]byte,
 	changes []Change,
-	preconditions []storagev2.DocumentPrecondition,
-	collectionPreconditions []storagev2.CollectionPrecondition,
-) (storagev2.DocumentTransaction, error) {
+	preconditions []storage.DocumentPrecondition,
+	collectionPreconditions []storage.CollectionPrecondition,
+) (storage.DocumentTransaction, error) {
 	if store == nil || db == nil || transactionID == ([16]byte{}) || len(changes) == 0 {
-		return storagev2.DocumentTransaction{}, ErrCorrupt
+		return storage.DocumentTransaction{}, ErrCorrupt
 	}
-	mutations := make([]storagev2.DocumentMutation, len(changes))
+	mutations := make([]storage.DocumentMutation, len(changes))
 	for index, change := range changes {
 		if err := contextError(ctx); err != nil {
-			return storagev2.DocumentTransaction{}, err
+			return storage.DocumentTransaction{}, err
 		}
-		operation := storagev2.DocumentInsert
+		operation := storage.DocumentInsert
 		switch change.Operation {
 		case InsertOperation:
-			operation = storagev2.DocumentInsert
+			operation = storage.DocumentInsert
 		case UpdateOperation:
-			operation = storagev2.DocumentUpdate
+			operation = storage.DocumentUpdate
 		case DeleteOperation:
-			operation = storagev2.DocumentDelete
+			operation = storage.DocumentDelete
 		default:
-			return storagev2.DocumentTransaction{}, ErrCorrupt
+			return storage.DocumentTransaction{}, ErrCorrupt
 		}
-		mutation := storagev2.DocumentMutation{
+		mutation := storage.DocumentMutation{
 			Collection: change.Collection, DocumentID: [16]byte(change.DocumentID), Operation: operation,
 			ChangedPaths: append([]string(nil), change.ChangedPaths...),
 		}
@@ -650,7 +650,7 @@ func (store *v2DurableStore) prepareDocumentTransaction(
 		if change.After != nil {
 			mutation.Document, err = encodeStoredDocument(*change.After)
 			if err != nil {
-				return storagev2.DocumentTransaction{}, err
+				return storage.DocumentTransaction{}, err
 			}
 		}
 		data := db.collections[change.Collection]
@@ -662,17 +662,17 @@ func (store *v2DurableStore) prepareDocumentTransaction(
 			sort.Strings(names)
 			for _, name := range names {
 				definition := data.indexes[name].definition
-				item := storagev2.IndexMutation{Name: name}
+				item := storage.IndexMutation{Name: name}
 				if change.Before != nil {
 					item.BeforeKey, _, err = indexDocumentKey(definition, *change.Before)
 					if err != nil {
-						return storagev2.DocumentTransaction{}, err
+						return storage.DocumentTransaction{}, err
 					}
 				}
 				if change.After != nil {
 					item.AfterKey, _, err = indexDocumentKey(definition, *change.After)
 					if err != nil {
-						return storagev2.DocumentTransaction{}, err
+						return storage.DocumentTransaction{}, err
 					}
 				}
 				mutation.Indexes = append(mutation.Indexes, item)
@@ -680,21 +680,21 @@ func (store *v2DurableStore) prepareDocumentTransaction(
 		}
 		mutations[index] = mutation
 	}
-	return storagev2.DocumentTransaction{TransactionID: transactionID, Preconditions: preconditions, CollectionPreconditions: collectionPreconditions, Mutations: mutations}, nil
+	return storage.DocumentTransaction{TransactionID: transactionID, Preconditions: preconditions, CollectionPreconditions: collectionPreconditions, Mutations: mutations}, nil
 }
 
-// commitV2ChangeBatchesLocked is the DB-side companion to V2's private group
+// commitDurableChangeBatchesLocked is the DB-side companion to 's private group
 // publisher. The caller holds db.mu and supplies already-authorized, immutable
-// logical batches in admission order. V2's optional CommitCoordinator reaches
+// logical batches in admission order. 's optional CommitCoordinator reaches
 // this boundary only for ordinary InsertMany requests after it owns admission,
 // cancellation and conflict partitioning; special writes stay exclusive.
-func (db *DB) commitV2ChangeBatchesLocked(ctx context.Context, store *v2DurableStore, batches []ChangeBatch) error {
-	return db.commitV2ChangeBatchesWithPreconditionsLocked(ctx, store, batches, nil, nil)
+func (db *DB) commitDurableChangeBatchesLocked(ctx context.Context, store *durableStore, batches []ChangeBatch) error {
+	return db.commitChangeBatchesWithPreconditionsLocked(ctx, store, batches, nil, nil)
 }
 
-// commitV2ChangeBatchesWithPreconditionsLocked is the coordinator's complete
+// commitChangeBatchesWithPreconditionsLocked is the coordinator's complete
 // document group boundary. Every logical member owns an independent point read
-// set, validated against the preceding logical CatalogRoot inside the same V2
+// set, validated against the preceding logical CatalogRoot inside the same
 // WriteTxn. That is the required foundation for future grouped Update/Delete:
 // an old query selection can never overwrite a document changed by an earlier
 // admitted member or an exclusive write.
@@ -702,12 +702,12 @@ func (db *DB) commitV2ChangeBatchesLocked(ctx context.Context, store *v2DurableS
 // The caller holds db.mu. A nil preconditions slice means no member requires a
 // read set (the ordinary InsertMany coordinator path); otherwise its length
 // must exactly match batches.
-func (db *DB) commitV2ChangeBatchesWithPreconditionsLocked(
+func (db *DB) commitChangeBatchesWithPreconditionsLocked(
 	ctx context.Context,
-	store *v2DurableStore,
+	store *durableStore,
 	batches []ChangeBatch,
-	preconditions [][]storagev2.DocumentPrecondition,
-	collectionPreconditions [][]storagev2.CollectionPrecondition,
+	preconditions [][]storage.DocumentPrecondition,
+	collectionPreconditions [][]storage.CollectionPrecondition,
 ) error {
 	if db == nil || store == nil || store.file == nil || len(batches) < 2 || len(batches) > 256 {
 		return ErrCorrupt
@@ -724,7 +724,7 @@ func (db *DB) commitV2ChangeBatchesWithPreconditionsLocked(
 	if db.fatalErr != nil {
 		return db.fatalErr
 	}
-	currentStore, ok := db.durability.(*v2DurableStore)
+	currentStore, ok := db.durability.(*durableStore)
 	if !ok || currentStore != store {
 		return ErrWriteConflict
 	}
@@ -732,11 +732,11 @@ func (db *DB) commitV2ChangeBatchesWithPreconditionsLocked(
 		return ErrCorrupt
 	}
 	for index := range batches {
-		if err := db.validateV2PrimaryWriteFence(db.token + uint64(index) + 1); err != nil {
+		if err := db.validatePrimaryWriteFence(db.token + uint64(index) + 1); err != nil {
 			return err
 		}
 	}
-	transactions := make([]storagev2.DocumentTransaction, len(batches))
+	transactions := make([]storage.DocumentTransaction, len(batches))
 	for index, batch := range batches {
 		if err := contextError(ctx); err != nil {
 			return err
@@ -748,8 +748,8 @@ func (db *DB) commitV2ChangeBatchesWithPreconditionsLocked(
 		if _, err := rand.Read(transactionID[:]); err != nil {
 			return err
 		}
-		var readSet []storagev2.DocumentPrecondition
-		var collectionReadSet []storagev2.CollectionPrecondition
+		var readSet []storage.DocumentPrecondition
+		var collectionReadSet []storage.CollectionPrecondition
 		if preconditions != nil {
 			readSet = preconditions[index]
 		}
@@ -762,13 +762,13 @@ func (db *DB) commitV2ChangeBatchesWithPreconditionsLocked(
 		}
 		transactions[index] = transaction
 	}
-	db.metrics.v2CommitAttempts.Add(uint64(len(batches)))
+	db.metrics.durableCommitAttempts.Add(uint64(len(batches)))
 	started := time.Now()
 	sequences, err := store.file.ApplyDocumentTransactionGroup(transactions)
 	if err != nil {
-		mapped := mapStorageV2Error(err)
+		mapped := mapStorageError(err)
 		if !errors.Is(mapped, ErrDuplicateID) && !errors.Is(mapped, ErrDuplicateKey) && !errors.Is(mapped, ErrInvalidIndex) && !errors.Is(mapped, ErrResourceLimit) && !errors.Is(mapped, ErrWriteConflict) {
-			db.metrics.v2RejectedTransactions.Add(uint64(len(batches)))
+			db.metrics.durableRejectedTransactions.Add(uint64(len(batches)))
 			db.fatalErr = fmt.Errorf("%w: %v", ErrDurability, mapped)
 			return db.fatalErr
 		}
@@ -778,18 +778,18 @@ func (db *DB) commitV2ChangeBatchesWithPreconditionsLocked(
 		return mapped
 	}
 	if len(sequences) != len(batches) {
-		db.fatalErr = fmt.Errorf("%w: V2 grouped commit sequence count", ErrDurability)
+		db.fatalErr = fmt.Errorf("%w: grouped commit sequence count", ErrDurability)
 		return db.fatalErr
 	}
 	for index, sequence := range sequences {
 		if sequence != db.token+uint64(index)+1 {
-			db.fatalErr = fmt.Errorf("%w: V2 grouped commit sequence mismatch", ErrDurability)
+			db.fatalErr = fmt.Errorf("%w: grouped commit sequence mismatch", ErrDurability)
 			return db.fatalErr
 		}
 	}
 	if store.rollbackAnchor != nil {
 		if err := store.advanceRollbackAnchor(ctx, sequences[len(sequences)-1]); err != nil {
-			db.metrics.v2RejectedTransactions.Add(uint64(len(batches)))
+			db.metrics.durableRejectedTransactions.Add(uint64(len(batches)))
 			db.fatalErr = fmt.Errorf("%w: grouped commit sequence %d but %w", ErrDurability, sequences[len(sequences)-1], err)
 			return db.fatalErr
 		}
@@ -806,13 +806,13 @@ func (db *DB) commitV2ChangeBatchesWithPreconditionsLocked(
 		db.publish(batch)
 	}
 	elapsed := uint64(time.Since(started))
-	db.metrics.v2CommittedTransactions.Add(uint64(len(batches)))
-	db.metrics.v2CommitNanos.Add(elapsed)
-	updateAtomicMax(&db.metrics.v2CommitMaxNanos, elapsed)
+	db.metrics.durableCommittedTransactions.Add(uint64(len(batches)))
+	db.metrics.durableCommitNanos.Add(elapsed)
+	updateAtomicMax(&db.metrics.durableCommitMaxNanos, elapsed)
 	return nil
 }
 
-func (store *v2DurableStore) advanceRollbackAnchor(ctx context.Context, minimumSequence uint64) error {
+func (store *durableStore) advanceRollbackAnchor(ctx context.Context, minimumSequence uint64) error {
 	if store == nil || store.rollbackAnchor == nil || zeroDatabaseID(store.databaseID) {
 		return ErrRollbackAnchor
 	}
@@ -854,7 +854,7 @@ func (store *v2DurableStore) advanceRollbackAnchor(ctx context.Context, minimumS
 	return nil
 }
 
-func (db *DB) advanceV2RollbackAnchorLocked(ctx context.Context, store *v2DurableStore, minimumSequence uint64) error {
+func (db *DB) advanceRollbackAnchorLocked(ctx context.Context, store *durableStore, minimumSequence uint64) error {
 	if store == nil || store.rollbackAnchor == nil {
 		return nil
 	}
@@ -866,7 +866,7 @@ func (db *DB) advanceV2RollbackAnchorLocked(ctx context.Context, store *v2Durabl
 	return nil
 }
 
-func (db *DB) advanceV2RollbackAnchor(ctx context.Context, store *v2DurableStore, minimumSequence uint64) error {
+func (db *DB) advanceRollbackAnchor(ctx context.Context, store *durableStore, minimumSequence uint64) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	if db.closed {
@@ -875,24 +875,24 @@ func (db *DB) advanceV2RollbackAnchor(ctx context.Context, store *v2DurableStore
 	if db.fatalErr != nil {
 		return db.fatalErr
 	}
-	return db.advanceV2RollbackAnchorLocked(ctx, store, minimumSequence)
+	return db.advanceRollbackAnchorLocked(ctx, store, minimumSequence)
 }
 
 // collectIndexEntries streams the Primary B+Tree at one exact sequence. It may
 // run outside db.mu; a changed current sequence is an optimistic conflict, not
-// a durability fault. It deliberately does not consult db.collections: V2 keeps only
+// a durability fault. It deliberately does not consult db.collections:  keeps only
 // collection/index metadata in memory and treats the immutable storage roots as
 // the source of truth for document contents.
-func (store *v2DurableStore) collectIndexEntries(ctx context.Context, sequence uint64, collection string, definition IndexDefinition, budget *indexBuildBudget) (_ []storagev2.IndexEntry, resultErr error) {
+func (store *durableStore) collectIndexEntries(ctx context.Context, sequence uint64, collection string, definition IndexDefinition, budget *indexBuildBudget) (_ []storage.IndexEntry, resultErr error) {
 	if store == nil || store.file == nil {
 		return nil, ErrClosed
 	}
 	snapshot, err := store.file.OpenSnapshot()
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
 	defer func() {
-		if closeErr := mapStorageV2Error(snapshot.Close()); resultErr == nil && closeErr != nil {
+		if closeErr := mapStorageError(snapshot.Close()); resultErr == nil && closeErr != nil {
 			resultErr = closeErr
 		}
 	}()
@@ -904,14 +904,14 @@ func (store *v2DurableStore) collectIndexEntries(ctx context.Context, sequence u
 	}
 	iterator, err := snapshot.OpenCollectionIterator(collection, nil, nil, 0)
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
 	defer func() {
-		if closeErr := mapStorageV2Error(iterator.Close()); resultErr == nil && closeErr != nil {
+		if closeErr := mapStorageError(iterator.Close()); resultErr == nil && closeErr != nil {
 			resultErr = closeErr
 		}
 	}()
-	entries := make([]storagev2.IndexEntry, 0)
+	entries := make([]storage.IndexEntry, 0)
 	fields := indexDefinitionFields(definition)
 	paths := make([][][]byte, len(fields))
 	for index, field := range fields {
@@ -923,14 +923,14 @@ func (store *v2DurableStore) collectIndexEntries(ctx context.Context, sequence u
 		}
 		record := iterator.Record()
 		if record.InsertionPosition == 0 {
-			return nil, fmt.Errorf("%w: V2 stored document", ErrCorrupt)
+			return nil, fmt.Errorf("%w: stored document", ErrCorrupt)
 		}
 		values := make([]Value, len(fields))
 		present := 0
 		for index, path := range paths {
 			value, exists, scalar, decodeErr := projectStoredDocumentScalar(record.Document, path, DocumentID(record.DocumentID))
 			if decodeErr != nil {
-				return nil, fmt.Errorf("%w: V2 stored document", ErrCorrupt)
+				return nil, fmt.Errorf("%w: stored document", ErrCorrupt)
 			}
 			if !exists {
 				break
@@ -961,10 +961,10 @@ func (store *v2DurableStore) collectIndexEntries(ctx context.Context, sequence u
 		if err := budget.add(key); err != nil {
 			return nil, err
 		}
-		entries = append(entries, storagev2.IndexEntry{Key: key, InsertionPosition: record.InsertionPosition, DocumentID: record.DocumentID})
+		entries = append(entries, storage.IndexEntry{Key: key, InsertionPosition: record.InsertionPosition, DocumentID: record.DocumentID})
 	}
 	if err := iterator.Err(); err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
 	if err := contextError(ctx); err != nil {
 		return nil, err
@@ -972,18 +972,18 @@ func (store *v2DurableStore) collectIndexEntries(ctx context.Context, sequence u
 	return entries, nil
 }
 
-func storageV2IndexFields(definition IndexDefinition) []storagev2.IndexField {
+func storageIndexFields(definition IndexDefinition) []storage.IndexField {
 	fields := indexDefinitionFields(definition)
-	result := make([]storagev2.IndexField, len(fields))
+	result := make([]storage.IndexField, len(fields))
 	for index, field := range fields {
-		result[index] = storagev2.IndexField{Path: field.Field, Direction: int8(field.Order)}
+		result[index] = storage.IndexField{Path: field.Field, Direction: int8(field.Order)}
 	}
 	return result
 }
 
-func publicV2IndexFields(fieldPath string, fields []storagev2.IndexField) ([]IndexField, error) {
+func publicIndexFields(fieldPath string, fields []storage.IndexField) ([]IndexField, error) {
 	if len(fields) == 0 {
-		fields = []storagev2.IndexField{{Path: fieldPath, Direction: 1}}
+		fields = []storage.IndexField{{Path: fieldPath, Direction: 1}}
 	}
 	result := make([]IndexField, len(fields))
 	for index, field := range fields {
@@ -996,8 +996,8 @@ func publicV2IndexFields(fieldPath string, fields []storagev2.IndexField) ([]Ind
 	return cloneIndexFields(definition.Fields), nil
 }
 
-func (store *v2DurableStore) storageDBStats() StorageStats {
-	stats := StorageStats{Engine: "v2"}
+func (store *durableStore) storageDBStats() StorageStats {
+	stats := StorageStats{Engine: "current"}
 	if store == nil || store.file == nil {
 		return stats
 	}
@@ -1056,14 +1056,14 @@ func (store *v2DurableStore) storageDBStats() StorageStats {
 	return stats
 }
 
-func (store *v2DurableStore) syncDB(db *DB) error {
+func (store *durableStore) syncDB(db *DB) error {
 	if db.fatalErr != nil {
 		return db.fatalErr
 	}
-	return nil // every V2 commit is already data+meta fsynced
+	return nil // every commit is already data+meta fsynced
 }
 
-func (store *v2DurableStore) closeDB(db *DB) error {
+func (store *durableStore) closeDB(db *DB) error {
 	if store == nil || store.file == nil {
 		return db.fatalErr
 	}
@@ -1087,51 +1087,51 @@ func (db *DB) OpenQueryReplay(ctx context.Context, collection string, query Quer
 	return db.replaySource.OpenQueryReplay(ctx, collection, query, afterToken, buffer)
 }
 
-func mapStorageV2Error(err error) error {
+func mapStorageError(err error) error {
 	switch {
-	case errors.Is(err, storagev2.ErrLocked):
+	case errors.Is(err, storage.ErrLocked):
 		return fmt.Errorf("%w: %v", ErrDatabaseLocked, err)
-	case errors.Is(err, storagev2.ErrStaleSnapshot):
+	case errors.Is(err, storage.ErrStaleSnapshot):
 		return fmt.Errorf("%w: %v", ErrRollbackDetected, err)
-	case errors.Is(err, storagev2.ErrDatabaseIdentity):
+	case errors.Is(err, storage.ErrDatabaseIdentity):
 		return fmt.Errorf("%w: %v", ErrDatabaseIdentity, err)
-	case errors.Is(err, storagev2.ErrInsecureFileMode):
+	case errors.Is(err, storage.ErrInsecureFileMode):
 		return ErrInsecureFileMode
-	case errors.Is(err, storagev2.ErrUnsupportedFormat), errors.Is(err, storagev2.ErrUnsupportedFeature):
+	case errors.Is(err, storage.ErrUnsupportedFormat), errors.Is(err, storage.ErrUnsupportedFeature):
 		return fmt.Errorf("%w: %v", ErrUnsupportedFormat, err)
-	case errors.Is(err, storagev2.ErrReclamationConflict):
+	case errors.Is(err, storage.ErrReclamationConflict):
 		return fmt.Errorf("%w: %v", ErrReclamationConflict, err)
-	case errors.Is(err, storagev2.ErrUniqueConflict):
+	case errors.Is(err, storage.ErrUniqueConflict):
 		return ErrDuplicateKey
-	case errors.Is(err, storagev2.ErrDocumentExists):
+	case errors.Is(err, storage.ErrDocumentExists):
 		return ErrDuplicateID
-	case errors.Is(err, storagev2.ErrIndexExists):
+	case errors.Is(err, storage.ErrIndexExists):
 		return ErrInvalidIndex
-	case errors.Is(err, storagev2.ErrIndexBuildExists):
+	case errors.Is(err, storage.ErrIndexBuildExists):
 		return ErrIndexBuildExists
-	case errors.Is(err, storagev2.ErrIndexBuildNotFound):
+	case errors.Is(err, storage.ErrIndexBuildNotFound):
 		return ErrIndexBuildNotFound
-	case errors.Is(err, storagev2.ErrIndexBuildState):
+	case errors.Is(err, storage.ErrIndexBuildState):
 		return ErrWriteConflict
-	case errors.Is(err, storagev2.ErrDocumentConflict):
+	case errors.Is(err, storage.ErrDocumentConflict):
 		return ErrWriteConflict
-	case errors.Is(err, storagev2.ErrIndexBuildHistoryLost):
+	case errors.Is(err, storage.ErrIndexBuildHistoryLost):
 		return ErrHistoryLost
-	case errors.Is(err, storagev2.ErrHistoryLost):
+	case errors.Is(err, storage.ErrHistoryLost):
 		return ErrHistoryLost
-	case errors.Is(err, storagev2.ErrDurableConsumerExists):
+	case errors.Is(err, storage.ErrDurableConsumerExists):
 		return ErrDurableConsumerExists
-	case errors.Is(err, storagev2.ErrDurableConsumerNotFound):
+	case errors.Is(err, storage.ErrDurableConsumerNotFound):
 		return ErrDurableConsumerNotFound
-	case errors.Is(err, storagev2.ErrIndexKeyTooLarge):
+	case errors.Is(err, storage.ErrIndexKeyTooLarge):
 		return ErrInvalidIndex
-	case errors.Is(err, storagev2.ErrStorageLimit):
-		return fmt.Errorf("%w: V2 physical storage quota", ErrResourceLimit)
-	case errors.Is(err, storagev2.ErrInvalidStorageLimit):
+	case errors.Is(err, storage.ErrStorageLimit):
+		return fmt.Errorf("%w: physical storage quota", ErrResourceLimit)
+	case errors.Is(err, storage.ErrInvalidStorageLimit):
 		return ErrInvalidResourceLimits
-	case errors.Is(err, storagev2.ErrCorrupt):
+	case errors.Is(err, storage.ErrCorrupt):
 		return fmt.Errorf("%w: %v", ErrCorrupt, err)
-	case errors.Is(err, storagev2.ErrRecoveryRequired):
+	case errors.Is(err, storage.ErrRecoveryRequired):
 		return ErrRecoveryRequired
 	default:
 		return err

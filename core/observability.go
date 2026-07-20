@@ -26,21 +26,21 @@ type DBStats struct {
 	Indexes              uint64        `json:"indexes"`
 	ActiveChangeWatchers uint64        `json:"activeChangeWatchers"`
 
-	Commits           CommitStats              `json:"commits"`
-	Transactions      WriteTransactionStats    `json:"writeTransactions"`
-	Queries           QueryStats               `json:"queries"`
-	Realtime          RealtimeStats            `json:"realtime"`
-	CommitCoordinator V2CommitCoordinatorStats `json:"commitCoordinator"`
-	PrimaryWriteFence V2PrimaryWriteFenceStats `json:"primaryWriteFence"`
-	Durability        DurabilityStats          `json:"durability"`
-	Storage           StorageStats             `json:"storage"`
-	Compaction        CompactionStats          `json:"compaction"`
-	Reclamation       ReclamationStats         `json:"reclamation"`
-	Backup            BackupStats              `json:"backup"`
-	Diagnostics       DiagnosticStats          `json:"diagnostics"`
-	Recovery          RecoveryReport           `json:"recovery"`
-	Resources         ResourceStats            `json:"resources"`
-	IndexBuilds       IndexBuildStats          `json:"indexBuilds"`
+	Commits           CommitStats            `json:"commits"`
+	Transactions      WriteTransactionStats  `json:"writeTransactions"`
+	Queries           QueryStats             `json:"queries"`
+	Realtime          RealtimeStats          `json:"realtime"`
+	CommitCoordinator CommitCoordinatorStats `json:"commitCoordinator"`
+	PrimaryWriteFence PrimaryWriteFenceStats `json:"primaryWriteFence"`
+	Durability        DurabilityStats        `json:"durability"`
+	Storage           StorageStats           `json:"storage"`
+	Compaction        CompactionStats        `json:"compaction"`
+	Reclamation       ReclamationStats       `json:"reclamation"`
+	Backup            BackupStats            `json:"backup"`
+	Diagnostics       DiagnosticStats        `json:"diagnostics"`
+	Recovery          RecoveryReport         `json:"recovery"`
+	Resources         ResourceStats          `json:"resources"`
+	IndexBuilds       IndexBuildStats        `json:"indexBuilds"`
 }
 
 type ResourceStats struct {
@@ -101,11 +101,13 @@ type DurabilityStats struct {
 	CheckpointMaxLatency time.Duration `json:"checkpointMaxLatencyNanos"`
 }
 
-// V2CommitCoordinatorStats is a fixed-cardinality snapshot of the optional
-// V2 write-admission scheduler. It is included in DBStats and the versioned
+// CommitCoordinatorStats is a fixed-cardinality snapshot of the optional
+//
+//	write-admission scheduler. It is included in DBStats and the versioned
+//
 // admin schema, so applications can alert on admission pressure without
 // inspecting a mutable queue or adding application labels.
-type V2CommitCoordinatorStats struct {
+type CommitCoordinatorStats struct {
 	Enabled             bool   `json:"enabled"`
 	Pending             uint64 `json:"pending"`
 	PendingCapacity     uint64 `json:"pendingCapacity"`
@@ -116,12 +118,12 @@ type V2CommitCoordinatorStats struct {
 	OutcomeUnknown      uint64 `json:"outcomeUnknown"`
 }
 
-// V2PrimaryWriteFenceStats is a fixed-cardinality view of the optional
+// PrimaryWriteFenceStats is a fixed-cardinality view of the optional
 // external primary-write guard. Configured means a guard was supplied at open;
 // Enforced is false while a read-only follower applies validated source
 // history. Checks and Rejected count only actual primary write admissions.
 // No lease, epoch, endpoint, database ID, or controller detail is exposed.
-type V2PrimaryWriteFenceStats struct {
+type PrimaryWriteFenceStats struct {
 	Configured bool   `json:"configured"`
 	Enforced   bool   `json:"enforced"`
 	Checks     uint64 `json:"checks"`
@@ -310,10 +312,10 @@ type dbMetrics struct {
 	pendingReactiveBytes                                  atomic.Uint64
 	sharedDeltas, deltaDeliveries, deltaOperations        atomic.Uint64
 
-	v2CommitAttempts, v2CommittedTransactions          atomic.Uint64
-	v2RejectedTransactions, v2CommitNanos              atomic.Uint64
-	v2CommitMaxNanos                                   atomic.Uint64
-	primaryWriteFenceChecks, primaryWriteFenceRejected atomic.Uint64
+	durableCommitAttempts, durableCommittedTransactions atomic.Uint64
+	durableRejectedTransactions, durableCommitNanos     atomic.Uint64
+	durableCommitMaxNanos                               atomic.Uint64
+	primaryWriteFenceChecks, primaryWriteFenceRejected  atomic.Uint64
 
 	compactionActive, compactionAttempts, compactionCompleted     atomic.Uint64
 	compactionFailed, compactionInputBytes, compactionOutputBytes atomic.Uint64
@@ -346,7 +348,7 @@ func (db *DB) Stats() DBStats {
 		return stats
 	}
 
-	var coordinator *v2CommitCoordinator
+	var coordinator *commitCoordinator
 	var dispatcher *changeDispatcher
 	var dispatch changeDispatcherStats
 	db.mu.RLock()
@@ -366,7 +368,7 @@ func (db *DB) Stats() DBStats {
 	dispatcher = db.dispatcher
 	if provider, ok := db.durability.(storageStatsBackend); ok {
 		stats.Storage = provider.storageDBStats()
-		if stats.Storage.Engine == "v2" {
+		if stats.Storage.Engine == "current" {
 			stats.Documents = stats.Storage.Documents
 			stats.Collections = stats.Storage.Collections
 		}
@@ -504,11 +506,11 @@ func (db *DB) Stats() DBStats {
 	if diagnostics := db.diagnostics.Load(); diagnostics != nil {
 		stats.Diagnostics = diagnostics.Stats()
 	}
-	stats.Storage.CommitAttempts = db.metrics.v2CommitAttempts.Load()
-	stats.Storage.CommittedTransactions = db.metrics.v2CommittedTransactions.Load()
-	stats.Storage.RejectedTransactions = db.metrics.v2RejectedTransactions.Load()
-	stats.Storage.CommitNanos = db.metrics.v2CommitNanos.Load()
-	stats.Storage.CommitMaxLatency = time.Duration(db.metrics.v2CommitMaxNanos.Load())
+	stats.Storage.CommitAttempts = db.metrics.durableCommitAttempts.Load()
+	stats.Storage.CommittedTransactions = db.metrics.durableCommittedTransactions.Load()
+	stats.Storage.RejectedTransactions = db.metrics.durableRejectedTransactions.Load()
+	stats.Storage.CommitNanos = db.metrics.durableCommitNanos.Load()
+	stats.Storage.CommitMaxLatency = time.Duration(db.metrics.durableCommitMaxNanos.Load())
 	return stats
 }
 
@@ -534,7 +536,7 @@ func (db *DB) recordLiveCommit(batch ChangeBatch) {
 
 // initializeLogicalStats performs the one allowed catalog walk while a DB is
 // still private to its constructor. Live commits maintain the gauges in O(1),
-// and Stats never repeats this work. V2 keeps documents outside the compatibility
+// and Stats never repeats this work.  keeps documents outside the compatibility
 // mirror, so its authoritative persistent count is supplied explicitly.
 func (db *DB) initializeLogicalStats(persistentDocuments *uint64) {
 	if db == nil {

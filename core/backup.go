@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-type BackupV2Result struct {
+type BackupResult struct {
 	Bytes          uint64 `json:"bytes"`
 	Pages          uint64 `json:"pages"`
 	CommitSequence uint64 `json:"commitSequence"`
@@ -23,11 +23,11 @@ type BackupV2Result struct {
 	SHA256         string `json:"sha256"`
 }
 
-// BackupV2 writes an exact, verified physical copy to a new path. It preserves
+// Backup writes an exact, verified physical copy to a new path. It preserves
 // database identity and Commit Log history, so the result is a restore artifact
 // rather than an independent writable fork. The source writer is blocked for
 // the copy duration; readers remain available.
-func (db *DB) BackupV2(ctx context.Context, destination string) (result BackupV2Result, resultErr error) {
+func (db *DB) Backup(ctx context.Context, destination string) (result BackupResult, resultErr error) {
 	if db == nil {
 		return result, ErrBackupUnsupported
 	}
@@ -41,20 +41,20 @@ func (db *DB) BackupV2(ctx context.Context, destination string) (result BackupV2
 	if err != nil {
 		return result, err
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return result, ErrBackupUnsupported
 	}
 	store.compactMu.Lock()
 	defer store.compactMu.Unlock()
-	return db.backupV2WithStoreLocked(ctx, absoluteDestination, store)
+	return db.backupWithStoreLocked(ctx, absoluteDestination, store)
 }
 
-// backupV2WithStoreLocked is the physical-copy half shared by ordinary
+// backupWithStoreLocked is the physical-copy half shared by ordinary
 // backups and archive bootstrap. The caller holds store.compactMu, which also
 // makes DB.Close wait until a newly created durable checkpoint has either been
 // paired with its verified snapshot or removed on failure.
-func (db *DB) backupV2WithStoreLocked(ctx context.Context, absoluteDestination string, store *v2DurableStore) (result BackupV2Result, resultErr error) {
+func (db *DB) backupWithStoreLocked(ctx context.Context, absoluteDestination string, store *durableStore) (result BackupResult, resultErr error) {
 	if db == nil || store == nil || store.file == nil || absoluteDestination == "" {
 		return result, ErrBackupUnsupported
 	}
@@ -97,19 +97,19 @@ func (db *DB) backupV2WithStoreLocked(ctx context.Context, absoluteDestination s
 	syncErr := temporary.Sync()
 	closeErr := temporary.Close()
 	if err := errors.Join(copyErr, syncErr, closeErr); err != nil {
-		return result, mapStorageV2Error(err)
+		return result, mapStorageError(err)
 	}
 	if copyResult.Meta.CommitSequence != db.token || copyResult.Meta.DatabaseID != db.databaseID ||
-		copyResult.Bytes < copyResult.Meta.PhysicalPageCount*storagev2.PageSize || copyResult.Bytes%storagev2.PageSize != 0 {
+		copyResult.Bytes < copyResult.Meta.PhysicalPageCount*storage.PageSize || copyResult.Bytes%storage.PageSize != 0 {
 		return result, ErrCorrupt
 	}
 	readDigest, err := hashBackupFile(ctx, temporaryPath, copyResult.Bytes)
 	if err != nil || readDigest != copyResult.SHA256 {
 		return result, errors.Join(ErrCorrupt, err)
 	}
-	verifiedFile, verifiedMeta, err := storagev2.Open(temporaryPath)
+	verifiedFile, verifiedMeta, err := storage.Open(temporaryPath)
 	if err != nil {
-		return result, mapStorageV2Error(err)
+		return result, mapStorageError(err)
 	}
 	if verifiedMeta != copyResult.Meta {
 		_ = verifiedFile.Close()
@@ -118,7 +118,7 @@ func (db *DB) backupV2WithStoreLocked(ctx context.Context, absoluteDestination s
 	_, auditErr := verifiedFile.ReachabilityContext(ctx)
 	auditErr = errors.Join(auditErr, verifiedFile.Close())
 	if auditErr != nil {
-		return result, mapStorageV2Error(auditErr)
+		return result, mapStorageError(auditErr)
 	}
 	verified, err := Open(temporaryPath)
 	if err != nil {
@@ -147,8 +147,8 @@ func (db *DB) backupV2WithStoreLocked(ctx context.Context, absoluteDestination s
 	db.metrics.backupLastBytes.Store(copyResult.Bytes)
 	db.metrics.backupCompleted.Add(1)
 	succeeded = true
-	return BackupV2Result{
-		Bytes: copyResult.Bytes, Pages: copyResult.Bytes / storagev2.PageSize,
+	return BackupResult{
+		Bytes: copyResult.Bytes, Pages: copyResult.Bytes / storage.PageSize,
 		CommitSequence: copyResult.Meta.CommitSequence, MetaGeneration: copyResult.Meta.Generation,
 		DatabaseIDHex: hex.EncodeToString(copyResult.Meta.DatabaseID[:]), SHA256: hex.EncodeToString(copyResult.SHA256[:]),
 	}, nil

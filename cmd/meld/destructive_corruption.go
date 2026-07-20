@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/crapthings/meldbase/core"
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const (
@@ -22,32 +22,32 @@ const (
 	maxCorruptionPageSamples                  = 128
 )
 
-var destructiveCorruptionOffsets = []uint64{0, 7, 8, 31, 63, 127, 223, 224, 255, 511, 1023, 2047, 3071, storagev2.PageSize - 1}
+var destructiveCorruptionOffsets = []uint64{0, 7, 8, 31, 63, 127, 223, 224, 255, 511, 1023, 2047, 3071, storage.PageSize - 1}
 
 type destructiveCorruptionReceipt struct {
-	SchemaVersion     uint32                        `json:"schemaVersion"`
-	SourceRevision    string                        `json:"sourceRevision,omitempty"`
-	BuildRevision     string                        `json:"buildRevision,omitempty"`
-	BuildModified     bool                          `json:"buildModified"`
-	GOOS              string                        `json:"goos"`
-	GOARCH            string                        `json:"goarch"`
-	GoVersion         string                        `json:"goVersion"`
-	DatabaseArtifact  string                        `json:"databaseArtifact"`
-	DatabaseSHA256    string                        `json:"databaseSha256"`
-	Baseline          meldbase.V2VerificationReport `json:"baseline"`
-	SampledPages      []uint64                      `json:"sampledPages"`
-	OffsetsWithinPage []uint64                      `json:"offsetsWithinPage"`
-	MutationCount     int                           `json:"mutationCount"`
-	DetectedCount     int                           `json:"detectedCount"`
-	ValidOutcomeCount int                           `json:"validOutcomeCount"`
-	ValidOutcomeBySeq map[string]int                `json:"validOutcomeBySequence"`
-	StartedAt         time.Time                     `json:"startedAt"`
-	FinishedAt        time.Time                     `json:"finishedAt"`
-	Passed            bool                          `json:"passed"`
+	SchemaVersion     uint32                      `json:"schemaVersion"`
+	SourceRevision    string                      `json:"sourceRevision,omitempty"`
+	BuildRevision     string                      `json:"buildRevision,omitempty"`
+	BuildModified     bool                        `json:"buildModified"`
+	GOOS              string                      `json:"goos"`
+	GOARCH            string                      `json:"goarch"`
+	GoVersion         string                      `json:"goVersion"`
+	DatabaseArtifact  string                      `json:"databaseArtifact"`
+	DatabaseSHA256    string                      `json:"databaseSha256"`
+	Baseline          meldbase.VerificationReport `json:"baseline"`
+	SampledPages      []uint64                    `json:"sampledPages"`
+	OffsetsWithinPage []uint64                    `json:"offsetsWithinPage"`
+	MutationCount     int                         `json:"mutationCount"`
+	DetectedCount     int                         `json:"detectedCount"`
+	ValidOutcomeCount int                         `json:"validOutcomeCount"`
+	ValidOutcomeBySeq map[string]int              `json:"validOutcomeBySequence"`
+	StartedAt         time.Time                   `json:"startedAt"`
+	FinishedAt        time.Time                   `json:"finishedAt"`
+	Passed            bool                        `json:"passed"`
 }
 
 type destructiveCorruptionCampaignResult struct {
-	Baseline          meldbase.V2VerificationReport
+	Baseline          meldbase.VerificationReport
 	SampledPages      []uint64
 	MutationCount     int
 	DetectedCount     int
@@ -58,7 +58,7 @@ type destructiveCorruptionCampaignResult struct {
 func runDestructiveCorruptionCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-corruption-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	databasePath := flags.String("database", "", "existing V2 database that will never be modified")
+	databasePath := flags.String("database", "", "existing database that will never be modified")
 	outputPath := flags.String("out", "", "new machine-readable corruption campaign receipt")
 	pageSamples := flags.Int("page-samples", maxCorruptionPageSamples, "maximum deterministically sampled physical pages")
 	sourceRevision := flags.String("source-revision", "", "optional 40- or 64-hex source revision")
@@ -164,10 +164,10 @@ func executeDestructiveCorruptionCampaign(ctx context.Context, database string, 
 	if pageSampleLimit < 2 || pageSampleLimit > maxCorruptionPageSamples {
 		return result, errors.New("corruption campaign page sample limit is invalid")
 	}
-	baseline, err := meldbase.VerifyV2File(ctx, database)
+	baseline, err := meldbase.VerifyFile(ctx, database)
 	if err != nil || !baseline.Verified || !baseline.IndexContentsVerified || !baseline.IndexBuildContentsVerified ||
 		baseline.ValidMetaSlots != 2 || baseline.TrailingBytes != 0 || baseline.PhysicalPages < 2 {
-		return result, fmt.Errorf("corruption campaign requires a completely verified V2 source: %w", err)
+		return result, fmt.Errorf("corruption campaign requires a completely verified source: %w", err)
 	}
 	allowedSequences, databaseID, err := corruptionAllowedMetaOutcomes(database)
 	if err != nil {
@@ -199,7 +199,7 @@ func executeDestructiveCorruptionCampaign(ctx context.Context, database string, 
 	result = destructiveCorruptionCampaignResult{Baseline: baseline, SampledPages: pages, ValidOutcomeBySeq: make(map[string]int)}
 	for _, page := range pages {
 		for _, within := range destructiveCorruptionOffsets {
-			offset := int64(page*storagev2.PageSize + within)
+			offset := int64(page*storage.PageSize + within)
 			original := []byte{0}
 			if _, err := temporary.ReadAt(original, offset); err != nil {
 				return result, err
@@ -211,7 +211,7 @@ func executeDestructiveCorruptionCampaign(ctx context.Context, database string, 
 			if err := temporary.Sync(); err != nil {
 				return result, err
 			}
-			verification, verifyErr := meldbase.VerifyV2File(ctx, temporaryPath)
+			verification, verifyErr := meldbase.VerifyFile(ctx, temporaryPath)
 			if _, err := temporary.WriteAt(original, offset); err != nil {
 				return result, err
 			}
@@ -250,11 +250,11 @@ func corruptionAllowedMetaOutcomes(path string) (map[uint64]struct{}, string, er
 	allowed := make(map[uint64]struct{}, 2)
 	databaseID := ""
 	for slot := range 2 {
-		page := make([]byte, storagev2.PageSize)
-		if _, err := file.ReadAt(page, int64(slot*storagev2.PageSize)); err != nil {
+		page := make([]byte, storage.PageSize)
+		if _, err := file.ReadAt(page, int64(slot*storage.PageSize)); err != nil {
 			return nil, "", err
 		}
-		meta, err := storagev2.DecodeMeta(page)
+		meta, err := storage.DecodeMeta(page)
 		if err != nil {
 			continue
 		}

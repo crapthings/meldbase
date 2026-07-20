@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"os"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 // StorageFormatInfo is a read-only negotiation view, not a full graph audit.
@@ -56,13 +56,13 @@ func DetectStorageFormat(path string) (StorageFormat, error) {
 	if info.Size() == 0 {
 		return StorageFormatUnknown, nil
 	}
-	if info.Size() < 2*int64(storagev2.PageSize) {
+	if info.Size() < 2*int64(storage.PageSize) {
 		return StorageFormatUnknown, ErrCorrupt
 	}
 	var pages [2][]byte
 	for slot := range pages {
-		pages[slot] = make([]byte, storagev2.PageSize)
-		if _, err := file.ReadAt(pages[slot], int64(slot)*int64(storagev2.PageSize)); err != nil {
+		pages[slot] = make([]byte, storage.PageSize)
+		if _, err := file.ReadAt(pages[slot], int64(slot)*int64(storage.PageSize)); err != nil {
 			return StorageFormatUnknown, err
 		}
 	}
@@ -86,8 +86,8 @@ func InspectStorageFormat(path string) (StorageFormatInfo, error) {
 	defer file.Close()
 	var pages [2][]byte
 	for slot := range pages {
-		pages[slot] = make([]byte, storagev2.PageSize)
-		if _, err := file.ReadAt(pages[slot], int64(slot)*int64(storagev2.PageSize)); err != nil {
+		pages[slot] = make([]byte, storage.PageSize)
+		if _, err := file.ReadAt(pages[slot], int64(slot)*int64(storage.PageSize)); err != nil {
 			return StorageFormatInfo{}, err
 		}
 	}
@@ -95,10 +95,10 @@ func InspectStorageFormat(path string) (StorageFormatInfo, error) {
 }
 
 func inspectCurrentFormat(pages [2][]byte) (StorageFormatInfo, error) {
-	var envelopes [2]storagev2.MetaEnvelope
+	var envelopes [2]storage.MetaEnvelope
 	valid := [2]bool{}
 	for slot := range pages {
-		envelope, err := storagev2.InspectMetaEnvelope(pages[slot])
+		envelope, err := storage.InspectMetaEnvelope(pages[slot])
 		if err == nil {
 			envelopes[slot], valid[slot] = envelope, true
 		}
@@ -121,8 +121,8 @@ func inspectCurrentFormat(pages [2][]byte) (StorageFormatInfo, error) {
 	if valid[0] && valid[1] {
 		validSlots = 2
 	}
-	compatible := envelope.Revision == storagev2.FormatVersion && envelope.HeaderSize == storagev2.MetaHeaderSize &&
-		envelope.PageSize == storagev2.PageSize && envelope.RequiredFeatures&^storagev2.SupportedRequiredFeatures == 0
+	compatible := envelope.Revision == storage.FormatVersion && envelope.HeaderSize == storage.MetaHeaderSize &&
+		envelope.PageSize == storage.PageSize && envelope.RequiredFeatures&^storage.SupportedRequiredFeatures == 0
 	return StorageFormatInfo{
 		Format: StorageFormatCurrent, Revision: envelope.Revision, Generation: envelope.Generation,
 		CommitSequence: envelope.CommitSequence, PhysicalPageCount: envelope.PhysicalPageCount,

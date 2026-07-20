@@ -29,7 +29,7 @@ func (cursor *CommitCursor) ResolveChange(change CommitChange) (ResolvedCommitCh
 	cursor.file.mu.RLock()
 	defer cursor.file.mu.RUnlock()
 	if cursor.file.file == nil {
-		return ResolvedCommitChange{}, errors.New("meldbase storage v2: file is closed")
+		return ResolvedCommitChange{}, errors.New("meldbase storage: file is closed")
 	}
 	return cursor.file.resolveCommitChangeUnlocked(change)
 }
@@ -52,7 +52,7 @@ func (stream *LiveCommitStream) ResolveChange(change CommitChange) (ResolvedComm
 	stream.file.mu.RLock()
 	defer stream.file.mu.RUnlock()
 	if stream.file.file == nil {
-		return ResolvedCommitChange{}, errors.New("meldbase storage v2: file is closed")
+		return ResolvedCommitChange{}, errors.New("meldbase storage: file is closed")
 	}
 	if pin, exists := stream.file.readers[stream.pinID]; !exists || !pin.replay || pin.sequence != stream.deliveredSequence {
 		return ResolvedCommitChange{}, ErrCorrupt

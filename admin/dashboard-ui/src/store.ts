@@ -125,7 +125,7 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
       let pages = 0;
       let more = true;
       while (more && pages < 4) {
-        pages += 1;
+       pages += 1;
         const requestedAfter = diagnosticAfter;
         const snapshot = await loadDiagnostics(token, diagnosticAfter, diagnosticController.signal);
         if (!snapshot) {
@@ -156,7 +156,7 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
   },
 }), {
   name: dashboardSessionKey,
-  storage: createJSONStorage(() => sessionStorage),
+ storage: createJSONStorage(() => sessionStorage),
   partialize: (state) => state.rememberSession && state.token ? { token: state.token, rememberSession: true } : {},
   onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
 }));

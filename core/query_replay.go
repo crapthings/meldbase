@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 // QueryReplaySource atomically reconstructs a query at afterToken and tails
@@ -38,24 +38,24 @@ func (subscription *QueryReplaySubscription) Close() {
 	}
 }
 
-// v2QueryReplaySource backs the explicit alpha Open path. It remains internal
+// queryReplaySource backs the explicit alpha Open path. It remains internal
 // so callers depend on the transport-independent QueryReplaySource contract,
-// not Storage V2 implementation details.
-type v2QueryReplaySource struct {
-	file            *storagev2.File
+// not Storage  implementation details.
+type queryReplaySource struct {
+	file            *storage.File
 	deliveryTimeout time.Duration
 	onSlowConsumer  func()
 	onResourceLimit func()
 	resourceLimits  ResourceLimits
 }
 
-func (source *v2QueryReplaySource) OpenQueryReplay(ctx context.Context, collection string, query QuerySpec, afterToken uint64, buffer int) (*QueryReplaySubscription, error) {
+func (source *queryReplaySource) OpenQueryReplay(ctx context.Context, collection string, query QuerySpec, afterToken uint64, buffer int) (*QueryReplaySubscription, error) {
 	if source == nil || source.file == nil || buffer <= 0 || buffer > 1024 {
 		return nil, ErrCorrupt
 	}
 	snapshot, stream, err := source.file.OpenSnapshotAndStreamAt(afterToken)
 	if err != nil {
-		if errors.Is(err, storagev2.ErrHistoryLost) {
+		if errors.Is(err, storage.ErrHistoryLost) {
 			return nil, ErrHistoryLost
 		}
 		return nil, replayCorrupt(err)
@@ -69,7 +69,7 @@ func (source *v2QueryReplaySource) OpenQueryReplay(ctx context.Context, collecti
 			return nil, err
 		}
 	}
-	view, err := newV2ReactiveReplayView(snapshot, collection, query, limits)
+	view, err := newReactiveReplayView(snapshot, collection, query, limits)
 	if closeErr := snapshot.Close(); err == nil && closeErr != nil {
 		err = closeErr
 	}
@@ -95,7 +95,7 @@ func (source *v2QueryReplaySource) OpenQueryReplay(ctx context.Context, collecti
 			batch, err := stream.Next(child)
 			if err != nil {
 				if child.Err() == nil {
-					if errors.Is(err, storagev2.ErrHistoryLost) {
+					if errors.Is(err, storage.ErrHistoryLost) {
 						err = ErrHistoryLost
 					} else {
 						err = replayCorrupt(err)
@@ -132,7 +132,7 @@ func (source *v2QueryReplaySource) OpenQueryReplay(ctx context.Context, collecti
 // deliver bounds a stalled replay consumer. The immediate send preserves the
 // normal zero-allocation path; only a full caller buffer allocates a timer.
 // Ending the stream releases its durable replay pin so retention can recover.
-func (source *v2QueryReplaySource) deliver(ctx context.Context, deltas chan<- QueryDelta, delta QueryDelta) bool {
+func (source *queryReplaySource) deliver(ctx context.Context, deltas chan<- QueryDelta, delta QueryDelta) bool {
 	select {
 	case <-ctx.Done():
 		return false
@@ -140,7 +140,7 @@ func (source *v2QueryReplaySource) deliver(ctx context.Context, deltas chan<- Qu
 		return true
 	default:
 	}
-	timeout := DefaultV2ReplayDeliveryTimeout
+	timeout := DefaultReplayDeliveryTimeout
 	if source != nil && source.deliveryTimeout > 0 {
 		timeout = source.deliveryTimeout
 	}

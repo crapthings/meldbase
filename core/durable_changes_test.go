@@ -10,7 +10,7 @@ import (
 
 func TestDurableCollectionChangesPersistAcrossReopenAndRequireAck(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "durable-collection-changes.meld2")
-	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestDurableCollectionChangesPersistAcrossReopenAndRequireAck(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	db, err = OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err = OpenWithOptions(path, OpenOptions{CommitRetention: CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}

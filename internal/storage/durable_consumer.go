@@ -23,8 +23,8 @@ var (
 
 	// ErrDurableConsumerExists prevents an accidental reset of a durable
 	// checkpoint. Callers must explicitly open the existing consumer instead.
-	ErrDurableConsumerExists   = errors.New("meldbase storage v2: durable consumer already exists")
-	ErrDurableConsumerNotFound = errors.New("meldbase storage v2: durable consumer not found")
+	ErrDurableConsumerExists   = errors.New("meldbase storage: durable consumer already exists")
+	ErrDurableConsumerNotFound = errors.New("meldbase storage: durable consumer not found")
 )
 
 type durableConsumerCheckpoint struct {
@@ -77,7 +77,7 @@ func (f *File) CreateDurableCommitConsumer(name string, after uint64) (*DurableC
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -130,7 +130,7 @@ func (f *File) OpenDurableCommitConsumer(name string) (*DurableCommitConsumer, e
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -162,7 +162,7 @@ func retainedConsumerPosition(root DatabaseRoot, after uint64) error {
 
 func (f *File) openDurableCommitConsumerUnlocked(name string, after uint64) (*DurableCommitConsumer, error) {
 	if f == nil || f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	pinID, err := f.addReaderPinUnlocked(after, f.meta.RootPage, true)
 	if err != nil {
@@ -237,7 +237,7 @@ func (consumer *DurableCommitConsumer) Ack(sequence uint64) error {
 	consumer.file.mu.Lock()
 	defer consumer.file.mu.Unlock()
 	if consumer.file.file == nil {
-		return errors.New("meldbase storage v2: file is closed")
+		return errors.New("meldbase storage: file is closed")
 	}
 	root, err := consumer.file.databaseRootUnlocked()
 	if err != nil {
@@ -360,7 +360,7 @@ func (f *File) DeleteDurableCommitConsumer(name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return errors.New("meldbase storage v2: file is closed")
+		return errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {

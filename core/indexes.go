@@ -40,14 +40,14 @@ func (c *Collection) CreateIndex(ctx context.Context, name string, fields []Inde
 		return err
 	}
 	if usesCompoundIndexCodec(definition) && c.db.durability != nil {
-		if _, storageV2 := c.db.durability.(*v2DurableStore); !storageV2 {
+		if _, storage := c.db.durability.(*durableStore); !storage {
 			return ErrCompoundIndexUnsupported
 		}
 	}
 	budget := c.db.newIndexBuildBudget(c.db.resourceLimits)
-	if store, ok := c.db.durability.(*v2DurableStore); ok && store != nil {
+	if store, ok := c.db.durability.(*durableStore); ok && store != nil {
 		return c.db.observeIndexBuild(budget, func() error {
-			return c.createV2IndexOptimistic(ctx, definition, store, budget)
+			return c.createDurableIndexOptimistic(ctx, definition, store, budget)
 		})
 	}
 	return c.db.observeIndexBuild(budget, func() error {
@@ -78,10 +78,10 @@ func (c *Collection) createLockedIndex(ctx context.Context, definition IndexDefi
 	defer func() { c.db.activeIndexBuild = nil }()
 	var state *indexState
 	if c.db.querySource != nil {
-		// The durable V2 transaction scans one pinned Primary snapshot and owns
+		// The durable  transaction scans one pinned Primary snapshot and owns
 		// uniqueness validation. Keeping a second decoded-document scan here
 		// would both double the work and make CreateIndex depend on the
-		// compatibility mirror that V2 is progressively removing.
+		// compatibility mirror that  is progressively removing.
 		state = &indexState{definition: definition}
 	} else {
 		var err error

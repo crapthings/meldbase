@@ -23,7 +23,7 @@ type DurableConsumerPromotionReadiness struct {
 	Buffer       int
 }
 
-func (readiness DurableConsumerPromotionReadiness) VerifyV2FollowerPromotion(ctx context.Context, request meldbase.FollowerPromotionRequest, record LeaseRecord, exists bool) error {
+func (readiness DurableConsumerPromotionReadiness) VerifyFollowerPromotion(ctx context.Context, request meldbase.FollowerPromotionRequest, record LeaseRecord, exists bool) error {
 	if readiness.Source == nil || readiness.ConsumerName == "" || !exists || record.DatabaseID != request.DatabaseID || record.CommitSequence != request.CommitSequence {
 		return ErrLeasePromotionReadiness
 	}

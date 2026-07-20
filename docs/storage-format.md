@@ -2,7 +2,7 @@
 
 Meldbase has one supported durable format. `Open` and `OpenWithOptions` create
 or open that single-file copy-on-write database; there is no runtime format
-selection, legacy WAL, or automatic migration path.
+selection or automatic migration path.
 
 `DetectStorageFormat` distinguishes a missing/empty path from a valid current
 file. `InspectStorageFormat` reads the two Meta pages without taking a writer
@@ -18,11 +18,10 @@ root. `RecoveryRequireClean` rejects either action before it changes bytes.
 
 ## Alpha compatibility
 
-This is an intentional alpha-format boundary. Builds after this change do not
-open historical V1 files and do not ship a V1-to-current migration API. Before
-upgrading a personal test database, export the data with the old build and
-import it into a newly created database. Production deployments should always
-verify a backup/restore exercise before upgrading.
+This is an intentional alpha-format boundary. A file from an earlier alpha is
+not opened or migrated in place. Export it with its matching build and import it
+into a newly created database. Production deployments should always verify a
+backup/restore exercise before upgrading.
 
 ## Operational commands
 

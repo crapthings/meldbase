@@ -73,12 +73,12 @@ func TestReplicationWireBatchDrivesFollower(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bootstrap, stream, err := source.BeginV2Archive(context.Background(), "wire", directory+"/bootstrap.meld2", 2)
+	bootstrap, stream, err := source.BeginArchive(context.Background(), "wire", directory+"/bootstrap.meld2", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	follower, err := OpenV2Follower(directory+"/bootstrap.meld2", OpenOptions{})
+	follower, err := OpenFollower(directory+"/bootstrap.meld2", OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

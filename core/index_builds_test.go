@@ -8,10 +8,10 @@ import (
 	"sync"
 	"testing"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-func TestV2OnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
+func TestOnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online.meld")
 	db, err := Open(path)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestV2OnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
 	}
 }
 
-func TestV2OnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
+func TestOnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online-compound.meld")
 	db, err := Open(path)
 	if err != nil {
@@ -110,7 +110,7 @@ func TestV2OnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(status.Fields, fields) || status.Field != "tenant" {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
-	if required := db.durability.(*v2DurableStore).file.Meta().RequiredFeatures; required&storagev2.RequiredFeatureShadowIndexBuilds == 0 || required&storagev2.RequiredFeatureCompoundIndexes == 0 {
+	if required := db.durability.(*durableStore).file.Meta().RequiredFeatures; required&storage.RequiredFeatureShadowIndexBuilds == 0 || required&storage.RequiredFeatureCompoundIndexes == 0 {
 		t.Fatalf("required features = %#x", required)
 	}
 	third, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "score": Int(7)})
@@ -147,9 +147,9 @@ func TestV2OnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 	}
 }
 
-func TestV2IndexBuildStatsAttributeBindingRetentionPressure(t *testing.T) {
+func TestIndexBuildStatsAttributeBindingRetentionPressure(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "build-retention.meld"), OpenOptions{
-		CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2},
+		CommitRetention: CommitRetentionPolicy{MaxCommits: 2},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestV2IndexBuildStatsAttributeBindingRetentionPressure(t *testing.T) {
 	}
 }
 
-func TestV2OnlineIndexBuildCatchesWriteRacingFinalization(t *testing.T) {
+func TestOnlineIndexBuildCatchesWriteRacingFinalization(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "finalize-race.meld"))
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestV2OnlineIndexBuildCatchesWriteRacingFinalization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := db.durability.(*v2DurableStore)
+	store := db.durability.(*durableStore)
 	ready, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	store.testPersistentIndexBuildReadyHook = func() {
@@ -225,7 +225,7 @@ func TestV2OnlineIndexBuildCatchesWriteRacingFinalization(t *testing.T) {
 	}
 }
 
-func TestV2OnlineIndexBuildCancellationAndAbort(t *testing.T) {
+func TestOnlineIndexBuildCancellationAndAbort(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "abort.meld"))
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +247,7 @@ func TestV2OnlineIndexBuildCancellationAndAbort(t *testing.T) {
 	if _, err := db.IndexBuild(id); err != nil {
 		t.Fatalf("cancellation lost build: %v", err)
 	}
-	if err := db.CompactToV2(context.Background(), filepath.Join(t.TempDir(), "compacted.meld")); !errors.Is(err, ErrWriteConflict) {
+	if err := db.Compact(context.Background(), filepath.Join(t.TempDir(), "compacted.meld")); !errors.Is(err, ErrWriteConflict) {
 		t.Fatalf("compaction with private build=%v", err)
 	}
 	if err := db.AbortIndexBuild(context.Background(), id); err != nil {
@@ -258,7 +258,7 @@ func TestV2OnlineIndexBuildCancellationAndAbort(t *testing.T) {
 	}
 }
 
-func TestOnlineIndexBuildRequiresV2AndIDRoundTrips(t *testing.T) {
+func TestOnlineIndexBuildRequiresAndIDRoundTrips(t *testing.T) {
 	db := New()
 	if _, err := db.Collection("items").StartIndexBuild(context.Background(), "by_value", []IndexField{{Field: "value", Order: 1}}, IndexOptions{}); !errors.Is(err, ErrIndexBuildUnsupported) {
 		t.Fatalf("memory start=%v", err)
@@ -273,7 +273,7 @@ func TestOnlineIndexBuildRequiresV2AndIDRoundTrips(t *testing.T) {
 	}
 }
 
-func TestV2OnlineUniqueBuildRejectsOnlyAtomicPublication(t *testing.T) {
+func TestOnlineUniqueBuildRejectsOnlyAtomicPublication(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "unique.meld"))
 	if err != nil {
 		t.Fatal(err)
@@ -305,7 +305,7 @@ func TestV2OnlineUniqueBuildRejectsOnlyAtomicPublication(t *testing.T) {
 	}
 }
 
-func TestV2OnlineIndexBuildResourceRejectionPreservesDurableCursor(t *testing.T) {
+func TestOnlineIndexBuildResourceRejectionPreservesDurableCursor(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded.meld"), OpenOptions{ResourceLimits: ResourceLimits{
 		MaxIndexBuildEntries: 1,
 	}})

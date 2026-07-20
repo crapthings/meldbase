@@ -8,12 +8,12 @@ import (
 
 const maxOptimisticIndexBuildAttempts = 3
 
-// createV2IndexOptimistic performs the document decode/key extraction phase on
+// createDurableIndexOptimistic performs the document decode/key extraction phase on
 // a pinned immutable snapshot without holding db.mu. Publication still takes
 // the writer lock and succeeds only if the source sequence remains current.
 // A later persisted shadow-build protocol can replace bounded retries without
 // changing ApplyCreateIndex's final atomic catalog publication.
-func (c *Collection) createV2IndexOptimistic(ctx context.Context, definition IndexDefinition, store *v2DurableStore, budget *indexBuildBudget) error {
+func (c *Collection) createDurableIndexOptimistic(ctx context.Context, definition IndexDefinition, store *durableStore, budget *indexBuildBudget) error {
 	reservation := c.name + "\x00" + definition.Name
 	c.db.mu.Lock()
 	if err := c.indexBuildPreconditionLocked(definition); err != nil {

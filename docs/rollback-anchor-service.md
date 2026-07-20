@@ -48,7 +48,10 @@ Signature, and its private key and HMAC file must be mode `0600` or stricter:
 ```sh
 meld serve \
   --db /var/lib/app/orders.meld \
-  --dev-no-auth \
+  --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
+  --jwt-issuer https://identity.example/ \
+  --jwt-audience meldbase-api \
+  --workspace-collections orders \
   --rollback-anchor-cluster orders-production \
   --rollback-anchor-replica anchor-a=https://anchor-a.example.com:8443 \
   --rollback-anchor-replica anchor-b=https://anchor-b.example.com:8443 \
@@ -70,10 +73,9 @@ the database opens. The trust-plane HTTP transport deliberately ignores
 environment proxy variables, requires TLS 1.3 and performs normal DNS/IP
 certificate verification.
 
-`--dev-no-auth` applies to the example database HTTP API, not to the anchor
-connection. It remains unsafe for a production database server; production
-applications should embed the server package with real authentication while
-constructing the same `anchorhttp.QuorumStore`.
+The JWT settings apply to the database HTTP API, not to the anchor connection.
+The anchor trust plane remains independently authenticated while the database
+server derives tenant scope from verified application tokens.
 
 ## Immutable membership
 
@@ -193,7 +195,7 @@ The phase requirements are strict:
   image, every member responds and opening returns `ErrRollbackDetected`.
 
 Receipts bind the protocol/configuration digest, hashed endpoint mapping,
-per-member classifications and coordinates, offline V2 verification, runtime,
+per-member classifications and coordinates, offline graph verification, runtime,
 timeline, previous receipt, external evidence digest and Ed25519 signature.
 They contain no HMAC, private key or raw endpoint URL.
 

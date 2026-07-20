@@ -29,9 +29,11 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: meld <demo|serve|anchor-serve|anchor-qualification|inspect|verify|backup|restore|durability-check|destructive-volume-check|destructive-process-check|destructive-enospc-check|destructive-power-prepare|destructive-power-controller-keygen|destructive-power-controller-run|destructive-qemu-reset|destructive-qemu-process-kill|destructive-power-recover|destructive-power-receipt-check|destructive-power-matrix-check|destructive-corruption-check|destructive-qemu-eio|destructive-qemu-flush-eio|destructive-qemu-volatile-loss|destructive-manifest-build|storage-soak|qualification-environment-capture|qualification-session-init|qualification-session-record|qualification-session-status|qualification-session-power-status|qualification-session-power-prepare|qualification-session-power-recover|qualification-session-seal|qualification-artifacts-index-build|qualification-artifacts-index-verify|qualification-check|qualification-packet-keygen|qualification-packet-verify|index-build>")
+		return errors.New("usage: meld <init|demo|serve|anchor-serve|anchor-qualification|inspect|verify|backup|restore|durability-check|destructive-volume-check|destructive-process-check|destructive-enospc-check|destructive-power-prepare|destructive-power-controller-keygen|destructive-power-controller-run|destructive-qemu-reset|destructive-qemu-process-kill|destructive-power-recover|destructive-power-receipt-check|destructive-power-matrix-check|destructive-corruption-check|destructive-qemu-eio|destructive-qemu-flush-eio|destructive-qemu-volatile-loss|destructive-manifest-build|storage-soak|qualification-environment-capture|qualification-session-init|qualification-session-record|qualification-session-status|qualification-session-power-status|qualification-session-power-prepare|qualification-session-power-recover|qualification-session-seal|qualification-artifacts-index-build|qualification-artifacts-index-verify|qualification-check|qualification-packet-keygen|qualification-packet-verify|index-build>")
 	}
 	switch args[0] {
+	case "init":
+		return runInit(args[1:], stdout, stderr)
 	case "demo":
 		return runDemo(args[1:], stdout, stderr)
 	case "serve":
@@ -315,7 +317,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	adminMetrics := flags.Bool("admin-metrics", false, "serve authenticated Prometheus metrics on the admin listener")
 	workerAddress := flags.String("worker-addr", "", "optional loopback control address for server JavaScript workers")
 	workerPublications := flags.String("worker-publications", "", "comma-separated collections whose query visibility is owned by the worker")
-	rollbackAnchorPath := flags.String("rollback-anchor", "", "independently trusted V2 rollback-anchor file")
+	rollbackAnchorPath := flags.String("rollback-anchor", "", "independently trusted rollback-anchor file")
 	rollbackAnchorInit := flags.Bool("rollback-anchor-init", false, "explicitly initialize an empty anchor from the current database")
 	rollbackAnchorTimeout := flags.Duration("rollback-anchor-timeout", meldbase.DefaultRollbackAnchorOperationTimeout, "deadline for each rollback-anchor operation")
 	rollbackAnchorCluster := flags.String("rollback-anchor-cluster", "", "remote anchor static cluster ID")
@@ -402,7 +404,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		openOptions.RollbackProtection = meldbase.V2RollbackProtection{
+		openOptions.RollbackProtection = meldbase.RollbackProtection{
 			AnchorStore: anchor, InitializeAnchor: *rollbackAnchorInit, OperationTimeout: *rollbackAnchorTimeout,
 		}
 	} else if remoteAnchor.enabled() {
@@ -412,7 +414,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		}
 		anchorTransport = transport
 		defer anchorTransport.CloseIdleConnections()
-		openOptions.RollbackProtection = meldbase.V2RollbackProtection{
+		openOptions.RollbackProtection = meldbase.RollbackProtection{
 			AnchorStore: anchor, InitializeAnchor: *rollbackAnchorInit, OperationTimeout: *rollbackAnchorTimeout,
 		}
 	}

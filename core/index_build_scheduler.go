@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const (
@@ -80,8 +80,8 @@ func (db *DB) StartIndexBuildScheduler(parent context.Context, options IndexBuil
 	if concurrency == 0 {
 		concurrency = 1
 	}
-	if interval < minV2MaintenanceDuration || interval > maxV2MaintenanceInterval ||
-		timeout < minV2MaintenanceDuration || timeout > maxV2MaintenanceTimeout ||
+	if interval < minMaintenanceDuration || interval > maxMaintenanceInterval ||
+		timeout < minMaintenanceDuration || timeout > maxMaintenanceTimeout ||
 		concurrency < 1 || concurrency > maxIndexBuildSchedulers {
 		return nil, ErrInvalidIndexBuildSchedulerOptions
 	}
@@ -90,7 +90,7 @@ func (db *DB) StartIndexBuildScheduler(parent context.Context, options IndexBuil
 		db.mu.Unlock()
 		return nil, ErrClosed
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		db.mu.Unlock()
 		return nil, ErrIndexBuildUnsupported
@@ -222,18 +222,18 @@ func (scheduler *IndexBuildScheduler) runOne(parent context.Context, db *DB, id 
 	}
 }
 
-func persistentIndexBuildFailure(err error) (storagev2.IndexBuildFailure, bool) {
+func persistentIndexBuildFailure(err error) (storage.IndexBuildFailure, bool) {
 	switch {
 	case errors.Is(err, ErrDuplicateKey):
-		return storagev2.IndexBuildFailureUniqueConflict, true
+		return storage.IndexBuildFailureUniqueConflict, true
 	case errors.Is(err, ErrResourceLimit):
-		return storagev2.IndexBuildFailureResourceLimit, true
+		return storage.IndexBuildFailureResourceLimit, true
 	case errors.Is(err, ErrHistoryLost):
-		return storagev2.IndexBuildFailureHistoryLost, true
+		return storage.IndexBuildFailureHistoryLost, true
 	case errors.Is(err, ErrInvalidIndex):
-		return storagev2.IndexBuildFailureInvalidIndex, true
+		return storage.IndexBuildFailureInvalidIndex, true
 	default:
-		return storagev2.IndexBuildFailureNone, false
+		return storage.IndexBuildFailureNone, false
 	}
 }
 

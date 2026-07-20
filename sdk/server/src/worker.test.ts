@@ -31,7 +31,7 @@ class FakeSocket implements WorkerSocket {
     this.listeners.get(type)?.delete(listener);
   }
 
-  open(): void {
+ open(): void {
     this.readyState = 1;
     this.emit("open", {});
   }
@@ -290,7 +290,7 @@ test("publication returns only a data constraint and static visibility declarati
     url: "wss://control.example.test/v1/workers",
     token: "worker-control-token-0123456789abcdef",
     workerId: "publication-worker",
-    publications: {
+   publications: {
       orders: publish({ version: "orders-v1", maxResults: 50, queryPaths, resultFields: ["status", "description"] }, ({ principal, query }) => {
         assert.equal(query.where.op, "true");
         if (principal.tenant === "blocked") return null;

@@ -1,6 +1,6 @@
 # Index construction architecture
 
-Storage V2 provides both the compatibility `CreateIndex` path and a negotiated,
+The storage engine provides both the compatibility `CreateIndex` path and a negotiated,
 crash-resumable shadow-build protocol. Both have one atomic visibility point;
 only the latter persists private progress across cancellation and restart.
 
@@ -10,7 +10,7 @@ only the latter persists private progress across cancellation and restart.
 visibility point.
 
 1. Reserve `(collection, index name)` in the process.
-2. Pin V2 commit sequence `S` and scan its immutable Primary tree without
+2. Pin commit sequence `S` and scan its immutable Primary tree without
    holding the database writer mutex.
 3. Validate the complete canonical document encoding and `_id`, but materialize
    only the indexed scalar paths.
@@ -41,7 +41,7 @@ that snapshot atomically in O(1), with no BuildCatalog traversal or allocation.
 development amd64 machine, decoding a representative 1 KiB document and then
 looking up one nested scalar measures about 2.94 µs, 5,296 B and 44 allocations;
 the validating path projection measures about 341 ns with zero allocations.
-`BenchmarkV2CreateIndexTenThousandDocuments` is the end-to-end regression target
+`BenchmarkCreateIndexTenThousandDocuments` is the end-to-end regression target
 covering snapshot extraction, sorting, Primary/Order revalidation, bulk loading,
 Commit Log publication and fsync. Benchmark allocation totals are cumulative
 work, not a claim about peak resident memory.
@@ -140,7 +140,7 @@ root into the normal IndexCatalog. It must not copy or rebuild the tree.
 - Context cancellation stops the current runner and preserves durable progress.
   Explicit abort removes the build record in a maintenance generation; ordinary
   epoch-safe reclamation later recovers private pages.
-- Corrupt build metadata fails normal V2 graph verification. A semantically
+- Corrupt build metadata fails normal graph verification. A semantically
   failed build is not database corruption and uses a fixed state/reason.
 - Physical backup preserves the complete build graph and it can resume from the
   restored artifact. Logical compaction deliberately refuses to run while any
@@ -166,7 +166,7 @@ err = db.AbortIndexBuild(ctx, id)
 ```
 
 `CreateIndexOnline` is the start-and-resume convenience form. These APIs are
-Storage V2-only; memory and V1 return `ErrIndexBuildUnsupported`. A unique-key
+Persistent storage only; memory returns `ErrIndexBuildUnsupported`. A unique-key
 conflict rejects only final publication and leaves the private `ready` build
 available for inspection or explicit abort.
 
@@ -196,7 +196,7 @@ record returns `ErrIndexBuildFailed`, with the fixed reason available on status.
 
 The `meld index-build` CLI exposes `start`, `list`, `resume` and `abort` over the
 same APIs for an offline/local operator. It performs read-only format negotiation
-before opening, requires an existing compatible V2 file, honors signal/deadline
+before opening, requires an existing compatible file, honors signal/deadline
 cancellation and emits schema-versioned JSON only after a successful operation.
 It deliberately does not expose an unauthenticated network control endpoint.
 `start` accepts one to four ordered repeatable flags; an omitted suffix means

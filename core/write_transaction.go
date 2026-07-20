@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
@@ -24,7 +24,7 @@ type WriteTransaction struct {
 	snapshot        queryStorageSnapshot
 	baseToken       uint64
 	entries         map[writeTransactionKey]*writeTransactionEntry
-	collections     map[string]storagev2.CollectionPrecondition
+	collections     map[string]storage.CollectionPrecondition
 	systemMutations []systemrecord.Mutation
 	commitHooks     []func(uint64)
 	systemBytes     uint64
@@ -86,7 +86,7 @@ type writeTransactionEntry struct {
 	exists       bool
 }
 
-// Find evaluates query against the transaction's immutable V2 snapshot plus
+// Find evaluates query against the transaction's immutable snapshot plus
 // its own staged point writes. It installs a collection snapshot fence, so any
 // concurrent document or published-index change in that collection causes the
 // eventual commit to return ErrWriteConflict rather than admitting a phantom.
@@ -368,7 +368,7 @@ func (tx *WriteTransaction) recordCollectionRead(collection string, exists bool,
 	if tx == nil || !tx.active || tx.collections == nil {
 		return ErrClosed
 	}
-	precondition := storagev2.CollectionPrecondition{Collection: collection, ExpectedExists: exists}
+	precondition := storage.CollectionPrecondition{Collection: collection, ExpectedExists: exists}
 	if exists {
 		if version.ID == 0 || version.UpdatedSequence == 0 {
 			return ErrCorrupt
@@ -412,7 +412,7 @@ func (tx *WriteTransaction) setCurrent(entry *writeTransactionEntry, document Do
 	return nil
 }
 
-func (tx *WriteTransaction) preconditions() []storagev2.DocumentPrecondition {
+func (tx *WriteTransaction) preconditions() []storage.DocumentPrecondition {
 	keys := make([]writeTransactionKey, 0, len(tx.entries))
 	for key := range tx.entries {
 		keys = append(keys, key)
@@ -423,10 +423,10 @@ func (tx *WriteTransaction) preconditions() []storagev2.DocumentPrecondition {
 		}
 		return string(keys[i].id[:]) < string(keys[j].id[:])
 	})
-	result := make([]storagev2.DocumentPrecondition, len(keys))
+	result := make([]storage.DocumentPrecondition, len(keys))
 	for index, key := range keys {
 		entry := tx.entries[key]
-		result[index] = storagev2.DocumentPrecondition{
+		result[index] = storage.DocumentPrecondition{
 			Collection: key.collection, DocumentID: [16]byte(key.id),
 			ExpectedExists: entry.exists, ExpectedHash: entry.baseHash,
 		}
@@ -434,13 +434,13 @@ func (tx *WriteTransaction) preconditions() []storagev2.DocumentPrecondition {
 	return result
 }
 
-func (tx *WriteTransaction) collectionPreconditions() []storagev2.CollectionPrecondition {
+func (tx *WriteTransaction) collectionPreconditions() []storage.CollectionPrecondition {
 	collections := make([]string, 0, len(tx.collections))
 	for collection := range tx.collections {
 		collections = append(collections, collection)
 	}
 	sort.Strings(collections)
-	result := make([]storagev2.CollectionPrecondition, len(collections))
+	result := make([]storage.CollectionPrecondition, len(collections))
 	for index, collection := range collections {
 		result[index] = tx.collections[collection]
 	}
@@ -476,7 +476,7 @@ func (tx *WriteTransaction) changes() []Change {
 	return changes
 }
 
-func (db *DB) beginWriteTransaction(ctx context.Context) (*WriteTransaction, *v2DurableStore, error) {
+func (db *DB) beginWriteTransaction(ctx context.Context) (*WriteTransaction, *durableStore, error) {
 	if db == nil || ctx == nil {
 		return nil, nil, ErrClosed
 	}
@@ -492,7 +492,7 @@ func (db *DB) beginWriteTransaction(ctx context.Context) (*WriteTransaction, *v2
 		db.mu.RUnlock()
 		return nil, nil, db.fatalErr
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store.file == nil || db.querySource == nil {
 		db.mu.RUnlock()
 		return nil, nil, ErrWriteTransactionUnsupported
@@ -509,7 +509,7 @@ func (db *DB) beginWriteTransaction(ctx context.Context) (*WriteTransaction, *v2
 	}
 	tx := &WriteTransaction{
 		db: db, ctx: ctx, active: true, snapshot: snapshot, baseToken: baseToken,
-		entries: make(map[writeTransactionKey]*writeTransactionEntry), collections: make(map[string]storagev2.CollectionPrecondition),
+		entries: make(map[writeTransactionKey]*writeTransactionEntry), collections: make(map[string]storage.CollectionPrecondition),
 	}
 	return tx, store, nil
 }
@@ -527,13 +527,13 @@ func (tx *WriteTransaction) finish() error {
 	return err
 }
 
-// commitWriteTransaction is the single V2 business/System publication path
+// commitWriteTransaction is the single  business/System publication path
 // shared by public transactions and first-party transactional RPC. The bool is
 // false when optimistic validation failed before storage publication began.
 func (db *DB) commitWriteTransaction(
 	ctx context.Context,
 	tx *WriteTransaction,
-	store *v2DurableStore,
+	store *durableStore,
 	changes []Change,
 	systemMutations []systemrecord.Mutation,
 ) (systemrecord.Result, bool, error) {
@@ -545,24 +545,24 @@ func (db *DB) commitWriteTransaction(
 	if db.fatalErr != nil {
 		return systemrecord.Result{}, false, db.fatalErr
 	}
-	currentStore, ok := db.durability.(*v2DurableStore)
+	currentStore, ok := db.durability.(*durableStore)
 	if !ok || currentStore != store || tx == nil {
 		return systemrecord.Result{}, false, ErrWriteConflict
 	}
 	return db.commitPreparedWriteTransactionLocked(ctx, store, changes, systemMutations, tx.preconditions(), tx.collectionPreconditions(), tx.commitHooks)
 }
 
-// commitPreparedWriteTransactionLocked publishes already-frozen V2 point
+// commitPreparedWriteTransactionLocked publishes already-frozen  point
 // writes while db.mu is held. It is shared by the direct transaction path and
 // the CommitCoordinator's conflict fallback: neither path reevaluates a user
 // callback after its snapshot has closed.
 func (db *DB) commitPreparedWriteTransactionLocked(
 	ctx context.Context,
-	store *v2DurableStore,
+	store *durableStore,
 	changes []Change,
 	systemMutations []systemrecord.Mutation,
-	preconditions []storagev2.DocumentPrecondition,
-	collectionPreconditions []storagev2.CollectionPrecondition,
+	preconditions []storage.DocumentPrecondition,
+	collectionPreconditions []storage.CollectionPrecondition,
 	commitHooks []func(uint64),
 ) (systemrecord.Result, bool, error) {
 	if db == nil || store == nil || len(changes) == 0 {
@@ -574,7 +574,7 @@ func (db *DB) commitPreparedWriteTransactionLocked(
 	if db.fatalErr != nil {
 		return systemrecord.Result{}, false, db.fatalErr
 	}
-	currentStore, ok := db.durability.(*v2DurableStore)
+	currentStore, ok := db.durability.(*durableStore)
 	if !ok || currentStore != store {
 		return systemrecord.Result{}, false, ErrWriteConflict
 	}
@@ -603,7 +603,7 @@ func (db *DB) commitPreparedWriteTransactionLocked(
 	return result, true, nil
 }
 
-func (db *DB) validateWriteTransactionSnapshot(tx *WriteTransaction, store *v2DurableStore) error {
+func (db *DB) validateWriteTransactionSnapshot(tx *WriteTransaction, store *durableStore) error {
 	if db == nil || tx == nil || store == nil {
 		return ErrClosed
 	}
@@ -615,7 +615,7 @@ func (db *DB) validateWriteTransactionSnapshot(tx *WriteTransaction, store *v2Du
 	if db.fatalErr != nil {
 		return db.fatalErr
 	}
-	currentStore, ok := db.durability.(*v2DurableStore)
+	currentStore, ok := db.durability.(*durableStore)
 	if !ok || currentStore != store {
 		return ErrWriteConflict
 	}
@@ -624,13 +624,13 @@ func (db *DB) validateWriteTransactionSnapshot(tx *WriteTransaction, store *v2Du
 	if len(preconditions) == 0 && len(collectionPreconditions) == 0 {
 		return nil
 	}
-	if err := mapStorageV2Error(store.file.ValidateCollectionPreconditions(collectionPreconditions)); err != nil {
+	if err := mapStorageError(store.file.ValidateCollectionPreconditions(collectionPreconditions)); err != nil {
 		return err
 	}
-	return mapStorageV2Error(store.file.ValidateDocumentPreconditions(preconditions))
+	return mapStorageError(store.file.ValidateDocumentPreconditions(preconditions))
 }
 
-// RunWriteTransaction executes build against one immutable Storage V2
+// RunWriteTransaction executes build against one immutable Storage
 // snapshot and atomically publishes all staged point mutations if every
 // document read by the callback still matches. The callback runs without
 // the database writer lock. A conflicting point write returns ErrWriteConflict;
@@ -721,9 +721,9 @@ const (
 	writeTransactionConflict
 )
 
-// MeldbaseSystemWrite runs build against one immutable V2 snapshot without
+// MeldbaseSystemWrite runs build against one immutable snapshot without
 // holding the database writer lock. If build succeeds and its point read set is
-// still valid, its business changes and systemMutation commit in one V2 generation.
+// still valid, its business changes and systemMutation commit in one  generation.
 // The bool reports whether a composite commit was attempted; false means build
 // produced no business change or lost optimistic validation.
 //

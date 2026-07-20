@@ -36,36 +36,36 @@ type anchorQualificationMember struct {
 }
 
 type anchorQualificationReceipt struct {
-	SchemaVersion          uint32                        `json:"schemaVersion"`
-	ProtocolVersion        uint32                        `json:"protocolVersion"`
-	Phase                  string                        `json:"phase"`
-	RunID                  string                        `json:"runId"`
-	PreviousSHA256         string                        `json:"previousSha256,omitempty"`
-	SourceRevision         string                        `json:"sourceRevision,omitempty"`
-	BuildRevision          string                        `json:"buildRevision,omitempty"`
-	BuildModified          bool                          `json:"buildModified"`
-	GOOS                   string                        `json:"goos"`
-	GOARCH                 string                        `json:"goarch"`
-	GoVersion              string                        `json:"goVersion"`
-	StartedAt              time.Time                     `json:"startedAt"`
-	FinishedAt             time.Time                     `json:"finishedAt"`
-	ConfigurationID        string                        `json:"configurationId"`
-	ExternalEvidenceSHA256 string                        `json:"externalEvidenceSha256"`
-	Replicas               uint64                        `json:"replicas"`
-	Quorum                 uint64                        `json:"quorum"`
-	Members                []anchorQualificationMember   `json:"members"`
-	AvailableMembers       uint64                        `json:"availableMembers"`
-	UnavailableMembers     uint64                        `json:"unavailableMembers"`
-	QuorumLoad             string                        `json:"quorumLoad"`
-	AnchorExists           bool                          `json:"anchorExists"`
-	AnchorSequence         uint64                        `json:"anchorSequence"`
-	AnchorGeneration       uint64                        `json:"anchorGeneration"`
-	Database               meldbase.V2VerificationReport `json:"database"`
-	DatabaseRelation       string                        `json:"databaseRelation"`
-	DatabaseOpen           string                        `json:"databaseOpen"`
-	Passed                 bool                          `json:"passed"`
-	SigningPublicKey       string                        `json:"signingPublicKey"`
-	Signature              string                        `json:"signature"`
+	SchemaVersion          uint32                      `json:"schemaVersion"`
+	ProtocolVersion        uint32                      `json:"protocolVersion"`
+	Phase                  string                      `json:"phase"`
+	RunID                  string                      `json:"runId"`
+	PreviousSHA256         string                      `json:"previousSha256,omitempty"`
+	SourceRevision         string                      `json:"sourceRevision,omitempty"`
+	BuildRevision          string                      `json:"buildRevision,omitempty"`
+	BuildModified          bool                        `json:"buildModified"`
+	GOOS                   string                      `json:"goos"`
+	GOARCH                 string                      `json:"goarch"`
+	GoVersion              string                      `json:"goVersion"`
+	StartedAt              time.Time                   `json:"startedAt"`
+	FinishedAt             time.Time                   `json:"finishedAt"`
+	ConfigurationID        string                      `json:"configurationId"`
+	ExternalEvidenceSHA256 string                      `json:"externalEvidenceSha256"`
+	Replicas               uint64                      `json:"replicas"`
+	Quorum                 uint64                      `json:"quorum"`
+	Members                []anchorQualificationMember `json:"members"`
+	AvailableMembers       uint64                      `json:"availableMembers"`
+	UnavailableMembers     uint64                      `json:"unavailableMembers"`
+	QuorumLoad             string                      `json:"quorumLoad"`
+	AnchorExists           bool                        `json:"anchorExists"`
+	AnchorSequence         uint64                      `json:"anchorSequence"`
+	AnchorGeneration       uint64                      `json:"anchorGeneration"`
+	Database               meldbase.VerificationReport `json:"database"`
+	DatabaseRelation       string                      `json:"databaseRelation"`
+	DatabaseOpen           string                      `json:"databaseOpen"`
+	Passed                 bool                        `json:"passed"`
+	SigningPublicKey       string                      `json:"signingPublicKey"`
+	Signature              string                      `json:"signature"`
 }
 
 func runAnchorQualification(args []string, stdout, stderr io.Writer) error {
@@ -121,7 +121,7 @@ func runAnchorQualificationProbe(args []string, stdout, stderr io.Writer) error 
 	flags := flag.NewFlagSet("anchor-qualification probe", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	phase := flags.String("phase", "", "healthy, degraded, minority, recovered or rollback-rejected")
-	databasePath := flags.String("db", "", "offline disposable V2 database path")
+	databasePath := flags.String("db", "", "offline disposable database path")
 	previousPath := flags.String("previous", "", "previous signed phase receipt")
 	outputPath := flags.String("out", "", "new exclusive signed phase receipt")
 	signingKeyPath := flags.String("signing-key", "", "private Ed25519 receipt signing key")
@@ -186,7 +186,7 @@ func runAnchorQualificationProbe(args []string, stdout, stderr io.Writer) error 
 	defer transport.CloseIdleConnections()
 	started := time.Now().UTC()
 	verificationContext, verificationCancel := context.WithTimeout(context.Background(), *verificationTimeout)
-	verified, err := meldbase.VerifyV2File(verificationContext, *databasePath)
+	verified, err := meldbase.VerifyFile(verificationContext, *databasePath)
 	verificationCancel()
 	if err != nil {
 		return fmt.Errorf("offline qualification database verification: %w", err)
@@ -220,7 +220,7 @@ func runAnchorQualificationProbe(args []string, stdout, stderr io.Writer) error 
 	}
 	databaseOpen := "not-attempted"
 	if *phase == "recovered" || *phase == "rollback-rejected" {
-		opened, openErr := meldbase.OpenWithOptions(*databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.V2RollbackProtection{AnchorStore: store, OperationTimeout: *timeout}})
+		opened, openErr := meldbase.OpenWithOptions(*databasePath, meldbase.OpenOptions{RollbackProtection: meldbase.RollbackProtection{AnchorStore: store, OperationTimeout: *timeout}})
 		if *phase == "rollback-rejected" {
 			if !errors.Is(openErr, meldbase.ErrRollbackDetected) || opened != nil {
 				if opened != nil {
@@ -238,7 +238,7 @@ func runAnchorQualificationProbe(args []string, stdout, stderr io.Writer) error 
 			}
 			databaseOpen = "succeeded"
 			verificationContext, verificationCancel = context.WithTimeout(context.Background(), *verificationTimeout)
-			verified, err = meldbase.VerifyV2File(verificationContext, *databasePath)
+			verified, err = meldbase.VerifyFile(verificationContext, *databasePath)
 			verificationCancel()
 			if err != nil {
 				return err
@@ -419,7 +419,7 @@ func anchorQualificationMembers(checks []anchorhttp.ReplicaCheck, replicaSpecs [
 	return members, available, unavailable
 }
 
-func anchorQualificationRelation(database meldbase.V2VerificationReport, anchor meldbase.RollbackAnchor, exists bool, loadErr error) (string, error) {
+func anchorQualificationRelation(database meldbase.VerificationReport, anchor meldbase.RollbackAnchor, exists bool, loadErr error) (string, error) {
 	if loadErr != nil {
 		return "unavailable", nil
 	}

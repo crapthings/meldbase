@@ -12,7 +12,7 @@ import (
 
 const (
 	indexMetaHeaderBytes       = 64
-	indexKeyCodecV2            = 2
+	indexKeyCodec              = 2
 	indexKeyCodecV3            = 3
 	maxIndexFields             = 4
 	maxIndexFieldBytes         = 1024
@@ -22,9 +22,9 @@ const (
 var indexMetaMagic = [8]byte{'M', 'E', 'L', 'D', 'I', 'D', 'X', '2'}
 
 var (
-	ErrIndexExists      = errors.New("meldbase storage v2: index name exists")
-	ErrUniqueConflict   = errors.New("meldbase storage v2: unique index conflict")
-	ErrIndexKeyTooLarge = errors.New("meldbase storage v2: index key is too large")
+	ErrIndexExists      = errors.New("meldbase storage: index name exists")
+	ErrUniqueConflict   = errors.New("meldbase storage: unique index conflict")
+	ErrIndexKeyTooLarge = errors.New("meldbase storage: index key is too large")
 )
 
 type IndexMeta struct {
@@ -209,7 +209,7 @@ func applyIndexMutations(pending []pendingIndexMutation) error {
 			if err != nil {
 				return err
 			}
-			return errors.New("meldbase storage v2: duplicate secondary entry")
+			return errors.New("meldbase storage: duplicate secondary entry")
 		}
 		if mutation.state.meta.Unique {
 			conflict, err := uniqueIndexConflict(mutation.state.tree, mutation.afterKey)
@@ -278,14 +278,14 @@ func encodeIndexMeta(meta IndexMeta) ([]byte, error) {
 		if compoundIndexFields(fields) {
 			codec = indexKeyCodecV3
 		} else {
-			codec = indexKeyCodecV2
+			codec = indexKeyCodec
 		}
 	}
-	if (codec == indexKeyCodecV2 && compoundIndexFields(fields)) || (codec != indexKeyCodecV2 && codec != indexKeyCodecV3) {
+	if (codec == indexKeyCodec && compoundIndexFields(fields)) || (codec != indexKeyCodec && codec != indexKeyCodecV3) {
 		return nil, ErrCorrupt
 	}
 	payload := []byte(nil)
-	if codec == indexKeyCodecV2 {
+	if codec == indexKeyCodec {
 		payload = append(payload, fields[0].Path...)
 	} else {
 		for _, field := range fields {
@@ -336,7 +336,7 @@ func decodeIndexMeta(name string, encoded []byte) (IndexMeta, error) {
 	}
 	payload := encoded[indexMetaHeaderBytes:]
 	switch codec {
-	case indexKeyCodecV2:
+	case indexKeyCodec:
 		if !allZero(encoded[52:64]) || payloadLength > maxIndexFieldBytes {
 			return IndexMeta{}, ErrCorrupt
 		}
@@ -369,7 +369,7 @@ func decodeIndexMeta(name string, encoded []byte) (IndexMeta, error) {
 		return IndexMeta{}, ErrCorrupt
 	}
 	fields, valid := normalizeIndexFields(meta.FieldPath, meta.Fields)
-	if !valid || (codec == indexKeyCodecV2 && compoundIndexFields(fields)) || meta.Root < 2 || meta.CreatedSequence == 0 ||
+	if !valid || (codec == indexKeyCodec && compoundIndexFields(fields)) || meta.Root < 2 || meta.CreatedSequence == 0 ||
 		meta.UpdatedSequence < meta.CreatedSequence {
 		return IndexMeta{}, ErrCorrupt
 	}
@@ -423,7 +423,7 @@ func normalizeIndexEntries(entries []IndexEntry, unique bool) ([]IndexEntry, err
 			return nil, ErrCorrupt
 		}
 		if _, duplicate := seenDocuments[entry.DocumentID]; duplicate {
-			return nil, errors.New("meldbase storage v2: document has multiple entries in one index")
+			return nil, errors.New("meldbase storage: document has multiple entries in one index")
 		}
 		seenDocuments[entry.DocumentID] = struct{}{}
 	}
@@ -438,7 +438,7 @@ func normalizeIndexEntries(entries []IndexEntry, unique bool) ([]IndexEntry, err
 	for index := 1; index < len(entries); index++ {
 		if bytes.Equal(entries[index-1].Key, entries[index].Key) {
 			if entries[index-1].DocumentID == entries[index].DocumentID {
-				return nil, errors.New("meldbase storage v2: duplicate index entry")
+				return nil, errors.New("meldbase storage: duplicate index entry")
 			}
 			if unique {
 				return nil, ErrUniqueConflict
@@ -653,7 +653,7 @@ func (snapshot *ReadSnapshot) IndexMeta(collection, name string) (IndexMeta, boo
 	snapshot.file.mu.RLock()
 	defer snapshot.file.mu.RUnlock()
 	if snapshot.file.file == nil {
-		return IndexMeta{}, false, errors.New("meldbase storage v2: file is closed")
+		return IndexMeta{}, false, errors.New("meldbase storage: file is closed")
 	}
 	encodedCollection, exists, err := snapshot.file.treeGetUnlocked(snapshot.root.CatalogRoot, TreeCatalog, []byte(collection))
 	if err != nil || !exists {
@@ -689,7 +689,7 @@ func (snapshot *ReadSnapshot) Indexes(collection string) ([]IndexMeta, error) {
 	snapshot.file.mu.RLock()
 	defer snapshot.file.mu.RUnlock()
 	if snapshot.file.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	encodedCollection, exists, err := snapshot.file.treeGetUnlocked(snapshot.root.CatalogRoot, TreeCatalog, []byte(collection))
 	if err != nil || !exists {
@@ -755,7 +755,7 @@ func (snapshot *ReadSnapshot) OpenIndexIterator(collection, name string, start, 
 	file.mu.Lock()
 	defer file.mu.Unlock()
 	if file.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	encodedCollection, collectionExists, err := file.treeGetUnlocked(snapshot.root.CatalogRoot, TreeCatalog, []byte(collection))
 	if err != nil {
@@ -816,7 +816,7 @@ func (iterator *IndexIterator) Next() bool {
 	iterator.entry = IndexEntry{}
 	iterator.file.mu.RLock()
 	if iterator.file.file == nil {
-		iterator.err = errors.New("meldbase storage v2: file is closed")
+		iterator.err = errors.New("meldbase storage: file is closed")
 		iterator.file.mu.RUnlock()
 		iterator.releasePin()
 		return false

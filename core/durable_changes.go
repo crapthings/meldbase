@@ -7,7 +7,7 @@ import (
 	"errors"
 	"sync"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 // DurableChangeBatch is one globally ordered Commit Log position projected to
@@ -23,7 +23,7 @@ type DurableChangeBatch struct {
 	Changes []Change
 }
 
-// DurableChangeSubscription is a pull/acknowledge bridge over a V2 durable
+// DurableChangeSubscription is a pull/acknowledge bridge over a  durable
 // checkpoint. Batches remain ordered. Ack must be called only after the
 // consumer's external side effect for that token is durable.
 type DurableChangeSubscription struct {
@@ -75,15 +75,15 @@ func (db *DB) CreateDurableCollectionChanges(ctx context.Context, name, collecti
 	if db.closed {
 		return nil, ErrClosed
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return nil, ErrDurableConsumerUnsupported
 	}
-	// An empty V2 database establishes its private consumer directory through a
+	// An empty database establishes its private consumer directory through a
 	// sequence-one control commit. It is not a user-data event, but it changes
 	// the source history and must not become a stale-primary side door.
 	if db.token == 0 {
-		if err := db.validateV2PrimaryWriteFence(1); err != nil {
+		if err := db.validatePrimaryWriteFence(1); err != nil {
 			return nil, err
 		}
 	}
@@ -91,7 +91,7 @@ func (db *DB) CreateDurableCollectionChanges(ctx context.Context, name, collecti
 	if err != nil {
 		return nil, mapDurableConsumerError(err)
 	}
-	// A brand-new empty V2 file establishes its private System tree through one
+	// A brand-new empty file establishes its private System tree through one
 	// initialization commit. Keep DB's in-memory sequence aligned with that
 	// storage fact before any subsequent business write computes token+1.
 	if sequence := store.file.Meta().CommitSequence; sequence != db.token {
@@ -122,7 +122,7 @@ func (db *DB) OpenDurableCollectionChanges(ctx context.Context, name, collection
 		db.mu.RUnlock()
 		return nil, ErrClosed
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		db.mu.RUnlock()
 		return nil, ErrDurableConsumerUnsupported
@@ -153,14 +153,14 @@ func (db *DB) DeleteDurableCollectionChanges(ctx context.Context, name, collecti
 	if db.closed {
 		return ErrClosed
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return ErrDurableConsumerUnsupported
 	}
 	return mapDurableConsumerError(store.file.DeleteDurableCommitConsumer(durableCollectionConsumerKey(name, collection)))
 }
 
-func newDurableCollectionSubscription(ctx context.Context, store *v2DurableStore, consumer *storagev2.DurableCommitConsumer, collection string, buffer int) (*DurableChangeSubscription, error) {
+func newDurableCollectionSubscription(ctx context.Context, store *durableStore, consumer *storage.DurableCommitConsumer, collection string, buffer int) (*DurableChangeSubscription, error) {
 	if store == nil || store.file == nil || consumer == nil || !collectionNamePattern.MatchString(collection) || buffer <= 0 || buffer > 1024 {
 		if consumer != nil {
 			_ = consumer.Close()
@@ -211,14 +211,14 @@ func newDurableCollectionSubscription(ctx context.Context, store *v2DurableStore
 	return subscription, nil
 }
 
-func convertDurableCollectionBatch(consumer *storagev2.DurableCommitConsumer, batch storagev2.CommitBatch, collection string, collectionID uint32) (DurableChangeBatch, uint32, error) {
+func convertDurableCollectionBatch(consumer *storage.DurableCommitConsumer, batch storage.CommitBatch, collection string, collectionID uint32) (DurableChangeBatch, uint32, error) {
 	if consumer == nil || batch.Sequence == 0 || !collectionNamePattern.MatchString(collection) {
 		return DurableChangeBatch{}, 0, ErrCorrupt
 	}
 	result := DurableChangeBatch{Token: batch.Sequence}
 	seen := make(map[DocumentID]struct{})
 	for _, change := range batch.Changes {
-		if change.Operation == storagev2.CommitCatalog {
+		if change.Operation == storage.CommitCatalog {
 			if change.CollectionName == collection {
 				if collectionID != 0 && collectionID != change.CollectionID {
 					return DurableChangeBatch{}, 0, ErrCorrupt
@@ -234,7 +234,7 @@ func convertDurableCollectionBatch(consumer *storagev2.DurableCommitConsumer, ba
 		if err != nil {
 			return DurableChangeBatch{}, 0, err
 		}
-		converted, err := convertV2ReplayChange(resolved)
+		converted, err := convertReplayChange(resolved)
 		if err != nil {
 			return DurableChangeBatch{}, 0, err
 		}
@@ -248,7 +248,7 @@ func convertDurableCollectionBatch(consumer *storagev2.DurableCommitConsumer, ba
 	return result, collectionID, nil
 }
 
-func durableCollectionID(file *storagev2.File, collection string) (uint32, error) {
+func durableCollectionID(file *storage.File, collection string) (uint32, error) {
 	if file == nil || !collectionNamePattern.MatchString(collection) {
 		return 0, ErrCorrupt
 	}
@@ -294,8 +294,8 @@ func mapDurableConsumerError(err error) error {
 	if err == nil {
 		return nil
 	}
-	mapped := mapStorageV2Error(err)
-	if errors.Is(mapped, storagev2.ErrCursorClosed) {
+	mapped := mapStorageError(err)
+	if errors.Is(mapped, storage.ErrCursorClosed) {
 		return ErrClosed
 	}
 	return mapped

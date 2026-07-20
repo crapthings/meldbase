@@ -46,7 +46,7 @@ func (f *File) ApplyReplicationNoop(transactionID [16]byte, committedAt time.Tim
 		return 0, err
 	}
 	if sequence == 0 {
-		return 0, errors.New("meldbase storage v2: replication noop sequence missing")
+		return 0, errors.New("meldbase storage: replication noop sequence missing")
 	}
 	return sequence, nil
 }

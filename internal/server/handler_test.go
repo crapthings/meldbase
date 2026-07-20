@@ -719,8 +719,8 @@ func TestRealtimePolicyLeaseRevocationForcesSafeResubscribe(t *testing.T) {
 				t.Fatalf("revocation message = %+v", resync)
 			}
 
-			lease2, _ := NewQueryPolicyLease("policy-v2")
-			authorizer.set("policy-v2", lease2)
+			lease2, _ := NewQueryPolicyLease("policy-store")
+			authorizer.set("policy-store", lease2)
 			if err := writeSocketJSON(ctx, connection, subscribe); err != nil {
 				t.Fatal(err)
 			}
@@ -1009,8 +1009,8 @@ func TestRealtimeResumedSubscriptionHonorsPolicyLeaseRevocation(t *testing.T) {
 	}
 }
 
-func TestRealtimeV2ResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
-	db, err := meldbase.Open(filepath.Join(t.TempDir(), "server-v2.meld2"))
+func TestRealtimeResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "server-store.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1039,7 +1039,7 @@ func TestRealtimeV2ResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
 	}
 	_ = readMap(t, ctx, connection)
 	query := map[string]any{"version": 1, "where": map[string]any{"op": "true"}}
-	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "subscribe", "mode": "delta", "requestId": "v2-initial", "collection": "items", "query": query}); err != nil {
+	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "subscribe", "mode": "delta", "requestId": "store-initial", "collection": "items", "query": query}); err != nil {
 		t.Fatal(err)
 	}
 	initial := readSnapshot(t, ctx, connection)
@@ -1058,7 +1058,7 @@ func TestRealtimeV2ResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
 	}
 	_ = readMap(t, ctx, connection)
 	if err := writeSocketJSON(ctx, connection, map[string]any{
-		"v": 1, "type": "subscribe", "mode": "delta", "requestId": "v2-resume",
+		"v": 1, "type": "subscribe", "mode": "delta", "requestId": "store-resume",
 		"collection": "items", "query": query, "resumeToken": initial.Token,
 	}); err != nil {
 		t.Fatal(err)
@@ -1068,7 +1068,7 @@ func TestRealtimeV2ResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
 		t.Fatalf("resumed=%+v", resumed)
 	}
 	delta := readMap(t, ctx, connection)
-	if delta["type"] != "delta" || delta["requestId"] != "v2-resume" || delta["subscriptionId"] != resumed["subscriptionId"] || delta["fromToken"] != initial.Token || delta["token"] == initial.Token {
+	if delta["type"] != "delta" || delta["requestId"] != "store-resume" || delta["subscriptionId"] != resumed["subscriptionId"] || delta["fromToken"] != initial.Token || delta["token"] == initial.Token {
 		t.Fatalf("delta=%+v", delta)
 	}
 	operations, ok := delta["operations"].([]any)

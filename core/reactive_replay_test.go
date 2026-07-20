@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-func TestV2HistoricalReplayUsesSharedReactiveTransitions(t *testing.T) {
-	file, _, err := storagev2.Open(filepath.Join(t.TempDir(), "reactive-replay.meld2"))
+func TestHistoricalReplayUsesSharedReactiveTransitions(t *testing.T) {
+	file, _, err := storage.Open(filepath.Join(t.TempDir(), "reactive-replay.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,23 +24,23 @@ func TestV2HistoricalReplayUsesSharedReactiveTransitions(t *testing.T) {
 		}
 		return encoded
 	}
-	apply := func(sequence byte, mutations ...storagev2.DocumentMutation) {
+	apply := func(sequence byte, mutations ...storage.DocumentMutation) {
 		t.Helper()
 		transactionID := [16]byte{sequence}
-		got, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: transactionID, Mutations: mutations})
+		got, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: transactionID, Mutations: mutations})
 		if err != nil || got != uint64(sequence) {
 			t.Fatalf("sequence=%d got=%d err=%v", sequence, got, err)
 		}
 	}
 	apply(1,
-		storagev2.DocumentMutation{Collection: "items", DocumentID: [16]byte(a), Operation: storagev2.DocumentInsert, Document: doc(a, 10, true)},
-		storagev2.DocumentMutation{Collection: "items", DocumentID: [16]byte(b), Operation: storagev2.DocumentInsert, Document: doc(b, 10, true)},
+		storage.DocumentMutation{Collection: "items", DocumentID: [16]byte(a), Operation: storage.DocumentInsert, Document: doc(a, 10, true)},
+		storage.DocumentMutation{Collection: "items", DocumentID: [16]byte(b), Operation: storage.DocumentInsert, Document: doc(b, 10, true)},
 	)
-	apply(2, storagev2.DocumentMutation{Collection: "items", DocumentID: [16]byte(b), Operation: storagev2.DocumentUpdate, Document: doc(b, 5, true)})
-	apply(3, storagev2.DocumentMutation{Collection: "other", DocumentID: [16]byte(other), Operation: storagev2.DocumentInsert, Document: doc(other, 1, true)})
-	apply(4, storagev2.DocumentMutation{Collection: "items", DocumentID: [16]byte(c), Operation: storagev2.DocumentInsert, Document: doc(c, 7, true)})
-	apply(5, storagev2.DocumentMutation{Collection: "items", DocumentID: [16]byte(a), Operation: storagev2.DocumentUpdate, Document: doc(a, 1, true)})
-	apply(6, storagev2.DocumentMutation{Collection: "items", DocumentID: [16]byte(b), Operation: storagev2.DocumentDelete})
+	apply(2, storage.DocumentMutation{Collection: "items", DocumentID: [16]byte(b), Operation: storage.DocumentUpdate, Document: doc(b, 5, true)})
+	apply(3, storage.DocumentMutation{Collection: "other", DocumentID: [16]byte(other), Operation: storage.DocumentInsert, Document: doc(other, 1, true)})
+	apply(4, storage.DocumentMutation{Collection: "items", DocumentID: [16]byte(c), Operation: storage.DocumentInsert, Document: doc(c, 7, true)})
+	apply(5, storage.DocumentMutation{Collection: "items", DocumentID: [16]byte(a), Operation: storage.DocumentUpdate, Document: doc(a, 1, true)})
+	apply(6, storage.DocumentMutation{Collection: "items", DocumentID: [16]byte(b), Operation: storage.DocumentDelete})
 
 	limit := 2
 	query, err := CompileQuery(Filter{"active": true}, QueryOptions{Sort: []SortField{{Path: "score", Direction: 1}}, Limit: &limit})
@@ -53,7 +53,7 @@ func TestV2HistoricalReplayUsesSharedReactiveTransitions(t *testing.T) {
 	}
 	defer snapshot.Close()
 	defer stream.Close()
-	view, err := newV2ReactiveReplayView(snapshot, "items", query)
+	view, err := newReactiveReplayView(snapshot, "items", query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,8 +98,8 @@ func TestV2HistoricalReplayUsesSharedReactiveTransitions(t *testing.T) {
 	}
 }
 
-func TestV2HistoricalSnapshotRestoresInsertionTieBreaker(t *testing.T) {
-	file, _, err := storagev2.Open(filepath.Join(t.TempDir(), "historical-order.meld2"))
+func TestHistoricalSnapshotRestoresInsertionTieBreaker(t *testing.T) {
+	file, _, err := storage.Open(filepath.Join(t.TempDir(), "historical-order.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,9 +112,9 @@ func TestV2HistoricalSnapshotRestoresInsertionTieBreaker(t *testing.T) {
 		}
 		return value
 	}
-	if _, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{1}, Mutations: []storagev2.DocumentMutation{
-		{Collection: "items", DocumentID: [16]byte(first), Operation: storagev2.DocumentInsert, Document: encode(first)},
-		{Collection: "items", DocumentID: [16]byte(second), Operation: storagev2.DocumentInsert, Document: encode(second)},
+	if _, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{1}, Mutations: []storage.DocumentMutation{
+		{Collection: "items", DocumentID: [16]byte(first), Operation: storage.DocumentInsert, Document: encode(first)},
+		{Collection: "items", DocumentID: [16]byte(second), Operation: storage.DocumentInsert, Document: encode(second)},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -128,15 +128,15 @@ func TestV2HistoricalSnapshotRestoresInsertionTieBreaker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := newV2ReactiveReplayView(snapshot, "items", query)
+	view, err := newReactiveReplayView(snapshot, "items", query)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertSnapshotIDs(t, view.Snapshot(), []DocumentID{first, second})
 }
 
-func TestV2ReplayRejectsBatchAtomically(t *testing.T) {
-	file, _, err := storagev2.Open(filepath.Join(t.TempDir(), "replay-atomic.meld2"))
+func TestReplayRejectsBatchAtomically(t *testing.T) {
+	file, _, err := storage.Open(filepath.Join(t.TempDir(), "replay-atomic.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +146,8 @@ func TestV2ReplayRejectsBatchAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{1}, Mutations: []storagev2.DocumentMutation{{
-		Collection: "items", DocumentID: [16]byte(id), Operation: storagev2.DocumentInsert, Document: encoded,
+	if _, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{1}, Mutations: []storage.DocumentMutation{{
+		Collection: "items", DocumentID: [16]byte(id), Operation: storage.DocumentInsert, Document: encoded,
 	}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestV2ReplayRejectsBatchAtomically(t *testing.T) {
 	defer snapshot.Close()
 	defer stream.Close()
 	query, _ := CompileQuery(Filter{}, QueryOptions{})
-	view, err := newV2ReactiveReplayView(snapshot, "items", query)
+	view, err := newReactiveReplayView(snapshot, "items", query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestV2ReplayRejectsBatchAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	corrupt := batch
-	corrupt.Changes = append([]storagev2.CommitChange(nil), batch.Changes...)
+	corrupt.Changes = append([]storage.CommitChange(nil), batch.Changes...)
 	corrupt.Changes = append(corrupt.Changes, batch.Changes[len(batch.Changes)-1])
 	if _, _, err := view.ApplyCommit(stream, corrupt); err == nil {
 		t.Fatal("duplicate change accepted")
@@ -182,8 +182,8 @@ func TestV2ReplayRejectsBatchAtomically(t *testing.T) {
 	assertSnapshotIDs(t, next, []DocumentID{id})
 }
 
-func TestV2QueryReplaySourceSkipsInvisibleSequencesAndReportsRetention(t *testing.T) {
-	file, _, err := storagev2.Open(filepath.Join(t.TempDir(), "query-replay-source.meld2"))
+func TestQueryReplaySourceSkipsInvisibleSequencesAndReportsRetention(t *testing.T) {
+	file, _, err := storage.Open(filepath.Join(t.TempDir(), "query-replay-source.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,10 +196,10 @@ func TestV2QueryReplaySourceSkipsInvisibleSequencesAndReportsRetention(t *testin
 		}
 		return value
 	}
-	transactions := []storagev2.DocumentTransaction{
-		{TransactionID: [16]byte{1}, Mutations: []storagev2.DocumentMutation{{Collection: "items", DocumentID: [16]byte(item), Operation: storagev2.DocumentInsert, Document: encode(item, "one")}}},
-		{TransactionID: [16]byte{2}, Mutations: []storagev2.DocumentMutation{{Collection: "other", DocumentID: [16]byte(other), Operation: storagev2.DocumentInsert, Document: encode(other, "other")}}},
-		{TransactionID: [16]byte{3}, Mutations: []storagev2.DocumentMutation{{Collection: "items", DocumentID: [16]byte(item), Operation: storagev2.DocumentUpdate, Document: encode(item, "three")}}},
+	transactions := []storage.DocumentTransaction{
+		{TransactionID: [16]byte{1}, Mutations: []storage.DocumentMutation{{Collection: "items", DocumentID: [16]byte(item), Operation: storage.DocumentInsert, Document: encode(item, "one")}}},
+		{TransactionID: [16]byte{2}, Mutations: []storage.DocumentMutation{{Collection: "other", DocumentID: [16]byte(other), Operation: storage.DocumentInsert, Document: encode(other, "other")}}},
+		{TransactionID: [16]byte{3}, Mutations: []storage.DocumentMutation{{Collection: "items", DocumentID: [16]byte(item), Operation: storage.DocumentUpdate, Document: encode(item, "three")}}},
 	}
 	for _, transaction := range transactions {
 		if _, err := file.ApplyDocumentTransaction(transaction); err != nil {
@@ -207,7 +207,7 @@ func TestV2QueryReplaySourceSkipsInvisibleSequencesAndReportsRetention(t *testin
 		}
 	}
 	query, _ := CompileQuery(Filter{}, QueryOptions{})
-	source := &v2QueryReplaySource{file: file}
+	source := &queryReplaySource{file: file}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	replay, err := source.OpenQueryReplay(ctx, "items", query, 1, 2)

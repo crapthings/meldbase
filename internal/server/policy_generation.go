@@ -24,7 +24,7 @@ func NewDurablePolicyGenerationStore(db *meldbase.DB) (*DurablePolicyGenerationS
 	}
 	backend := db.MeldbaseSystemRecordBackend()
 	if backend == nil {
-		return nil, errors.New("meldbase server: durable policy generations require an open V2 database")
+		return nil, errors.New("meldbase server: durable policy generations require an open database")
 	}
 	return &DurablePolicyGenerationStore{backend: backend, db: db}, nil
 }

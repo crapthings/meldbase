@@ -61,7 +61,7 @@ func (iterator *TreeIterator) Next() bool {
 	iterator.file.mu.RLock()
 	defer iterator.file.mu.RUnlock()
 	if iterator.file.file == nil {
-		iterator.err = errors.New("meldbase storage v2: file is closed")
+		iterator.err = errors.New("meldbase storage: file is closed")
 		return false
 	}
 	return iterator.nextUnlocked()

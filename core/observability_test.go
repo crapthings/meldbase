@@ -213,20 +213,20 @@ func TestStatsTrackReactiveLifecycle(t *testing.T) {
 	}
 }
 
-func TestStatsSnapshotIsAllocationFreeForMemoryAndV2(t *testing.T) {
+func TestStatsSnapshotIsAllocationFreeForMemoryAnd(t *testing.T) {
 	memory := New()
 	defer memory.Close()
 	if allocations := testing.AllocsPerRun(1_000, func() { _ = memory.Stats() }); allocations != 0 {
 		t.Fatalf("memory Stats allocations=%v, want 0", allocations)
 	}
 
-	v2, err := Open(filepath.Join(t.TempDir(), "stats.meld2"))
+	store, err := Open(filepath.Join(t.TempDir(), "stats.meld2"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer v2.Close()
-	if allocations := testing.AllocsPerRun(1_000, func() { _ = v2.Stats() }); allocations != 0 {
-		t.Fatalf("V2 Stats allocations=%v, want 0", allocations)
+	defer store.Close()
+	if allocations := testing.AllocsPerRun(1_000, func() { _ = store.Stats() }); allocations != 0 {
+		t.Fatalf(" Stats allocations=%v, want 0", allocations)
 	}
 }
 

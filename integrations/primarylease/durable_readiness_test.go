@@ -33,21 +33,21 @@ func TestDurableConsumerPromotionReadinessRequiresExactDurableAckAndSourcePositi
 	request := meldbase.FollowerPromotionRequest{DatabaseID: source.DatabaseID(), CommitSequence: batch.Token}
 	record := primarylease.LeaseRecord{DatabaseID: request.DatabaseID, Owner: "writer-a", Epoch: 1, CommitSequence: request.CommitSequence, NotAfter: time.Now().UTC().Add(time.Minute)}
 	readiness := primarylease.DurableConsumerPromotionReadiness{Source: source, ConsumerName: "follower-a"}
-	if err := readiness.VerifyV2FollowerPromotion(context.Background(), request, record, true); err != nil {
+	if err := readiness.VerifyFollowerPromotion(context.Background(), request, record, true); err != nil {
 		t.Fatalf("exact durable acknowledgement readiness err=%v", err)
 	}
 	if _, err := source.Collection("items").UpdateOne(context.Background(), meldbase.Filter{"_id": id}, meldbase.Update{"$set": map[string]any{"value": 2}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := readiness.VerifyV2FollowerPromotion(context.Background(), request, record, true); !errors.Is(err, primarylease.ErrLeasePromotionReadiness) {
+	if err := readiness.VerifyFollowerPromotion(context.Background(), request, record, true); !errors.Is(err, primarylease.ErrLeasePromotionReadiness) {
 		t.Fatalf("source advanced past follower checkpoint err=%v", err)
 	}
-	if err := (primarylease.DurableConsumerPromotionReadiness{Source: source, ConsumerName: "missing"}).VerifyV2FollowerPromotion(context.Background(), request, record, true); !errors.Is(err, primarylease.ErrLeasePromotionReadiness) {
+	if err := (primarylease.DurableConsumerPromotionReadiness{Source: source, ConsumerName: "missing"}).VerifyFollowerPromotion(context.Background(), request, record, true); !errors.Is(err, primarylease.ErrLeasePromotionReadiness) {
 		t.Fatalf("missing consumer readiness err=%v", err)
 	}
 	wrongRequest := request
 	wrongRequest.DatabaseID[0]++
-	if err := readiness.VerifyV2FollowerPromotion(context.Background(), wrongRequest, record, true); !errors.Is(err, primarylease.ErrLeasePromotionReadiness) {
+	if err := readiness.VerifyFollowerPromotion(context.Background(), wrongRequest, record, true); !errors.Is(err, primarylease.ErrLeasePromotionReadiness) {
 		t.Fatalf("identity mismatch readiness err=%v", err)
 	}
 }

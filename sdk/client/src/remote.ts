@@ -42,9 +42,6 @@ export interface ClientOptions {
   readonly maxSnapshotDocuments?: number;
   readonly maxDeltaOperations?: number;
 	readonly maxRPCArguments?: number;
-  // Fail closed if the authenticated ticket response omits the protocol
-  // descriptor. Leave false only while rolling out from a legacy v1 server.
-  readonly requireRealtimeProtocol?: boolean;
   readonly reconnect?: { readonly minDelayMs?: number; readonly maxDelayMs?: number };
 }
 
@@ -294,7 +291,6 @@ class RealtimeConnection {
   readonly #maxInboundBytes: number;
   readonly #maxSnapshotDocuments: number;
   readonly #maxDeltaOperations: number;
-  readonly #requireProtocol: boolean;
   readonly #minDelay: number;
   readonly #maxDelay: number;
   #socket: WebSocketLike | undefined;
@@ -314,8 +310,6 @@ class RealtimeConnection {
     this.#maxSnapshotDocuments = positiveLimit(options.maxSnapshotDocuments, 10_000, "maxSnapshotDocuments");
     const defaultDeltaOperations = Math.min(Number.MAX_SAFE_INTEGER, this.#maxSnapshotDocuments * 4);
     this.#maxDeltaOperations = positiveLimit(options.maxDeltaOperations, defaultDeltaOperations, "maxDeltaOperations");
-    if (options.requireRealtimeProtocol !== undefined && typeof options.requireRealtimeProtocol !== "boolean") throw new TypeError("requireRealtimeProtocol must be boolean");
-    this.#requireProtocol = options.requireRealtimeProtocol ?? false;
     this.#minDelay = options.reconnect?.minDelayMs ?? 250;
     this.#maxDelay = options.reconnect?.maxDelayMs ?? 15_000;
   }
@@ -600,8 +594,7 @@ class RealtimeConnection {
   private validateProtocol(protocol: ProtocolDescriptor | undefined): void {
 		this.#protocol = protocol;
 		if (!protocol) {
-			if (this.#requireProtocol) throw new MeldbaseProtocolError(["protocol.discovery"]);
-			return; // Legacy v1 servers predate explicit discovery.
+			throw new MeldbaseProtocolError(["protocol.discovery"]);
 		}
 		const required = new Set<string>();
 		if (this.#subscriptions.size > 0) required.add("query.delta");

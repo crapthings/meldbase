@@ -236,7 +236,7 @@ func TestPrimaryRuntimeRenewsThroughPinnedMTLSAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := primarylease.OpenV2Primary(filepath.Join(t.TempDir(), "primary.meld2"), primarylease.PrimaryV2Options{
+	runtime, err := primarylease.OpenPrimary(filepath.Join(t.TempDir(), "primary.meld2"), primarylease.PrimaryOptions{
 		PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "node-a", Clock: func() time.Time { return now }}, RenewalClient: client,
 	})
 	if err != nil {
@@ -333,7 +333,7 @@ func TestPrimaryRuntimeUsesThreeMemberMTLSQuorumAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := primarylease.OpenV2Primary(filepath.Join(t.TempDir(), "quorum-primary.meld2"), primarylease.PrimaryV2Options{
+	runtime, err := primarylease.OpenPrimary(filepath.Join(t.TempDir(), "quorum-primary.meld2"), primarylease.PrimaryOptions{
 		PublicKey: publicKey, GuardOptions: primarylease.GuardOptions{Owner: "node-a", Clock: func() time.Time { return now }}, RenewalClient: authorityClient,
 	})
 	if err != nil {

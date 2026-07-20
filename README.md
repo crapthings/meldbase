@@ -25,10 +25,10 @@ engine retains a bounded 10,000-commit / 256 MiB logical replay window by
 default, while active replay leases safely pin required history and expose
 retention pressure.
 The database enforces canonical document/transaction resource limits before
-publication. V2 point transactions additionally admit tracked entries and
+publication. Point transactions additionally admit tracked entries and
 retained base/current overlay bytes while the callback runs, preventing a
 read-heavy callback from growing unbounded before commit.
-V2 additionally has an 8 GiB default physical high-water quota; safe reusable
+The storage engine additionally has an 8 GiB default physical high-water quota; safe reusable
 pages are consumed first and crossing the quota rejects before file I/O without
 poisoning the database.
 
@@ -53,7 +53,7 @@ go build -o /tmp/meldbase-qualification ./cmd/meld
 
 It creates an isolated temporary directory, checks file and directory `fsync`,
 exclusive advisory-lock conflict and close-release behavior, atomic
-no-overwrite hard links, same-directory rename, and a real indexed V2
+no-overwrite hard links, same-directory rename, and a real indexed
 commit/reopen followed by offline full-graph verification. It prints schema-2
 JSON and removes the probe directory. Passing proves those APIs work in the
 current mounted environment; it does not prove controller behavior during power
@@ -78,7 +78,7 @@ Its four-hour release floor applies to measured concurrent worker time; reopen
 and verification overhead is reported separately and cannot satisfy the floor.
 The release writer runs flat out only until it proves one real optimistic
 reclamation conflict, then uses a hardware-independent cadence of one write
-every ten seconds. This keeps the duration/recovery qualification inside the normal V2
+every ten seconds. This keeps the duration/recovery qualification inside the normal
 physical safety quota; it is not a storage-throughput benchmark.
 Shadow-index catch-up coalesces up to thirty seconds of ordered Commit Log work,
 then drains any larger backlog in bounded batches. This keeps the soak focused
@@ -93,7 +93,7 @@ The first Level 4 runner, `meld destructive-process-check`, now sends a real
 old/new logical-state hashes, lock reacquisition and full offline verification.
 The Linux-only `destructive-volume-check` and `destructive-enospc-check` pair
 adds a token-gated, non-root, independently mounted disposable-volume runner
-that reaches every V2 publication boundary, fills the real filesystem through
+that reaches every publication boundary, fills the real filesystem through
 kernel `fallocate` until `ENOSPC`, kills the blocked writer and verifies recovery.
 `destructive-qemu-reset` captures the QMP block inventory, exact hard-reset
 command/response and host-originated RESET event. `destructive-power-prepare`
@@ -151,7 +151,7 @@ are truthful or cover stale reads.
 An explicit volatile-overlay negative control covers that distinction: it
 acknowledges a commit in a QEMU temporary layer, kills QEMU with `SIGKILL`,
 proves the durable base image never changed, and reboots without the layer. The
-harness must classify the resulting sequence rollback as unsafe. Public V2
+harness must classify the resulting sequence rollback as unsafe. Public
 opening supports a synchronous external rollback anchor; a stale but
 checksum-valid generation is rejected before the database file is modified:
 
@@ -161,7 +161,7 @@ if err != nil {
 	return err
 }
 db, err := meldbase.OpenWithOptions("/data/app.meld", meldbase.OpenOptions{
-	RollbackProtection: meldbase.V2RollbackProtection{
+	RollbackProtection: meldbase.RollbackProtection{
 		AnchorStore:      anchor,
 		InitializeAnchor: true, // audited first provisioning only
 	},
@@ -254,7 +254,7 @@ err = users.CreateIndex(ctx, "users_age", []meldbase.IndexField{
   {Field: "age", Order: 1},
 }, meldbase.IndexOptions{})
 
-// V2 and memory support one to four fields with independent directions.
+// Storage and memory support one to four fields with independent directions.
 err = users.CreateIndex(ctx, "users_name_age", []meldbase.IndexField{
   {Field: "name", Order: 1},
   {Field: "age", Order: -1},
@@ -265,7 +265,7 @@ birthday, err := meldbase.CompileUpdate(meldbase.Update{
 })
 if err != nil { log.Fatal(err) }
 
-// Storage V2 atomically publishes point writes across collections. Meldbase
+// Storage atomically publishes point writes across collections. Meldbase
 // never retries this callback when another commit wins first.
 err = db.RunWriteTransaction(ctx, func(tx *meldbase.WriteTransaction) error {
   if err := tx.UpdateOne("users", id, birthday); err != nil {
@@ -324,11 +324,11 @@ RPC reuses Meldbase wire values, so `bigint`, Date and binary values do not lose
 type information. The public Go `server` package requires both explicit method
 registration and a separate RPC authorizer; arbitrary server error text is never
 sent to clients. Socket calls are never automatically retried after disconnect.
-An explicit V2-backed server store can durably claim an idempotency key and
+An explicit storage-backed server store can durably claim an idempotency key and
 replay its terminal result; an interrupted claim returns outcome-unknown rather
 than rerunning application code. Go methods registered through
 `RPCTransactionalMethods` can additionally publish supported point writes and
-the successful result in one V2 commit; exact point-read-set contention returns
+the successful result in one commit; exact point-read-set contention returns
 a durable conflict without rerunning the method, while disjoint commits may
 proceed. See
 [`docs/client-protocol.md`](docs/client-protocol.md#rpc-calls).
@@ -346,8 +346,11 @@ Run the worker example locally in two terminals:
 
 ```bash
 export MELDBASE_WORKER_TOKEN=development-worker-token-0123456789abcdef
+export MELDBASE_ACCESS_TOKEN='token-issued-by-your-identity-service'
 go run ./cmd/meld serve --db /tmp/meldbase-worker-demo.meld2 \
-  --addr 127.0.0.1:8080 --dev-no-auth --worker-addr 127.0.0.1:9092 \
+  --addr 127.0.0.1:8080 --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
+  --jwt-issuer https://identity.example/ --jwt-audience meldbase-api \
+  --workspace-collections orders --worker-addr 127.0.0.1:9092 \
   --worker-publications orders
 ```
 
@@ -360,6 +363,7 @@ Then invoke its transactional method:
 
 ```bash
 curl -sS http://127.0.0.1:8080/v1/rpc \
+  -H "authorization: Bearer $MELDBASE_ACCESS_TOKEN" \
   -H 'content-type: application/json' \
   --data '{"v":1,"type":"call","requestId":"demo-1","idempotencyKey":"demo-order-000000000001","method":"orders.create","arguments":[{"t":"string","v":"first order"}]}'
 ```
@@ -375,21 +379,21 @@ without blocking later commits; writes that finish after that snapshot are not
 included in the compacted file:
 
 ```go
-if err := db.CompactToV2(ctx, "app-compacted.meld2"); err != nil {
+if err := db.Compact(ctx, "app-compacted.meld2"); err != nil {
   log.Fatal(err)
 }
 ```
 
-The compacted file also has a new database identity. Lazy V2 COLLSCAN cursors
+The compacted file also has a new database identity. Lazy COLLSCAN cursors
 release their snapshot automatically on exhaustion, limit, error or context
 cancellation; callers that stop early should call `cursor.Close()`.
 
-V2 can also create an exact, checksummed physical restore artifact. Unlike
+Backup can also create an exact, checksummed physical restore artifact. Unlike
 compaction, backup deliberately preserves the database identity, Meta
 generation, Commit Log and physical history:
 
 ```go
-result, err := db.BackupV2(ctx, "app-backup.meld2")
+result, err := db.Backup(ctx, "app-backup.meld2")
 if err != nil {
   log.Fatal(err)
 }
@@ -422,15 +426,15 @@ The destination must not exist. The library blocks source writes for the copy
 duration while allowing readers; the CLI must acquire the database's exclusive
 process lock, so it is intended for an offline source. A physical backup is a
 restore artifact, not an independent writable clone: retire the original before
-starting the restored file. Use `CompactToV2` when an independent database with
+starting the restored file. Use `Compact` when an independent database with
 a new identity and history is required.
 
-V2 reclamation can run as an explicit low-pause maintenance loop. It is off by
+Online reclamation can run as an explicit low-pause maintenance loop. It is off by
 default; online scans do not hold the writer lock and discard their result if a
 commit changes the audited generation:
 
 ```go
-maintenance, err := db.StartV2Maintenance(ctx, meldbase.V2MaintenanceOptions{
+maintenance, err := db.StartMaintenance(ctx, meldbase.MaintenanceOptions{
   Interval:    5 * time.Minute,
   Timeout:     time.Minute,
   MaxAttempts: 2,
@@ -452,7 +456,7 @@ checkpoint maintenance does not advance the logical commit sequence.
 Startup recovery is explicit and auditable. Normal `Open` performs only bounded
 automatic recovery and freezes the result in `db.RecoveryReport()`. Deployments
 that require an operator/offline verifier to approve every recovery can reject
-before any crash tail is truncated or WAL is replayed:
+before any crash tail is truncated:
 
 ```go
 db, err := meldbase.OpenWithOptions("app.meld2", meldbase.OpenOptions{
@@ -466,7 +470,7 @@ if errors.Is(err, meldbase.ErrRecoveryRequired) {
 There is no online API for clearing durability fail-stop.
 
 For a production process that prefers a slower startup to serving from a
-structurally corrupt deep V2 page, opt into the protected-graph audit. It runs
+structurally corrupt deep page, opt into the protected-graph audit. It runs
 before automatic crash-tail removal and does not replace the offline semantic
 index verifier:
 
@@ -476,19 +480,19 @@ db, err := meldbase.OpenWithOptions("app.meld2", meldbase.OpenOptions{
 })
 ```
 
-Write admission and V2 replay history are configured at open and remain
+Write admission and replay history are configured at open and remain
 immutable for that handle. Zero fields select the production defaults:
 
 ```go
 db, err := meldbase.OpenWithOptions("app.meld2", meldbase.OpenOptions{
-  V2CommitRetention: meldbase.V2CommitRetentionPolicy{
+  CommitRetention: meldbase.CommitRetentionPolicy{
     MaxCommits: 25_000,
     MaxBytes:   512 << 20,
   },
   // A full replay-consumer buffer is terminated after this interval so it
   // cannot indefinitely pin retained history. Zero selects five seconds.
-  V2ReplayDeliveryTimeout: 5 * time.Second,
-  V2StorageLimits: meldbase.V2StorageLimits{MaxFileBytes: 16 << 30},
+  ReplayDeliveryTimeout: 5 * time.Second,
+  StorageLimits: meldbase.StorageLimits{MaxFileBytes: 16 << 30},
   ResourceLimits: meldbase.ResourceLimits{
     MaxDocumentBytes:      8 << 20,
     MaxTransactionBytes:   32 << 20,
@@ -508,7 +512,7 @@ atomically with `ErrResourceLimit`; the defaults cap one build at 1,000,000
 entries and 256 MiB. Online index creation leaves the commit sequence and
 durable bytes unchanged on rejection.
 The compatibility `CreateIndex` path uses a pinned snapshot without holding the
-database writer mutex and retries bounded snapshot conflicts. Storage V2 also
+database writer mutex and retries bounded snapshot conflicts. Storage also
 supports durable, crash-resumable construction for write-heavy collections:
 
 ```go
@@ -553,8 +557,8 @@ go run ./cmd/meld index-build abort --db app.meld2 --id <build-id>
 `resume` never hides a uniqueness or resource failure: it exits unsuccessfully,
 and `list` can inspect the still-private task before an explicit abort. These are
 local file-management commands, not unauthenticated HTTP administration routes.
-Compaction inherits the source quota. Use `CompactToV2WithOptions` with
-`V2DestinationOptions` when a rewritten file needs a different quota or
+Compaction inherits the source quota. Use `CompactWithOptions` with
+`CompactionOptions` when a rewritten file needs a different quota or
 index-build budget; an undersized destination is never published.
 
 ## TypeScript SDK
@@ -584,10 +588,7 @@ import { MeldbaseClient } from "@meldbase/client"
 
 const db = new MeldbaseClient({
   baseUrl: "https://data.example.com",
-  accessToken: () => auth.currentAccessToken(),
-  // Enable after every server in a rolling deployment advertises its fixed
-  // realtime/RPC capability descriptor.
-  requireRealtimeProtocol: true
+  accessToken: () => auth.currentAccessToken()
 })
 
 const query = db.collection("todos").find({ done: false })
@@ -648,21 +649,10 @@ reactive query, closes the database, and proves the data after reopen:
 go run ./cmd/meld demo
 ```
 
-Run the HTTP/WebSocket server locally only with the explicit development-auth
-switch:
-
-```sh
-go run ./cmd/meld serve \
-  --db ./app.meld \
-  --addr :8080 \
-  --dev-no-auth
-```
-
-`--dev-no-auth` grants every request full access and is intentionally required;
-it is not a production authentication mode. For the built-in production path,
-configure JWT verification and the collections that are scoped to a current
-workspace. A token must carry `sub`, an expiring `exp`, the configured `iss` and
-`aud`, plus `workspace_id` (or the claim selected by `--jwt-workspace-claim`):
+Run the HTTP/WebSocket server with JWT verification and the collections scoped
+to the current workspace. A token must carry `sub`, an expiring `exp`, the
+configured `iss` and `aud`, plus `workspace_id` (or the claim selected by
+`--jwt-workspace-claim`):
 
 ```sh
 go run ./cmd/meld serve \
@@ -688,7 +678,7 @@ client never sends a trusted workspace selector. Collections not listed in
 `server` package can supply custom `Authenticator` and `Authorizer`
 implementations for more specialized rules.
 
-The development server can exercise the same fail-closed V2 anchor lifecycle.
+The server can exercise the same fail-closed anchor lifecycle.
 On the first audited provisioning only, use `--rollback-anchor-init`; omit it on
 every subsequent start:
 
@@ -698,7 +688,10 @@ go run ./cmd/meld serve \
   --rollback-anchor /trusted/app.anchor \
   --rollback-anchor-init \
   --rollback-anchor-timeout 10s \
-  --dev-no-auth
+  --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
+  --jwt-issuer https://identity.example/ \
+  --jwt-audience meldbase-api \
+  --workspace-collections projects,tasks,comments
 ```
 
 `/trusted` must already exist and, for actual rollback protection, must not be
@@ -717,7 +710,10 @@ export MELDBASE_ADMIN_TOKEN='replace-with-at-least-32-random-bytes'
 go run ./cmd/meld serve \
   --db ./app.meld \
   --addr :8080 \
-  --dev-no-auth \
+  --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
+  --jwt-issuer https://identity.example/ \
+  --jwt-audience meldbase-api \
+  --workspace-collections projects,tasks,comments \
   --admin-addr 127.0.0.1:9091 \
   --admin-diagnostics \
   --admin-metrics
@@ -727,7 +723,7 @@ Then open `http://127.0.0.1:9091/` and paste the token. The panel receives a
 fixed-history snapshot followed by an isolated SSE stream; it is not backed by a
 user collection or the business reactive pipeline. Its health strip separates
 database, durability, storage, realtime, telemetry and optional transport state;
-fixed explanations identify fail-stop writes, queue pressure and recent fallback
+fixed explanations identify fail-stop writes, queue pressure and recent recovery
 events without exposing business data. It also shows Commit Log retention
 pressure and configured/rejected write resource budgets. Use
 `--admin-diagnostics-all` only for short sessions that need every query/commit;
@@ -783,7 +779,7 @@ curl -X POST http://localhost:8080/v1/collections/todos/query \
 
 Browser realtime authentication is two-step: obtain a short-lived, single-use
 ticket over authenticated HTTP, then send it in the first WebSocket message.
-Credentials never appear in the WebSocket URL. The core V1 exchange is:
+Credentials never appear in the WebSocket URL. The protocol version 1 exchange is:
 
 ```json
 {"v":1,"type":"authenticate","ticket":"<single-use-ticket>"}
@@ -798,8 +794,8 @@ See [`docs/client-protocol.md`](docs/client-protocol.md) for reconnect,
 ## Status
 
 Early-stage and not suitable for production data. See
-[`docs/architecture.md`](docs/architecture.md) and
-[`docs/roadmap.md`](docs/roadmap.md). The low-cost metrics, bounded admin sampler
+[`docs/README.md`](docs/README.md), [`docs/architecture.md`](docs/architecture.md)
+and [`docs/roadmap.md`](docs/roadmap.md). The low-cost metrics, bounded admin sampler
 and secured realtime stats stream are in
 [`docs/observability.md`](docs/observability.md). The first-stage
 requirement-to-evidence map is in [`docs/mvp-audit.md`](docs/mvp-audit.md).

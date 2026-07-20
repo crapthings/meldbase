@@ -14,21 +14,21 @@ check is not transferable to another mount.
    boundary. These run on Linux and macOS CI.
 2. **Volume capability receipt** — `meld durability-check` exercises the actual
    target directory's file/directory `fsync`, advisory-lock exclusion and
-   close-release, no-overwrite link, same-directory rename, indexed V2
-   commit/reopen and offline full-graph/index verification. Schema 2 binds the
+   close-release, no-overwrite link, same-directory rename, indexed
+  commit/reopen and offline full-graph/index verification. Schema 2 binds the
    receipt to an optional claimed source revision, records the binary's actual
    VCS revision/dirty flag, and records OS/architecture/Go,
-   filesystem type/name, device, block/capacity values, individual timings and
+  filesystem type/name, device, block/capacity values, individual timings and
    the verified database SHA-256.
 3. **Concurrent release soak** — the schema-4 `release` soak runs at least four
    measured hours of concurrent workers with race detection, 10,000 documents,
    12 complete reopen phases,
-   writer/read/index-build/reclamation activity and a real reclamation conflict.
+  writer/read/index-build/reclamation activity and a real reclamation conflict.
    It proves the live shadow index before abort and the final graph afterward,
    and records the temp directory's device, filesystem type/name and block size.
 4. **Destructive platform qualification** — controlled power interruption and
    real capacity exhaustion on a disposable volume, using the intended kernel,
-   filesystem, mount options, virtual/block device, cache/controller and flush
+  filesystem, mount options, virtual/block device, cache/controller and flush
    policy. This cannot safely run inside `durability-check` on an application
    volume and remains external release evidence.
 5. **Rollback-protection qualification** — one complete five-phase signed
@@ -50,7 +50,7 @@ For every production candidate and filesystem class, retain all of the
 following against the exact release revision:
 
 - a schema-2 volume receipt with every fixed check passed, a nonempty indexed
-  database proof, matching claimed/build revisions and `buildModified=false`;
+ database proof, matching claimed/build revisions and `buildModified=false`;
 - a schema-4 release-soak receipt from the same target volume, not a `sentinel`
   or `custom` run;
 - kernel/OS version, filesystem implementation/version, mount options, device or
@@ -352,7 +352,7 @@ pass that exact token to the destructive runner:
   --require-clean-source
 ```
 
-The controller runs at least three independent trials at each of the five V2
+The controller runs at least three independent trials at each of the five
 publication boundaries. A repository-internal synchronous hook records the
 exact reached boundary on the separate control device. The controller then
 uses real `fallocate` allocation down to one filesystem block until the kernel
@@ -562,7 +562,7 @@ as a strict session.
 
 Power interruption and short-write tests do not by themselves prove that an
 accidental persistent bit flip is detected. Run the deterministic corruption
-campaign against a checksum-valid, offline V2 database:
+campaign against a checksum-valid, offline database:
 
 ```sh
 /tmp/meldbase-qualification destructive-corruption-check \
@@ -605,7 +605,7 @@ scripts/destructive-qemu-eio.sh \
   vmlinuz-virt initramfs-virt modloop-virt
 ```
 
-The runner creates a V2 fixture with a persisted reusable-page pool, places it
+The runner creates a current-format fixture with a persisted reusable-page pool, places it
 inside a fresh ext4 image, asks `debugfs` for the file's actual allocated block
 numbers and generates one canonical rule for every corresponding 512-byte
 sector. Every rule is explicitly `event="write_aio"`, `iotype="write"`,
@@ -767,15 +767,15 @@ evidence. Its purpose is to prove that the qualification harness rejects a
 flush-lie environment instead of calling an internally consistent old
 generation safe.
 
-The public V2 open lifecycle exposes three non-format-breaking static rollback
+The public open lifecycle exposes three non-format-breaking static rollback
 gates for trusted callers:
 
-- `V2RollbackProtection.ExpectedDatabaseID` rejects substitution of another
-  database with `ErrDatabaseIdentity`.
-- `V2RollbackProtection.MinimumCommitSequence` rejects a checksum-valid
+- `RollbackProtection.ExpectedDatabaseID` rejects substitution of another
+ database with `ErrDatabaseIdentity`.
+- `RollbackProtection.MinimumCommitSequence` rejects a checksum-valid
   generation below an externally remembered sequence with
   `ErrRollbackDetected`.
-- `V2RollbackProtection.MinimumGeneration` rejects loss of an acknowledged
+- `RollbackProtection.MinimumGeneration` rejects loss of an acknowledged
   physical maintenance generation even when the logical sequence is unchanged.
 
 Both checks occur after read-only graph selection but before recovery

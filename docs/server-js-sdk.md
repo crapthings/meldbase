@@ -115,7 +115,7 @@ point operation at a time:
 Each `tx_op` carries a call-local `opId`; the hub returns one typed `tx_result`
 or stable `tx_error`. Operations are executed against the fixed snapshot and
 isolated overlay in Go. A successful worker result triggers the existing atomic
-business/result V2 publication. A write to a point read or touched by the worker
+business/result publication. A write to a point read or touched by the worker
 returns the durable `rpc_transaction_conflict` terminal; disjoint commits remain
 concurrent, and JavaScript is never reinvoked. Point entries and retained
 base/current document values are bounded during execution by the Go-owned
@@ -128,7 +128,7 @@ HTTP and local TypeScript collections.
 authorization meaning depends on data outside the collection it queries. For
 example, a transaction that changes an `organization_members` record can
 invalidate the `orders` publication. It stages a new random policy generation
-in the private V2 System tree beside the business mutations and RPC terminal.
+in the private System tree beside the business mutations and RPC terminal.
 The old policy lease is revoked only after that root is durable and before the
 business ChangeBatch is emitted, so existing subscriptions resync instead of
 continuing under stale visibility. A conflict, handler error or failed commit
@@ -195,7 +195,7 @@ reuse an older authorization result.
 The policy version also includes a durable per-collection generation. Worker
 registration loads that generation before taking ownership, so a restart cannot
 forget a previously committed invalidation. The generation store must be the
-same V2 database used by transactional RPC; no memory fallback is allowed.
+same durable database used by transactional RPC.
 
 ## Current setup
 
@@ -254,7 +254,7 @@ const worker = new MeldbaseWorker({
       return order;
     }),
   },
-  publications: {
+ publications: {
     orders: publish({
       version: "orders-owner-v1",
       maxResults: 100,

@@ -28,7 +28,7 @@ reactive pending-batch/change/canonical-image-byte capacities. Counters reset
 when the database is reopened. Persistent gauges such as commit sequence come
 from the selected database state.
 
-When the opt-in V2 CommitCoordinator is enabled, the same snapshot includes its
+When the opt-in CommitCoordinator is enabled, the same snapshot includes its
 enabled state, pending/capacity gauges and admitted, queue-rejected, batch,
 grouped-request and caller-outcome-unknown counters. Admin schema version 14,
 Prometheus and OpenTelemetry expose these fixed-cardinality fields; at 50% queue
@@ -36,7 +36,7 @@ pressure database health becomes degraded and at 90% critical. A new queue-full
 rejection is also degraded. Sampling observes this scheduler outside commit
 publication, so exporters never execute on a write's hot path.
 
-The optional V2 primary-write fence also has a fixed aggregate: configured and
+The optional primary-write fence also has a fixed aggregate: configured and
 currently-enforced state plus check/rejection counters. A read-only follower
 reports a configured but not enforced fence because validated source history
 must not be rechecked as local primary work. A new local rejection degrades the
@@ -52,14 +52,7 @@ method, collection, document, principal or error labels. Callback timing and
 business values are not recorded unless the separate bounded diagnostics
 session is explicitly enabled.
 
-For legacy V1, durability statistics include current WAL bytes/commits,
-checkpoint attempts/completions/failures, automatic checkpoint triggers and
-successful checkpoint total/maximum latency. These expose threshold behavior
-and fail-stop maintenance errors without exporting the sidecar path. V2 reports
-zero for the V1-only families because every logical write is already a COW
-checkpoint.
-
-The V2 backend used for new default databases additionally exposes:
+The current storage backend exposes:
 
 - physical page count and page size;
 - page-cache capacity, residency, hits, misses and evictions;
@@ -80,7 +73,7 @@ The V2 backend used for new default databases additionally exposes:
 - reclamation operations, complete graph scans including retries, exhausted
   online conflicts, last mode/attempt count, reachable/reclaimable pages and
   duration.
-- physical V2 backup active/attempt/completed/failed counters, last byte count
+- physical backup active/attempt/completed/failed counters, last byte count
   and last duration.
 - persistent index-build phase/entry/byte gauges plus scheduler run/yield/failure
   counters and a retention-lease gauge, read from an immutable aggregate
@@ -100,10 +93,10 @@ also provides local run/completion/conflict/failure totals without page IDs or
 dynamic labels.
 
 Every successful constructor also freezes a schema-versioned `RecoveryReport`.
-It records the engine, selected/valid Meta slots, selected sequence, V1 WAL
-records replayed, provably incomplete main/WAL tail bytes removed, V2 fallback
-to an older root and optional acceleration degradation. It contains no path or
-business data, performs no I/O when read, and is included in `DBStats`. The
+It records selected/valid Meta slots, selected sequence, provably incomplete
+main-file tail bytes removed, selection of the valid Meta page and optional
+acceleration degradation. It contains no path or business data, performs no I/O
+when read, and is included in `DBStats`. The
 dashboard, Prometheus `meldbase_recovery_*` families and OpenTelemetry
 `meldbase.recovery.*` gauges expose the same startup receipt. These are gauges
 for this process session, not counters that increase while the process runs.
@@ -118,8 +111,8 @@ after `DB.Stats()` on the sampler goroutine; no health policy executes in a
 storage, query, commit or reactive hot path. Levels are stable enums:
 
 - `healthy` — no current state or latest-window engine signal;
-- `degraded` — operation continues, but an engine/control-plane fallback or
-  pressure signal needs attention;
+- `degraded` — operation continues, but a storage/control-plane pressure signal
+  needs attention;
 - `critical` — the database is closed, writes are fail-stopped, or a reactive
   pending queue is at least 90% full;
 - `unavailable` — that optional component, currently transport, was not attached
@@ -129,7 +122,7 @@ The assessment has fixed database, durability, storage, realtime, telemetry and
 transport components plus fixed boolean explanations. Realtime pressure becomes
 degraded at 50% and critical at 90% of the engine-reported capacities. A discarded
 persistent FreeSpace map remains storage-degraded until it is republished.
-Queue overflow, slow-consumer, WAL/checkpoint failure, telemetry replacement,
+Queue overflow, slow-consumer, storage publication failure, telemetry replacement,
 transport busy, outcome-unknown and worker-protocol signals use counter increases
 between adjacent samples; they clear after a quiet window and are ignored across
 database/server session resets. Application RPC failures, collection scans and
@@ -245,7 +238,7 @@ choose the bind address, TLS and shutdown policy explicitly. The handler exposes
 With `ServeDashboard: true`, `GET /` and its two embedded assets provide the
 developer Observatory panel. It is a local React operator console, with a
 sidebar for overview, storage, realtime, transport and diagnostics. React Router
-uses hash routes so the Go handler needs no client-side fallback; Zustand keeps
+uses hash routes so the Go handler needs no client-side route handler; Zustand keeps
 the bearer token, connection state and bounded live samples in tab memory. The
 static shell is intentionally readable without credentials and contains no
 database state. The user enters the bearer token in the page; JavaScript sends
@@ -276,7 +269,10 @@ The development CLI can launch the same panel on a separate loopback listener:
 export MELDBASE_ADMIN_TOKEN='replace-with-at-least-32-random-bytes'
 go run ./cmd/meld serve \
   --db ./dev.meld \
-  --dev-no-auth \
+  --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
+  --jwt-issuer https://identity.example/ \
+  --jwt-audience meldbase-api \
+  --workspace-collections projects,tasks,comments \
   --admin-addr 127.0.0.1:9091 \
   --admin-diagnostics \
   --admin-metrics
@@ -308,7 +304,7 @@ index-build retention lease and its fixed degraded-health explanations; version
 10 adds public optimistic write-transaction lifecycle aggregates; version 11
 adds fixed-cardinality physical generation, rollback-protection state, anchor
 sequence/generation, failure and synchronous update-latency fields; version 12
-adds the V2 CommitCoordinator scheduler state and its pressure/rejection health
+adds the CommitCoordinator scheduler state and its pressure/rejection health
 signals; version 13 adds the central change-dispatch queue's batch/change
 capacity and pressure to the realtime contract; version 14 adds independent
 canonical document-image byte capacities and pending-byte pressure for the
@@ -360,7 +356,7 @@ Events contain only fixed enums and aggregate work: kind, outcome, sanitized
 error class, planner stage, duration, documents examined/returned and mutation
 count. They never contain collection or field names, query AST/literals,
 document IDs/content, original error strings, principals, tenants or credentials.
-V2 lazy COLLSCAN events span actual cursor execution through exhaustion, error or
+ lazy COLLSCAN events span actual cursor execution through exhaustion, error or
 explicit close; they are not mislabeled as planner-only latency.
 
 `SnapshotAfter` and the authenticated admin endpoint return chronological events
@@ -385,13 +381,13 @@ or enter a database lock; sampling cost remains on the configured sampler tick.
 
 The namespace is `meldbase_`. Counters end in `_total`; durations use seconds and
 sizes use bytes. Exported families cover database/session health, commits,
-planner stages, query work, reactive queues, current WAL/checkpoint health,
-WAL/storage duration, page/document
+planner stages, query work, reactive queues, current storage health,
+storage duration, page/document
 caches, compaction, reclamation, backup, diagnostics, optional aggregate server/RPC work
 and the admin sampler itself.
 Labels are limited to these engine-owned enums:
 
-- `engine="memory|v1|v2"`;
+- `engine="memory|current"`;
 - `stage="collection_scan|index_scan|id_lookup"`;
 - `outcome="committed|rejected"`;
 - `kind="query|commit"`;
@@ -468,7 +464,7 @@ their unbounded cardinality would turn observability into an uncontrolled memory
 consumer.
 
 The same sample exposes configured document/transaction/index-build admission limits, the
-aggregate number of resource-limit rejections, and V2 Commit Log count/byte
+aggregate number of resource-limit rejections, and Commit Log count/byte
 budgets, retained logical bytes, overage and pressure. These are available in the embedded panel, Prometheus
 and OpenTelemetry without per-collection labels. A legitimate oversized request
 increments a counter but does not make health degraded; current retention
@@ -484,14 +480,13 @@ a coincident older replay reader is not misattributed to the build. Failed
 builds release their Commit Log lease but remain degraded maintenance state
 until explicitly aborted.
 
-V2 additionally exposes physical high-water bytes, configured quota, overage,
+The durable backend additionally exposes physical high-water bytes, configured quota, overage,
 current exhaustion and pre-I/O quota rejections. Exhaustion is a degraded storage
 state, not a durability failure: committed reads remain valid and writes may
 resume after reclaiming reusable pages, compacting to another file, or reopening
 with a larger quota.
 
-`BenchmarkStatsSnapshot`, `BenchmarkV2StatsSnapshot` and
-`BenchmarkV2StatsSnapshotWithPersistentIndexBuilds` are regression gates for
+`BenchmarkStatsSnapshot` and the persistent-index-build snapshot benchmarks are regression gates for
 snapshot cost and allocations. The dedicated-runner sampling gate compares the
 median throughput of the same synthetic publication-lock writer with sampling
 disabled and with `Stats()` called every millisecond—1,000 times the normal admin
@@ -502,15 +497,13 @@ changing the public `DBStats` schema.
 
 The derived health assessment itself measures approximately 124 ns with zero
 heap allocations and runs only once per sampler tick. Current
-development-machine measurements are approximately 217–244 ns for the
-in-memory/V1 snapshot and 540 ns for the V2 snapshot, both with zero heap
-allocations. A dedicated cardinality benchmark measures the same range with one
+development-machine measurements are approximately 540 ns for the current
+durable snapshot with zero heap allocations. A dedicated cardinality benchmark measures the same range with one
 and 10,000 collections, proving that sampling does not traverse their catalogs. Eight
 durable unfinished index builds remain approximately 539 ns with zero
 allocations because sampling does not traverse their catalog.
-Sampling V1 while a diagnostic ring is enabled is approximately 241 ns, also
-allocation-free. A sampler capture including rates and health over a synthetic
-source is approximately 501 ns with zero allocations. V2 additionally samples its 16
+ A sampler capture including rates and health over a synthetic source is
+approximately 501 ns with zero allocations. The durable backend additionally samples its 16
 page-cache shards, decoded-document cache and active reader pins. These numbers
 describe snapshot and sampler reads; they do not replace the required
 instrumentation-on/off concurrent throughput comparison.

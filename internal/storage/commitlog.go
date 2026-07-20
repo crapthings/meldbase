@@ -327,7 +327,7 @@ func (f *File) ReadCommit(rootPage, sequence uint64) (CommitBatch, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return CommitBatch{}, errors.New("meldbase storage v2: file is closed")
+		return CommitBatch{}, errors.New("meldbase storage: file is closed")
 	}
 	return f.readCommitUnlocked(rootPage, sequence)
 }

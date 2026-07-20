@@ -104,19 +104,19 @@ type DB struct {
 	activeIndexBuild          *indexBuildBudget
 	indexBuildReservations    map[string]struct{}
 	indexBuildSchedulerActive bool
-	v2StorageLimits           V2StorageLimits
+	storageLimits             StorageLimits
 	dispatcher                *changeDispatcher
-	commitCoordinator         *v2CommitCoordinator
+	commitCoordinator         *commitCoordinator
 	// replicationSourceLeases provides process-local single-active ownership for
 	// an authenticated primary-side replica identity. It is not a distributed
 	// leader lease; it only prevents two transport connections in this DB from
 	// racing one durable consumer checkpoint.
 	replicationSourceLeases map[string]struct{}
-	// replicaReadOnly is set only by OpenV2Follower. Application mutations are
+	// replicaReadOnly is set only by OpenFollower. Application mutations are
 	// rejected at the common durable commit boundary; follower.Apply bypasses
 	// that boundary only after it validates the next source token under db.mu.
 	replicaReadOnly   bool
-	primaryWriteFence V2PrimaryWriteFence
+	primaryWriteFence PrimaryWriteFence
 }
 
 type collectionData struct {
@@ -195,20 +195,20 @@ func NewWithOptions(options DatabaseOptions) (*DB, error) {
 	return db, nil
 }
 func (db *DB) Close() error {
-	// Stop V2 admission before taking db.mu: a running coordinator owns work
+	// Stop  admission before taking db.mu: a running coordinator owns work
 	// that will shortly need that mutex to publish, so reversing this order
 	// would deadlock Close against an in-flight group.
 	if db != nil && db.commitCoordinator != nil {
 		db.commitCoordinator.close()
 	}
-	// A V2 compaction retains an immutable storage snapshot after it releases
+	// A  compaction retains an immutable storage snapshot after it releases
 	// db.mu so ordinary writes can continue. Closing the underlying file during
 	// that copy would invalidate its pinned readers, therefore Close joins the
 	// same gate before it closes the durable store. Compaction takes this gate
 	// before its short db.mu read section, so this ordering cannot deadlock.
-	var compactionStore *v2DurableStore
+	var compactionStore *durableStore
 	if db != nil {
-		compactionStore, _ = db.durability.(*v2DurableStore)
+		compactionStore, _ = db.durability.(*durableStore)
 		if compactionStore != nil {
 			compactionStore.compactMu.Lock()
 			defer compactionStore.compactMu.Unlock()
@@ -260,18 +260,18 @@ func (db *DB) DatabaseID() [16]byte {
 	return db.databaseID
 }
 
-// CommitCoordinatorStats returns a bounded snapshot of the optional V2
+// CommitCoordinatorStats returns a bounded snapshot of the optional
 // admission scheduler. It performs no I/O. DBStats includes the same snapshot
 // in the versioned admin schema; this method is convenient for direct callers.
-func (db *DB) CommitCoordinatorStats() V2CommitCoordinatorStats {
+func (db *DB) CommitCoordinatorStats() CommitCoordinatorStats {
 	if db == nil {
-		return V2CommitCoordinatorStats{}
+		return CommitCoordinatorStats{}
 	}
 	db.mu.RLock()
 	coordinator := db.commitCoordinator
 	db.mu.RUnlock()
 	if coordinator == nil {
-		return V2CommitCoordinatorStats{}
+		return CommitCoordinatorStats{}
 	}
 	return coordinator.stats()
 }
@@ -364,7 +364,7 @@ func (c *Collection) InsertMany(ctx context.Context, documents []Document) ([]Do
 }
 
 // commitInsertManyLocked retains the original single-request commit semantics.
-// It is also the logical-conflict fallback for the V2 coordinator: a grouped
+// It is also the logical-conflict fallback for the  coordinator: a grouped
 // attempt is all-or-nothing, while independent public requests must retain
 // their individual success or duplicate-key outcomes.
 //
@@ -552,7 +552,7 @@ func (c *Collection) deleteQuery(ctx context.Context, query QuerySpec, one bool,
 	return result, err
 }
 
-// deleteQueryLocked is the original one-request mutation path. The V2
+// deleteQueryLocked is the original one-request mutation path. The
 // coordinator reuses it for a singleton or after a group-level logical
 // conflict so filter semantics and affected-count results remain identical.
 // The caller holds db.mu.
@@ -625,9 +625,9 @@ func (db *DB) DatabaseIdentity() [16]byte {
 	return db.databaseID
 }
 
-// validateV2PrimaryWriteFence is called under the V2 writer admission lock.
-// It intentionally performs no I/O itself; see V2PrimaryWriteFence.
-func (db *DB) validateV2PrimaryWriteFence(nextCommitSequence uint64) error {
+// validatePrimaryWriteFence is called under the writer admission lock.
+// It intentionally performs no I/O itself; see PrimaryWriteFence.
+func (db *DB) validatePrimaryWriteFence(nextCommitSequence uint64) error {
 	if db == nil || db.replicaReadOnly || db.primaryWriteFence == nil {
 		return nil
 	}
@@ -635,7 +635,7 @@ func (db *DB) validateV2PrimaryWriteFence(nextCommitSequence uint64) error {
 		return ErrCorrupt
 	}
 	db.metrics.primaryWriteFenceChecks.Add(1)
-	if err := db.primaryWriteFence.ValidateV2PrimaryWrite(PrimaryWriteFenceRequest{
+	if err := db.primaryWriteFence.ValidatePrimaryWrite(PrimaryWriteFenceRequest{
 		DatabaseID: db.databaseID, NextCommitSequence: nextCommitSequence,
 	}); err != nil {
 		db.metrics.primaryWriteFenceRejected.Add(1)

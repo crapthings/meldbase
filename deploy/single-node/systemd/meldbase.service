@@ -1,5 +1,5 @@
 [Unit]
-Description=Meldbase local single-node development service
+Description=Meldbase single-node JWT-isolated service
 After=local-fs.target
 RequiresMountsFor=/var/lib/meldbase
 
@@ -14,7 +14,7 @@ Restart=on-failure
 RestartSec=5s
 UMask=0077
 
-# The V2 database is the only state that this unit may write.
+# The database is the only state that this unit may write.
 NoNewPrivileges=true
 PrivateDevices=true
 PrivateTmp=true

@@ -10,7 +10,7 @@ import (
 
 func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "durable-database-changes.meld2")
-	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing
 		t.Fatal(err)
 	}
 
-	db, err = OpenWithOptions(path, OpenOptions{CommitRetention: V2CommitRetentionPolicy{MaxCommits: 2}})
+	db, err = OpenWithOptions(path, OpenOptions{CommitRetention: CommitRetentionPolicy{MaxCommits: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -77,7 +77,7 @@ func runIndexBuild(args []string, stdout, stderr io.Writer) error {
 func runIndexBuildStart(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("index-build start", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("db", "", "existing compatible V2 database path")
+	path := flags.String("db", "", "existing compatible database path")
 	collection := flags.String("collection", "", "existing collection name")
 	name := flags.String("name", "", "new index name")
 	var fields indexFieldFlags
@@ -116,7 +116,7 @@ func runIndexBuildStart(args []string, stdout, stderr io.Writer) error {
 func runIndexBuildList(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("index-build list", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("db", "", "existing compatible V2 database path")
+	path := flags.String("db", "", "existing compatible database path")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func runIndexBuildList(args []string, stdout, stderr io.Writer) error {
 func runIndexBuildResume(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("index-build resume", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("db", "", "existing compatible V2 database path")
+	path := flags.String("db", "", "existing compatible database path")
 	idText := flags.String("id", "", "hex build ID from start/list")
 	timeout := flags.Duration("timeout", 0, "optional resume deadline")
 	if err := flags.Parse(args); err != nil {
@@ -176,7 +176,7 @@ func runIndexBuildResume(args []string, stdout, stderr io.Writer) error {
 func runIndexBuildAbort(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("index-build abort", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("db", "", "existing compatible V2 database path")
+	path := flags.String("db", "", "existing compatible database path")
 	idText := flags.String("id", "", "hex build ID from start/list")
 	timeout := flags.Duration("timeout", 0, "optional abort deadline")
 	if err := flags.Parse(args); err != nil {
@@ -213,7 +213,7 @@ func openIndexBuildDatabase(path string) (*meldbase.DB, error) {
 		return nil, err
 	}
 	if info.Format != meldbase.StorageFormatCurrent {
-		return nil, fmt.Errorf("index-build requires an existing V2 database: %w", meldbase.ErrIndexBuildUnsupported)
+		return nil, fmt.Errorf("index-build requires an existing database: %w", meldbase.ErrIndexBuildUnsupported)
 	}
 	if !info.ReaderCompatible {
 		return nil, meldbase.ErrUnsupportedFormat

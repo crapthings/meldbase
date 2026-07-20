@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const destructiveQMPVolatileLossProofSchema uint32 = 1
@@ -556,7 +556,7 @@ func runDestructiveVolatileLossBundleCheck(args []string, stdout, stderr io.Writ
 	if err != nil || fmt.Sprintf("%x", verified.SHA256) != result.RecoveredSHA256 || verified.Meta.CommitSequence != result.RecoveredCommitSequence {
 		return errors.Join(err, errors.New("volatile-loss recovered artifact is missing or mismatched"))
 	}
-	file, meta, err := storagev2.Open(result.DatabaseArtifact)
+	file, meta, err := storage.Open(result.DatabaseArtifact)
 	if err != nil {
 		return err
 	}

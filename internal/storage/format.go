@@ -1,6 +1,4 @@
-// Package v2 contains the experimental Meldbase Storage V2 page format.
-// It is intentionally isolated from the public database open path until its
-// crash and migration contracts are complete.
+// Package storage implements the current Meldbase copy-on-write page format.
 package storage
 
 import (
@@ -19,9 +17,9 @@ const (
 )
 
 var (
-	ErrCorrupt            = errors.New("meldbase storage v2: corrupt database")
-	ErrUnsupportedFormat  = errors.New("meldbase storage v2: unsupported format version")
-	ErrUnsupportedFeature = errors.New("meldbase storage v2: unsupported required feature")
+	ErrCorrupt            = errors.New("meldbase storage: corrupt database")
+	ErrUnsupportedFormat  = errors.New("meldbase storage: unsupported format version")
+	ErrUnsupportedFeature = errors.New("meldbase storage: unsupported required feature")
 	metaMagic             = [8]byte{'M', 'E', 'L', 'D', 'M', 'T', '2', 0}
 	pageMagic             = [8]byte{'M', 'E', 'L', 'D', 'P', 'G', '2', 0}
 	crcTable              = crc32.MakeTable(crc32.Castagnoli)
@@ -80,7 +78,7 @@ type Meta struct {
 	OptionalFeatures       uint64
 }
 
-// MetaEnvelope contains only fields whose byte positions are frozen for V2
+// MetaEnvelope contains only fields whose byte positions are frozen for
 // format negotiation. It can be decoded from a checksum-valid future revision
 // without interpreting that revision's page graph.
 type MetaEnvelope struct {
@@ -146,7 +144,7 @@ func EncodeMeta(meta Meta) ([]byte, error) {
 
 func DecodeMeta(page []byte) (Meta, error) {
 	// The magic, full-page SHA-256 envelope and checksum location are stable
-	// across future V2 revisions. Validate that envelope before classifying a
+	// across future  revisions. Validate that envelope before classifying a
 	// version mismatch, so a torn version field remains ordinary corruption and
 	// can safely fall back to the other Meta slot.
 	envelope, err := InspectMetaEnvelope(page)

@@ -16,7 +16,7 @@ import (
 	"runtime"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const destructiveENOSPCReceiptSchema uint32 = 1
@@ -237,8 +237,8 @@ func validateDestructiveENOSPCReceiptWithCanonicalEvidence(receipt destructiveEN
 	return nil
 }
 
-func verifyRawDestructiveArtifact(path string) (storagev2.VerificationResult, error) {
-	return storagev2.VerifyPathContextWithIndexAudit(context.Background(), path, func(storagev2.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
+func verifyRawDestructiveArtifact(path string) (storage.VerificationResult, error) {
+	return storage.VerifyPathContextWithIndexAudit(context.Background(), path, func(storage.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
 		return nil, false, errors.New("destructive fixture unexpectedly contains an index")
 	})
 }
@@ -257,7 +257,7 @@ func runDestructiveENOSPCWorker(args []string, stderr io.Writer) error {
 		return errors.New("destructive-enospc-worker requires --db, --marker and a valid --boundary")
 	}
 	reached := false
-	file, _, _, err := storagev2.OpenForQualification(*databasePath, storagev2.OpenOptions{}, func(current storagev2.QualificationBoundary) error {
+	file, _, _, err := storage.OpenForQualification(*databasePath, storage.OpenOptions{}, func(current storage.QualificationBoundary) error {
 		if reached || current != boundary {
 			return nil
 		}
@@ -274,8 +274,8 @@ func runDestructiveENOSPCWorker(args []string, stderr io.Writer) error {
 	}
 	defer file.Close()
 	id := [16]byte{15: 1}
-	_, err = file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{2}, Mutations: []storagev2.DocumentMutation{{
-		Collection: "items", DocumentID: id, Operation: storagev2.DocumentUpdate, Document: []byte("new"),
+	_, err = file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{2}, Mutations: []storage.DocumentMutation{{
+		Collection: "items", DocumentID: id, Operation: storage.DocumentUpdate, Document: []byte("new"),
 	}}})
 	if err != nil {
 		return err
@@ -352,7 +352,7 @@ func runDestructiveCapacityTrial(facts destructiveVolumeFacts, executable, artif
 	if err := copyFileExclusiveDurable(databaseArtifact, databasePath); err != nil {
 		return trial, evidence, err
 	}
-	verified, err := storagev2.VerifyPathContextWithIndexAudit(context.Background(), databasePath, func(storagev2.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
+	verified, err := storage.VerifyPathContextWithIndexAudit(context.Background(), databasePath, func(storage.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
 		return nil, false, errors.New("capacity fixture unexpectedly contains an index")
 	})
 	if err != nil {
@@ -412,35 +412,35 @@ func runDestructiveCapacityTrial(facts destructiveVolumeFacts, executable, artif
 }
 
 func seedDestructiveCapacityDatabase(path string, value []byte) error {
-	file, _, err := storagev2.Open(path)
+	file, _, err := storage.Open(path)
 	if err != nil {
 		return err
 	}
 	id := [16]byte{15: 1}
-	_, commitErr := file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{1}, Mutations: []storagev2.DocumentMutation{{
-		Collection: "items", DocumentID: id, Operation: storagev2.DocumentInsert, Document: value,
+	_, commitErr := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{1}, Mutations: []storage.DocumentMutation{{
+		Collection: "items", DocumentID: id, Operation: storage.DocumentInsert, Document: value,
 	}}})
 	return errors.Join(commitErr, file.Close())
 }
 
-func recoverDestructiveCapacityDatabase(path string) ([]byte, storagev2.Meta, error) {
-	file, meta, err := storagev2.Open(path)
+func recoverDestructiveCapacityDatabase(path string) ([]byte, storage.Meta, error) {
+	file, meta, err := storage.Open(path)
 	if err != nil {
-		return nil, storagev2.Meta{}, err
+		return nil, storage.Meta{}, err
 	}
 	id := [16]byte{15: 1}
 	value, exists, readErr := file.GetDocument("items", id)
 	closeErr := file.Close()
 	if readErr != nil || closeErr != nil || !exists {
-		return nil, storagev2.Meta{}, errors.Join(readErr, closeErr, errors.New("capacity fixture document missing"))
+		return nil, storage.Meta{}, errors.Join(readErr, closeErr, errors.New("capacity fixture document missing"))
 	}
 	return value, meta, nil
 }
 
-func destructiveQualificationBoundary(value string) (storagev2.QualificationBoundary, bool) {
-	for _, boundary := range []storagev2.QualificationBoundary{
-		storagev2.QualificationAfterPageWrite, storagev2.QualificationBeforeDataSync, storagev2.QualificationAfterDataSync,
-		storagev2.QualificationAfterMetaWrite, storagev2.QualificationAfterMetaSync,
+func destructiveQualificationBoundary(value string) (storage.QualificationBoundary, bool) {
+	for _, boundary := range []storage.QualificationBoundary{
+		storage.QualificationAfterPageWrite, storage.QualificationBeforeDataSync, storage.QualificationAfterDataSync,
+		storage.QualificationAfterMetaWrite, storage.QualificationAfterMetaSync,
 	} {
 		if string(boundary) == value {
 			return boundary, true

@@ -14,16 +14,16 @@ import (
 // command in internal/qualification; a Go test binary has no trustworthy VCS
 // build identity and must never emit a qualification receipt.
 func TestConfigurableLargeDatabaseSoak(t *testing.T) {
-	documentCount := soakEnvInt(t, "MELDBASE_V2_SOAK_DOCUMENTS", 0)
+	documentCount := soakEnvInt(t, "MELDBASE_SOAK_DOCUMENTS", 0)
 	if documentCount == 0 {
-		t.Skip("set MELDBASE_V2_SOAK_DOCUMENTS to run the large-database soak")
+		t.Skip("set MELDBASE_SOAK_DOCUMENTS to run the large-database soak")
 	}
 	if documentCount < 100 {
-		t.Fatal("MELDBASE_V2_SOAK_DOCUMENTS must be at least 100")
+		t.Fatal("MELDBASE_SOAK_DOCUMENTS must be at least 100")
 	}
-	rounds := soakEnvInt(t, "MELDBASE_V2_SOAK_ROUNDS", 4)
+	rounds := soakEnvInt(t, "MELDBASE_SOAK_ROUNDS", 4)
 	if rounds < 1 {
-		t.Fatal("MELDBASE_V2_SOAK_ROUNDS must be positive")
+		t.Fatal("MELDBASE_SOAK_ROUNDS must be positive")
 	}
 
 	path := filepath.Join(t.TempDir(), "large-soak.meld2")

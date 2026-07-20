@@ -27,7 +27,7 @@ type RenewalClient interface {
 }
 
 // RenewerOptions configures a single-primary renewal agent. DB must be the
-// same V2 database that was opened with Guard as its PrimaryWriteFence. The
+// same database that was opened with Guard as its PrimaryWriteFence. The
 // API cannot infer that pointer equality across the Meldbase boundary, so this
 // deployment wiring is explicit and checked at least for a configured fence.
 //

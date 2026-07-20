@@ -227,8 +227,8 @@ Implemented socket client messages: `authenticate`, `subscribe`, `unsubscribe`,
 `call`, `cancel`, `ping`. Implemented server messages: `authenticated`,
 `snapshot`, `resumed`, `delta`, `result`, `error`, `resync_required`, `pong`.
 
-All envelopes include protocol version `v: 1`. A subscription may request
-`mode: "delta"`; omitting `mode` preserves the legacy full-snapshot stream.
+All envelopes include protocol version `v: 1`. Subscriptions use
+`mode: "delta"` for an initial snapshot followed by ordered transformations.
 The checked-in `testdata/protocol-v1-contract.json` artifact freezes the ticket
 media type, base and conditional capabilities, worker capabilities, all client
 and server frame names, their required/optional top-level fields, and the nested
@@ -239,11 +239,9 @@ their compatibility suites. The public Go `server.ProtocolVersion` and
 TypeScript `MELDBASE_PROTOCOL_VERSION` constants must match it, and production
 encoders use those constants rather than independent numeric literals.
 
-Protocol v1 frame grammar is immutable. Adding an optional capability may remain
-on v1 only when old peers can safely ignore it and the original frames retain
-their meaning. Adding required fields, changing field meaning or type, or
-removing a frame requires a new protocol version and a new contract artifact;
-the v1 file is retained as historical reader/writer evidence.
+Protocol v1 frame grammar is immutable. Adding required fields, changing field
+meaning or type, or removing a frame requires a new protocol version and a new
+contract artifact.
 
 ### Version and capability discovery
 
@@ -279,13 +277,9 @@ is absent the TypeScript SDK deliberately reconnects with a clean snapshot.
 `rpc.idempotency` is advertised only when a store is configured, and
 `rpc.transactional` only when a transactional registry or resolver exists.
 
-Omitting `protocol` preserves the original v1 ticket shape for rolling upgrades.
-The TypeScript SDK accepts that legacy shape by default, but
-`requireRealtimeProtocol: true` makes omission a terminal
-`MeldbaseProtocolError`. This is the production anti-downgrade setting after all
-servers in a deployment have been upgraded. A malformed descriptor, unsupported
-version, or missing required capability is terminal and does not enter reconnect
-backoff. Capability discovery is authenticated and contains no method,
+The current SDK requires the protocol descriptor. A malformed descriptor,
+unsupported version, or missing required capability is terminal and does not
+enter reconnect backoff. Capability discovery is authenticated and contains no method,
 collection, principal, tenant or database identity.
 
 Delta mode always begins with:
@@ -432,13 +426,13 @@ handler, err := server.New(server.Config{
 })
 ```
 
-Memory and V1 databases are rejected instead of receiving a non-durable
-fallback. The returned store also exposes bounded `PruneExpired`; pending claims
+The durable store requires an open current-format database. The returned store
+also exposes bounded `PruneExpired`; pending claims
 are never removed by retention alone. See
 [`rpc-idempotency.md`](rpc-idempotency.md).
 
 Methods registered in Go through `RPCTransactionalMethods` additionally commit
-their supported Meldbase point writes and success result under one V2 root/meta
+their supported Meldbase point writes and success result under one root/meta
 publication. They require `idempotencyKey`; a keyless call fails with
 `rpc_idempotency_required`. Optimistic snapshot contention returns the durable,
 replayable `rpc_transaction_conflict` error and never reruns the method. This is

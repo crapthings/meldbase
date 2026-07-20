@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
@@ -21,7 +21,7 @@ func (db *DB) MeldbaseSystemRecordBackend() systemrecord.Backend {
 	}
 	db.mu.RLock()
 	defer db.mu.RUnlock()
-	if _, ok := db.durability.(*v2DurableStore); !ok || db.closed {
+	if _, ok := db.durability.(*durableStore); !ok || db.closed {
 		return nil
 	}
 	return &dbSystemRecordBackend{db: db}
@@ -45,47 +45,47 @@ func (backend *dbSystemRecordBackend) CompareAndSwap(ctx context.Context, mutati
 		db.mu.Unlock()
 		return systemrecord.Result{}, err
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store.file == nil {
 		db.mu.Unlock()
-		return systemrecord.Result{}, errors.New("meldbase: durable system records require storage V2")
+		return systemrecord.Result{}, errors.New("meldbase: durable system records require storage ")
 	}
 	// Private system records are still durable logical commits. They back RPC
 	// idempotency and policy state, so a revoked primary must not advance them
 	// independently of public business writes.
-	if err := db.validateV2PrimaryWriteFence(db.token + 1); err != nil {
+	if err := db.validatePrimaryWriteFence(db.token + 1); err != nil {
 		db.mu.Unlock()
 		return systemrecord.Result{}, err
 	}
-	db.metrics.v2CommitAttempts.Add(1)
+	db.metrics.durableCommitAttempts.Add(1)
 	started := time.Now()
-	result, err := store.file.ApplySystemRecordTransaction(storagev2.SystemRecordTransaction{
+	result, err := store.file.ApplySystemRecordTransaction(storage.SystemRecordTransaction{
 		TransactionID: mutation.TransactionID, Key: append([]byte(nil), mutation.Key...),
 		ExpectedExists: mutation.ExpectedExists, ExpectedHash: mutation.ExpectedHash,
 		NewValue: append([]byte(nil), mutation.NewValue...), Delete: mutation.Delete, Unconditional: mutation.Unconditional,
 	})
 	if err != nil {
-		db.metrics.v2RejectedTransactions.Add(1)
-		mapped := mapStorageV2Error(err)
+		db.metrics.durableRejectedTransactions.Add(1)
+		mapped := mapStorageError(err)
 		db.fatalErr = fmt.Errorf("%w: %v", ErrDurability, mapped)
 		db.mu.Unlock()
 		return systemrecord.Result{}, db.fatalErr
 	}
 	if !result.Applied {
-		db.metrics.v2RejectedTransactions.Add(1)
+		db.metrics.durableRejectedTransactions.Add(1)
 		db.mu.Unlock()
 		return systemrecord.Result{Current: append([]byte(nil), result.Current...)}, nil
 	}
 	want := db.token + 1
 	if want == 0 || result.Sequence != want {
-		db.metrics.v2RejectedTransactions.Add(1)
-		db.fatalErr = fmt.Errorf("%w: V2 system commit sequence mismatch", ErrDurability)
+		db.metrics.durableRejectedTransactions.Add(1)
+		db.fatalErr = fmt.Errorf("%w: system commit sequence mismatch", ErrDurability)
 		db.mu.Unlock()
 		return systemrecord.Result{}, db.fatalErr
 	}
 	if store.rollbackAnchor != nil {
 		if anchorErr := store.advanceRollbackAnchor(ctx, result.Sequence); anchorErr != nil {
-			db.metrics.v2RejectedTransactions.Add(1)
+			db.metrics.durableRejectedTransactions.Add(1)
 			db.fatalErr = fmt.Errorf("%w: committed system sequence %d but %w", ErrDurability, result.Sequence, anchorErr)
 			db.mu.Unlock()
 			return systemrecord.Result{}, db.fatalErr
@@ -93,9 +93,9 @@ func (backend *dbSystemRecordBackend) CompareAndSwap(ctx context.Context, mutati
 	}
 	db.token = result.Sequence
 	elapsed := uint64(time.Since(started))
-	db.metrics.v2CommittedTransactions.Add(1)
-	db.metrics.v2CommitNanos.Add(elapsed)
-	updateAtomicMax(&db.metrics.v2CommitMaxNanos, elapsed)
+	db.metrics.durableCommittedTransactions.Add(1)
+	db.metrics.durableCommitNanos.Add(elapsed)
+	updateAtomicMax(&db.metrics.durableCommitMaxNanos, elapsed)
 	batch := ChangeBatch{Token: result.Sequence}
 	db.publish(batch)
 	db.mu.Unlock()
@@ -118,18 +118,18 @@ func (backend *dbSystemRecordBackend) Scan(ctx context.Context, start, end []byt
 	if db.fatalErr != nil {
 		return nil, db.fatalErr
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store.file == nil {
-		return nil, errors.New("meldbase: durable system records require storage V2")
+		return nil, errors.New("meldbase: durable system records require storage ")
 	}
 	snapshot, err := store.file.OpenSnapshot()
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
 	defer snapshot.Close()
 	records, err := snapshot.ScanSystemRecords(start, end, limit)
 	if err != nil {
-		return nil, mapStorageV2Error(err)
+		return nil, mapStorageError(err)
 	}
 	result := make([]systemrecord.KeyValue, len(records))
 	for index, record := range records {

@@ -15,7 +15,7 @@ server / SDK
         -> planner and execution
             -> transactions and catalog
                 -> indexes and record store
-                    -> pager and Commit Log (legacy V1: WAL)
+                    -> pager and Commit Log
 ```
 
 Lower layers never import server, transport, or UI concepts. A committed change
@@ -30,7 +30,7 @@ promotion-readiness policy. A promotion without independently proven follower
 history is refused rather than presented as an HA success.
 
 Durable RPC idempotency follows the same dependency rule. The transport owns
-method authorization and wire envelopes, while V2 owns a private COW system tree
+method authorization and wire envelopes, while the core owns a private COW system tree
 and compare-and-set record transitions. Internal idempotency state is never a
 user collection or a reactive query source. A durable claim is published before
 application code starts; an interrupted pending claim becomes outcome-unknown
@@ -38,7 +38,7 @@ and is never automatically stolen. See
 [`rpc-idempotency.md`](rpc-idempotency.md) for the crash contract.
 
 Transactional RPC is a distinct opt-in registry. Its point-write view runs on an
-immutable V2 snapshot without holding the writer lock, then validates the base
+immutable snapshot without holding the writer lock, then validates the base
 token and publishes business roots plus the terminal System record in one COW
 generation. Contention is a durable conflict, not an implicit method retry.
 Handlers may not hide external side effects inside this contract.
@@ -55,15 +55,13 @@ terminal contract as local Go methods.
 Both public realtime and private Worker control protocols use an opt-in,
 bounded compatibility descriptor before application frames begin. Versions and
 capabilities are canonical fixed arrays: unknown capabilities are additive,
-while a missing required capability fails before work is sent. The descriptor
-is omitted for legacy peers during rolling upgrades; each TypeScript SDK has an
-explicit strict mode that makes omission an anti-downgrade failure. Discovery
-runs only on authenticated control/ticket paths and never enters storage,
+while a missing required capability fails before work is sent. Current clients
+require the descriptor. Discovery runs only on authenticated control/ticket paths and never enters storage,
 reactive publication, or commit hot paths.
 
 Authorization semantics that depend on another collection use an explicit
 commit-ordered invalidation, not a best-effort WebSocket event. The business
-write, RPC terminal and random policy generation are published under one V2
+write, RPC terminal and random policy generation are published under one
 Catalog/meta root. Only after durability does Go rotate the publication lease,
 and it does so before publishing the business ChangeBatch. Existing subscribers
 therefore resync before observing output under stale visibility; restart reloads
@@ -110,7 +108,7 @@ slot and write only to a caller-owned destination. They are not exposed by the
 default admin HTTP handler and never run from storage or query hot paths.
 
 Resource admission is also a core contract, not a transport-only defense. Every
-memory, V1 and V2 write applies the same immutable document-byte,
+memory and durable write applies the same immutable document-byte,
 transaction-byte and transaction-change limits. Bytes mean the deterministic
 canonical typed encoding, so accounting cannot drift with JSON spelling, Go heap
 layout or compression. Rejection occurs before durable publication and is
@@ -124,7 +122,7 @@ business Commit Log tree is mutable, but replay leases cap the deletion
 watermark. Byte accounting is derived from persisted inline/overflow descriptors
 on open and then advanced only after a successful Meta publication.
 
-V2 page allocation has a separate physical high-water quota. The allocator
+Page allocation has a separate physical high-water quota. The allocator
 consumes epoch-safe reusable pages first and checks the quota before increasing
 `nextPage`; a rejection therefore performs no file write and is not a durability
 failure. Real write/fsync/Meta errors retain fail-stop semantics. The quota does
@@ -154,28 +152,11 @@ first-class live-query and local-first operators later.
 
 ### Commit and recovery
 
-Legacy V1 uses a single writer and redo-only, no-steal transaction boundary:
+Each logical write publishes immutable tree pages, a DatabaseRoot and the
+inactive Meta in one COW generation; the Commit Log is part of that same atomic
+root. There is no sidecar WAL, deferred checkpoint or second storage engine.
 
-1. Build private page images and index changes.
-2. Append transaction records and a commit record to the WAL.
-3. `fsync` the WAL.
-4. Publish the committed version to readers.
-5. Publish a catalog-rooted COW checkpoint when explicitly requested or when
-   the bounded WAL byte/commit policy triggers.
-6. Emit the change event from the committed transaction record.
-
-The checkpoint's data pages are synced before its inactive Meta; only after that
-Meta sync may V1 reset the WAL. Automatic maintenance runs after the triggering
-logical commit is already durable and never emits a second logical token. A
-maintenance error fail-stops later writes without making the successful business
-operation ambiguous. Recovery replays only complete checksum-valid frames newer
-than the selected checkpoint token.
-
-New/default V2 has no sidecar WAL or deferred checkpoint. Each logical write
-publishes immutable tree pages, a DatabaseRoot and the inactive Meta in one COW
-generation; its Commit Log is part of that same atomic root.
-
-Public `RunWriteTransaction` uses the same V2 `DocumentTransaction` publication
+Public `RunWriteTransaction` uses the same `DocumentTransaction` publication
 primitive as transactional RPC. Its callback reads a pinned immutable root and
 maintains a point overlay without holding the database writer mutex. Commit
 validates an exact point read set inside the same storage write closure that
@@ -199,16 +180,14 @@ snapshot plus the callback overlay and records a persistent
 point reads and writes, so a concurrent document, collection creation or
 published-index change cannot create a phantom. The initial collection-wide
 fence is intentionally conservative; a later index-range fence may reduce
-false conflicts but must preserve this serializability contract. V1 is rejected
-rather than extending the frozen legacy WAL transaction-v1 grammar with
-mixed-operation semantics an older reader cannot understand.
+false conflicts but must preserve this serializability contract.
 
 Open freezes a non-sensitive `RecoveryReport` after storage validation and
 before the DB is returned. It describes selected Meta/root redundancy, removed
-provable crash tails, replayed V1 WAL records and optional allocator degradation.
-It never turns ambiguous corruption into recovery. An in-process durability
-failure remains fail-stop until close/restart; restart re-enters the complete
-format negotiation and graph validation path rather than resetting an error bit.
+provable crash tails and optional allocator degradation. It never turns
+ambiguous corruption into recovery. An in-process durability failure remains
+fail-stop until close/restart; restart re-enters the complete format validation
+and graph-validation path rather than resetting an error bit.
 
 ### Stable live-query boundary
 
@@ -219,28 +198,28 @@ server accepts a replay source that reconstructs Snapshot N and tails N+1; when
 none can prove that contract it emits `resync_required` instead of presenting a
 fresh snapshot as resumed history.
 
-### Storage format and V2 integration boundary
+### Storage format boundary
 
 `Open` creates or opens the sole current copy-on-write format. A missing/empty
 path creates it; an unknown non-empty file fails closed. Historical alpha
 formats require offline export/import and are never implicitly migrated.
 
-V2 is the default-new copy-on-write page engine. It
-persists primary records, per-collection secondary-index catalogs and the
+The current copy-on-write page engine persists primary records, per-collection
+secondary-index catalogs and the
 logical Commit Log under one CatalogRoot publication, then provides exact
 historical query replay to the server. Opening reads only collection and index
 catalog metadata; it does not scan or decode Primary records. Index candidates
 are checked against their resolved Primary document when read. Explicit
 Reachability performs exhaustive Primary↔Order and Secondary-position checks.
 
-Public V2 queries pin one immutable DatabaseRoot and read Primary/Secondary
+Public queries pin one immutable DatabaseRoot and read Primary/Secondary
 trees directly. `_id` lookup resolves one primary record; equality/range plans
 stream a Secondary iterator and resolve matching primary records; unsorted
 collection scans stream the persistent Order tree and resolve Primary records
 under the same root. Secondary suffixes contain insertion position before
 DocumentID, preserving the public tie breaker. A byte-and-entry-bounded decoded-document LRU
 validates the current encoded record on every hit, while the immutable page cache
-remains the lower-level IO cache. V2 no longer rebuilds process-local query
+remains the lower-level IO cache. The engine does not rebuild process-local query
 B+Trees or a decoded-document collection mirror on open. Update/Delete selection,
 CreateIndex construction, SnapshotQuery and Reactive View initialization/resync
 all consume pinned storage snapshots. Live CRUD retains only collection/index
@@ -272,32 +251,31 @@ fixed concurrency. It is outside the storage engine and default-off. Terminal
 semantic failures are persisted as bounded enums; failed builds stop pinning
 Commit Log history but retain their private graph until operator abort.
 
-Physical V2 B+Tree nodes split by exact encoded bytes rather than entry count.
+Physical B+Tree nodes split by exact encoded bytes rather than entry count.
 Path-copy deletion merges fitting siblings and can propagate a new split upward
-when a replacement separator grows beyond the page budget. The legacy in-memory
-index also deletes through local borrow/merge rather than rebuilding the tree.
+when a replacement separator grows beyond the page budget.
 
-`DetectStorageFormat` distinguishes missing/empty, V1 and V2 paths without
-mutating them; an unknown non-empty or mixed-family file fails closed.
+`DetectStorageFormat` distinguishes a missing/empty path from the current format
+without mutating it; an unknown non-empty file fails closed.
 `InspectStorageFormat` checksum-validates both Meta slots and reports the newest
 revision/features/identity without acquiring the writer lock. Its compatibility
 bit is a negotiation result, not a substitute for structural validation.
-Normal V2 open validates the selected Meta/root and required catalog metadata,
+Normal open validates the selected Meta/root and required catalog metadata,
 not every protected page. `OpenOptions.RequireGraphAudit` is the explicit startup
 mode that walks both protected graphs before serving; it is structural only and
 is intentionally opt-in because its cost grows with database size.
-`VerifyV2File` occupies the explicit offline layer between them: a shared-lock,
+`VerifyFile` occupies the explicit offline layer between them: a shared-lock,
 read-only audit reuses normal Meta selection, walks both protected business
 graphs, proves published Secondary-to-Primary key correctness and
 Primary-to-Secondary completeness from canonical stored documents, reports
 optional FreeSpace degradation independently, and hashes the complete file
 without repair or maintenance side effects. This semantic work is excluded from
 normal open, read, commit and reclamation paths.
-The V2 Meta magic, full-page checksum envelope and checksum position are a stable
+The current Meta magic, full-page checksum envelope and checksum position are a stable
 negotiation boundary. A checksum-valid future revision or unknown required
-feature fails explicitly as unsupported and blocks dual-Meta fallback; only a
-torn/checksum-invalid slot may fall back. Unknown optional bits are carried
-without becoming recovery authority.
+feature fails explicitly as unsupported. When one Meta slot is torn or
+checksum-invalid, recovery selects the other valid slot. Unknown optional bits
+are carried without becoming recovery authority.
 Format extensions use additive golden evidence. The applied shadow watermark
 extension is pinned as a page-delta over the immutable business fixture: base,
 patch and reconstructed-file digests are all checked, and the reader rebuilds
@@ -309,9 +287,9 @@ with openable database fixtures and rejects any PageType that has no revision-3
 artifact. Codec evidence and reachable full-graph compatibility remain separate
 claims: the former catches byte/type drift; the latter must also prove traversal,
 recovery and future-writer advancement.
-Unsorted V2 COLLSCAN cursors are lazy and own a bounded snapshot pin until
+Unsorted COLLSCAN cursors are lazy and own a bounded snapshot pin until
 exhaustion, limit completion, error, context cancellation or explicit `Close`.
-Indexed and sorted plans retain the correct materializing fallback. Manual
+Indexed and sorted plans retain the correct materializing execution path. Manual
 compact-to-new-file and explicit epoch-safe page reuse are available. The
 disk-full publication matrix and configurable large-database churn/reopen/reclaim
 soak gate the default path; broader platform durability testing remains release
@@ -324,18 +302,18 @@ retries instead of unsafe merging. An explicit default-off scheduler runs these
 online audits serially with per-run deadlines and stops with the DB. The resulting candidate extents may be published
 as optional immutable FreeSpace metadata without advancing the logical Commit
 Log. Restart recovery filters the allocator's consumed high-ID suffix by page
-generation; invalid acceleration falls back to an empty pool, never to an
-unverified allocation. V1 files are never silently reinterpreted as V2.
+generation; invalid acceleration resets to an empty pool, never to an
+unverified allocation. Historical files are never silently reinterpreted.
 The scheduler defaults to a memory-only O(1) pool installation; physical
 FreeSpace publication is explicit because extent construction and fsync remain
 a writer-lock maintenance step.
 
-Physical backup is separate from logical compaction. `BackupV2` holds the source
+Physical backup is separate from logical compaction. `Backup` holds the source
 writer boundary, copies and hashes the exact page-aligned file, performs physical
 reachability plus public reopen verification, and publishes through a synced
 no-overwrite destination link. It preserves database identity, Meta generation
 and Commit Log history, so only one descendant may be writable in that identity
-domain. `CompactToV2` rebuilds one pinned logical snapshot under a new identity
+domain. `Compact` rebuilds one pinned logical snapshot under a new identity
 when an independent fork is intended. It serializes with another compaction and
 with close, but releases the database writer immediately after snapshot
 admission; commits that follow that boundary remain in the source only. Both
@@ -343,21 +321,17 @@ operations expose only fixed aggregate observability fields.
 
 ## Concurrency model
 
-Milestone one uses collection-level read/write locks. The durable milestone moves
-the lock boundary to a database transaction manager: one writer, snapshot readers,
-and immutable committed roots. User callbacks are never invoked while an engine
-lock is held.
+The database transaction manager has one writer, snapshot readers and immutable
+committed roots. User callbacks are never invoked while a storage lock is held.
 
 ## Package boundaries
 
 - Root package `meldbase`: public embedded API and stable value types.
 - `admin`: optional bounded sampler, secured admin HTTP/SSE adapter and embedded
   developer dashboard, plus fixed-schema Prometheus exposition.
-- `internal/storage`: page IO, checksums, allocation, and record identifiers.
-- `internal/wal`: framing, durability, and recovery scanning.
-- `internal/query`: parsed expression tree and evaluation.
+- `internal/storage`: page IO, COW trees, checksums, allocation and record identifiers.
 - `internal/index`: ordered key encoding and B+Tree implementation.
-- `internal/reactive`: subscriptions driven by committed batches.
+- `core`: public database API, query execution, committed batches and reactive views.
 - `server`: public authenticated HTTP/WebSocket/RPC facade.
 - `internal/server`: transport implementation and security machinery.
 

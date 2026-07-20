@@ -78,7 +78,7 @@ func TestAssessHealthReportsRecentStorageLimitRejection(t *testing.T) {
 
 func TestAssessHealthReportsCommitCoordinatorPressureAndRejection(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
-	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, CommitCoordinator: meldbase.V2CommitCoordinatorStats{Enabled: true, PendingCapacity: 10, AdmissionRejected: 2}}}
+	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, CommitCoordinator: meldbase.CommitCoordinatorStats{Enabled: true, PendingCapacity: 10, AdmissionRejected: 2}}}
 	current := previous
 	current.Stats.CommitCoordinator.Pending = 9
 	current.Stats.CommitCoordinator.AdmissionRejected++
@@ -95,7 +95,7 @@ func TestAssessHealthReportsCommitCoordinatorPressureAndRejection(t *testing.T) 
 
 func TestAssessHealthReportsRecentPrimaryWriteFenceRejection(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
-	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, PrimaryWriteFence: meldbase.V2PrimaryWriteFenceStats{
+	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, PrimaryWriteFence: meldbase.PrimaryWriteFenceStats{
 		Configured: true, Enforced: true, Checks: 2, Rejected: 1,
 	}}}
 	current := previous

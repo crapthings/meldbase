@@ -9,12 +9,12 @@ import (
 	"runtime"
 	"testing"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 var recoveryBenchmarkSink RecoveryReport
 
-func TestV2RequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
+func TestRequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix mode bits are not a Windows security boundary")
 	}
@@ -30,7 +30,7 @@ func TestV2RequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strict, err := OpenWithOptions(path, OpenOptions{RequirePrivateFileMode: true}); strict != nil || !errors.Is(err, ErrInsecureFileMode) {
-		t.Fatalf("strict V2 open db=%v err=%v", strict, err)
+		t.Fatalf("strict open db=%v err=%v", strict, err)
 	}
 	if strict, err := OpenWithOptions(path, OpenOptions{RequirePrivateFileMode: true}); strict != nil || !errors.Is(err, ErrInsecureFileMode) {
 		t.Fatalf("strict format-neutral open db=%v err=%v", strict, err)
@@ -80,8 +80,8 @@ func BenchmarkRecoveryReport(b *testing.B) {
 	}
 }
 
-func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "recovery-v2.meld2")
+func TestRecoveryReportAccountsForRootFallbackAndTailRemoval(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "recovery-store.meld2")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -101,24 +101,24 @@ func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var newest storagev2.Meta
+	var newest storage.Meta
 	for slot := range 2 {
-		page := make([]byte, storagev2.PageSize)
-		if _, err := file.ReadAt(page, int64(slot*storagev2.PageSize)); err != nil {
+		page := make([]byte, storage.PageSize)
+		if _, err := file.ReadAt(page, int64(slot*storage.PageSize)); err != nil {
 			file.Close()
 			t.Fatal(err)
 		}
-		meta, err := storagev2.DecodeMeta(page)
+		meta, err := storage.DecodeMeta(page)
 		if err == nil && meta.Generation > newest.Generation {
 			newest = meta
 		}
 	}
 	if newest.RootPage == 0 {
 		file.Close()
-		t.Fatal("newest V2 root is empty")
+		t.Fatal("newest root is empty")
 	}
 	byteAtRoot := []byte{0}
-	offset := int64(newest.RootPage*storagev2.PageSize + 64)
+	offset := int64(newest.RootPage*storage.PageSize + 64)
 	if _, err := file.ReadAt(byteAtRoot, offset); err != nil {
 		file.Close()
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
 		file.Close()
 		t.Fatal(err)
 	}
-	tail := []byte("partial-v2-page")
+	tail := []byte("partial-store-page")
 	if _, err := file.Write(tail); err != nil {
 		file.Close()
 		t.Fatal(err)
@@ -142,10 +142,10 @@ func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
 	}
 	before := mustReadRecoveryFile(t, path)
 	if strict, err := OpenWithOptions(path, OpenOptions{Recovery: RecoveryRequireClean}); !errors.Is(err, ErrRecoveryRequired) || strict != nil {
-		t.Fatalf("strict V2 open db=%v err=%v", strict, err)
+		t.Fatalf("strict open db=%v err=%v", strict, err)
 	}
 	if got := mustReadRecoveryFile(t, path); !bytes.Equal(got, before) {
-		t.Fatal("strict V2 open modified the file")
+		t.Fatal("strict open modified the file")
 	}
 
 	reopened, err := Open(path)
@@ -154,14 +154,14 @@ func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
 	}
 	defer reopened.Close()
 	report := reopened.RecoveryReport()
-	if report.Engine != "v2" || report.Created || !report.Recovered || !report.FallbackToOlderRoot || !report.MetaRedundancyDegraded ||
+	if report.Engine != "current" || report.Created || !report.Recovered || !report.FallbackToOlderRoot || !report.MetaRedundancyDegraded ||
 		report.ChecksumValidMetaSlots != 2 || report.RootValidMetaSlots != 1 ||
 		report.MainTailBytesRemoved != uint64(len(tail)) || report.CommitSequenceAfter != 1 {
-		t.Fatalf("V2 recovery report=%+v newest=%+v", report, newest)
+		t.Fatalf(" recovery report=%+v newest=%+v", report, newest)
 	}
 }
 
-func TestPublicV2GraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T) {
+func TestPublicGraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-graph-audit.meld2")
 	db, err := Open(path)
 	if err != nil {
@@ -174,12 +174,12 @@ func TestPublicV2GraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T)
 		t.Fatal(err)
 	}
 
-	storage, _, err := storagev2.Open(path)
+	file, _, err := storage.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := storage.DatabaseRoot()
-	if closeErr := storage.Close(); err != nil {
+	root, err := file.DatabaseRoot()
+	if closeErr := file.Close(); err != nil {
 		t.Fatal(err)
 	} else if closeErr != nil {
 		t.Fatal(closeErr)
@@ -192,12 +192,12 @@ func TestPublicV2GraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T)
 		t.Fatal(err)
 	}
 	byteAtPayload := []byte{0}
-	if _, err := raw.ReadAt(byteAtPayload, int64(root.CatalogRoot)*storagev2.PageSize+storagev2.PageHeaderSize); err != nil {
+	if _, err := raw.ReadAt(byteAtPayload, int64(root.CatalogRoot)*storage.PageSize+storage.PageHeaderSize); err != nil {
 		_ = raw.Close()
 		t.Fatal(err)
 	}
 	byteAtPayload[0] ^= 0xff
-	if _, err := raw.WriteAt(byteAtPayload, int64(root.CatalogRoot)*storagev2.PageSize+storagev2.PageHeaderSize); err != nil {
+	if _, err := raw.WriteAt(byteAtPayload, int64(root.CatalogRoot)*storage.PageSize+storage.PageHeaderSize); err != nil {
 		_ = raw.Close()
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestPublicV2GraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T)
 		name string
 		open func() (*DB, error)
 	}{
-		{name: "explicit-v2", open: func() (*DB, error) {
+		{name: "explicit-store", open: func() (*DB, error) {
 			return OpenWithOptions(path, OpenOptions{RequireGraphAudit: true})
 		}},
 		{name: "format-neutral", open: func() (*DB, error) {
@@ -275,7 +275,7 @@ func TestRequireCleanAllowsCreationAndCleanReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report := db.RecoveryReport(); !report.Created || report.Recovered || report.Engine != "v2" {
+	if report := db.RecoveryReport(); !report.Created || report.Recovered || report.Engine != "current" {
 		t.Fatalf("created strict report=%+v", report)
 	}
 	if err := db.Close(); err != nil {
@@ -286,7 +286,7 @@ func TestRequireCleanAllowsCreationAndCleanReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if report := reopened.RecoveryReport(); report.Created || report.Recovered || report.Engine != "v2" {
+	if report := reopened.RecoveryReport(); report.Created || report.Recovered || report.Engine != "current" {
 		t.Fatalf("clean strict reopen report=%+v", report)
 	}
 }

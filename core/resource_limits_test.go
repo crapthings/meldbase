@@ -231,7 +231,7 @@ func TestReactiveViewByteLimitUsesCanonicalDocumentBytes(t *testing.T) {
 	}
 }
 
-func TestV2ReplayReactiveViewResourceLimitTerminatesAndReleasesLease(t *testing.T) {
+func TestReplayReactiveViewResourceLimitTerminatesAndReleasesLease(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "replay-view-limit.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxReactiveViewDocuments: 1, MaxReactiveViewBytes: 1024},
 	})

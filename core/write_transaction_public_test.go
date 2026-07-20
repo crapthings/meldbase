@@ -430,7 +430,7 @@ func TestRunWriteTransactionFindRejectsCollectionPhantomAndSeesOwnWrites(t *test
 
 func TestRunWriteTransactionFindFenceSurvivesCommitCoordinator(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "coordinated-range-transaction.meld2"), OpenOptions{
-		CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond},
+		CommitCoordinator: CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond},
 	})
 	if err != nil {
 		t.Fatal(err)

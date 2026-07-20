@@ -11,11 +11,11 @@ import (
 	"time"
 )
 
-// BenchmarkV2ConcurrentIndependentCommits is the storage baseline for the
+// BenchmarkConcurrentIndependentCommits is the storage baseline for the
 // future CommitCoordinator. It deliberately uses independent documents: any
-// contention it observes comes from the shared V2 commit path rather than a
+// contention it observes comes from the shared commit path rather than a
 // business-key conflict.
-func BenchmarkV2ConcurrentIndependentCommits(b *testing.B) {
+func BenchmarkConcurrentIndependentCommits(b *testing.B) {
 	for _, parallelism := range []int{1, 4, 16} {
 		b.Run(fmt.Sprintf("parallelism_%d", parallelism), func(b *testing.B) {
 			db, err := Open(filepath.Join(b.TempDir(), "commits.meld2"))
@@ -51,12 +51,12 @@ func BenchmarkV2ConcurrentIndependentCommits(b *testing.B) {
 	}
 }
 
-// BenchmarkV2PublicInsertPair compares the established public synchronous
+// BenchmarkPublicInsertPair compares the established public synchronous
 // InsertOne path with the public coordinator path. The grouped case uses the
 // package-test admission hook only to ensure both independent callers land in
 // one window; the measured operation still traverses document validation,
-// queue admission, the V2 COW group publisher and result delivery.
-func BenchmarkV2PublicInsertPair(b *testing.B) {
+// queue admission, the  COW group publisher and result delivery.
+func BenchmarkPublicInsertPair(b *testing.B) {
 	for _, grouped := range []bool{false, true} {
 		name := "sequential"
 		if grouped {
@@ -65,7 +65,7 @@ func BenchmarkV2PublicInsertPair(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			options := OpenOptions{}
 			if grouped {
-				options.CommitCoordinator = V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}
+				options.CommitCoordinator = CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}
 			}
 			db, err := OpenWithOptions(filepath.Join(b.TempDir(), "public-pair.meld2"), options)
 			if err != nil {
@@ -146,12 +146,12 @@ func BenchmarkV2PublicInsertPair(b *testing.B) {
 	}
 }
 
-// BenchmarkV2PublicWriteTransactionPair measures the same physical-barrier
+// BenchmarkPublicWriteTransactionPair measures the same physical-barrier
 // comparison for two independently built optimistic point transactions. The
 // grouped path must never rerun either callback after a conflict or
 // cancellation boundary; this benchmark uses independent inserts so it exposes
 // only the coordinator's intended persistence saving.
-func BenchmarkV2PublicWriteTransactionPair(b *testing.B) {
+func BenchmarkPublicWriteTransactionPair(b *testing.B) {
 	for _, grouped := range []bool{false, true} {
 		name := "sequential"
 		if grouped {
@@ -160,7 +160,7 @@ func BenchmarkV2PublicWriteTransactionPair(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			options := OpenOptions{}
 			if grouped {
-				options.CommitCoordinator = V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}
+				options.CommitCoordinator = CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second}
 			}
 			db, err := OpenWithOptions(filepath.Join(b.TempDir(), "public-transaction-pair.meld2"), options)
 			if err != nil {
@@ -237,10 +237,10 @@ func BenchmarkV2PublicWriteTransactionPair(b *testing.B) {
 	}
 }
 
-// BenchmarkV2SharedRealtimeFanout measures a durable write plus delivery to
+// BenchmarkSharedRealtimeFanout measures a durable write plus delivery to
 // many subscribers of one canonical query. It separates the cost of one shared
 // view transition from per-subscriber delta cloning/delivery.
-func BenchmarkV2SharedRealtimeFanout(b *testing.B) {
+func BenchmarkSharedRealtimeFanout(b *testing.B) {
 	for _, subscribers := range []int{1, 100} {
 		b.Run(fmt.Sprintf("subscribers_%d", subscribers), func(b *testing.B) {
 			db, err := Open(filepath.Join(b.TempDir(), "realtime.meld2"))
@@ -292,11 +292,11 @@ func BenchmarkV2SharedRealtimeFanout(b *testing.B) {
 	}
 }
 
-// BenchmarkV2ReactiveViewRebuild measures one immutable V2 collection scan
+// BenchmarkReactiveViewRebuild measures one immutable  collection scan
 // shared by many canonical views. It is the cold/resync cost that must remain
 // bounded and independent of a writer; each document's canonical byte size is
 // intentionally charged once even when it matches every view.
-func BenchmarkV2ReactiveViewRebuild(b *testing.B) {
+func BenchmarkReactiveViewRebuild(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "reactive-rebuild.meld2"))
 	if err != nil {
 		b.Fatal(err)

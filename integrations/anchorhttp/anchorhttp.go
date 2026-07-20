@@ -30,7 +30,7 @@ import (
 const (
 	// ProtocolVersion identifies the strict HTTP/JSON and signing contract.
 	ProtocolVersion      uint32 = 2
-	anchorPathPrefix            = "/v2/anchors/"
+	anchorPathPrefix            = "/store/anchors/"
 	defaultMaxClockSkew         = 30 * time.Second
 	maximumBodyBytes     int64  = 4096
 	nodeManifestName            = ".meldbase-anchor-node.json"
@@ -109,7 +109,7 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 	if err := bindNodeDirectory(directory, configurationID, options.MemberID); err != nil {
 		return nil, err
 	}
-	dummyKey := sha256.Sum256([]byte("meldbase-anchor-http-unknown-key-v2"))
+	dummyKey := sha256.Sum256([]byte("meldbase-anchor-http-unknown-key-store"))
 	return &Handler{directory: directory, configurationID: configurationID, memberID: options.MemberID, keys: keys, dummyKey: dummyKey[:], clockSkew: skew, now: time.Now}, nil
 }
 
@@ -773,7 +773,7 @@ func configurationDigest(clusterID string, members []string, requiredMember stri
 		return "", errors.New("meldbase anchor HTTP: MemberID is not present in Members")
 	}
 	hash := sha256.New()
-	_, _ = hash.Write([]byte("meldbase-anchor-http-static-configuration-v2\x00"))
+	_, _ = hash.Write([]byte("meldbase-anchor-http-static-configuration-store\x00"))
 	_, _ = hash.Write([]byte(clusterID))
 	for _, member := range ordered {
 		_, _ = hash.Write([]byte{0})

@@ -73,7 +73,7 @@ func TestQueryPolicyLeaseVersionValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := applyPolicy(query, QueryPolicy{PolicyVersion: "policy-v2", Lease: lease, MaxResults: 1, AllowAllQueryPaths: true}); !errors.Is(err, ErrForbidden) {
+	if _, err := applyPolicy(query, QueryPolicy{PolicyVersion: "policy-store", Lease: lease, MaxResults: 1, AllowAllQueryPaths: true}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("mismatched lease version error = %v", err)
 	}
 }

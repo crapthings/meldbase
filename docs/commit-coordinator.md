@@ -1,12 +1,12 @@
 # CommitCoordinator design
 
 This is the required design before Meldbase enables group commit. It is based on
-the current V2 publication algorithm, not on an assumption that repeated
+the current publication algorithm, not on an assumption that repeated
 `fsync` calls can safely be removed.
 
 ## Safety finding
 
-V2 currently writes all new COW pages, syncs them, writes the inactive Meta
+The storage engine currently writes all new COW pages, syncs them, writes the inactive Meta
 slot, then syncs it. The data-before-Meta barrier is what makes either existing
 Meta slot a recoverable root after a process or power loss.
 
@@ -43,7 +43,7 @@ safe because pages freed by an uncommitted intermediate root cannot be reused
 until the final Meta is durable.
 
 This requires a new internal storage transaction primitive, not a weakening of
-the V2 revision-3 reader/writer contract. The existing single-commit encoding
+the current revision-3 reader/writer contract. The existing single-commit encoding
 remains the default and reader-compatible; any on-disk group marker or changed
 recovery interpretation requires an additive feature/revision decision and
 fresh byte fixtures.
@@ -67,7 +67,7 @@ never runs user callbacks, RPC handlers or authorization inside its batch.
 - Reactive/query publication occurs only after the whole group is durable. The
   dispatcher then receives its `ChangeBatch` objects in increasing sequence.
 
-Phase one groups ordinary V2 document mutations only. This includes a completed
+Phase one groups ordinary document mutations only. This includes a completed
 public `RunWriteTransaction`: its callback has already closed, so the group owns
 only frozen changes and an exact point-read set. A candidate conflict never
 reruns that callback; the coordinator revalidates and publishes the frozen
@@ -111,19 +111,19 @@ remains a separate release gate.
 ## Delivery sequence
 
 1. **Implemented, internal-only:** `ApplyDocumentTransactionGroup` builds two
-   to 256 ordinary document transactions in one V2 `WriteTxn`, retains one
+   to 256 ordinary document transactions in one `WriteTxn`, retains one
    ordered `CommitBatch` and CatalogRoot per logical sequence, and publishes a
    single final Meta. Its tests prove historical Snapshot N reconstruction,
    reopen/reachability and an abrupt-process-loss matrix with only whole-group
    outcomes. It is deliberately not reachable from public `DB` or server APIs yet.
-   The DB-side `commitV2ChangeBatchesLocked` companion now also maps ordered
+   The DB-side `commitChangeBatchesLocked` companion now also maps ordered
    `ChangeBatch` values to that primitive and preserves per-sequence DB stats,
    reactive dispatch and direct watcher ordering. It remains an internal
    coordinator boundary, not a CRUD fast path.
 2. **Implemented:** ENOSPC and abrupt-process-loss matrices cover whole-group
    recovery plus historical replay from retained intermediate Catalog roots.
    Flush-error qualification remains part of the later physical campaign.
-3. **Implemented, opt-in:** V2 now exposes `V2CommitCoordinatorOptions` on
+3. **Implemented, opt-in:** Meldbase now exposes `CommitCoordinatorOptions` on
    `OpenWithOptions` and format-neutral `OpenWithOptions`. It is disabled by
    default. When enabled, ordinary `Collection.InsertMany`, filter
    `UpdateOne/UpdateMany`, filter `DeleteOne/DeleteMany`, and completed public
@@ -141,8 +141,8 @@ remains a separate release gate.
    retry blindly. A public write transaction instead waits for its final durable
    outcome after admission because it has no separate reconciliation handle and
    its callback must not be rerun. `DB.Close` first closes
-   admission and lets a currently owned group finish before closing the V2
-   file. `DB.CommitCoordinatorStats()` exposes the fixed Go snapshot of queue
+   admission and lets a currently owned group finish before closing the
+  file. `DB.CommitCoordinatorStats()` exposes the fixed Go snapshot of queue
    capacity/depth, admissions, rejection, batches, grouped transactions and
    uncertain outcomes. Embedding it in the admin HTTP/SSE payload remains a
    separate versioned schema change; existing admin metrics stay stable in this
@@ -151,7 +151,7 @@ remains a separate release gate.
    anchor that persists then reports an acknowledgement failure. Protocol-v1 HTTP/WebSocket code
    maps this local error to its existing `rpc_outcome_unknown` contract rather
    than adding an incompatible new error-code spelling.
-4. **Implemented publicly:** the DB group boundary accepts one V2
+4. **Implemented publicly:** the DB group boundary accepts one
    `DocumentPrecondition` read set per logical member. Storage validates each
    set against that member's preceding in-group CatalogRoot. Tests prove that
    independent updates/deletes group successfully, while two members based on

@@ -14,18 +14,18 @@ import (
 	"github.com/crapthings/meldbase/core"
 )
 
-const physicalV2RestoreArtifact = "physical-v2-restore"
+const physicalRestoreArtifact = "physical-restore"
 
 type backupCommandResult struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	ArtifactKind  string `json:"artifactKind"`
-	meldbase.BackupV2Result
+	meldbase.BackupResult
 }
 
 func runBackup(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	source := flags.String("db", "", "existing compatible V2 database path")
+	source := flags.String("db", "", "existing current-format database path")
 	destination := flags.String("out", "", "new physical restore-artifact path (must not exist)")
 	timeout := flags.Duration("timeout", 0, "optional backup deadline, for example 10m")
 	if err := flags.Parse(args); err != nil {
@@ -46,7 +46,7 @@ func runBackup(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if info.Format != meldbase.StorageFormatCurrent {
-		return fmt.Errorf("backup source must be an existing V2 database: %w", meldbase.ErrBackupUnsupported)
+		return fmt.Errorf("backup source must be an existing current-format database: %w", meldbase.ErrBackupUnsupported)
 	}
 	if !info.ReaderCompatible {
 		return meldbase.ErrUnsupportedFormat
@@ -63,11 +63,11 @@ func runBackup(args []string, stdout, stderr io.Writer) error {
 		ctx, cancel = context.WithTimeout(ctx, *timeout)
 		defer cancel()
 	}
-	result, backupErr := db.BackupV2(ctx, *destination)
+	result, backupErr := db.Backup(ctx, *destination)
 	if err := errors.Join(backupErr, db.Close()); err != nil {
 		return err
 	}
-	output := backupCommandResult{SchemaVersion: 1, ArtifactKind: physicalV2RestoreArtifact, BackupV2Result: result}
+	output := backupCommandResult{SchemaVersion: 1, ArtifactKind: physicalRestoreArtifact, BackupResult: result}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(output)

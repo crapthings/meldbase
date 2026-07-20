@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 const (
@@ -300,7 +300,7 @@ func runDestructivePowerPrepare(args []string, stderr io.Writer) error {
 	}
 	started := time.Now().UTC()
 	reached := false
-	file, _, _, err := storagev2.OpenForQualification(databasePath, storagev2.OpenOptions{}, func(current storagev2.QualificationBoundary) error {
+	file, _, _, err := storage.OpenForQualification(databasePath, storage.OpenOptions{}, func(current storage.QualificationBoundary) error {
 		if reached || current != boundary {
 			return nil
 		}
@@ -325,8 +325,8 @@ func runDestructivePowerPrepare(args []string, stderr io.Writer) error {
 	}
 	defer file.Close()
 	id := [16]byte{15: 1}
-	_, err = file.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: [16]byte{2}, Mutations: []storagev2.DocumentMutation{{
-		Collection: "items", DocumentID: id, Operation: storagev2.DocumentUpdate, Document: newState,
+	_, err = file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{2}, Mutations: []storage.DocumentMutation{{
+		Collection: "items", DocumentID: id, Operation: storage.DocumentUpdate, Document: newState,
 	}}})
 	if err != nil {
 		return err
@@ -428,7 +428,7 @@ func runDestructivePowerRecover(args []string, stdout, stderr io.Writer) error {
 	if err := copyFileExclusiveDurable(databaseArtifact, databasePath); err != nil {
 		return err
 	}
-	verified, err := storagev2.VerifyPathContextWithIndexAudit(context.Background(), databasePath, func(storagev2.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
+	verified, err := storage.VerifyPathContextWithIndexAudit(context.Background(), databasePath, func(storage.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
 		return nil, false, errors.New("power fixture unexpectedly contains an index")
 	})
 	if err != nil {

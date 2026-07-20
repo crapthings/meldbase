@@ -105,5 +105,5 @@ signature check or archived `productionQualified` boolean is not a release
 decision. The offline verifier also refuses to run from a dirty build or a
 revision other than the qualified release.
 
-Never publish from a worktree containing database files, WAL files, credentials,
+Never publish from a worktree containing database files, credentials,
 or development-auth deployments.

@@ -77,7 +77,7 @@ func (f *File) OpenSnapshot() (*ReadSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -99,7 +99,7 @@ func (f *File) OpenSnapshotAndStream() (*ReadSnapshot, *LiveCommitStream, error)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return nil, nil, errors.New("meldbase storage v2: file is closed")
+		return nil, nil, errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -126,7 +126,7 @@ func (f *File) OpenLiveCommitStream(after uint64) (*LiveCommitStream, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -156,7 +156,7 @@ func (f *File) OpenSnapshotAndStreamAt(sequence uint64) (*ReadSnapshot, *LiveCom
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return nil, nil, errors.New("meldbase storage v2: file is closed")
+		return nil, nil, errors.New("meldbase storage: file is closed")
 	}
 	current, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -235,7 +235,7 @@ func (stream *LiveCommitStream) Next(ctx context.Context) (CommitBatch, error) {
 		stream.file.mu.Lock()
 		if stream.file.file == nil {
 			stream.file.mu.Unlock()
-			return CommitBatch{}, errors.New("meldbase storage v2: file is closed")
+			return CommitBatch{}, errors.New("meldbase storage: file is closed")
 		}
 		root, err := stream.file.databaseRootUnlocked()
 		if err != nil {
@@ -319,7 +319,7 @@ func (snapshot *ReadSnapshot) ReadCommit(sequence uint64) (CommitBatch, error) {
 	snapshot.file.mu.RLock()
 	defer snapshot.file.mu.RUnlock()
 	if snapshot.file.file == nil {
-		return CommitBatch{}, errors.New("meldbase storage v2: file is closed")
+		return CommitBatch{}, errors.New("meldbase storage: file is closed")
 	}
 	return snapshot.file.readCommitUnlocked(snapshot.root.CommitLogRoot, sequence)
 }
@@ -339,7 +339,7 @@ func (snapshot *ReadSnapshot) ReadDocumentVersion(reference DocumentVersionRef) 
 	snapshot.file.mu.RLock()
 	defer snapshot.file.mu.RUnlock()
 	if snapshot.file.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	value, exists, err := snapshot.file.readDocumentUnlocked(reference.PrimaryRoot, reference.DocumentID)
 	if err != nil {
@@ -365,7 +365,7 @@ func (snapshot *ReadSnapshot) CollectionMeta(collection string) (CollectionMeta,
 	snapshot.file.mu.RLock()
 	defer snapshot.file.mu.RUnlock()
 	if snapshot.file.file == nil {
-		return CollectionMeta{}, false, errors.New("meldbase storage v2: file is closed")
+		return CollectionMeta{}, false, errors.New("meldbase storage: file is closed")
 	}
 	encoded, exists, err := snapshot.file.treeGetUnlocked(snapshot.root.CatalogRoot, TreeCatalog, []byte(collection))
 	if err != nil || !exists {
@@ -390,7 +390,7 @@ func (snapshot *ReadSnapshot) Collections() ([]CollectionRecord, error) {
 	snapshot.file.mu.RLock()
 	defer snapshot.file.mu.RUnlock()
 	if snapshot.file.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	tx := &WriteTxn{file: snapshot.file, generation: snapshot.file.meta.Generation, sequence: snapshot.root.CommitSequence, nextPage: snapshot.file.nextPage, byID: make(map[uint64][]byte)}
 	tree, err := tx.OpenTree(snapshot.root.CatalogRoot, TreeCatalog)
@@ -449,7 +449,7 @@ func (snapshot *ReadSnapshot) GetDocumentRecord(collection string, documentID [1
 	snapshot.file.mu.RLock()
 	defer snapshot.file.mu.RUnlock()
 	if snapshot.file.file == nil {
-		return DocumentRecord{}, false, errors.New("meldbase storage v2: file is closed")
+		return DocumentRecord{}, false, errors.New("meldbase storage: file is closed")
 	}
 	encodedMeta, exists, err := snapshot.file.treeGetUnlocked(snapshot.root.CatalogRoot, TreeCatalog, []byte(collection))
 	if err != nil || !exists {
@@ -499,7 +499,7 @@ func (snapshot *ReadSnapshot) OpenCollectionIterator(collection string, start, e
 	file.mu.Lock()
 	defer file.mu.Unlock()
 	if file.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	encodedMeta, exists, err := file.treeGetUnlocked(snapshot.root.CatalogRoot, TreeCatalog, []byte(collection))
 	if err != nil {
@@ -557,7 +557,7 @@ func (snapshot *ReadSnapshot) OpenInsertionOrderIterator(collection string, star
 	file.mu.Lock()
 	defer file.mu.Unlock()
 	if file.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	encodedMeta, exists, err := file.treeGetUnlocked(snapshot.root.CatalogRoot, TreeCatalog, []byte(collection))
 	if err != nil {
@@ -606,7 +606,7 @@ func (iterator *DocumentIterator) Next() bool {
 	iterator.record = DocumentRecord{}
 	iterator.file.mu.RLock()
 	if iterator.file.file == nil {
-		iterator.err = errors.New("meldbase storage v2: file is closed")
+		iterator.err = errors.New("meldbase storage: file is closed")
 		iterator.file.mu.RUnlock()
 		iterator.releasePin()
 		return false

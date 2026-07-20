@@ -6,21 +6,21 @@ import (
 	"errors"
 	"fmt"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 // coordinatorPreparedMutation is an immutable selection made at admission.
-// Its point read set pins every document whose before image will enter the V2
+// Its point read set pins every document whose before image will enter the
 // group. The original query remains on the request solely for conflict fallback
 // under db.mu; it is never evaluated by storage.
 type coordinatorPreparedMutation struct {
 	changes []Change
-	readSet []storagev2.DocumentPrecondition
+	readSet []storage.DocumentPrecondition
 	update  UpdateResult
 	delete  DeleteResult
 }
 
-func (coordinator *v2CommitCoordinator) submitUpdate(ctx context.Context, collection string, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (UpdateResult, error) {
+func (coordinator *commitCoordinator) submitUpdate(ctx context.Context, collection string, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (UpdateResult, error) {
 	if coordinator == nil || coordinator.db == nil {
 		return UpdateResult{}, ErrCorrupt
 	}
@@ -31,19 +31,19 @@ func (coordinator *v2CommitCoordinator) submitUpdate(ctx context.Context, collec
 	if err != nil || len(prepared.changes) == 0 {
 		return prepared.update, err
 	}
-	request := &v2CommitRequest{
+	request := &commitRequest{
 		collection: collection, changes: prepared.changes, readSet: prepared.readSet,
-		success: v2CommitResult{update: prepared.update}, result: make(chan v2CommitResult, 1),
+		success: commitResult{update: prepared.update}, result: make(chan commitResult, 1),
 	}
-	request.fallback = func() v2CommitResult {
+	request.fallback = func() commitResult {
 		result, err := c.updateQueryLocked(context.Background(), query, mutation, one, maxAffected)
-		return v2CommitResult{update: result, err: err}
+		return commitResult{update: result, err: err}
 	}
 	result, err := coordinator.admit(ctx, request)
 	return result.update, err
 }
 
-func (coordinator *v2CommitCoordinator) submitDelete(ctx context.Context, collection string, query QuerySpec, one bool, maxAffected int) (DeleteResult, error) {
+func (coordinator *commitCoordinator) submitDelete(ctx context.Context, collection string, query QuerySpec, one bool, maxAffected int) (DeleteResult, error) {
 	if coordinator == nil || coordinator.db == nil {
 		return DeleteResult{}, ErrCorrupt
 	}
@@ -54,13 +54,13 @@ func (coordinator *v2CommitCoordinator) submitDelete(ctx context.Context, collec
 	if err != nil || len(prepared.changes) == 0 {
 		return prepared.delete, err
 	}
-	request := &v2CommitRequest{
+	request := &commitRequest{
 		collection: collection, changes: prepared.changes, readSet: prepared.readSet,
-		success: v2CommitResult{delete: prepared.delete}, result: make(chan v2CommitResult, 1),
+		success: commitResult{delete: prepared.delete}, result: make(chan commitResult, 1),
 	}
-	request.fallback = func() v2CommitResult {
+	request.fallback = func() commitResult {
 		result, err := c.deleteQueryLocked(context.Background(), query, one, maxAffected)
-		return v2CommitResult{delete: result, err: err}
+		return commitResult{delete: result, err: err}
 	}
 	result, err := coordinator.admit(ctx, request)
 	return result.delete, err
@@ -170,8 +170,8 @@ func (c *Collection) prepareCoordinatorDeleteLocked(ctx context.Context, query Q
 	return prepared, nil
 }
 
-func coordinatorReadSet(changes []Change) ([]storagev2.DocumentPrecondition, error) {
-	readSet := make([]storagev2.DocumentPrecondition, 0, len(changes))
+func coordinatorReadSet(changes []Change) ([]storage.DocumentPrecondition, error) {
+	readSet := make([]storage.DocumentPrecondition, 0, len(changes))
 	for _, change := range changes {
 		if change.Before == nil || change.DocumentID.IsZero() || change.Operation == InsertOperation {
 			return nil, ErrCorrupt
@@ -180,7 +180,7 @@ func coordinatorReadSet(changes []Change) ([]storagev2.DocumentPrecondition, err
 		if err != nil {
 			return nil, err
 		}
-		readSet = append(readSet, storagev2.DocumentPrecondition{
+		readSet = append(readSet, storage.DocumentPrecondition{
 			Collection: change.Collection, DocumentID: [16]byte(change.DocumentID), ExpectedExists: true, ExpectedHash: sha256.Sum256(encoded),
 		})
 	}

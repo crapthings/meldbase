@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"sync"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// V2Follower owns a local, read-only V2 database that advances only through
+// Follower owns a local, read-only database that advances only through
 // validated DurableDatabaseChangeBatch values. It is the local application
 // half of a future remote replication protocol; transport authentication,
 // snapshot transfer and promotion deliberately remain outside this type.
-type V2Follower struct {
+type Follower struct {
 	mu       sync.Mutex
 	db       *DB
 	promoted bool
@@ -46,40 +46,40 @@ type FollowerPromotionAuthority interface {
 }
 
 // FollowerPromotionFenceBinder binds one controller-issued promotion fence to
-// the local V2 primary-write guard before a follower becomes writable. The
+// the local primary-write guard before a follower becomes writable. The
 // binder may update caller-owned local lease/epoch state, but must not enable
 // writes until it has accepted the exact fence. It runs on the promotion
-// control path, outside the DB writer lock; unlike ValidateV2PrimaryWrite it
+// control path, outside the DB writer lock; unlike ValidatePrimaryWrite it
 // may coordinate with the controller if the implementation needs to.
 //
 // A promoted follower requires this interface in addition to
-// V2PrimaryWriteFence. Otherwise an unrelated always-allow guard could make a
+// PrimaryWriteFence. Otherwise an unrelated always-allow guard could make a
 // one-time promotion certificate appear to grant permanent write authority.
 type FollowerPromotionFenceBinder interface {
-	BindV2FollowerPromotion(context.Context, FollowerPromotionFence) error
+	BindFollowerPromotion(context.Context, FollowerPromotionFence) error
 }
 
-// OpenV2Follower opens a physical archive/bootstrap copy as a replica. Normal
+// OpenFollower opens a physical archive/bootstrap copy as a replica. Normal
 // public mutations on DB return ErrReplicaReadOnly; use Apply to advance the
 // next source token. The returned DB remains fully queryable and reactive.
-func OpenV2Follower(path string, options OpenOptions) (*V2Follower, error) {
+func OpenFollower(path string, options OpenOptions) (*Follower, error) {
 	options.Follower = true
-	options.CommitCoordinator = V2CommitCoordinatorOptions{}
+	options.CommitCoordinator = CommitCoordinatorOptions{}
 	db, err := OpenWithOptions(path, options)
 	if err != nil {
 		return nil, err
 	}
-	return &V2Follower{db: db}, nil
+	return &Follower{db: db}, nil
 }
 
-func (follower *V2Follower) DB() *DB {
+func (follower *Follower) DB() *DB {
 	if follower == nil {
 		return nil
 	}
 	return follower.db
 }
 
-func (follower *V2Follower) Close() error {
+func (follower *Follower) Close() error {
 	if follower == nil {
 		return nil
 	}
@@ -95,7 +95,7 @@ func (follower *V2Follower) Close() error {
 // the former primary at this exact identity/token. There is intentionally no
 // default or best-effort implementation: promoting without a durable external
 // fence would turn a network partition into split-brain data loss.
-func (follower *V2Follower) Promote(ctx context.Context, authority FollowerPromotionAuthority) (FollowerPromotionFence, error) {
+func (follower *Follower) Promote(ctx context.Context, authority FollowerPromotionAuthority) (FollowerPromotionFence, error) {
 	if follower == nil || follower.db == nil {
 		return FollowerPromotionFence{}, ErrClosed
 	}
@@ -146,7 +146,7 @@ func (follower *V2Follower) Promote(ctx context.Context, authority FollowerPromo
 	if fence.DatabaseID != request.DatabaseID || fence.CommitSequence != request.CommitSequence || fence.Epoch == "" || len(fence.Epoch) > 256 {
 		return FollowerPromotionFence{}, ErrReplicaPromotionFence
 	}
-	if err := binder.BindV2FollowerPromotion(ctx, fence); err != nil {
+	if err := binder.BindFollowerPromotion(ctx, fence); err != nil {
 		return FollowerPromotionFence{}, fmt.Errorf("%w: %w", ErrReplicaPromotionFence, err)
 	}
 	db.mu.Lock()
@@ -165,7 +165,7 @@ func (follower *V2Follower) Promote(ctx context.Context, authority FollowerPromo
 // ApplyFrame binds the decoded transport envelope to this bootstrap's durable
 // identity before applying its batch. A transport handles hello/ack/resync;
 // only a validated batch frame belongs at the follower mutation boundary.
-func (follower *V2Follower) ApplyFrame(ctx context.Context, frame ReplicationFrame) error {
+func (follower *Follower) ApplyFrame(ctx context.Context, frame ReplicationFrame) error {
 	if follower == nil || follower.db == nil {
 		return ErrClosed
 	}
@@ -192,7 +192,7 @@ func (follower *V2Follower) ApplyFrame(ctx context.Context, frame ReplicationFra
 // Apply durably and atomically applies exactly the next source batch. A gap,
 // duplicate or locally diverged token returns ErrReplicaSequence; it never
 // guesses, retries business logic or advances past missing history.
-func (follower *V2Follower) Apply(ctx context.Context, source DurableDatabaseChangeBatch) error {
+func (follower *Follower) Apply(ctx context.Context, source DurableDatabaseChangeBatch) error {
 	if follower == nil || follower.db == nil {
 		return ErrClosed
 	}
@@ -204,7 +204,7 @@ func (follower *V2Follower) Apply(ctx context.Context, source DurableDatabaseCha
 	return follower.applyLocked(ctx, source)
 }
 
-func (follower *V2Follower) applyLocked(ctx context.Context, source DurableDatabaseChangeBatch) error {
+func (follower *Follower) applyLocked(ctx context.Context, source DurableDatabaseChangeBatch) error {
 	if follower == nil || follower.db == nil {
 		return ErrClosed
 	}
@@ -233,14 +233,14 @@ func (follower *V2Follower) applyLocked(ctx context.Context, source DurableDatab
 	if source.Token != db.token+1 {
 		return fmt.Errorf("%w: have %d, received %d", ErrReplicaSequence, db.token, source.Token)
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return ErrReplicaReadOnly
 	}
 	return applyFollowerBatchLocked(ctx, db, store, source, changes)
 }
 
-func applyFollowerBatchLocked(ctx context.Context, db *DB, store *v2DurableStore, source DurableDatabaseChangeBatch, changes []Change) error {
+func applyFollowerBatchLocked(ctx context.Context, db *DB, store *durableStore, source DurableDatabaseChangeBatch, changes []Change) error {
 	documents := make([]Change, 0, len(changes))
 	collections := make(map[string]struct{})
 	indexes := make([]Change, 0, 1)
@@ -332,7 +332,7 @@ func applyFollowerBatchLocked(ctx context.Context, db *DB, store *v2DurableStore
 		if db.collections[collection] != nil {
 			return ErrCorrupt
 		}
-		sequence, err := store.file.ApplyCreateCollection(storagev2.CreateCollectionTransaction{TransactionID: source.TransactionID, Collection: collection, CommittedAt: source.CommittedAt})
+		sequence, err := store.file.ApplyCreateCollection(storage.CreateCollectionTransaction{TransactionID: source.TransactionID, Collection: collection, CommittedAt: source.CommittedAt})
 		if err != nil {
 			return followerStorageError(db, err)
 		}
@@ -365,7 +365,7 @@ func finishFollowerBatchLocked(db *DB, source DurableDatabaseChangeBatch, change
 }
 
 func followerStorageError(db *DB, err error) error {
-	mapped := mapStorageV2Error(err)
+	mapped := mapStorageError(err)
 	if db != nil && !errors.Is(mapped, ErrResourceLimit) && !errors.Is(mapped, ErrDuplicateID) && !errors.Is(mapped, ErrDuplicateKey) && !errors.Is(mapped, ErrInvalidIndex) {
 		db.fatalErr = fmt.Errorf("%w: follower apply: %v", ErrDurability, mapped)
 		return db.fatalErr

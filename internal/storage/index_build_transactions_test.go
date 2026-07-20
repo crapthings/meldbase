@@ -718,7 +718,7 @@ func TestIndexBuildCatchUpSnapshotPinsCommitAndVersionRootsAcrossReuse(t *testin
 		t.Fatalf("ready=%+v err=%v", ready, err)
 	}
 	if _, err := file.ApplyDocumentTransaction(DocumentTransaction{TransactionID: randomTransactionID(t), Mutations: []DocumentMutation{{
-		Collection: "items", DocumentID: id, Operation: DocumentUpdate, Document: []byte("v2"),
+		Collection: "items", DocumentID: id, Operation: DocumentUpdate, Document: []byte("current"),
 	}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -745,7 +745,7 @@ func TestIndexBuildCatchUpSnapshotPinsCommitAndVersionRootsAcrossReuse(t *testin
 		t.Fatalf("before=%q err=%v", before, err)
 	}
 	after, err := snapshot.ReadDocumentVersion(*commit.Changes[0].AfterRef)
-	if err != nil || string(after) != "v2" {
+	if err != nil || string(after) != "current" {
 		t.Fatalf("after=%q err=%v", after, err)
 	}
 	if err := snapshot.Close(); err != nil {

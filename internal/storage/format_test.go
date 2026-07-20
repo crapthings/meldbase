@@ -337,7 +337,7 @@ func createTwoGenerationFormatFile(t *testing.T) (string, int) {
 		t.Fatal(err)
 	}
 	if _, err := file.ApplyDocumentTransaction(DocumentTransaction{TransactionID: [16]byte{2}, Mutations: []DocumentMutation{{
-		Collection: "items", DocumentID: id, Operation: DocumentUpdate, Document: []byte("v2"),
+		Collection: "items", DocumentID: id, Operation: DocumentUpdate, Document: []byte("current"),
 	}}}); err != nil {
 		t.Fatal(err)
 	}

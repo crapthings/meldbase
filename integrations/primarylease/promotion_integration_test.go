@@ -28,7 +28,7 @@ func TestDurableACKReadinessPromotesCaughtUpFollowerAfterSafeHandoff(t *testing.
 	if err := follower.Close(); err != nil {
 		t.Fatal(err)
 	}
-	follower, err = meldbase.OpenV2Follower(bootstrap, meldbase.OpenOptions{PrimaryWriteFence: guard})
+	follower, err = meldbase.OpenFollower(bootstrap, meldbase.OpenOptions{PrimaryWriteFence: guard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestDurableACKReadinessRejectsFollowerWhenSourceAdvancedAfterACK(t *testing
 	if err := follower.Close(); err != nil {
 		t.Fatal(err)
 	}
-	follower, err = meldbase.OpenV2Follower(bootstrap, meldbase.OpenOptions{PrimaryWriteFence: guard})
+	follower, err = meldbase.OpenFollower(bootstrap, meldbase.OpenOptions{PrimaryWriteFence: guard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestDurableACKReadinessRejectsFollowerWhenSourceAdvancedAfterACK(t *testing
 	}
 }
 
-func promotionFixture(t *testing.T, directory string) (*meldbase.DB, *meldbase.V2Follower, primarylease.DurableConsumerPromotionReadiness, *primarylease.Authority, ed25519.PublicKey, *time.Time) {
+func promotionFixture(t *testing.T, directory string) (*meldbase.DB, *meldbase.Follower, primarylease.DurableConsumerPromotionReadiness, *primarylease.Authority, ed25519.PublicKey, *time.Time) {
 	t.Helper()
 	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
 	if err != nil {
@@ -104,11 +104,11 @@ func promotionFixture(t *testing.T, directory string) (*meldbase.DB, *meldbase.V
 	}
 	consumer.Close()
 	bootstrap := filepath.Join(directory, "bootstrap.meld2")
-	if _, err := source.BackupV2(context.Background(), bootstrap); err != nil {
+	if _, err := source.Backup(context.Background(), bootstrap); err != nil {
 		source.Close()
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(bootstrap, meldbase.OpenOptions{})
+	follower, err := meldbase.OpenFollower(bootstrap, meldbase.OpenOptions{})
 	if err != nil {
 		source.Close()
 		t.Fatal(err)

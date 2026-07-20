@@ -156,10 +156,10 @@ func TestReceiveAppliesPrimaryWebSocketTailToFollower(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.BackupV2(context.Background(), filepath.Join(directory, "bootstrap.meld2")); err != nil {
+	if _, err := source.Backup(context.Background(), filepath.Join(directory, "bootstrap.meld2")); err != nil {
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), meldbase.OpenOptions{})
+	follower, err := meldbase.OpenFollower(filepath.Join(directory, "bootstrap.meld2"), meldbase.OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,10 +227,10 @@ func TestReceiveAcknowledgesBootstrapCoveredBatchesBeforeApplyingTail(t *testing
 		t.Fatal(err)
 	}
 	bootstrapToken := source.Stats().CommitSequence
-	if _, err := source.BackupV2(context.Background(), filepath.Join(directory, "bootstrap.meld2")); err != nil {
+	if _, err := source.Backup(context.Background(), filepath.Join(directory, "bootstrap.meld2")); err != nil {
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(filepath.Join(directory, "bootstrap.meld2"), meldbase.OpenOptions{})
+	follower, err := meldbase.OpenFollower(filepath.Join(directory, "bootstrap.meld2"), meldbase.OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

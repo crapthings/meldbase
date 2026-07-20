@@ -131,7 +131,7 @@ func (hub *reactiveHub) subscribe(ctx context.Context, collection string, query 
 }
 
 // subscribeMode establishes a subscriber with a short database read-lock
-// boundary. Cold V2 collections may build their first immutable view outside
+// boundary. Cold  collections may build their first immutable view outside
 // that boundary and then prove the snapshot token is still current before
 // registration; all warm/retry paths retain the established lock-held logic.
 func (hub *reactiveHub) subscribeMode(ctx context.Context, collection string, query QuerySpec, canonical []byte, buffer int, cancel context.CancelFunc, deltas, allowColdStorage bool) (*sharedQuerySubscriber, error) {
@@ -258,7 +258,7 @@ func (hub *reactiveHub) subscribeMode(ctx context.Context, collection string, qu
 
 const maxColdReactiveSubscriptionAttempts = 3
 
-// subscribeColdStorage avoids holding db.mu while a first V2 view scans its
+// subscribeColdStorage avoids holding db.mu while a first view scans its
 // immutable storage snapshot. A current-token check under db.mu before
 // publication closes the snapshot/register gap; repeated write contention
 // falls back to the original lock-held path rather than weakening ordering.
@@ -906,7 +906,7 @@ type reactiveRebuildTarget struct {
 	query QuerySpec
 }
 
-// tryFullRecomputeStorageCollection rebuilds every existing view from one V2
+// tryFullRecomputeStorageCollection rebuilds every existing view from one
 // snapshot without retaining db.mu during the scan. It succeeds only when both
 // the database token and the exact collection view set are unchanged at the
 // handoff. Replacing the shared order at that token makes queued older batches
@@ -1029,7 +1029,7 @@ func (hub *reactiveHub) fullRecomputeCollection(collection string) {
 }
 
 // fullRecomputeCollectionLocked retains the original lock-held rebuild as the
-// conservative fallback when a V2 storage handoff cannot prove one stable
+// conservative fallback when a storage handoff cannot prove one stable
 // snapshot/current-view boundary.
 func (hub *reactiveHub) fullRecomputeCollectionLocked(collection string) {
 	db := hub.db

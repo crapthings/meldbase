@@ -17,7 +17,7 @@ const worker = new MeldbaseWorker({
   methods: {
     "health.echo": rpc((_context, [value]) => value ?? null),
   },
-  publications: {
+ publications: {
     todos: publish({
       version: "owner-v1",
       maxResults: 100,

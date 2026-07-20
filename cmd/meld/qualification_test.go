@@ -436,7 +436,7 @@ func qualificationFixtures() (durabilityCheckResult, qualificationSoakReceipt) {
 	}
 	phases[0].ReclamationConflicts = 1
 	soak := qualificationSoakReceipt{
-		SchemaVersion: 4, FormatRevision: 3, Engine: "v2", Profile: "release", RaceEnabled: true,
+		SchemaVersion: 4, FormatRevision: 3, Engine: "current", Profile: "release", RaceEnabled: true,
 		GOOS: durability.GOOS, GOARCH: durability.GOARCH, GoVersion: durability.GoVersion,
 		SourceRevision: qualificationTestRevision, BuildRevision: qualificationTestRevision,
 		Device: durability.Device, FilesystemType: durability.FilesystemType, FilesystemName: durability.FilesystemName, BlockSize: durability.BlockSize,

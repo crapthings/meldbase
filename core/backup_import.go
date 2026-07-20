@@ -12,20 +12,20 @@ import (
 	"os"
 	"path/filepath"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 // PhysicalBackupImportOptions bounds an untrusted physical-backup stream
-// before it can consume local disk. Zero selects the normal V2 file limit.
-// Deployments with a deliberately larger V2 database must set MaxBytes
+// before it can consume local disk. Zero selects the normal file limit.
+// Deployments with a deliberately larger database must set MaxBytes
 // explicitly on the receiving side; a sender never chooses that authority.
 type PhysicalBackupImportOptions struct {
 	MaxBytes uint64
 }
 
-// ImportV2PhysicalBackup receives one exact BackupV2 artifact into a new local
+// ImportPhysicalBackup receives one exact Backup artifact into a new local
 // path. It writes a private temporary file, checks the claimed byte count and
-// SHA-256 while streaming, runs the complete offline V2 graph/index verifier,
+// SHA-256 while streaming, runs the complete offline  graph/index verifier,
 // then publishes with the same no-overwrite link-and-directory-sync commit
 // point as backup and migration.
 //
@@ -34,75 +34,75 @@ type PhysicalBackupImportOptions struct {
 // must close or honor ctx itself: a generic io.Reader cannot be interrupted
 // while blocked in Read. The destination is never opened as a writable DB by
 // this function; callers normally open the successfully imported file through
-// OpenV2Follower before applying a replication tail.
-func ImportV2PhysicalBackup(ctx context.Context, source io.Reader, destination string, expected BackupV2Result, options PhysicalBackupImportOptions) (BackupV2Result, error) {
+// OpenFollower before applying a replication tail.
+func ImportPhysicalBackup(ctx context.Context, source io.Reader, destination string, expected BackupResult, options PhysicalBackupImportOptions) (BackupResult, error) {
 	if source == nil {
-		return BackupV2Result{}, ErrCorrupt
+		return BackupResult{}, ErrCorrupt
 	}
 	if err := contextError(ctx); err != nil {
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	if destination == "" {
-		return BackupV2Result{}, errors.New("meldbase: empty backup destination")
+		return BackupResult{}, errors.New("meldbase: empty backup destination")
 	}
 	if options.MaxBytes == 0 {
-		options.MaxBytes = DefaultV2MaxFileBytes
+		options.MaxBytes = DefaultMaxFileBytes
 	}
 	if err := validatePhysicalBackupReceipt(expected, options.MaxBytes); err != nil {
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	destination, err := filepath.Abs(filepath.Clean(destination))
 	if err != nil {
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	if _, err := os.Lstat(destination); err == nil {
-		return BackupV2Result{}, ErrBackupDestinationExists
+		return BackupResult{}, ErrBackupDestinationExists
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	temporary, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+".import-*")
 	if err != nil {
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 	if err := copyAndVerifyPhysicalBackup(ctx, temporary, source, expected); err != nil {
 		_ = temporary.Close()
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	if err := temporary.Sync(); err != nil {
 		_ = temporary.Close()
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	if err := temporary.Close(); err != nil {
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
-	verification, err := VerifyV2File(ctx, temporaryPath)
+	verification, err := VerifyFile(ctx, temporaryPath)
 	if err != nil {
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	if !verification.Verified || verification.FileBytes != expected.Bytes || verification.PhysicalPages != expected.Pages ||
 		verification.CommitSequence != expected.CommitSequence || verification.MetaGeneration != expected.MetaGeneration ||
 		verification.DatabaseIDHex != expected.DatabaseIDHex || verification.SHA256 != expected.SHA256 ||
 		!verification.IndexContentsVerified || !verification.IndexBuildContentsVerified {
-		return BackupV2Result{}, ErrCorrupt
+		return BackupResult{}, ErrCorrupt
 	}
 	if err := contextError(ctx); err != nil {
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	if err := publishNewFile(temporaryPath, destination, publishFileOps{link: os.Link, remove: os.Remove, syncDirectory: syncDirectory}); err != nil {
 		if errors.Is(err, ErrDestinationExists) {
-			return BackupV2Result{}, ErrBackupDestinationExists
+			return BackupResult{}, ErrBackupDestinationExists
 		}
-		return BackupV2Result{}, err
+		return BackupResult{}, err
 	}
 	_ = os.Remove(temporaryPath)
 	return expected, nil
 }
 
-func validatePhysicalBackupReceipt(expected BackupV2Result, maxBytes uint64) error {
-	if maxBytes < storagev2.PageSize || maxBytes%storagev2.PageSize != 0 || expected.Bytes < 2*storagev2.PageSize ||
-		expected.Bytes > maxBytes || expected.Bytes%storagev2.PageSize != 0 || expected.Pages != expected.Bytes/storagev2.PageSize ||
+func validatePhysicalBackupReceipt(expected BackupResult, maxBytes uint64) error {
+	if maxBytes < storage.PageSize || maxBytes%storage.PageSize != 0 || expected.Bytes < 2*storage.PageSize ||
+		expected.Bytes > maxBytes || expected.Bytes%storage.PageSize != 0 || expected.Pages != expected.Bytes/storage.PageSize ||
 		expected.MetaGeneration == 0 || len(expected.DatabaseIDHex) != 32 || stringsLower(expected.DatabaseIDHex) != expected.DatabaseIDHex ||
 		len(expected.SHA256) != sha256.Size*2 || stringsLower(expected.SHA256) != expected.SHA256 {
 		return ErrCorrupt
@@ -118,7 +118,7 @@ func validatePhysicalBackupReceipt(expected BackupV2Result, maxBytes uint64) err
 	return nil
 }
 
-func copyAndVerifyPhysicalBackup(ctx context.Context, destination *os.File, source io.Reader, expected BackupV2Result) error {
+func copyAndVerifyPhysicalBackup(ctx context.Context, destination *os.File, source io.Reader, expected BackupResult) error {
 	if destination == nil || source == nil {
 		return ErrCorrupt
 	}

@@ -149,7 +149,7 @@ func TestCreateIndexCanCreateEmptyCollection(t *testing.T) {
 }
 
 func TestIndexMetaCodecRejectsReservedAndInvalidValues(t *testing.T) {
-	meta := IndexMeta{Name: "by_value", FieldPath: "value", Root: 2, CreatedSequence: 1, UpdatedSequence: 1, KeyCodecVersion: indexKeyCodecV2}
+	meta := IndexMeta{Name: "by_value", FieldPath: "value", Root: 2, CreatedSequence: 1, UpdatedSequence: 1, KeyCodecVersion: indexKeyCodec}
 	encoded, err := encodeIndexMeta(meta)
 	if err != nil {
 		t.Fatal(err)

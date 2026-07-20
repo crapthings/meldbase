@@ -29,7 +29,7 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		`meldbase_health_status{component="database"} 2`,
 		`meldbase_health_status{component="realtime"} 1`,
 		`meldbase_health_status{component="telemetry"} 0`,
-		`meldbase_database_info{engine="v1"} 1`,
+		`meldbase_database_info{engine="current"} 1`,
 		`meldbase_recovery_performed 1`,
 		`meldbase_recovery_fallback_to_older_root 1`,
 		`meldbase_recovery_meta_slots{validation="checksum"} 2`,
@@ -145,15 +145,15 @@ func representativePrometheusSample() Sample {
 			Uptime: 3*time.Second + 250*time.Millisecond, Durable: true, WritesDisabled: true,
 			CommitSequence: 2, Collections: 3, Documents: 4, Indexes: 5, ActiveChangeWatchers: 6,
 			Recovery: meldbase.RecoveryReport{
-				SchemaVersion: 1, Engine: "v2", Recovered: true, FallbackToOlderRoot: true,
+				SchemaVersion: 1, Engine: "current", Recovered: true, FallbackToOlderRoot: true,
 				ChecksumValidMetaSlots: 2, RootValidMetaSlots: 1, MainTailBytesRemoved: 17,
 			},
 			Commits: meldbase.CommitStats{Total: 7, Changes: 8},
-			CommitCoordinator: meldbase.V2CommitCoordinatorStats{
+			CommitCoordinator: meldbase.CommitCoordinatorStats{
 				Enabled: true, Pending: 3, PendingCapacity: 8, Admitted: 21, AdmissionRejected: 2,
 				Batches: 10, GroupedTransactions: 20, OutcomeUnknown: 1,
 			},
-			PrimaryWriteFence: meldbase.V2PrimaryWriteFenceStats{Configured: true, Enforced: true, Checks: 9, Rejected: 2},
+			PrimaryWriteFence: meldbase.PrimaryWriteFenceStats{Configured: true, Enforced: true, Checks: 9, Rejected: 2},
 			Transactions:      meldbase.WriteTransactionStats{Active: 1, Started: 10, Committed: 4, Noops: 2, Conflicts: 3, Aborted: 1},
 			Queries: meldbase.QueryStats{
 				ActiveCursors: 2, Total: 17, Failed: 2, CollectionScans: 3, IndexScans: 4,

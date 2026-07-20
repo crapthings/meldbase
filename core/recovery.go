@@ -18,12 +18,12 @@ const (
 // OpenOptions configures the current durable storage format.
 type OpenOptions struct {
 	Recovery              RecoveryMode
-	CommitRetention       V2CommitRetentionPolicy
+	CommitRetention       CommitRetentionPolicy
 	ReplayDeliveryTimeout time.Duration
-	CommitCoordinator     V2CommitCoordinatorOptions
+	CommitCoordinator     CommitCoordinatorOptions
 	ResourceLimits        ResourceLimits
-	StorageLimits         V2StorageLimits
-	RollbackProtection    V2RollbackProtection
+	StorageLimits         StorageLimits
+	RollbackProtection    RollbackProtection
 	// RequireGraphAudit rejects a database at startup when any page
 	// protected by the current or fallback Meta root is structurally invalid.
 	// It is intentionally opt-in because audit cost grows with database size.
@@ -37,23 +37,23 @@ type OpenOptions struct {
 	// consulted by a read-only follower applying an already validated source
 	// batch. The guard must be local, non-blocking and safe for concurrent use;
 	// controller I/O/lease renewal belongs outside Meldbase's writer lock.
-	PrimaryWriteFence V2PrimaryWriteFence
+	PrimaryWriteFence PrimaryWriteFence
 	// Follower marks this local open as a replica. Normal application writes
 	// fail with ErrReplicaReadOnly; only Follower.Apply may advance it.
 	Follower bool
 }
 
-// V2PrimaryWriteFence is the local enforcement hook for an external primary
+// PrimaryWriteFence is the local enforcement hook for an external primary
 // election/fencing system. Its implementation normally checks an atomically
 // refreshed lease epoch and expiry, not the network. Returning an error rejects
-// the whole logical commit before V2 storage mutation; it never poisons the
+// the whole logical commit before storage mutation; it never poisons the
 // database or advances a token.
 //
 // Implementations must not call back into DB and must return promptly: the
-// check runs while the V2 writer has admitted a commit. Election, renewal,
+// check runs while the writer has admitted a commit. Election, renewal,
 // certificate rotation and old-primary revocation remain external concerns.
-type V2PrimaryWriteFence interface {
-	ValidateV2PrimaryWrite(PrimaryWriteFenceRequest) error
+type PrimaryWriteFence interface {
+	ValidatePrimaryWrite(PrimaryWriteFenceRequest) error
 }
 
 // PrimaryWriteFenceRequest binds a proposed primary mutation to this database
@@ -64,18 +64,18 @@ type PrimaryWriteFenceRequest struct {
 	NextCommitSequence uint64
 }
 
-// V2CommitCoordinatorOptions controls optional group commit for ordinary V2
+// CommitCoordinatorOptions controls optional group commit for ordinary
 // InsertMany, filter Update and filter Delete operations. It is disabled by
 // default, so opening an existing database never changes write scheduling
 // unexpectedly.
 //
-// A coordinator group has one physical V2 Meta publication but retains one
+// A coordinator group has one physical  Meta publication but retains one
 // logical commit token for every admitted write request. Public write
 // transactions, atomic RPC, index builds and other maintenance operations
 // remain exclusive commits. When rollback protection is configured, the
 // coordinator advances the external anchor only after the group's final Meta
 // publication is durable and before acknowledging any member.
-type V2CommitCoordinatorOptions struct {
+type CommitCoordinatorOptions struct {
 	Enabled    bool
 	MaxBatch   int
 	MaxPending int
@@ -83,28 +83,28 @@ type V2CommitCoordinatorOptions struct {
 }
 
 const (
-	DefaultV2CommitCoordinatorMaxBatch   = 32
-	DefaultV2CommitCoordinatorMaxPending = 1024
+	DefaultCommitCoordinatorMaxBatch   = 32
+	DefaultCommitCoordinatorMaxPending = 1024
 )
 
-const DefaultV2CommitCoordinatorMaxDelay = time.Millisecond
+const DefaultCommitCoordinatorMaxDelay = time.Millisecond
 
-func normalizeV2CommitCoordinatorOptions(options V2CommitCoordinatorOptions) (V2CommitCoordinatorOptions, error) {
+func normalizeCommitCoordinatorOptions(options CommitCoordinatorOptions) (CommitCoordinatorOptions, error) {
 	if !options.Enabled {
-		return V2CommitCoordinatorOptions{}, nil
+		return CommitCoordinatorOptions{}, nil
 	}
 	if options.MaxBatch == 0 {
-		options.MaxBatch = DefaultV2CommitCoordinatorMaxBatch
+		options.MaxBatch = DefaultCommitCoordinatorMaxBatch
 	}
 	if options.MaxPending == 0 {
-		options.MaxPending = DefaultV2CommitCoordinatorMaxPending
+		options.MaxPending = DefaultCommitCoordinatorMaxPending
 	}
 	if options.MaxDelay == 0 {
-		options.MaxDelay = DefaultV2CommitCoordinatorMaxDelay
+		options.MaxDelay = DefaultCommitCoordinatorMaxDelay
 	}
 	if options.MaxBatch < 2 || options.MaxBatch > 256 || options.MaxPending < options.MaxBatch ||
 		options.MaxPending > 65_536 || options.MaxDelay < 0 || options.MaxDelay > time.Second {
-		return V2CommitCoordinatorOptions{}, ErrInvalidCommitCoordinatorOptions
+		return CommitCoordinatorOptions{}, ErrInvalidCommitCoordinatorOptions
 	}
 	return options, nil
 }
@@ -152,12 +152,12 @@ type RollbackAnchorStatusProvider interface {
 	RollbackAnchorStatus() RollbackAnchorStoreStatus
 }
 
-// V2RollbackProtection configures fail-closed database identity and sequence
+// RollbackProtection configures fail-closed database identity and sequence
 // checks. AnchorStore should live on an independently trusted device or remote
 // quorum; placing it beside the database cannot detect whole-device rollback.
 // InitializeAnchor explicitly trusts the database currently at Path when the
 // store is empty and should only be used during provisioning or audited restore.
-type V2RollbackProtection struct {
+type RollbackProtection struct {
 	ExpectedDatabaseID    [16]byte
 	MinimumCommitSequence uint64
 	MinimumGeneration     uint64
@@ -172,43 +172,43 @@ type V2RollbackProtection struct {
 // from indefinitely holding database publication acknowledgement.
 const DefaultRollbackAnchorOperationTimeout = 10 * time.Second
 
-// V2StorageLimits bounds the physical single-file high-water mark. Zero selects
-// DefaultV2MaxFileBytes. The value must be a 16 KiB V2 page multiple.
-type V2StorageLimits struct{ MaxFileBytes uint64 }
+// StorageLimits bounds the physical single-file high-water mark. Zero selects
+// DefaultMaxFileBytes. The value must be a 16 KiB page multiple.
+type StorageLimits struct{ MaxFileBytes uint64 }
 
 const (
-	V2PageSize            uint64 = 16 << 10
-	DefaultV2MaxFileBytes uint64 = 8 << 30
+	PageSize            uint64 = 16 << 10
+	DefaultMaxFileBytes uint64 = 8 << 30
 )
 
-// V2DestinationOptions configures newly written migration or compaction files.
+// CompactionOptions configures newly written migration or compaction files.
 // ResourceLimits govern transient index construction as well as the reopened
 // destination handle; zero fields select production defaults.
-type V2DestinationOptions struct {
-	StorageLimits  V2StorageLimits
+type CompactionOptions struct {
+	StorageLimits  StorageLimits
 	ResourceLimits ResourceLimits
 }
 
-// V2CommitRetentionPolicy bounds logical Commit Log history by both commit
+// CommitRetentionPolicy bounds logical Commit Log history by both commit
 // count and canonical encoded bytes. Zero fields select production defaults.
 // Active replay leases may temporarily exceed either budget rather than losing
 // history under a reader.
-type V2CommitRetentionPolicy struct {
+type CommitRetentionPolicy struct {
 	MaxCommits uint64
 	MaxBytes   uint64
 }
 
 const (
-	DefaultV2CommitRetentionMaxCommits uint64 = 10_000
-	DefaultV2CommitRetentionMaxBytes   uint64 = 256 << 20
-	// DefaultV2ReplayDeliveryTimeout bounds how long a replay source can wait
+	DefaultCommitRetentionMaxCommits uint64 = 10_000
+	DefaultCommitRetentionMaxBytes   uint64 = 256 << 20
+	// DefaultReplayDeliveryTimeout bounds how long a replay source can wait
 	// for a full caller buffer before it releases the retained-history lease.
-	DefaultV2ReplayDeliveryTimeout = 5 * time.Second
+	DefaultReplayDeliveryTimeout = 5 * time.Second
 )
 
-func normalizeV2ReplayDeliveryTimeout(timeout time.Duration) (time.Duration, error) {
+func normalizeReplayDeliveryTimeout(timeout time.Duration) (time.Duration, error) {
 	if timeout == 0 {
-		return DefaultV2ReplayDeliveryTimeout, nil
+		return DefaultReplayDeliveryTimeout, nil
 	}
 	if timeout < time.Millisecond || timeout > time.Minute {
 		return 0, ErrInvalidReplayDeliveryTimeout

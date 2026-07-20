@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"hash/maphash"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// v2ReactiveReplayView bridges one pinned Storage V2 snapshot and its ordered
+// reactiveReplayView bridges one pinned Storage snapshot and its ordered
 // Commit Log tail into the same immutable state transitions used by live
-// process-local reactive views. It remains internal until Storage V2 becomes a
+// process-local reactive views. It remains internal until Storage  becomes a
 // supported public open path.
-type v2ReactiveReplayView struct {
+type reactiveReplayView struct {
 	collection     string
 	collectionID   uint32
 	query          QuerySpec
@@ -33,7 +33,7 @@ type replayOrderItem struct {
 	exists   bool
 }
 
-func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string, query QuerySpec, suppliedLimits ...ResourceLimits) (*v2ReactiveReplayView, error) {
+func newReactiveReplayView(snapshot *storage.ReadSnapshot, collection string, query QuerySpec, suppliedLimits ...ResourceLimits) (*reactiveReplayView, error) {
 	if snapshot == nil || !collectionNamePattern.MatchString(collection) {
 		return nil, ErrInvalidCollection
 	}
@@ -55,7 +55,7 @@ func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string
 	if err != nil {
 		return nil, replayCorrupt(err)
 	}
-	view := &v2ReactiveReplayView{
+	view := &reactiveReplayView{
 		collection: collection, query: query, seed: maphash.MakeSeed(),
 		order: &reactiveCollectionOrder{token: token, positions: make(map[DocumentID]uint64)}, resourceLimits: limits,
 	}
@@ -82,7 +82,7 @@ func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string
 		if _, duplicate := view.order.positions[id]; duplicate {
 			return nil, ErrCorrupt
 		}
-		document, err := decodeV2ReplayDocument(record.Document, record.DocumentID)
+		document, err := decodeReplayDocument(record.Document, record.DocumentID)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +114,7 @@ func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string
 	return view, nil
 }
 
-func (view *v2ReactiveReplayView) Snapshot() QuerySnapshot {
+func (view *reactiveReplayView) Snapshot() QuerySnapshot {
 	if view == nil || view.state == nil {
 		return QuerySnapshot{}
 	}
@@ -124,7 +124,7 @@ func (view *v2ReactiveReplayView) Snapshot() QuerySnapshot {
 // ApplyCommit resolves only this collection's images before acknowledging the
 // stream batch. Unrelated commits still advance the internal sequence, while a
 // delta is produced only when the materialized query result changes.
-func (view *v2ReactiveReplayView) ApplyCommit(stream *storagev2.LiveCommitStream, batch storagev2.CommitBatch) (QuerySnapshot, *sharedQueryDelta, error) {
+func (view *reactiveReplayView) ApplyCommit(stream *storage.LiveCommitStream, batch storage.CommitBatch) (QuerySnapshot, *sharedQueryDelta, error) {
 	if view == nil || view.state == nil || stream == nil || batch.Sequence == 0 || batch.Sequence != view.state.token+1 {
 		return QuerySnapshot{}, nil, ErrCorrupt
 	}
@@ -132,7 +132,7 @@ func (view *v2ReactiveReplayView) ApplyCommit(stream *storagev2.LiveCommitStream
 	candidateCollectionID := view.collectionID
 	seenDocuments := make(map[DocumentID]struct{})
 	for _, change := range batch.Changes {
-		if change.Operation == storagev2.CommitCatalog {
+		if change.Operation == storage.CommitCatalog {
 			if change.CollectionName != view.collection {
 				continue
 			}
@@ -149,7 +149,7 @@ func (view *v2ReactiveReplayView) ApplyCommit(stream *storagev2.LiveCommitStream
 		if err != nil {
 			return QuerySnapshot{}, nil, replayCorrupt(err)
 		}
-		converted, err := convertV2ReplayChange(resolved)
+		converted, err := convertReplayChange(resolved)
 		if err != nil {
 			return QuerySnapshot{}, nil, err
 		}
@@ -190,7 +190,7 @@ func (view *v2ReactiveReplayView) ApplyCommit(stream *storagev2.LiveCommitStream
 	return cloneSnapshot(next.snapshot), delta, nil
 }
 
-func (view *v2ReactiveReplayView) checkpointOrder(changes []Change) replayOrderCheckpoint {
+func (view *reactiveReplayView) checkpointOrder(changes []Change) replayOrderCheckpoint {
 	checkpoint := replayOrderCheckpoint{items: make(map[DocumentID]replayOrderItem, len(changes))}
 	view.order.mu.RLock()
 	checkpoint.token, checkpoint.next = view.order.token, view.order.next
@@ -202,7 +202,7 @@ func (view *v2ReactiveReplayView) checkpointOrder(changes []Change) replayOrderC
 	return checkpoint
 }
 
-func (view *v2ReactiveReplayView) restoreOrder(checkpoint replayOrderCheckpoint) {
+func (view *reactiveReplayView) restoreOrder(checkpoint replayOrderCheckpoint) {
 	view.order.mu.Lock()
 	view.order.token, view.order.next = checkpoint.token, checkpoint.next
 	for id, item := range checkpoint.items {
@@ -215,10 +215,10 @@ func (view *v2ReactiveReplayView) restoreOrder(checkpoint replayOrderCheckpoint)
 	view.order.mu.Unlock()
 }
 
-func convertV2ReplayChange(change storagev2.ResolvedCommitChange) (Change, error) {
+func convertReplayChange(change storage.ResolvedCommitChange) (Change, error) {
 	converted := Change{DocumentID: DocumentID(change.DocumentID), ChangedPaths: append([]string(nil), change.ChangedPaths...)}
 	decodeBefore := func() error {
-		document, err := decodeV2ReplayDocument(change.Before, change.DocumentID)
+		document, err := decodeReplayDocument(change.Before, change.DocumentID)
 		if err != nil {
 			return err
 		}
@@ -226,7 +226,7 @@ func convertV2ReplayChange(change storagev2.ResolvedCommitChange) (Change, error
 		return nil
 	}
 	decodeAfter := func() error {
-		document, err := decodeV2ReplayDocument(change.After, change.DocumentID)
+		document, err := decodeReplayDocument(change.After, change.DocumentID)
 		if err != nil {
 			return err
 		}
@@ -240,7 +240,7 @@ func convertV2ReplayChange(change storagev2.ResolvedCommitChange) (Change, error
 		return nil
 	}
 	switch change.Operation {
-	case storagev2.CommitInsert:
+	case storage.CommitInsert:
 		if len(change.Before) != 0 || len(change.After) == 0 {
 			return Change{}, ErrCorrupt
 		}
@@ -248,7 +248,7 @@ func convertV2ReplayChange(change storagev2.ResolvedCommitChange) (Change, error
 		if err := decodeAfter(); err != nil {
 			return Change{}, err
 		}
-	case storagev2.CommitUpdate:
+	case storage.CommitUpdate:
 		if len(change.Before) == 0 || len(change.After) == 0 {
 			return Change{}, ErrCorrupt
 		}
@@ -259,7 +259,7 @@ func convertV2ReplayChange(change storagev2.ResolvedCommitChange) (Change, error
 		if err := decodeAfter(); err != nil {
 			return Change{}, err
 		}
-	case storagev2.CommitDelete:
+	case storage.CommitDelete:
 		if len(change.Before) == 0 || len(change.After) != 0 {
 			return Change{}, ErrCorrupt
 		}
@@ -273,7 +273,7 @@ func convertV2ReplayChange(change storagev2.ResolvedCommitChange) (Change, error
 	return converted, nil
 }
 
-func decodeV2ReplayDocument(encoded []byte, expected [16]byte) (Document, error) {
+func decodeReplayDocument(encoded []byte, expected [16]byte) (Document, error) {
 	document, err := decodeStoredDocument(encoded)
 	if err != nil {
 		return nil, replayCorrupt(err)
@@ -289,5 +289,5 @@ func replayCorrupt(err error) error {
 	if err == nil || errors.Is(err, ErrCorrupt) {
 		return err
 	}
-	return fmt.Errorf("%w: storage v2 replay: %v", ErrCorrupt, err)
+	return fmt.Errorf("%w: storage store replay: %v", ErrCorrupt, err)
 }

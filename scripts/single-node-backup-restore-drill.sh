@@ -58,7 +58,7 @@ restore_receipt="$out_dir/restore-receipt.json"
 
 restore_args=(restore --in "$artifact" --receipt "$receipt" --out "$restored" --timeout "$timeout")
 if [[ -n "$max_bytes" ]]; then
-  restore_args+=(--max-bytes "$max_bytes")
+ restore_args+=(--max-bytes "$max_bytes")
 fi
 "$meld" "${restore_args[@]}" >"$restore_receipt"
 cmp "$receipt" "$restore_receipt"

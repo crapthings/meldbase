@@ -8,29 +8,29 @@ import (
 )
 
 const (
-	defaultV2DocumentCacheEntries = 4096
-	defaultV2DocumentCacheBytes   = 16 * 1024 * 1024
+	defaultDocumentCacheEntries = 4096
+	defaultDocumentCacheBytes   = 16 * 1024 * 1024
 )
 
-type v2DocumentCacheKey struct {
+type documentCacheKey struct {
 	collection string
 	id         DocumentID
 }
 
-type v2DocumentCacheEntry struct {
-	key      v2DocumentCacheKey
+type documentCacheEntry struct {
+	key      documentCacheKey
 	encoded  []byte
 	document Document
 	cost     uint64
 }
 
-// v2DocumentCache is a strictly bounded decoded-document LRU. Entries are
+// documentCache is a strictly bounded decoded-document LRU. Entries are
 // validated against the current immutable record bytes on every lookup, so an
 // update or delete cannot return a stale version even without invalidation on
 // the write path.
-type v2DocumentCache struct {
+type documentCache struct {
 	mu         sync.Mutex
-	entries    map[v2DocumentCacheKey]*list.Element
+	entries    map[documentCacheKey]*list.Element
 	lru        list.List
 	bytes      uint64
 	maxEntries uint64
@@ -40,20 +40,20 @@ type v2DocumentCache struct {
 	evictions  atomic.Uint64
 }
 
-func newV2DocumentCache(maxEntries, maxBytes uint64) *v2DocumentCache {
-	return &v2DocumentCache{
-		entries: make(map[v2DocumentCacheKey]*list.Element), maxEntries: maxEntries, maxBytes: maxBytes,
+func newDocumentCache(maxEntries, maxBytes uint64) *documentCache {
+	return &documentCache{
+		entries: make(map[documentCacheKey]*list.Element), maxEntries: maxEntries, maxBytes: maxBytes,
 	}
 }
 
-func (cache *v2DocumentCache) decode(collection string, id DocumentID, encoded []byte) (Document, error) {
+func (cache *documentCache) decode(collection string, id DocumentID, encoded []byte) (Document, error) {
 	if cache == nil || cache.maxEntries == 0 || cache.maxBytes == 0 {
 		return decodeStoredDocument(encoded)
 	}
-	key := v2DocumentCacheKey{collection: collection, id: id}
+	key := documentCacheKey{collection: collection, id: id}
 	cache.mu.Lock()
 	if element := cache.entries[key]; element != nil {
-		entry := element.Value.(*v2DocumentCacheEntry)
+		entry := element.Value.(*documentCacheEntry)
 		if bytes.Equal(entry.encoded, encoded) {
 			cache.lru.MoveToFront(element)
 			document := entry.document
@@ -78,12 +78,12 @@ func (cache *v2DocumentCache) decode(collection string, id DocumentID, encoded [
 	if cost > cache.maxBytes {
 		return document, nil
 	}
-	entry := &v2DocumentCacheEntry{
+	entry := &documentCacheEntry{
 		key: key, encoded: append([]byte(nil), encoded...), document: document, cost: cost,
 	}
 	cache.mu.Lock()
 	if element := cache.entries[key]; element != nil {
-		existing := element.Value.(*v2DocumentCacheEntry)
+		existing := element.Value.(*documentCacheEntry)
 		if bytes.Equal(existing.encoded, encoded) {
 			cache.lru.MoveToFront(element)
 			document = existing.document
@@ -102,22 +102,22 @@ func (cache *v2DocumentCache) decode(collection string, id DocumentID, encoded [
 	return document, nil
 }
 
-func (cache *v2DocumentCache) remove(collection string, id DocumentID) {
+func (cache *documentCache) remove(collection string, id DocumentID) {
 	if cache == nil {
 		return
 	}
 	cache.mu.Lock()
-	if element := cache.entries[v2DocumentCacheKey{collection: collection, id: id}]; element != nil {
+	if element := cache.entries[documentCacheKey{collection: collection, id: id}]; element != nil {
 		cache.removeElementLocked(element, false)
 	}
 	cache.mu.Unlock()
 }
 
-func (cache *v2DocumentCache) removeElementLocked(element *list.Element, eviction bool) {
+func (cache *documentCache) removeElementLocked(element *list.Element, eviction bool) {
 	if element == nil {
 		return
 	}
-	entry := element.Value.(*v2DocumentCacheEntry)
+	entry := element.Value.(*documentCacheEntry)
 	delete(cache.entries, entry.key)
 	cache.lru.Remove(element)
 	if entry.cost > cache.bytes {
@@ -130,7 +130,7 @@ func (cache *v2DocumentCache) removeElementLocked(element *list.Element, evictio
 	}
 }
 
-func (cache *v2DocumentCache) stats() DocumentCacheStats {
+func (cache *documentCache) stats() DocumentCacheStats {
 	if cache == nil {
 		return DocumentCacheStats{}
 	}

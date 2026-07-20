@@ -19,7 +19,7 @@ import (
 var compoundFixtureDatabaseID = [16]byte{0xc3, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 
 // This additive revision-3 fixture pins the independently negotiated V3 tuple
-// key metadata without rewriting the original V2 and shadow-build fixtures.
+// key metadata without rewriting the original  and shadow-build fixtures.
 func TestCompoundIndexRevision3GoldenFixtureOpensAuditsAndAdvances(t *testing.T) {
 	fixture := loadCompoundGoldenFixture(t)
 	raw := decodeGoldenFixture(t, fixture)

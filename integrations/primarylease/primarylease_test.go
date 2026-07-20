@@ -43,19 +43,19 @@ func TestGuardVerifiesSignedLeaseAndFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := meldbase.PrimaryWriteFenceRequest{DatabaseID: databaseID, NextCommitSequence: 13}
-	if err := guard.ValidateV2PrimaryWrite(request); err == nil {
+	if err := guard.ValidatePrimaryWrite(request); err == nil {
 		t.Fatal("uninstalled guard accepted a write")
 	}
 	if err := guard.Install(encoded); err != nil {
 		t.Fatal(err)
 	}
-	if err := guard.ValidateV2PrimaryWrite(request); err != nil {
+	if err := guard.ValidatePrimaryWrite(request); err != nil {
 		t.Fatalf("installed guard rejected next write: %v", err)
 	}
-	if err := guard.ValidateV2PrimaryWrite(meldbase.PrimaryWriteFenceRequest{DatabaseID: databaseID, NextCommitSequence: 12}); err == nil {
+	if err := guard.ValidatePrimaryWrite(meldbase.PrimaryWriteFenceRequest{DatabaseID: databaseID, NextCommitSequence: 12}); err == nil {
 		t.Fatal("guard accepted certificate sequence again")
 	}
-	if err := guard.ValidateV2PrimaryWrite(meldbase.PrimaryWriteFenceRequest{DatabaseID: [16]byte{15: 2}, NextCommitSequence: 13}); err == nil {
+	if err := guard.ValidatePrimaryWrite(meldbase.PrimaryWriteFenceRequest{DatabaseID: [16]byte{15: 2}, NextCommitSequence: 13}); err == nil {
 		t.Fatal("guard accepted a different database")
 	}
 	tamperedSuffix := "A"
@@ -66,7 +66,7 @@ func TestGuardVerifiesSignedLeaseAndFailsClosed(t *testing.T) {
 		t.Fatalf("tampered certificate err=%v", err)
 	}
 	guard.Revoke()
-	if err := guard.ValidateV2PrimaryWrite(request); err == nil {
+	if err := guard.ValidatePrimaryWrite(request); err == nil {
 		t.Fatal("revoked guard accepted a write")
 	}
 	if err := guard.Install(encoded); !errors.Is(err, primarylease.ErrLeaseEpoch) {
@@ -130,10 +130,10 @@ func TestSignedLeaseGuardBindsFollowerPromotionAndExpiresWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrap := filepath.Join(directory, "bootstrap.meld2")
-	if _, err := source.BackupV2(context.Background(), bootstrap); err != nil {
+	if _, err := source.Backup(context.Background(), bootstrap); err != nil {
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(bootstrap, meldbase.OpenOptions{PrimaryWriteFence: guard})
+	follower, err := meldbase.OpenFollower(bootstrap, meldbase.OpenOptions{PrimaryWriteFence: guard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestGuardWriteCheckDoesNotAllocate(t *testing.T) {
 	}
 	request := meldbase.PrimaryWriteFenceRequest{DatabaseID: databaseID, NextCommitSequence: 1}
 	if allocations := testing.AllocsPerRun(1_000, func() {
-		if err := guard.ValidateV2PrimaryWrite(request); err != nil {
+		if err := guard.ValidatePrimaryWrite(request); err != nil {
 			t.Fatal(err)
 		}
 	}); allocations != 0 {
@@ -340,7 +340,7 @@ func TestLeaseHandoffHasNoWriteOverlapWithinDeclaredClockSkew(t *testing.T) {
 		t.Fatal(err)
 	}
 	write := meldbase.PrimaryWriteFenceRequest{DatabaseID: databaseID, NextCommitSequence: 8}
-	if err := oldGuard.ValidateV2PrimaryWrite(write); err != nil {
+	if err := oldGuard.ValidatePrimaryWrite(write); err != nil {
 		t.Fatalf("old owner rejected before expiry: %v", err)
 	}
 	blocked, err := authority.Grant(context.Background(), primarylease.GrantRequest{DatabaseID: databaseID, Owner: "writer-b", CommitSequence: 7})
@@ -359,10 +359,10 @@ func TestLeaseHandoffHasNoWriteOverlapWithinDeclaredClockSkew(t *testing.T) {
 	if err := newGuard.Install(newGrant.Certificate); err != nil {
 		t.Fatal(err)
 	}
-	if err := oldGuard.ValidateV2PrimaryWrite(write); err == nil {
+	if err := oldGuard.ValidatePrimaryWrite(write); err == nil {
 		t.Fatal("slow old owner still accepted a write at new-owner handoff")
 	}
-	if err := newGuard.ValidateV2PrimaryWrite(write); err != nil {
+	if err := newGuard.ValidatePrimaryWrite(write); err != nil {
 		t.Fatalf("fast new owner rejected at handoff: %v", err)
 	}
 }

@@ -48,7 +48,7 @@ func TestFetchImportsVerifiedHTTPSBootstrap(t *testing.T) {
 	if bootstrap.SnapshotToken != bootstrap.Backup.CommitSequence || bootstrap.CheckpointToken > bootstrap.SnapshotToken || bootstrap.Backup.Bytes == 0 {
 		t.Fatalf("bootstrap=%+v", bootstrap)
 	}
-	follower, err := meldbase.OpenV2Follower(destination, meldbase.OpenOptions{RequireGraphAudit: true})
+	follower, err := meldbase.OpenFollower(destination, meldbase.OpenOptions{RequireGraphAudit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestFetchBootstrapHandsOffToSameDurableWSSConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	follower, err := meldbase.OpenV2Follower(bootstrapPath, meldbase.OpenOptions{RequireGraphAudit: true})
+	follower, err := meldbase.OpenFollower(bootstrapPath, meldbase.OpenOptions{RequireGraphAudit: true})
 	if err != nil {
 		t.Fatal(err)
 	}

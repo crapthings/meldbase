@@ -25,7 +25,7 @@ PUT /v2/anchors/{anchorName}
 ```
 
 `databaseId` is exactly 16 non-zero bytes encoded as 32 hexadecimal characters.
-`minimumGeneration` must be greater than `minimumCommitSequence`; Storage V2
+`minimumGeneration` must be greater than `minimumCommitSequence`; Storage
 starts at generation 1/sequence 0 and every logical commit advances both while
 maintenance may advance generation alone.
 
@@ -147,7 +147,7 @@ conflicts leave fewer than a quorum of possible accepting votes.
 Authentication, static-configuration and request-protocol responses fail the
 operation immediately; transport and 5xx failures count as unavailable nodes.
 Calls are bounded by the caller context, which Meldbase further bounds
-with `V2RollbackProtection.OperationTimeout`.
+with `RollbackProtection.OperationTimeout`.
 
 An unsuccessful or canceled write has an ambiguous outcome. Any member may have
 durably accepted the tuple before its response was lost, and cancellation does

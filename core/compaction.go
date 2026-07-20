@@ -11,26 +11,26 @@ import (
 	"sort"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// CompactToV2 writes one current logical V2 snapshot into a new, atomically
-// published V2 file. It never overwrites destination or mutates the source.
+// Compact writes one current logical snapshot into a new, atomically
+// published file. It never overwrites destination or mutates the source.
 // Writes which commit after the source snapshot is pinned may continue and are
 // intentionally absent from the destination. The compacted database receives a
 // new identity and commit-log history, so callers must treat every old resume
 // token as invalid.
-func (db *DB) CompactToV2(ctx context.Context, destination string) (resultErr error) {
-	options := V2DestinationOptions{}
+func (db *DB) Compact(ctx context.Context, destination string) (resultErr error) {
+	options := CompactionOptions{}
 	if db != nil {
-		options.StorageLimits = db.v2StorageLimits
+		options.StorageLimits = db.storageLimits
 		options.ResourceLimits = db.resourceLimits
 	}
-	return db.CompactToV2WithOptions(ctx, destination, options)
+	return db.CompactWithOptions(ctx, destination, options)
 }
 
-// CompactToV2WithOptions is CompactToV2 with an explicit destination quota.
-func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, options V2DestinationOptions) (resultErr error) {
+// CompactWithOptions is Compact with an explicit destination quota.
+func (db *DB) CompactWithOptions(ctx context.Context, destination string, options CompactionOptions) (resultErr error) {
 	if db == nil {
 		return ErrCompactionUnsupported
 	}
@@ -48,7 +48,7 @@ func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, op
 	if err != nil {
 		return err
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return ErrCompactionUnsupported
 	}
@@ -69,7 +69,7 @@ func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, op
 
 	// Only the snapshot admission is under db.mu. The storage snapshot pins its
 	// own immutable root, so the potentially long copy and verification stages
-	// must not stall ordinary V2 writers.
+	// must not stall ordinary writers.
 	db.mu.RLock()
 	if db.closed {
 		db.mu.RUnlock()
@@ -82,7 +82,7 @@ func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, op
 	builds, err := store.file.IndexBuilds()
 	if err != nil {
 		db.mu.RUnlock()
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	if len(builds) != 0 {
 		db.mu.RUnlock()
@@ -108,7 +108,7 @@ func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, op
 	source, err := store.file.OpenSnapshot()
 	if err != nil {
 		db.mu.RUnlock()
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	if source.Sequence() != db.token {
 		db.mu.RUnlock()
@@ -132,28 +132,28 @@ func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, op
 		return err
 	}
 	defer os.Remove(temporaryPath)
-	destinationFile, _, _, err := storagev2.OpenWithOptions(temporaryPath, storagev2.OpenOptions{MaxFileBytes: options.StorageLimits.MaxFileBytes})
+	destinationFile, _, _, err := storage.OpenWithOptions(temporaryPath, storage.OpenOptions{MaxFileBytes: options.StorageLimits.MaxFileBytes})
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	closeDestination := func(current error) error {
-		return errors.Join(current, mapStorageV2Error(destinationFile.Close()))
+		return errors.Join(current, mapStorageError(destinationFile.Close()))
 	}
 	if destinationFile.Meta().DatabaseID == db.databaseID {
 		return closeDestination(ErrCorrupt)
 	}
-	if err := compactV2Snapshot(ctx, source, destinationFile, db, resourceLimits); err != nil {
+	if err := compactSnapshot(ctx, source, destinationFile, db, resourceLimits); err != nil {
 		return closeDestination(err)
 	}
 	if _, err := destinationFile.Reachability(); err != nil {
-		return closeDestination(mapStorageV2Error(err))
+		return closeDestination(mapStorageError(err))
 	}
 	destinationSnapshot, err := destinationFile.OpenSnapshot()
 	if err != nil {
-		return closeDestination(mapStorageV2Error(err))
+		return closeDestination(mapStorageError(err))
 	}
-	verifyErr := verifyCompactedV2Snapshots(ctx, source, destinationSnapshot)
-	verifyErr = errors.Join(verifyErr, mapStorageV2Error(destinationSnapshot.Close()))
+	verifyErr := verifyCompactedSnapshots(ctx, source, destinationSnapshot)
+	verifyErr = errors.Join(verifyErr, mapStorageError(destinationSnapshot.Close()))
 	if verifyErr != nil {
 		return closeDestination(verifyErr)
 	}
@@ -183,10 +183,10 @@ func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, op
 	return nil
 }
 
-func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, destination *storagev2.File, db *DB, resourceLimits ResourceLimits) error {
+func compactSnapshot(ctx context.Context, source *storage.ReadSnapshot, destination *storage.File, db *DB, resourceLimits ResourceLimits) error {
 	collections, err := source.Collections()
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	sort.Slice(collections, func(left, right int) bool { return collections[left].Name < collections[right].Name })
 	for _, collection := range collections {
@@ -197,16 +197,16 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 		if err != nil {
 			return err
 		}
-		if _, err := destination.ApplyCreateCollection(storagev2.CreateCollectionTransaction{
+		if _, err := destination.ApplyCreateCollection(storage.CreateCollectionTransaction{
 			TransactionID: transactionID, Collection: collection.Name,
 		}); err != nil {
-			return mapStorageV2Error(err)
+			return mapStorageError(err)
 		}
 		iterator, err := source.OpenInsertionOrderIterator(collection.Name, nil, nil, 0)
 		if err != nil {
-			return mapStorageV2Error(err)
+			return mapStorageError(err)
 		}
-		pending := make([]storagev2.DocumentMutation, 0, snapshotDocumentBatchCount)
+		pending := make([]storage.DocumentMutation, 0, snapshotDocumentBatchCount)
 		pendingBytes := 0
 		flush := func() error {
 			if len(pending) == 0 {
@@ -216,10 +216,10 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 			if err != nil {
 				return err
 			}
-			_, err = destination.ApplyDocumentTransaction(storagev2.DocumentTransaction{TransactionID: transactionID, Mutations: pending})
+			_, err = destination.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: transactionID, Mutations: pending})
 			pending = pending[:0]
 			pendingBytes = 0
-			return mapStorageV2Error(err)
+			return mapStorageError(err)
 		}
 		for iterator.Next() {
 			if err := contextError(ctx); err != nil {
@@ -233,14 +233,14 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 					return err
 				}
 			}
-			pending = append(pending, storagev2.DocumentMutation{
+			pending = append(pending, storage.DocumentMutation{
 				Collection: collection.Name, DocumentID: record.DocumentID,
-				Operation: storagev2.DocumentInsert, Document: append([]byte(nil), record.Document...),
+				Operation: storage.DocumentInsert, Document: append([]byte(nil), record.Document...),
 			})
 			pendingBytes += len(record.Document)
 		}
-		iteratorErr := mapStorageV2Error(iterator.Err())
-		closeErr := mapStorageV2Error(iterator.Close())
+		iteratorErr := mapStorageError(iterator.Err())
+		closeErr := mapStorageError(iterator.Close())
 		if err := errors.Join(iteratorErr, closeErr); err != nil {
 			return err
 		}
@@ -249,16 +249,16 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 		}
 		indexes, err := source.Indexes(collection.Name)
 		if err != nil {
-			return mapStorageV2Error(err)
+			return mapStorageError(err)
 		}
 		sort.Slice(indexes, func(left, right int) bool { return indexes[left].Name < indexes[right].Name })
 		for _, index := range indexes {
 			iterator, err := source.OpenIndexIterator(collection.Name, index.Name, nil, nil, 0)
 			if err != nil {
-				return mapStorageV2Error(err)
+				return mapStorageError(err)
 			}
 			budget := db.newIndexBuildBudget(resourceLimits)
-			entries := make([]storagev2.IndexEntry, 0)
+			entries := make([]storage.IndexEntry, 0)
 			for iterator.Next() {
 				if err := contextError(ctx); err != nil {
 					_ = iterator.Close()
@@ -269,10 +269,10 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 					_ = iterator.Close()
 					return err
 				}
-				entries = append(entries, storagev2.IndexEntry{Key: append([]byte(nil), entry.Key...), DocumentID: entry.DocumentID})
+				entries = append(entries, storage.IndexEntry{Key: append([]byte(nil), entry.Key...), DocumentID: entry.DocumentID})
 			}
-			iteratorErr := mapStorageV2Error(iterator.Err())
-			closeErr := mapStorageV2Error(iterator.Close())
+			iteratorErr := mapStorageError(iterator.Err())
+			closeErr := mapStorageError(iterator.Close())
 			if err := errors.Join(iteratorErr, closeErr); err != nil {
 				return err
 			}
@@ -280,18 +280,18 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 			if err != nil {
 				return err
 			}
-			if _, err := destination.ApplyCreateIndex(storagev2.CreateIndexTransaction{
+			if _, err := destination.ApplyCreateIndex(storage.CreateIndexTransaction{
 				TransactionID: transactionID, Collection: collection.Name, Name: index.Name,
-				FieldPath: index.FieldPath, Fields: append([]storagev2.IndexField(nil), index.Fields...),
+				FieldPath: index.FieldPath, Fields: append([]storage.IndexField(nil), index.Fields...),
 				Unique: index.Unique, Entries: entries,
 			}); err != nil {
-				return mapStorageV2Error(err)
+				return mapStorageError(err)
 			}
 		}
 	}
 	systemRecords, err := source.SystemRecords()
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	for _, record := range systemRecords {
 		if err := contextError(ctx); err != nil {
@@ -301,11 +301,11 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 		if err != nil {
 			return err
 		}
-		result, err := destination.ApplySystemRecordTransaction(storagev2.SystemRecordTransaction{
+		result, err := destination.ApplySystemRecordTransaction(storage.SystemRecordTransaction{
 			TransactionID: transactionID, Key: record.Key, NewValue: record.Value,
 		})
 		if err != nil {
-			return mapStorageV2Error(err)
+			return mapStorageError(err)
 		}
 		if !result.Applied {
 			return ErrCorrupt
@@ -314,14 +314,14 @@ func compactV2Snapshot(ctx context.Context, source *storagev2.ReadSnapshot, dest
 	return nil
 }
 
-func verifyCompactedV2Snapshots(ctx context.Context, source, destination *storagev2.ReadSnapshot) error {
+func verifyCompactedSnapshots(ctx context.Context, source, destination *storage.ReadSnapshot) error {
 	expectedCollections, err := source.Collections()
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	actualCollections, err := destination.Collections()
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	sort.Slice(expectedCollections, func(left, right int) bool { return expectedCollections[left].Name < expectedCollections[right].Name })
 	sort.Slice(actualCollections, func(left, right int) bool { return actualCollections[left].Name < actualCollections[right].Name })
@@ -338,11 +338,11 @@ func verifyCompactedV2Snapshots(ctx context.Context, source, destination *storag
 		}
 		expectedIndexes, err := source.Indexes(expected.Name)
 		if err != nil {
-			return mapStorageV2Error(err)
+			return mapStorageError(err)
 		}
 		actualIndexes, err := destination.Indexes(actual.Name)
 		if err != nil {
-			return mapStorageV2Error(err)
+			return mapStorageError(err)
 		}
 		sort.Slice(expectedIndexes, func(left, right int) bool { return expectedIndexes[left].Name < expectedIndexes[right].Name })
 		sort.Slice(actualIndexes, func(left, right int) bool { return actualIndexes[left].Name < actualIndexes[right].Name })
@@ -361,11 +361,11 @@ func verifyCompactedV2Snapshots(ctx context.Context, source, destination *storag
 	}
 	expectedSystem, err := source.SystemRecords()
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	actualSystem, err := destination.SystemRecords()
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	if len(expectedSystem) != len(actualSystem) {
 		return fmt.Errorf("%w: compacted system record count", ErrCorrupt)
@@ -378,15 +378,15 @@ func verifyCompactedV2Snapshots(ctx context.Context, source, destination *storag
 	return nil
 }
 
-func compareCompactedIndex(ctx context.Context, source, destination *storagev2.ReadSnapshot, collection, name string) error {
+func compareCompactedIndex(ctx context.Context, source, destination *storage.ReadSnapshot, collection, name string) error {
 	expected, err := source.OpenIndexIterator(collection, name, nil, nil, 0)
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	defer expected.Close()
 	actual, err := destination.OpenIndexIterator(collection, name, nil, nil, 0)
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	defer actual.Close()
 	for {
@@ -398,7 +398,7 @@ func compareCompactedIndex(ctx context.Context, source, destination *storagev2.R
 			return fmt.Errorf("%w: compacted index entry count", ErrCorrupt)
 		}
 		if !expectedNext {
-			return errors.Join(mapStorageV2Error(expected.Err()), mapStorageV2Error(actual.Err()))
+			return errors.Join(mapStorageError(expected.Err()), mapStorageError(actual.Err()))
 		}
 		expectedEntry, actualEntry := expected.Entry(), actual.Entry()
 		if expectedEntry.DocumentID != actualEntry.DocumentID || !bytes.Equal(expectedEntry.Key, actualEntry.Key) {
@@ -407,15 +407,15 @@ func compareCompactedIndex(ctx context.Context, source, destination *storagev2.R
 	}
 }
 
-func compareCompactedDocuments(ctx context.Context, source, destination *storagev2.ReadSnapshot, collection string) error {
+func compareCompactedDocuments(ctx context.Context, source, destination *storage.ReadSnapshot, collection string) error {
 	expected, err := source.OpenInsertionOrderIterator(collection, nil, nil, 0)
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	defer expected.Close()
 	actual, err := destination.OpenInsertionOrderIterator(collection, nil, nil, 0)
 	if err != nil {
-		return mapStorageV2Error(err)
+		return mapStorageError(err)
 	}
 	defer actual.Close()
 	for {
@@ -427,7 +427,7 @@ func compareCompactedDocuments(ctx context.Context, source, destination *storage
 			return fmt.Errorf("%w: compacted document count", ErrCorrupt)
 		}
 		if !expectedNext {
-			return errors.Join(mapStorageV2Error(expected.Err()), mapStorageV2Error(actual.Err()))
+			return errors.Join(mapStorageError(expected.Err()), mapStorageError(actual.Err()))
 		}
 		expectedRecord, actualRecord := expected.Record(), actual.Record()
 		if expectedRecord.DocumentID != actualRecord.DocumentID || !bytes.Equal(expectedRecord.Document, actualRecord.Document) {

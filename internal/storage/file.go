@@ -15,19 +15,19 @@ import (
 )
 
 var (
-	ErrLocked              = errors.New("meldbase storage v2: database is locked")
-	ErrRecoveryRequired    = errors.New("meldbase storage v2: recovery required")
-	ErrInvalidStorageLimit = errors.New("meldbase storage v2: invalid storage limit")
-	ErrStorageLimit        = errors.New("meldbase storage v2: storage limit exceeded")
-	ErrStaleSnapshot       = errors.New("meldbase storage v2: commit sequence is below the required minimum")
-	ErrDatabaseIdentity    = errors.New("meldbase storage v2: unexpected database identity")
-	ErrInsecureFileMode    = errors.New("meldbase storage v2: database file permissions are not owner-private")
+	ErrLocked              = errors.New("meldbase storage: database is locked")
+	ErrRecoveryRequired    = errors.New("meldbase storage: recovery required")
+	ErrInvalidStorageLimit = errors.New("meldbase storage: invalid storage limit")
+	ErrStorageLimit        = errors.New("meldbase storage: storage limit exceeded")
+	ErrStaleSnapshot       = errors.New("meldbase storage: commit sequence is below the required minimum")
+	ErrDatabaseIdentity    = errors.New("meldbase storage: unexpected database identity")
+	ErrInsecureFileMode    = errors.New("meldbase storage: database file permissions are not owner-private")
 )
 
 type OpenOptions struct {
 	RequireClean bool
 	// RequireGraphAudit verifies every page protected by either valid Meta root
-	// before Open succeeds. It is deliberately opt-in: ordinary V2 startup is
+	// before Open succeeds. It is deliberately opt-in: ordinary  startup is
 	// metadata-only so large databases do not pay an unbounded open pause.
 	// Unlike VerifyPathContext it is a structural audit only; callers needing
 	// Secondary-to-document semantic proof must run the offline verifier.
@@ -178,7 +178,7 @@ func OpenWithReport(path string) (*File, Meta, OpenReport, error) {
 
 func OpenWithOptions(path string, options OpenOptions) (*File, Meta, OpenReport, error) {
 	if path == "" {
-		return nil, Meta{}, OpenReport{}, errors.New("meldbase storage v2: empty path")
+		return nil, Meta{}, OpenReport{}, errors.New("meldbase storage: empty path")
 	}
 	maxPhysicalPages, err := normalizeMaxFileBytes(options.MaxFileBytes)
 	if err != nil {
@@ -323,13 +323,13 @@ func OpenWithOptions(path string, options OpenOptions) (*File, Meta, OpenReport,
 }
 
 // OpenForQualification installs a synchronous boundary hook before returning
-// an otherwise normal V2 file. The hook may block while an external controller
+// an otherwise normal file. The hook may block while an external controller
 // cuts power, exhausts a disposable volume or terminates the process. This
 // entry point lives in internal/storage so external applications cannot opt
 // into qualification behavior accidentally.
 func OpenForQualification(path string, options OpenOptions, hook func(QualificationBoundary) error) (*File, Meta, OpenReport, error) {
 	if hook == nil {
-		return nil, Meta{}, OpenReport{}, errors.New("meldbase storage v2: nil qualification hook")
+		return nil, Meta{}, OpenReport{}, errors.New("meldbase storage: nil qualification hook")
 	}
 	file, meta, report, err := OpenWithOptions(path, options)
 	if err != nil {
@@ -493,7 +493,7 @@ func (f *File) CommitRoot(root DatabaseRoot) error {
 // callback must not retain tx and must not perform network or user callbacks.
 func (f *File) Update(build func(*WriteTxn) (DatabaseRoot, error)) error {
 	if f == nil || build == nil {
-		return errors.New("meldbase storage v2: invalid update")
+		return errors.New("meldbase storage: invalid update")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -514,7 +514,7 @@ func (f *File) updateUnlocked(advanceSequence bool, build func(*WriteTxn) (Datab
 // after constructing every intermediate CommitBatch in the same WriteTxn.
 func (f *File) updateUnlockedAdvance(advance uint64, build func(*WriteTxn) (DatabaseRoot, error)) error {
 	if f.file == nil {
-		return errors.New("meldbase storage v2: file is closed")
+		return errors.New("meldbase storage: file is closed")
 	}
 	if f.fatalErr != nil {
 		return f.fatalErr
@@ -848,7 +848,7 @@ func (f *File) DatabaseRoot() (DatabaseRoot, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return DatabaseRoot{}, errors.New("meldbase storage v2: file is closed")
+		return DatabaseRoot{}, errors.New("meldbase storage: file is closed")
 	}
 	return f.databaseRootUnlocked()
 }
@@ -879,7 +879,7 @@ func (f *File) TreeGet(rootPage uint64, kind TreeKind, key []byte) ([]byte, bool
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return nil, false, errors.New("meldbase storage v2: file is closed")
+		return nil, false, errors.New("meldbase storage: file is closed")
 	}
 	return f.treeGetUnlocked(rootPage, kind, key)
 }
@@ -891,7 +891,7 @@ func (f *File) TreeScan(rootPage uint64, kind TreeKind, start, end []byte, limit
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	iterator, err := newTreeIterator(f, rootPage, kind, start, end, limit)
 	if err != nil {

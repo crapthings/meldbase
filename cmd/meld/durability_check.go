@@ -183,7 +183,7 @@ func runDurabilityCheck(args []string, stdout, stderr io.Writer) error {
 	}
 	if passed {
 		passed = runCheck("meldbase-offline-full-verification", func() error {
-			report, err := meldbase.VerifyV2File(context.Background(), filepath.Join(probeDirectory, "probe.meld"))
+			report, err := meldbase.VerifyFile(context.Background(), filepath.Join(probeDirectory, "probe.meld"))
 			if err != nil {
 				return err
 			}

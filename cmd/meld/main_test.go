@@ -309,7 +309,7 @@ func TestVerifyCommandProducesFullReadOnlyAuditJSON(t *testing.T) {
 	if err := run([]string{"verify", "--db", path, "--timeout", "10s"}, &stdout, &stderr); err != nil {
 		t.Fatalf("verify error=%v stderr=%s", err, stderr.String())
 	}
-	var report meldbase.V2VerificationReport
+	var report meldbase.VerificationReport
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestBackupCommandPublishesVerifiedRestoreArtifactJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.SchemaVersion != 1 || result.ArtifactKind != physicalV2RestoreArtifact || result.Bytes == 0 ||
+	if result.SchemaVersion != 1 || result.ArtifactKind != physicalRestoreArtifact || result.Bytes == 0 ||
 		result.Pages == 0 || result.CommitSequence != sequence || result.DatabaseIDHex == "" || result.SHA256 == "" {
 		t.Fatalf("backup result=%+v", result)
 	}
@@ -438,7 +438,7 @@ func TestRestoreCommandImportsVerifiedPhysicalBackup(t *testing.T) {
 	if err := json.Unmarshal(restoreOutput.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.SchemaVersion != 1 || result.ArtifactKind != physicalV2RestoreArtifact || result.CommitSequence != sequence || result.DatabaseIDHex == "" {
+	if result.SchemaVersion != 1 || result.ArtifactKind != physicalRestoreArtifact || result.CommitSequence != sequence || result.DatabaseIDHex == "" {
 		t.Fatalf("restore result=%+v", result)
 	}
 	reopened, err := meldbase.Open(restored)
@@ -524,6 +524,74 @@ func TestServeRequiresExplicitUnsafeDevelopmentMode(t *testing.T) {
 	err := run([]string{"serve", "--db", filepath.Join(t.TempDir(), "data.meld")}, &output, &output)
 	if err == nil || !strings.Contains(err.Error(), "--dev-no-auth") {
 		t.Fatalf("serve error = %v", err)
+	}
+}
+
+func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "meldbase-local")
+	var output bytes.Buffer
+	if err := run([]string{"init", "--dir", root, "--jwt-issuer", "https://identity.example/", "--jwt-audience", "app-api", "--workspace-collections", "projects,tasks"}, &output, &output); err != nil {
+		t.Fatalf("init error=%v output=%s", err, output.String())
+	}
+	for _, path := range []string{
+		filepath.Join(root, "data"), filepath.Join(root, "backups"), filepath.Join(root, "rehearsals"),
+		filepath.Join(root, "config"), filepath.Join(root, "secrets"),
+	} {
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() {
+			t.Fatalf("directory %s info=%v err=%v", path, info, err)
+		}
+	}
+	configPath := filepath.Join(root, "config", "meldbase.env")
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"MELDBASE_DB='" + filepath.Join(root, "data", "app.meld") + "'",
+		"MELDBASE_JWT_ISSUER='https://identity.example/'", "MELDBASE_JWT_AUDIENCE='app-api'",
+		"MELDBASE_WORKSPACE_COLLECTIONS='projects,tasks'", "MELDBASE_ADMIN_TOKEN='",
+	} {
+		if !strings.Contains(string(config), expected) {
+			t.Fatalf("config missing %q:\n%s", expected, config)
+		}
+	}
+	for _, path := range []string{configPath, filepath.Join(root, "secrets", "jwt-hs256.secret")} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("mode for %s = %o, want 600", path, info.Mode().Perm())
+		}
+	}
+	secret, err := os.ReadFile(filepath.Join(root, "secrets", "jwt-hs256.secret"))
+	if err != nil || len(strings.TrimSpace(string(secret))) < 32 {
+		t.Fatalf("secret bytes=%d err=%v", len(secret), err)
+	}
+	launcher, err := os.ReadFile(filepath.Join(root, "start.sh"))
+	if err != nil || !strings.Contains(string(launcher), "--admin-metrics") || !strings.Contains(string(launcher), "--workspace-collections") {
+		t.Fatalf("launcher=%q err=%v", launcher, err)
+	}
+	if !strings.Contains(output.String(), "Start it with: "+filepath.Join(root, "start.sh")) ||
+		!strings.Contains(output.String(), "Admin token: "+configPath) || strings.Contains(output.String(), string(secret)) {
+		t.Fatalf("unexpected init output: %s", output.String())
+	}
+}
+
+func TestInitRefusesExistingOrUnsafeBundleConfiguration(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "meldbase-local")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err := run([]string{"init", "--dir", root}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("existing init error=%v", err)
+	}
+	err = run([]string{"init", "--dir", filepath.Join(t.TempDir(), "unsafe"), "--addr", ":8080"}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("unsafe address error=%v", err)
 	}
 }
 

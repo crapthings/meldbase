@@ -28,7 +28,7 @@ type VerificationResult struct {
 	SHA256                      [sha256.Size]byte
 }
 
-// VerifyPathContext opens an existing V2 file read-only under a non-blocking
+// VerifyPathContext opens an existing file read-only under a non-blocking
 // shared advisory lock. It never creates, truncates, repairs, reclaims, or
 // publishes a Meta generation. A running writer's exclusive lock fails closed.
 func VerifyPathContext(ctx context.Context, path string) (result VerificationResult, resultErr error) {
@@ -40,7 +40,7 @@ func VerifyPathContext(ctx context.Context, path string) (result VerificationRes
 // shared lock and must be deterministic, bounded and side-effect free.
 func VerifyPathContextWithIndexAudit(ctx context.Context, path string, indexAudit IndexAuditFunc) (result VerificationResult, resultErr error) {
 	if path == "" {
-		return result, errors.New("meldbase storage v2: empty path")
+		return result, errors.New("meldbase storage: empty path")
 	}
 	if err := contextErr(ctx); err != nil {
 		return result, err

@@ -16,7 +16,7 @@ import (
 func runVerify(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("db", "", "existing V2 database path to audit without mutation")
+	path := flags.String("db", "", "existing database path to audit without mutation")
 	timeout := flags.Duration("timeout", 0, "optional verification deadline, for example 10m")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -37,7 +37,7 @@ func runVerify(args []string, stdout, stderr io.Writer) error {
 		ctx, cancel = context.WithTimeout(ctx, *timeout)
 		defer cancel()
 	}
-	report, err := meldbase.VerifyV2File(ctx, *path)
+	report, err := meldbase.VerifyFile(ctx, *path)
 	if err != nil {
 		return err
 	}

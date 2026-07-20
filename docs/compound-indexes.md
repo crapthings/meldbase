@@ -1,17 +1,17 @@
 # Compound index contract
 
-Compound indexes are a Storage V2 and in-memory capability. Legacy V1 remains
-readable and keeps its frozen single-ascending-field catalog; it rejects new
-compound or descending definitions rather than persisting an ambiguous record.
+Compound indexes are part of the current durable format. An index definition is
+stored with its ordered fields, directions and key-codec version; there is no
+second storage engine with a reduced index catalog.
 
 ## Definition
 
 - An index contains one to four distinct, valid document paths.
 - Each field direction is `1` (ascending) or `-1` (descending).
-- Existing one-field ascending indexes retain the V2 scalar-key codec and their
-  exact on-disk bytes.
+- One-field ascending indexes retain the scalar-key codec and their exact
+  on-disk bytes.
 - A definition using multiple fields or descending order uses compound-key
-  codec V3 and negotiates a required V2 format feature before publication.
+  codec V3 and negotiates a required format feature before publication.
 - A missing first component omits the document, matching the existing
   single-field behavior. If a later component is missing, V3 stores the longest
   present left prefix followed by an internal partial marker and document ID.
@@ -59,9 +59,9 @@ the existing stable result sorter remains authoritative.
 
 ## Compatibility and crash safety
 
-V2 IndexCatalog, CreateIndex Commit Log events and persistent shadow-build
-records carry the ordered field list and codec version. Old single-field records
-decode unchanged. A database that has published codec V3 sets a required Meta
+IndexCatalog, CreateIndex Commit Log events and persistent shadow-build records
+carry the ordered field list and codec version. A database that has published
+codec V3 sets a required Meta
 feature bit, so an older reader reports unsupported format before interpreting
 the catalog. Build scan, catch-up, final publication, backup, reclamation and
 verification must all preserve the same definition and recompute the same tuple

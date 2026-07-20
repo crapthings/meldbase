@@ -27,12 +27,12 @@ var documentRecordMagic = [8]byte{'M', 'E', 'L', 'D', 'R', 'E', 'C', '2'}
 // ErrDocumentConflict reports that an optimistic point precondition no longer
 // matches the current root. It is a safe logical rejection, not corruption or
 // a durability failure.
-var ErrDocumentConflict = errors.New("meldbase storage v2: document precondition conflicted")
+var ErrDocumentConflict = errors.New("meldbase storage: document precondition conflicted")
 
 // ErrDocumentExists distinguishes an insert collision from an optimistic
 // update/delete precondition conflict. The public DB maps it to ErrDuplicateID
 // so a grouped candidate can fall back to ordinary per-request semantics.
-var ErrDocumentExists = errors.New("meldbase storage v2: document already exists")
+var ErrDocumentExists = errors.New("meldbase storage: document already exists")
 
 const documentRecordHeaderBytes = 24
 
@@ -290,7 +290,7 @@ func applyDocumentSystemTransactionInWriteTxn(
 		}
 		identity := mutation.Collection + "\x00" + string(mutation.DocumentID[:])
 		if _, duplicate := seenDocuments[identity]; duplicate {
-			return DatabaseRoot{}, errors.New("meldbase storage v2: duplicate document mutation")
+			return DatabaseRoot{}, errors.New("meldbase storage: duplicate document mutation")
 		}
 		seenDocuments[identity] = struct{}{}
 
@@ -627,7 +627,7 @@ func (f *File) ValidateDocumentPreconditions(preconditions []DocumentPreconditio
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return errors.New("meldbase storage v2: file is closed")
+		return errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -655,7 +655,7 @@ func (f *File) ValidateCollectionPreconditions(preconditions []CollectionPrecond
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return errors.New("meldbase storage v2: file is closed")
+		return errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -685,7 +685,7 @@ func (f *File) GetDocument(collection string, documentID [16]byte) ([]byte, bool
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return nil, false, errors.New("meldbase storage v2: file is closed")
+		return nil, false, errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {
@@ -709,7 +709,7 @@ func (f *File) ReadDocumentVersion(reference DocumentVersionRef) ([]byte, error)
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	value, exists, err := f.readDocumentUnlocked(reference.PrimaryRoot, reference.DocumentID)
 	if err != nil {

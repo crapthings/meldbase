@@ -82,7 +82,7 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 }
 
 // updateQueryLocked preserves the original filter-selection and publication
-// semantics for one request. The V2 coordinator uses it for single requests
+// semantics for one request. The  coordinator uses it for single requests
 // and logical-conflict fallback after a speculative group has been rejected.
 // The caller holds db.mu.
 func (c *Collection) updateQueryLocked(ctx context.Context, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (UpdateResult, error) {

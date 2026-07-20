@@ -123,7 +123,7 @@ that no business effect committed.
 
 The Go server has a separate `RPCTransactionalMethods` registry. It cannot be
 silently enabled for an ordinary method: construction requires the built-in
-durable store created from the exact same V2 `DB`, and every call requires an
+durable store created from the exact same `DB`, and every call requires an
 `idempotencyKey`.
 
 ```go
@@ -145,9 +145,9 @@ RPCTransactionalMethods: map[string]server.RPCTransactionalMethod{
 
 `WriteTransaction` exposes `GetOne`, `InsertOne`, `ReplaceOne`, `UpdateOne` and
 `DeleteOne`. `UpdateOne` consumes the same compiled data-only `MutationSpec` as
-normal collection updates. It reads one immutable V2 snapshot and keeps an isolated point
+normal collection updates. It reads one immutable snapshot and keeps an isolated point
 overlay. The handler does not hold the database writer lock. At commit Meldbase
-validates every point read or touched by the handler against the current V2 root,
+validates every point read or touched by the handler against the current root,
 then publishes document, order, index and Commit Log roots plus the idempotency
 result in one COW generation. A competing write to a related point discards the
 overlay and durably returns `rpc_transaction_conflict`; a disjoint commit may
@@ -177,16 +177,16 @@ If no business mutation remains, Meldbase durably records
 `rpc_transaction_requires_write` rather than incorrectly marking the outcome
 unknown.
 
-## V2 storage placement
+## storage placement
 
-The built-in store is below the server package in a private V2 System B+Tree.
+The built-in store is below the server package in a private System B+Tree.
 A reserved NUL-prefixed entry in the immutable Catalog B+Tree points to a small
 system-directory record, which points to the System root. This indirection keeps
 the revision-3 `DatabaseRoot` encoding unchanged while making the private root
 part of the same atomic Catalog/meta publication. The reserved entry cannot be
 created through the public collection API. The tree participates in:
 
-- the same COW root/meta publication and fsync boundary as all V2 state;
+- the same COW root/meta publication and fsync boundary as all state;
 - root reachability, reclamation, compaction and corruption validation;
 - the database's single-writer sequence so normal commits and realtime resume
   positions remain contiguous;
@@ -197,8 +197,8 @@ It is not represented as a user collection. Doing so would leak internal
 counts, create observable reactive changes, allow name collisions, and mix
 retention/security rules with business data.
 
-`server.NewDurableRPCIdempotencyStore(db)` requires an open V2 database and has
-no memory or V1 fallback. Its records use bounded inline/overflow values,
+`server.NewDurableRPCIdempotencyStore(db)` requires an open database and has
+and stores bounded inline/overflow values,
 compare-and-set transitions and the database's single-writer sequence. System
 commits advance the global sequence and reactive resume position without
 appearing as public collections, documents, or business changes. Reachability,

@@ -203,15 +203,15 @@ func representativeSample() admin.Sample {
 		Stats: meldbase.DBStats{
 			CommitSequence: 17, Collections: 3, Documents: 31, Indexes: 4,
 			Recovery: meldbase.RecoveryReport{
-				SchemaVersion: 1, Engine: "v2", Recovered: true, FallbackToOlderRoot: true,
+				SchemaVersion: 1, Engine: "current", Recovered: true, FallbackToOlderRoot: true,
 				ChecksumValidMetaSlots: 2, RootValidMetaSlots: 1, MainTailBytesRemoved: 17,
 			},
 			Commits: meldbase.CommitStats{Total: 9, Changes: 13},
-			CommitCoordinator: meldbase.V2CommitCoordinatorStats{
+			CommitCoordinator: meldbase.CommitCoordinatorStats{
 				Enabled: true, Pending: 3, PendingCapacity: 8, Admitted: 21, AdmissionRejected: 2,
 				Batches: 10, GroupedTransactions: 20, OutcomeUnknown: 1,
 			},
-			PrimaryWriteFence: meldbase.V2PrimaryWriteFenceStats{Configured: true, Enforced: true, Checks: 9, Rejected: 2},
+			PrimaryWriteFence: meldbase.PrimaryWriteFenceStats{Configured: true, Enforced: true, Checks: 9, Rejected: 2},
 			Transactions:      meldbase.WriteTransactionStats{Active: 1, Started: 10, Committed: 4, Noops: 2, Conflicts: 3, Aborted: 1},
 			Queries:           meldbase.QueryStats{Total: 11, Failed: 1, ActiveCursors: 2, DocumentsExamined: 22, DocumentsReturned: 10},
 			Realtime: meldbase.RealtimeStats{

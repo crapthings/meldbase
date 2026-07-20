@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	ErrNodeFull  = errors.New("meldbase storage v2: tree node is full")
-	ErrKeyTooBig = errors.New("meldbase storage v2: tree key is too large")
+	ErrNodeFull  = errors.New("meldbase storage: tree node is full")
+	ErrKeyTooBig = errors.New("meldbase storage: tree key is too large")
 )
 
 type TreeKind uint8

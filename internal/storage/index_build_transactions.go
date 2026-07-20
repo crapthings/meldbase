@@ -15,10 +15,10 @@ const (
 )
 
 var (
-	ErrIndexBuildExists      = errors.New("meldbase storage v2: index build exists")
-	ErrIndexBuildNotFound    = errors.New("meldbase storage v2: index build not found")
-	ErrIndexBuildState       = errors.New("meldbase storage v2: invalid index build state")
-	ErrIndexBuildHistoryLost = errors.New("meldbase storage v2: index build commit history lost")
+	ErrIndexBuildExists      = errors.New("meldbase storage: index build exists")
+	ErrIndexBuildNotFound    = errors.New("meldbase storage: index build not found")
+	ErrIndexBuildState       = errors.New("meldbase storage: invalid index build state")
+	ErrIndexBuildHistoryLost = errors.New("meldbase storage: index build commit history lost")
 )
 
 type BeginIndexBuildTransaction struct {
@@ -722,7 +722,7 @@ func (f *File) IndexBuild(buildID [16]byte) (IndexBuildMeta, bool, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return IndexBuildMeta{}, false, errors.New("meldbase storage v2: file is closed")
+		return IndexBuildMeta{}, false, errors.New("meldbase storage: file is closed")
 	}
 	if f.root.IndexBuildCatalogRoot == 0 {
 		return IndexBuildMeta{}, false, nil
@@ -742,7 +742,7 @@ func (f *File) IndexBuilds() ([]IndexBuildMeta, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	if f.root.IndexBuildCatalogRoot == 0 {
 		return nil, nil
@@ -781,7 +781,7 @@ func (f *File) OpenIndexBuildScanIterator(buildID [16]byte, limit int) (IndexBui
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return IndexBuildMeta{}, nil, errors.New("meldbase storage v2: file is closed")
+		return IndexBuildMeta{}, nil, errors.New("meldbase storage: file is closed")
 	}
 	if f.root.IndexBuildCatalogRoot == 0 {
 		return IndexBuildMeta{}, nil, ErrIndexBuildNotFound
@@ -838,7 +838,7 @@ func (f *File) OpenIndexBuildCatchUpSnapshot(buildID [16]byte) (IndexBuildMeta, 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file == nil {
-		return IndexBuildMeta{}, nil, errors.New("meldbase storage v2: file is closed")
+		return IndexBuildMeta{}, nil, errors.New("meldbase storage: file is closed")
 	}
 	root, err := f.databaseRootUnlocked()
 	if err != nil {

@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/crapthings/meldbase/core"
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
 func TestDestructiveManifestBuildImportsAndReverifiesMachineReceipts(t *testing.T) {
@@ -31,7 +31,7 @@ func TestDestructiveManifestBuildImportsAndReverifiesMachineReceipts(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	publicVerification, err := meldbase.VerifyV2File(context.Background(), templatePath)
+	publicVerification, err := meldbase.VerifyFile(context.Background(), templatePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +500,7 @@ func copyQualificationArtifactTree(t *testing.T, source string) string {
 	return destination
 }
 
-func buildPowerReceiptFixture(t *testing.T, directory string, trial qualificationDestructiveTrial, durability durabilityCheckResult, databaseRaw []byte, verified storagev2.VerificationResult, method, bootNonce string) string {
+func buildPowerReceiptFixture(t *testing.T, directory string, trial qualificationDestructiveTrial, durability durabilityCheckResult, databaseRaw []byte, verified storage.VerificationResult, method, bootNonce string) string {
 	t.Helper()
 	databasePath := filepath.Join(directory, trial.ID+"-power.meld")
 	if err := os.WriteFile(databasePath, databaseRaw, 0o600); err != nil {

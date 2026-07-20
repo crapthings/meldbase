@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	storagev2 "github.com/crapthings/meldbase/internal/storage"
+	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// IndexBuildID identifies one durable, resumable Storage V2 index build.
+// IndexBuildID identifies one durable, resumable Storage  index build.
 type IndexBuildID [16]byte
 
 func (id IndexBuildID) String() string               { return hex.EncodeToString(id[:]) }
@@ -80,7 +80,7 @@ type IndexBuildStatus struct {
 	UpdatedAt       time.Time         `json:"updatedAt"`
 }
 
-// StartIndexBuild creates a durable private shadow index. It is Storage V2
+// StartIndexBuild creates a durable private shadow index. It is Storage
 // only and does not scan documents or make the index query-visible.
 func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
 	if err := contextError(ctx); err != nil {
@@ -103,7 +103,7 @@ func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []
 	if c.db.replicaReadOnly {
 		return IndexBuildID{}, ErrReplicaReadOnly
 	}
-	store, ok := c.db.durability.(*v2DurableStore)
+	store, ok := c.db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return IndexBuildID{}, ErrIndexBuildUnsupported
 	}
@@ -119,14 +119,14 @@ func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []
 	if _, exists := c.db.indexBuildReservations[reservation]; exists {
 		return IndexBuildID{}, ErrIndexBuildExists
 	}
-	_, err = store.file.BeginIndexBuild(storagev2.BeginIndexBuildTransaction{
+	_, err = store.file.BeginIndexBuild(storage.BeginIndexBuildTransaction{
 		BuildID: [16]byte(id), Collection: c.name, Name: definition.Name,
-		FieldPath: definition.Field, Fields: storageV2IndexFields(definition), Unique: definition.Unique,
+		FieldPath: definition.Field, Fields: storageIndexFields(definition), Unique: definition.Unique,
 	})
 	if err != nil {
-		return IndexBuildID{}, c.db.handleV2IndexBuildErrorLocked(err)
+		return IndexBuildID{}, c.db.handleIndexBuildErrorLocked(err)
 	}
-	if err := c.db.advanceV2RollbackAnchorLocked(ctx, store, c.db.token); err != nil {
+	if err := c.db.advanceRollbackAnchorLocked(ctx, store, c.db.token); err != nil {
 		return IndexBuildID{}, err
 	}
 	store.refreshIndexBuildStats()
@@ -148,13 +148,13 @@ func (c *Collection) CreateIndexOnline(ctx context.Context, name string, fields 
 // IndexBuilds returns all durable unfinished builds. The result survives a
 // clean close, process crash, and reopen.
 func (db *DB) IndexBuilds() ([]IndexBuildStatus, error) {
-	store, err := db.v2IndexBuildStore()
+	store, err := db.durableIndexBuildStore()
 	if err != nil {
 		return nil, err
 	}
 	metas, err := store.file.IndexBuilds()
 	if err != nil {
-		return nil, db.handleV2IndexBuildError(err)
+		return nil, db.handleIndexBuildError(err)
 	}
 	result := make([]IndexBuildStatus, len(metas))
 	for index := range metas {
@@ -164,13 +164,13 @@ func (db *DB) IndexBuilds() ([]IndexBuildStatus, error) {
 }
 
 func (db *DB) IndexBuild(id IndexBuildID) (IndexBuildStatus, error) {
-	store, err := db.v2IndexBuildStore()
+	store, err := db.durableIndexBuildStore()
 	if err != nil {
 		return IndexBuildStatus{}, err
 	}
 	meta, exists, err := store.file.IndexBuild([16]byte(id))
 	if err != nil {
-		return IndexBuildStatus{}, db.handleV2IndexBuildError(err)
+		return IndexBuildStatus{}, db.handleIndexBuildError(err)
 	}
 	if !exists {
 		return IndexBuildStatus{}, ErrIndexBuildNotFound
@@ -182,7 +182,7 @@ func (db *DB) IndexBuild(id IndexBuildID) (IndexBuildStatus, error) {
 // atomically publishes the index. Only one caller should resume a given build;
 // stale concurrent callers receive ErrWriteConflict from durable CAS checks.
 func (db *DB) ResumeIndexBuild(ctx context.Context, id IndexBuildID) error {
-	store, err := db.v2IndexBuildStore()
+	store, err := db.durableIndexBuildStore()
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (db *DB) ResumeIndexBuild(ctx context.Context, id IndexBuildID) error {
 	}
 	meta, exists, err := store.file.IndexBuild([16]byte(id))
 	if err != nil {
-		return db.handleV2IndexBuildError(err)
+		return db.handleIndexBuildError(err)
 	}
 	if !exists {
 		return ErrIndexBuildNotFound
@@ -211,7 +211,7 @@ func (db *DB) ResumeIndexBuild(ctx context.Context, id IndexBuildID) error {
 			}
 			meta, exists, err = store.file.IndexBuild([16]byte(id))
 			if err != nil {
-				return db.handleV2IndexBuildError(err)
+				return db.handleIndexBuildError(err)
 			}
 			if !exists {
 				if db.indexBuildPublished(meta) {
@@ -222,24 +222,24 @@ func (db *DB) ResumeIndexBuild(ctx context.Context, id IndexBuildID) error {
 			budget.entries, budget.bytes = meta.EntryCount, meta.CanonicalBytes
 			finished := false
 			switch meta.Phase {
-			case storagev2.IndexBuildScan:
+			case storage.IndexBuildScan:
 				err = db.resumeIndexBuildScan(ctx, store, meta, budget)
-			case storagev2.IndexBuildCatchUp:
+			case storage.IndexBuildCatchUp:
 				err = db.resumeIndexBuildCatchUp(ctx, store, meta, budget)
-			case storagev2.IndexBuildReady:
+			case storage.IndexBuildReady:
 				if store.testPersistentIndexBuildReadyHook != nil {
 					store.testPersistentIndexBuildReadyHook()
 				}
 				root, rootErr := store.file.DatabaseRoot()
 				if rootErr != nil {
-					err = db.handleV2IndexBuildError(rootErr)
+					err = db.handleIndexBuildError(rootErr)
 				} else if root.CommitSequence > meta.AppliedSequence {
 					err = db.resumeIndexBuildCatchUp(ctx, store, meta, budget)
 				} else {
 					err = db.finalizeIndexBuild(ctx, store, meta)
 					finished = err == nil
 				}
-			case storagev2.IndexBuildFailed:
+			case storage.IndexBuildFailed:
 				return fmt.Errorf("%w: %s", ErrIndexBuildFailed, publicIndexBuildStatus(meta).Failure)
 			default:
 				return ErrCorrupt
@@ -259,7 +259,7 @@ func (db *DB) ResumeIndexBuild(ctx context.Context, id IndexBuildID) error {
 	})
 }
 
-func (db *DB) indexBuildPublished(meta storagev2.IndexBuildMeta) bool {
+func (db *DB) indexBuildPublished(meta storage.IndexBuildMeta) bool {
 	if db == nil || meta.Name == "" {
 		return false
 	}
@@ -270,29 +270,29 @@ func (db *DB) indexBuildPublished(meta storagev2.IndexBuildMeta) bool {
 		return false
 	}
 	state := data.indexes[meta.Name]
-	fields, err := publicV2IndexFields(meta.FieldPath, meta.Fields)
+	fields, err := publicIndexFields(meta.FieldPath, meta.Fields)
 	if err != nil {
 		return false
 	}
 	return state != nil && equalIndexDefinitions(state.definition, newIndexDefinition(meta.Name, fields, meta.Unique))
 }
 
-func (db *DB) resumeIndexBuildScan(ctx context.Context, store *v2DurableStore, meta storagev2.IndexBuildMeta, budget *indexBuildBudget) (resultErr error) {
-	opened, iterator, err := store.file.OpenIndexBuildScanIterator(meta.BuildID, storagev2.MaxIndexBuildBatchEntries)
+func (db *DB) resumeIndexBuildScan(ctx context.Context, store *durableStore, meta storage.IndexBuildMeta, budget *indexBuildBudget) (resultErr error) {
+	opened, iterator, err := store.file.OpenIndexBuildScanIterator(meta.BuildID, storage.MaxIndexBuildBatchEntries)
 	if err != nil {
-		return db.handleV2IndexBuildError(err)
+		return db.handleIndexBuildError(err)
 	}
 	defer func() {
 		if closeErr := iterator.Close(); resultErr == nil && closeErr != nil {
-			resultErr = db.handleV2IndexBuildError(closeErr)
+			resultErr = db.handleIndexBuildError(closeErr)
 		}
 	}()
-	fields, err := publicV2IndexFields(opened.FieldPath, opened.Fields)
+	fields, err := publicIndexFields(opened.FieldPath, opened.Fields)
 	if err != nil {
 		return err
 	}
 	definition := newIndexDefinition(opened.Name, fields, opened.Unique)
-	entries := make([]storagev2.IndexEntry, 0, storagev2.MaxIndexBuildBatchEntries)
+	entries := make([]storage.IndexEntry, 0, storage.MaxIndexBuildBatchEntries)
 	last := opened.ScanAfter
 	sourceCount := 0
 	batchBytes := uint64(0)
@@ -304,7 +304,7 @@ func (db *DB) resumeIndexBuildScan(ctx context.Context, store *v2DurableStore, m
 		record := iterator.Record()
 		key, found, err := projectedIndexBuildKey(record.Document, definition, DocumentID(record.DocumentID))
 		if errors.Is(err, ErrCorrupt) || record.InsertionPosition == 0 {
-			return fmt.Errorf("%w: V2 stored document", ErrCorrupt)
+			return fmt.Errorf("%w: stored document", ErrCorrupt)
 		}
 		if err != nil {
 			return err
@@ -315,86 +315,86 @@ func (db *DB) resumeIndexBuildScan(ctx context.Context, store *v2DurableStore, m
 			continue
 		}
 		entryBytes := uint64(len(key) + 8 + 16)
-		if sourceCount > 0 && entryBytes > storagev2.MaxIndexBuildBatchBytes-batchBytes {
+		if sourceCount > 0 && entryBytes > storage.MaxIndexBuildBatchBytes-batchBytes {
 			hitBatchLimit = true
 			break
 		}
 		if err := budget.add(key); err != nil {
 			return err
 		}
-		entries = append(entries, storagev2.IndexEntry{Key: key, InsertionPosition: record.InsertionPosition, DocumentID: record.DocumentID})
+		entries = append(entries, storage.IndexEntry{Key: key, InsertionPosition: record.InsertionPosition, DocumentID: record.DocumentID})
 		batchBytes += entryBytes
 		sourceCount++
 		last = record.DocumentID
 	}
 	if err := iterator.Err(); err != nil {
-		return db.handleV2IndexBuildError(err)
+		return db.handleIndexBuildError(err)
 	}
 	// The iterator limit counts source documents, while entries omit documents
 	// lacking the field. An exact full batch uses one cheap follow-up batch to
 	// prove EOF; a shorter batch can transition immediately.
-	complete := !hitBatchLimit && sourceCount < storagev2.MaxIndexBuildBatchEntries
-	_, err = store.file.ApplyIndexBuildScanBatch(storagev2.IndexBuildScanBatch{
+	complete := !hitBatchLimit && sourceCount < storage.MaxIndexBuildBatchEntries
+	_, err = store.file.ApplyIndexBuildScanBatch(storage.IndexBuildScanBatch{
 		BuildID: meta.BuildID, ExpectedScanAfter: opened.ScanAfter, ScanAfter: last,
 		Entries: entries, Complete: complete,
 	})
 	if err != nil {
-		return db.handleV2IndexBuildError(err)
+		return db.handleIndexBuildError(err)
 	}
-	if err := db.advanceV2RollbackAnchor(ctx, store, meta.AppliedSequence); err != nil {
+	if err := db.advanceRollbackAnchor(ctx, store, meta.AppliedSequence); err != nil {
 		return err
 	}
 	store.refreshIndexBuildStats()
 	return nil
 }
 
-func (db *DB) resumeIndexBuildCatchUp(ctx context.Context, store *v2DurableStore, meta storagev2.IndexBuildMeta, budget *indexBuildBudget) error {
+func (db *DB) resumeIndexBuildCatchUp(ctx context.Context, store *durableStore, meta storage.IndexBuildMeta, budget *indexBuildBudget) error {
 	opened, snapshot, err := store.file.OpenIndexBuildCatchUpSnapshot(meta.BuildID)
 	if err != nil {
-		return db.handleV2IndexBuildError(err)
+		return db.handleIndexBuildError(err)
 	}
 	defer snapshot.Close()
 	budget.entries, budget.bytes = opened.EntryCount, opened.CanonicalBytes
 	through := snapshot.Sequence()
-	if through > opened.AppliedSequence+storagev2.MaxIndexBuildCatchUpCommits {
-		through = opened.AppliedSequence + storagev2.MaxIndexBuildCatchUpCommits
+	if through > opened.AppliedSequence+storage.MaxIndexBuildCatchUpCommits {
+		through = opened.AppliedSequence + storage.MaxIndexBuildCatchUpCommits
 	}
 	if through <= opened.AppliedSequence {
 		return ErrWriteConflict
 	}
-	fields, err := publicV2IndexFields(opened.FieldPath, opened.Fields)
+	fields, err := publicIndexFields(opened.FieldPath, opened.Fields)
 	if err != nil {
 		return err
 	}
 	definition := newIndexDefinition(opened.Name, fields, opened.Unique)
-	mutations := make([]storagev2.IndexBuildCatchUpMutation, 0)
+	mutations := make([]storage.IndexBuildCatchUpMutation, 0)
 	for sequence := opened.AppliedSequence + 1; sequence <= through; sequence++ {
 		if err := contextError(ctx); err != nil {
 			return err
 		}
 		commit, err := snapshot.ReadCommit(sequence)
 		if err != nil {
-			return db.handleV2IndexBuildError(err)
+			return db.handleIndexBuildError(err)
 		}
 		relevant := 0
 		for _, change := range commit.Changes {
-			if change.CollectionID == opened.CollectionID && change.Operation != storagev2.CommitCatalog {
+			if change.CollectionID == opened.CollectionID && change.Operation != storage.CommitCatalog {
 				relevant++
 			}
 		}
-		if len(mutations) > 0 && relevant > storagev2.MaxIndexBuildCatchUpMutations-len(mutations) {
+		if len(mutations) > 0 && relevant > storage.MaxIndexBuildCatchUpMutations-len(mutations) {
 			through = sequence - 1
 			break
 		}
 		for _, change := range commit.Changes {
-			if change.CollectionID != opened.CollectionID || change.Operation == storagev2.CommitCatalog {
+			if change.CollectionID != opened.CollectionID || change.Operation == storage.CommitCatalog {
 				continue
 			}
-			mutation := storagev2.IndexBuildCatchUpMutation{Sequence: sequence, DocumentID: change.DocumentID, Operation: change.Operation}
+			mutation := storage.IndexBuildCatchUpMutation{Sequence: sequence, DocumentID: change.DocumentID, Operation: change.Operation}
 			if change.BeforeRef != nil {
 				encoded, err := snapshot.ReadDocumentVersion(*change.BeforeRef)
 				if err != nil {
-					return db.handleV2IndexBuildError(err)
+					return db.handleIndexBuildError(err)
 				}
 				mutation.BeforeKey, _, err = projectedIndexBuildKey(encoded, definition, DocumentID(change.DocumentID))
 				if err != nil {
@@ -404,7 +404,7 @@ func (db *DB) resumeIndexBuildCatchUp(ctx context.Context, store *v2DurableStore
 			if change.AfterRef != nil {
 				encoded, err := snapshot.ReadDocumentVersion(*change.AfterRef)
 				if err != nil {
-					return db.handleV2IndexBuildError(err)
+					return db.handleIndexBuildError(err)
 				}
 				mutation.AfterKey, _, err = projectedIndexBuildKey(encoded, definition, DocumentID(change.DocumentID))
 				if err != nil {
@@ -424,21 +424,21 @@ func (db *DB) resumeIndexBuildCatchUp(ctx context.Context, store *v2DurableStore
 			mutations = append(mutations, mutation)
 		}
 	}
-	_, err = store.file.ApplyIndexBuildCatchUpBatch(storagev2.IndexBuildCatchUpBatch{
+	_, err = store.file.ApplyIndexBuildCatchUpBatch(storage.IndexBuildCatchUpBatch{
 		BuildID: opened.BuildID, ExpectedAppliedSequence: opened.AppliedSequence,
 		ThroughSequence: through, Mutations: mutations,
 	})
 	if err != nil {
-		return db.handleV2IndexBuildError(err)
+		return db.handleIndexBuildError(err)
 	}
-	if err := db.advanceV2RollbackAnchor(ctx, store, through); err != nil {
+	if err := db.advanceRollbackAnchor(ctx, store, through); err != nil {
 		return err
 	}
 	store.refreshIndexBuildStats()
 	return nil
 }
 
-func (db *DB) finalizeIndexBuild(ctx context.Context, store *v2DurableStore, meta storagev2.IndexBuildMeta) error {
+func (db *DB) finalizeIndexBuild(ctx context.Context, store *durableStore, meta storage.IndexBuildMeta) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	if err := contextError(ctx); err != nil {
@@ -456,29 +456,29 @@ func (db *DB) finalizeIndexBuild(ctx context.Context, store *v2DurableStore, met
 	// Finalization is a logical catalog commit: it makes an index visible to
 	// queries and replication. A stale primary must not be able to publish that
 	// visibility point after its lease/epoch was revoked.
-	if err := db.validateV2PrimaryWriteFence(db.token + 1); err != nil {
+	if err := db.validatePrimaryWriteFence(db.token + 1); err != nil {
 		return err
 	}
 	var transactionID [16]byte
 	if _, err := rand.Read(transactionID[:]); err != nil {
 		return err
 	}
-	sequence, err := store.file.FinalizeIndexBuild(storagev2.FinalizeIndexBuildTransaction{
+	sequence, err := store.file.FinalizeIndexBuild(storage.FinalizeIndexBuildTransaction{
 		BuildID: meta.BuildID, TransactionID: transactionID,
 		ExpectedAppliedSequence: meta.AppliedSequence,
 	})
 	if err != nil {
-		return db.handleV2IndexBuildErrorLocked(err)
+		return db.handleIndexBuildErrorLocked(err)
 	}
 	if sequence != db.token+1 {
-		db.fatalErr = fmt.Errorf("%w: V2 index build sequence mismatch", ErrDurability)
+		db.fatalErr = fmt.Errorf("%w: index build sequence mismatch", ErrDurability)
 		return db.fatalErr
 	}
-	if err := db.advanceV2RollbackAnchorLocked(ctx, store, sequence); err != nil {
+	if err := db.advanceRollbackAnchorLocked(ctx, store, sequence); err != nil {
 		return err
 	}
 	store.refreshIndexBuildStats()
-	fields, err := publicV2IndexFields(meta.FieldPath, meta.Fields)
+	fields, err := publicIndexFields(meta.FieldPath, meta.Fields)
 	if err != nil {
 		return err
 	}
@@ -500,7 +500,7 @@ func (db *DB) finalizeIndexBuild(ctx context.Context, store *v2DurableStore, met
 }
 
 func (db *DB) AbortIndexBuild(ctx context.Context, id IndexBuildID) error {
-	store, err := db.v2IndexBuildStore()
+	store, err := db.durableIndexBuildStore()
 	if err != nil {
 		return err
 	}
@@ -509,7 +509,7 @@ func (db *DB) AbortIndexBuild(ctx context.Context, id IndexBuildID) error {
 	}
 	meta, exists, err := store.file.IndexBuild([16]byte(id))
 	if err != nil {
-		return db.handleV2IndexBuildError(err)
+		return db.handleIndexBuildError(err)
 	}
 	if !exists {
 		return ErrIndexBuildNotFound
@@ -520,9 +520,9 @@ func (db *DB) AbortIndexBuild(ctx context.Context, id IndexBuildID) error {
 		return ErrClosed
 	}
 	if err := store.file.AbortIndexBuild([16]byte(id)); err != nil {
-		return db.handleV2IndexBuildErrorLocked(err)
+		return db.handleIndexBuildErrorLocked(err)
 	}
-	if err := db.advanceV2RollbackAnchorLocked(ctx, store, db.token); err != nil {
+	if err := db.advanceRollbackAnchorLocked(ctx, store, db.token); err != nil {
 		return err
 	}
 	store.refreshIndexBuildStats()
@@ -530,7 +530,7 @@ func (db *DB) AbortIndexBuild(ctx context.Context, id IndexBuildID) error {
 	return nil
 }
 
-func (db *DB) failIndexBuild(ctx context.Context, id IndexBuildID, failure storagev2.IndexBuildFailure) (IndexBuildStatus, error) {
+func (db *DB) failIndexBuild(ctx context.Context, id IndexBuildID, failure storage.IndexBuildFailure) (IndexBuildStatus, error) {
 	if err := contextError(ctx); err != nil {
 		return IndexBuildStatus{}, err
 	}
@@ -542,22 +542,22 @@ func (db *DB) failIndexBuild(ctx context.Context, id IndexBuildID, failure stora
 	if db.fatalErr != nil {
 		return IndexBuildStatus{}, db.fatalErr
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return IndexBuildStatus{}, ErrIndexBuildUnsupported
 	}
-	meta, err := store.file.FailIndexBuild(storagev2.FailIndexBuildTransaction{BuildID: [16]byte(id), Failure: failure})
+	meta, err := store.file.FailIndexBuild(storage.FailIndexBuildTransaction{BuildID: [16]byte(id), Failure: failure})
 	if err != nil {
-		return IndexBuildStatus{}, db.handleV2IndexBuildErrorLocked(err)
+		return IndexBuildStatus{}, db.handleIndexBuildErrorLocked(err)
 	}
-	if err := db.advanceV2RollbackAnchorLocked(ctx, store, db.token); err != nil {
+	if err := db.advanceRollbackAnchorLocked(ctx, store, db.token); err != nil {
 		return IndexBuildStatus{}, err
 	}
 	store.refreshIndexBuildStats()
 	return publicIndexBuildStatus(meta), nil
 }
 
-func (db *DB) v2IndexBuildStore() (*v2DurableStore, error) {
+func (db *DB) durableIndexBuildStore() (*durableStore, error) {
 	if db == nil {
 		return nil, ErrClosed
 	}
@@ -566,34 +566,34 @@ func (db *DB) v2IndexBuildStore() (*v2DurableStore, error) {
 	if db.closed {
 		return nil, ErrClosed
 	}
-	store, ok := db.durability.(*v2DurableStore)
+	store, ok := db.durability.(*durableStore)
 	if !ok || store == nil || store.file == nil {
 		return nil, ErrIndexBuildUnsupported
 	}
 	return store, nil
 }
 
-func (db *DB) handleV2IndexBuildError(err error) error {
-	mapped := mapStorageV2Error(err)
+func (db *DB) handleIndexBuildError(err error) error {
+	mapped := mapStorageError(err)
 	if safeIndexBuildError(mapped) {
 		return mapped
 	}
 	if db != nil {
 		db.mu.Lock()
-		mapped = db.poisonV2IndexBuildLocked(mapped)
+		mapped = db.poisonIndexBuildLocked(mapped)
 		db.mu.Unlock()
 	}
 	return mapped
 }
 
-// handleV2IndexBuildErrorLocked is for storage calls deliberately serialized
+// handleIndexBuildErrorLocked is for storage calls deliberately serialized
 // by db.mu, including begin/finalize/abort publication coordination.
-func (db *DB) handleV2IndexBuildErrorLocked(err error) error {
-	mapped := mapStorageV2Error(err)
+func (db *DB) handleIndexBuildErrorLocked(err error) error {
+	mapped := mapStorageError(err)
 	if safeIndexBuildError(mapped) {
 		return mapped
 	}
-	return db.poisonV2IndexBuildLocked(mapped)
+	return db.poisonIndexBuildLocked(mapped)
 }
 
 func safeIndexBuildError(err error) bool {
@@ -603,7 +603,7 @@ func safeIndexBuildError(err error) bool {
 		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrClosed)
 }
 
-func (db *DB) poisonV2IndexBuildLocked(err error) error {
+func (db *DB) poisonIndexBuildLocked(err error) error {
 	if db == nil {
 		return err
 	}
@@ -648,7 +648,7 @@ func projectedIndexBuildKey(encoded []byte, definition IndexDefinition, id Docum
 	for index, field := range fields {
 		value, found, scalar, err := projectStoredDocumentScalar(encoded, indexBuildPath(field.Field), id)
 		if err != nil {
-			return nil, false, fmt.Errorf("%w: V2 stored document", ErrCorrupt)
+			return nil, false, fmt.Errorf("%w: stored document", ErrCorrupt)
 		}
 		if !found {
 			if index == 0 || !usesCompoundIndexCodec(definition) {
@@ -681,30 +681,30 @@ func projectedIndexBuildKey(encoded []byte, definition IndexDefinition, id Docum
 
 func indexBuildReservation(collection, name string) string { return collection + "\x00" + name }
 
-func publicIndexBuildStatus(meta storagev2.IndexBuildMeta) IndexBuildStatus {
+func publicIndexBuildStatus(meta storage.IndexBuildMeta) IndexBuildStatus {
 	phase := IndexBuildPhaseFailed
 	failure := IndexBuildFailureNone
 	switch meta.Phase {
-	case storagev2.IndexBuildScan:
+	case storage.IndexBuildScan:
 		phase = IndexBuildPhaseScan
-	case storagev2.IndexBuildCatchUp:
+	case storage.IndexBuildCatchUp:
 		phase = IndexBuildPhaseCatchUp
-	case storagev2.IndexBuildReady:
+	case storage.IndexBuildReady:
 		phase = IndexBuildPhaseReady
 	}
 	switch meta.Failure {
-	case storagev2.IndexBuildFailureUniqueConflict:
+	case storage.IndexBuildFailureUniqueConflict:
 		failure = IndexBuildFailureUniqueConflict
-	case storagev2.IndexBuildFailureResourceLimit:
+	case storage.IndexBuildFailureResourceLimit:
 		failure = IndexBuildFailureResourceLimit
-	case storagev2.IndexBuildFailureHistoryLost:
+	case storage.IndexBuildFailureHistoryLost:
 		failure = IndexBuildFailureHistoryLost
-	case storagev2.IndexBuildFailureCanceled:
+	case storage.IndexBuildFailureCanceled:
 		failure = IndexBuildFailureCanceled
-	case storagev2.IndexBuildFailureInvalidIndex:
+	case storage.IndexBuildFailureInvalidIndex:
 		failure = IndexBuildFailureInvalidIndex
 	}
-	fields, _ := publicV2IndexFields(meta.FieldPath, meta.Fields)
+	fields, _ := publicIndexFields(meta.FieldPath, meta.Fields)
 	return IndexBuildStatus{
 		ID: IndexBuildID(meta.BuildID), Collection: meta.Collection, Name: meta.Name, Field: meta.FieldPath,
 		Fields: fields,

@@ -184,13 +184,13 @@ func New(config Config) (*Handler, error) {
 	if len(transactionalMethods) > 0 {
 		store, ok := config.RPCIdempotencyStore.(*durableRPCIdempotencyStore)
 		if !ok || store.db != config.DB {
-			return nil, errors.New("transactional RPC methods require the built-in durable idempotency store for the same V2 database")
+			return nil, errors.New("transactional RPC methods require the built-in durable idempotency store for the same database")
 		}
 	}
 	if config.RPCTransactionalMethodResolver != nil {
 		store, ok := config.RPCIdempotencyStore.(*durableRPCIdempotencyStore)
 		if !ok || store.db != config.DB {
-			return nil, errors.New("transactional RPC resolver requires the built-in durable idempotency store for the same V2 database")
+			return nil, errors.New("transactional RPC resolver requires the built-in durable idempotency store for the same database")
 		}
 	}
 	if (len(methods) > 0 || len(transactionalMethods) > 0 || config.RPCMethodResolver != nil || config.RPCTransactionalMethodResolver != nil) && config.RPCAuthorizer == nil {
@@ -1535,7 +1535,7 @@ func writeEngineError(w http.ResponseWriter, err error) {
 
 func engineErrorStatusCode(err error) (int, string) {
 	status, code := http.StatusInternalServerError, "internal"
-	// Admission cancellation can race a durable V2 final-Meta acknowledgement.
+	// Admission cancellation can race a durable  final-Meta acknowledgement.
 	// It must win over the wrapped Context error below so a client never treats
 	// an acknowledged mutation as safely canceled and retries it blindly.
 	if errors.Is(err, meldbase.ErrCommitOutcomeUnknown) {

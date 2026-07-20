@@ -18,7 +18,7 @@ const (
 var (
 	systemCatalogKey     = []byte{0, 'm', 'e', 'l', 'd', 'b', 'a', 's', 'e', '.', 's', 'y', 's', 't', 'e', 'm'}
 	systemDirectoryMagic = [8]byte{'M', 'E', 'L', 'D', 'S', 'Y', 'S', '3'}
-	errSystemCASMismatch = errors.New("meldbase storage v2: system record compare-and-swap mismatch")
+	errSystemCASMismatch = errors.New("meldbase storage: system record compare-and-swap mismatch")
 )
 
 type systemDirectory struct {
@@ -207,7 +207,7 @@ func (f *File) GetSystemRecord(key []byte) ([]byte, bool, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.file == nil {
-		return nil, false, errors.New("meldbase storage v2: file is closed")
+		return nil, false, errors.New("meldbase storage: file is closed")
 	}
 	return f.getSystemRecordUnlocked(f.root.CatalogRoot, key)
 }
@@ -234,7 +234,7 @@ func (snapshot *ReadSnapshot) ScanSystemRecords(start, end []byte, limit int) ([
 	file.mu.RLock()
 	defer file.mu.RUnlock()
 	if file.file == nil {
-		return nil, errors.New("meldbase storage v2: file is closed")
+		return nil, errors.New("meldbase storage: file is closed")
 	}
 	encodedDirectory, exists, err := file.treeGetUnlocked(snapshot.root.CatalogRoot, TreeCatalog, systemCatalogKey)
 	if err != nil || !exists {

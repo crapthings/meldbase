@@ -69,8 +69,8 @@ if err != nil {
     log.Fatal(err)
 }
 
-db, err := meldbase.OpenV2WithOptions("/data/orders.meld", meldbase.V2Options{
-    RollbackProtection: meldbase.V2RollbackProtection{
+db, err := meldbase.OpenWithOptions("/data/orders.meld", meldbase.Options{
+    RollbackProtection: meldbase.RollbackProtection{
         AnchorStore:      anchor,
         InitializeAnchor: true, // first audited provisioning only
         OperationTimeout: 3 * time.Second,
@@ -114,7 +114,7 @@ the new ID, then remove the old ID after the maximum in-flight/skew window.
   may have persisted the tuple before losing its response; restart performs a
   new quorum read and can recover the corresponding durable database commit.
 - Concurrent crossed writers cannot both receive quorum success. Comparable
-  writers converge on the dominating tuple.
+ writers converge on the dominating tuple.
 - Any member-list change derives a different configuration and is rejected by
   existing directories. Membership must not be changed ad hoc. Safe reconfiguration requires a future
   explicit joint-consensus/membership protocol or an operator-controlled outage
