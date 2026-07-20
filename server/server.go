@@ -48,6 +48,7 @@ type (
 	WorkspaceAuthorizer            = internal.WorkspaceAuthorizer
 	CollectionAccessMode           = internal.CollectionAccessMode
 	CollectionAccess               = internal.CollectionAccess
+	CollectionAccessFields         = internal.CollectionAccessFields
 	CollectionAccessManifest       = internal.CollectionAccessManifest
 	WorkerHubStats                 = internal.WorkerHubStats
 )

@@ -2,8 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"regexp"
+	"sort"
+	"strings"
 
 	"github.com/crapthings/meldbase/core"
 )
@@ -32,9 +37,21 @@ const (
 // CollectionAccess declares the generic data API surface for one collection.
 // OwnerField is required only for CollectionAccessOwner.
 type CollectionAccess struct {
-	Collection string               `json:"collection"`
-	Mode       CollectionAccessMode `json:"mode"`
-	OwnerField string               `json:"ownerField,omitempty"`
+	Collection string                  `json:"collection"`
+	Mode       CollectionAccessMode    `json:"mode"`
+	OwnerField string                  `json:"ownerField,omitempty"`
+	Fields     *CollectionAccessFields `json:"fields,omitempty"`
+}
+
+// CollectionAccessFields is an optional static field boundary for generic
+// client access. A nil list allows every field for that operation; an explicit
+// empty list allows none. Server-owned workspace and owner fields remain
+// immutable regardless of these declarations.
+type CollectionAccessFields struct {
+	QueryPaths   []string `json:"queryPaths,omitempty"`
+	ResultFields []string `json:"resultFields,omitempty"`
+	InputFields  []string `json:"inputFields,omitempty"`
+	UpdatePaths  []string `json:"updatePaths,omitempty"`
 }
 
 // WorkspaceAuthorizerConfig declares which collections are scoped to the
@@ -54,10 +71,15 @@ type WorkspaceAuthorizerConfig struct {
 // collections. It is intentionally not a user or membership store; an external
 // identity provider supplies Principal.Tenant from the active workspace claim.
 type WorkspaceAuthorizer struct {
-	collections    map[string]CollectionAccess
+	collections    map[string]workspaceCollectionAccess
 	workspaceField string
 	maxResults     int
 	maxAffected    int
+}
+
+type workspaceCollectionAccess struct {
+	CollectionAccess
+	policyVersion string
 }
 
 func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthorizer, error) {
@@ -77,7 +99,7 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 	if len(access) == 0 || len(access) > 4096 {
 		return nil, errors.New("workspace authorizer requires between one and 4096 collection access declarations")
 	}
-	collections := make(map[string]CollectionAccess, len(access))
+	collections := make(map[string]workspaceCollectionAccess, len(access))
 	for _, rule := range access {
 		if !workspaceIdentifier.MatchString(rule.Collection) {
 			return nil, errors.New("workspace collection name is invalid")
@@ -97,7 +119,25 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 		default:
 			return nil, errors.New("workspace collection access mode is invalid")
 		}
-		collections[rule.Collection] = rule
+		fields, err := normalizeCollectionAccessFields(rule.Fields)
+		if err != nil {
+			return nil, err
+		}
+		if rule.Mode == CollectionAccessRPCOnly && fields != nil {
+			return nil, errors.New("rpc-only collection access cannot declare generic field access")
+		}
+		rule.Fields = fields
+		canonical, err := json.Marshal(struct {
+			WorkspaceField string           `json:"workspaceField"`
+			Rule           CollectionAccess `json:"rule"`
+		}{WorkspaceField: config.WorkspaceField, Rule: rule})
+		if err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256(canonical)
+		collections[rule.Collection] = workspaceCollectionAccess{
+			CollectionAccess: rule, policyVersion: "workspace-" + hex.EncodeToString(digest[:]),
+		}
 	}
 	if config.MaxResults == 0 {
 		config.MaxResults = meldbase.DefaultQueryLimits.MaxLimit
@@ -124,9 +164,12 @@ func (a *WorkspaceAuthorizer) AuthorizeQuery(_ context.Context, principal Princi
 	if err != nil {
 		return QueryPolicy{}, err
 	}
+	allowAllQueryPaths, allowedQueryPaths := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.QueryPaths })
+	allowAllResultFields, allowedResultFields := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.ResultFields })
 	return QueryPolicy{
-		PolicyVersion: "workspace-" + string(rule.Mode) + "-v1", Constraint: &constraint, MaxResults: a.maxResults,
-		AllowAllQueryPaths: true, AllowAllResultFields: true,
+		PolicyVersion: rule.policyVersion, Constraint: &constraint, MaxResults: a.maxResults,
+		AllowAllQueryPaths: allowAllQueryPaths, AllowedQueryPaths: allowedQueryPaths,
+		AllowAllResultFields: allowAllResultFields, AllowedResultFields: allowedResultFields,
 	}, nil
 }
 
@@ -139,10 +182,17 @@ func (a *WorkspaceAuthorizer) AuthorizeInsert(_ context.Context, principal Princ
 	if rule.Mode == CollectionAccessOwner {
 		setFields[rule.OwnerField] = meldbase.String(principal.Subject)
 	}
+	allowAllInputFields, allowedInputFields := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.InputFields })
+	allowAllResultFields, resultFields := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.ResultFields })
+	if !allowAllInputFields {
+		for field := range setFields {
+			allowedInputFields[field] = struct{}{}
+		}
+	}
 	return InsertPolicy{
-		AllowAllInputFields:  true,
+		AllowAllInputFields: allowAllInputFields, AllowedInputFields: allowedInputFields,
 		SetFields:            setFields,
-		AllowAllResultFields: true,
+		AllowAllResultFields: allowAllResultFields, AllowedResultFields: resultFields,
 	}, nil
 }
 
@@ -159,8 +209,9 @@ func (a *WorkspaceAuthorizer) AuthorizeUpdate(ctx context.Context, principal Pri
 	if rule.Mode == CollectionAccessOwner {
 		denied[rule.OwnerField] = struct{}{}
 	}
+	allowAllUpdatePaths, allowedUpdatePaths := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.UpdatePaths })
 	return UpdatePolicy{
-		QueryPolicy: base, AllowAllUpdatePaths: true,
+		QueryPolicy: base, AllowAllUpdatePaths: allowAllUpdatePaths, AllowedUpdatePaths: allowedUpdatePaths,
 		DeniedUpdatePaths: denied, MaxAffected: a.maxAffected,
 	}, nil
 }
@@ -180,7 +231,7 @@ func (*WorkspaceAuthorizer) AuthorizeRPC(context.Context, Principal, string) err
 	return ErrForbidden
 }
 
-func (a *WorkspaceAuthorizer) constraint(principal Principal, rule CollectionAccess) (meldbase.QuerySpec, error) {
+func (a *WorkspaceAuthorizer) constraint(principal Principal, rule workspaceCollectionAccess) (meldbase.QuerySpec, error) {
 	filter := meldbase.Filter{a.workspaceField: principal.Tenant}
 	if rule.Mode == CollectionAccessOwner {
 		filter[rule.OwnerField] = principal.Subject
@@ -188,13 +239,98 @@ func (a *WorkspaceAuthorizer) constraint(principal Principal, rule CollectionAcc
 	return meldbase.CompileQuery(filter, meldbase.QueryOptions{})
 }
 
-func (a *WorkspaceAuthorizer) allow(principal Principal, collection string) (CollectionAccess, error) {
+func (a *WorkspaceAuthorizer) allow(principal Principal, collection string) (workspaceCollectionAccess, error) {
 	if principal.Subject == "" || principal.Tenant == "" {
-		return CollectionAccess{}, ErrForbidden
+		return workspaceCollectionAccess{}, ErrForbidden
 	}
 	rule, ok := a.collections[collection]
 	if !ok || rule.Mode == CollectionAccessRPCOnly {
-		return CollectionAccess{}, ErrForbidden
+		return workspaceCollectionAccess{}, ErrForbidden
 	}
 	return rule, nil
+}
+
+func normalizeCollectionAccessFields(fields *CollectionAccessFields) (*CollectionAccessFields, error) {
+	if fields == nil {
+		return nil, nil
+	}
+	result := &CollectionAccessFields{
+		QueryPaths: cloneCollectionAccessStrings(fields.QueryPaths), ResultFields: cloneCollectionAccessStrings(fields.ResultFields),
+		InputFields: cloneCollectionAccessStrings(fields.InputFields), UpdatePaths: cloneCollectionAccessStrings(fields.UpdatePaths),
+	}
+	if err := validateCollectionAccessPathList(result.QueryPaths, "query"); err != nil {
+		return nil, err
+	}
+	if err := validateCollectionAccessPathList(result.UpdatePaths, "update"); err != nil {
+		return nil, err
+	}
+	if err := validateCollectionAccessFieldList(result.ResultFields, "result"); err != nil {
+		return nil, err
+	}
+	if err := validateCollectionAccessFieldList(result.InputFields, "input"); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func cloneCollectionAccessStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return append([]string{}, values...)
+}
+
+func validateCollectionAccessPathList(paths []string, kind string) error {
+	if paths == nil {
+		return nil
+	}
+	if len(paths) > 256 {
+		return errors.New("collection access " + kind + " paths exceed 256 entries")
+	}
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if _, duplicate := seen[path]; duplicate {
+			return errors.New("collection access " + kind + " paths must be unique")
+		}
+		expression, _ := json.Marshal(map[string]any{"version": 1, "where": map[string]any{"op": "exists", "path": path, "value": true}})
+		if _, err := meldbase.DecodeQuerySpecJSON(expression, meldbase.QueryLimits{}); err != nil || path == "_id" || strings.HasPrefix(path, "_id.") {
+			return errors.New("collection access " + kind + " path is invalid")
+		}
+		seen[path] = struct{}{}
+	}
+	sort.Strings(paths)
+	return nil
+}
+
+func validateCollectionAccessFieldList(fields []string, kind string) error {
+	if fields == nil {
+		return nil
+	}
+	if len(fields) > 256 {
+		return errors.New("collection access " + kind + " fields exceed 256 entries")
+	}
+	seen := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		if _, duplicate := seen[field]; duplicate || strings.Contains(field, ".") || (meldbase.Document{field: meldbase.Null()}).Validate() != nil {
+			return errors.New("collection access " + kind + " field is invalid")
+		}
+		seen[field] = struct{}{}
+	}
+	sort.Strings(fields)
+	return nil
+}
+
+func collectionAccessFieldSet(fields *CollectionAccessFields, selectFields func(*CollectionAccessFields) []string) (bool, map[string]struct{}) {
+	if fields == nil {
+		return true, nil
+	}
+	values := selectFields(fields)
+	if values == nil {
+		return true, nil
+	}
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		result[value] = struct{}{}
+	}
+	return false, result
 }

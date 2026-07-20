@@ -108,7 +108,10 @@ func TestCollectionAccessModesEnforceOwnerAndRPCOnlyBoundaries(t *testing.T) {
 		WorkspaceField: "workspaceId",
 		CollectionAccess: []CollectionAccess{
 			{Collection: "tasks", Mode: CollectionAccessCollaborative},
-			{Collection: "private_notes", Mode: CollectionAccessOwner, OwnerField: "ownerId"},
+			{Collection: "private_notes", Mode: CollectionAccessOwner, OwnerField: "ownerId", Fields: &CollectionAccessFields{
+				QueryPaths: []string{"title"}, ResultFields: []string{"title"},
+				InputFields: []string{"title"}, UpdatePaths: []string{"title"},
+			}},
 			{Collection: "payroll", Mode: CollectionAccessRPCOnly},
 		},
 	})
@@ -152,6 +155,19 @@ func TestCollectionAccessModesEnforceOwnerAndRPCOnlyBoundaries(t *testing.T) {
 	if title, _ := visible["title"].StringValue(); title != "visible" {
 		t.Fatalf("owner query title=%q", title)
 	}
+	if _, leaked := visible["ownerId"]; leaked {
+		t.Fatalf("owner field leaked through result policy: %+v", visible)
+	}
+	forbiddenQuery := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/query", tokenA, `{"version":1,"query":{"version":1,"where":{"op":"exists","path":"ownerId","value":true}}}`)
+	forbiddenQuery.Body.Close()
+	if forbiddenQuery.StatusCode != http.StatusForbidden {
+		t.Fatalf("restricted query status=%d", forbiddenQuery.StatusCode)
+	}
+	forbiddenInput := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/documents", tokenA, `{"version":1,"document":{"t":"object","v":[["title",{"t":"string","v":"forbidden"}],["body",{"t":"string","v":"private"}]]}}`)
+	forbiddenInput.Body.Close()
+	if forbiddenInput.StatusCode != http.StatusForbidden {
+		t.Fatalf("restricted insert status=%d", forbiddenInput.StatusCode)
+	}
 
 	forgedInsert := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/documents", tokenA, `{"version":1,"document":{"t":"object","v":[["workspaceId",{"t":"string","v":"team-b"}],["ownerId",{"t":"string","v":"user-b"}],["title",{"t":"string","v":"created"}]]}}`)
 	if forgedInsert.StatusCode != http.StatusCreated {
@@ -175,6 +191,11 @@ func TestCollectionAccessModesEnforceOwnerAndRPCOnlyBoundaries(t *testing.T) {
 	if forgedUpdate.StatusCode != http.StatusForbidden {
 		t.Fatalf("owner update status=%d", forgedUpdate.StatusCode)
 	}
+	forbiddenFieldUpdate := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/mutations", tokenA, `{"version":1,"action":"updateMany","query":{"version":1,"where":{"op":"true"}},"update":{"version":1,"operations":[{"op":"set","path":"body","value":{"t":"string","v":"private"}}]}}`)
+	forbiddenFieldUpdate.Body.Close()
+	if forbiddenFieldUpdate.StatusCode != http.StatusForbidden {
+		t.Fatalf("restricted update status=%d", forbiddenFieldUpdate.StatusCode)
+	}
 
 	rpcOnly := postWorkspaceRequest(t, api.URL+"/v1/collections/payroll/query", tokenA, `{"version":1,"query":{"version":1,"where":{"op":"true"}}}`)
 	rpcOnly.Body.Close()
@@ -189,7 +210,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 		"workspaceField": "workspaceId",
 		"collections": [
 			{"collection": "tasks", "mode": "collaborative"},
-			{"collection": "private_notes", "mode": "owner", "ownerField": "ownerId"},
+			{"collection": "private_notes", "mode": "owner", "ownerField": "ownerId", "fields": {"queryPaths":["title"],"resultFields":["title"],"inputFields":["title"],"updatePaths":["title"]}},
 			{"collection": "payroll", "mode": "rpc_only"}
 		]
 	}`))
@@ -197,17 +218,31 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	config, err := manifest.WorkspaceAuthorizerConfig()
-	if err != nil || len(config.CollectionAccess) != 3 {
+	if err != nil || len(config.CollectionAccess) != 3 || config.CollectionAccess[1].Fields == nil || len(config.CollectionAccess[1].Fields.UpdatePaths) != 1 {
 		t.Fatalf("manifest config=%+v err=%v", config, err)
 	}
 	for _, input := range []string{
 		`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"private_notes","mode":"owner"}]}`,
 		`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative","unexpected":true}]}`,
+		`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"rpc_only","fields":{"resultFields":["title"]}}]}`,
 		`{"version":2,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative"}]}`,
 	} {
 		if _, err := ParseCollectionAccessManifestJSON([]byte(input)); err == nil {
 			t.Fatalf("manifest %s was accepted", input)
 		}
+	}
+	emptyFields, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{
+		WorkspaceField: "workspaceId",
+		CollectionAccess: []CollectionAccess{{
+			Collection: "empty", Mode: CollectionAccessCollaborative, Fields: &CollectionAccessFields{ResultFields: []string{}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := emptyFields.AuthorizeQuery(context.Background(), Principal{Subject: "user", Tenant: "team"}, "empty", meldbase.QuerySpec{})
+	if err != nil || policy.AllowAllResultFields || len(policy.AllowedResultFields) != 0 {
+		t.Fatalf("explicit empty result fields policy=%+v err=%v", policy, err)
 	}
 }
 

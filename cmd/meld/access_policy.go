@@ -112,11 +112,15 @@ type collectionAccessQueryExplanation struct {
 
 type collectionAccessInsertExplanation struct {
 	Allowed      bool              `json:"allowed"`
+	InputFields  string            `json:"inputFields,omitempty"`
+	ResultFields string            `json:"resultFields,omitempty"`
 	ServerFields map[string]string `json:"serverFields,omitempty"`
 }
 
 type collectionAccessMutationExplanation struct {
 	Allowed           bool     `json:"allowed"`
+	QueryPaths        string   `json:"queryPaths,omitempty"`
+	UpdatePaths       string   `json:"updatePaths,omitempty"`
 	DeniedUpdatePaths []string `json:"deniedUpdatePaths,omitempty"`
 	MaxAffected       int      `json:"maxAffected,omitempty"`
 }
@@ -153,12 +157,16 @@ func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAcc
 	}
 	if policy, policyErr := authorizer.AuthorizeInsert(context.Background(), principal, rule.Collection, meldbase.Document{}); policyErr == nil {
 		explanation.Insert.Allowed = true
+		explanation.Insert.InputFields = describePolicyFields(policy.AllowAllInputFields, policy.AllowedInputFields)
+		explanation.Insert.ResultFields = describePolicyFields(policy.AllowAllResultFields, policy.AllowedResultFields)
 		explanation.Insert.ServerFields = stringPolicyFields(policy.SetFields)
 	} else if !errors.Is(policyErr, meldserver.ErrForbidden) {
 		return policyErr
 	}
 	if policy, policyErr := authorizer.AuthorizeUpdate(context.Background(), principal, rule.Collection, query, meldbase.MutationSpec{}); policyErr == nil {
 		explanation.Update.Allowed = true
+		explanation.Update.QueryPaths = describePolicyFields(policy.AllowAllQueryPaths, policy.AllowedQueryPaths)
+		explanation.Update.UpdatePaths = describePolicyFields(policy.AllowAllUpdatePaths, policy.AllowedUpdatePaths)
 		explanation.Update.DeniedUpdatePaths = sortedPolicyPaths(policy.DeniedUpdatePaths)
 		explanation.Update.MaxAffected = policy.MaxAffected
 	} else if !errors.Is(policyErr, meldserver.ErrForbidden) {

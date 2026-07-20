@@ -28,7 +28,16 @@ meld serve \
   "version": 1,
   "workspaceField": "workspaceId",
   "collections": [
-    {"collection": "tasks", "mode": "collaborative"},
+    {
+      "collection": "tasks",
+      "mode": "collaborative",
+      "fields": {
+        "queryPaths": ["title", "done"],
+        "resultFields": ["title", "done"],
+        "inputFields": ["title", "done"],
+        "updatePaths": ["title", "done"]
+      }
+    },
     {"collection": "private_notes", "mode": "owner", "ownerField": "ownerId"},
     {"collection": "payroll", "mode": "rpc_only"}
   ]
@@ -58,6 +67,23 @@ and operation allowance for that simulated principal. It is a static review
 tool: it does not validate a JWT, open a database, or evaluate a custom role or
 membership resolver.
 
+### Optional field boundary
+
+`fields` is a composable restriction, not another access mode. Each omitted
+field list means all fields for that operation; an explicit empty list means no
+application fields. All entries are bounded, unique, and validated at startup.
+
+| Declaration | Applies to | Meaning |
+| --- | --- | --- |
+| `queryPaths` | fetch, mutation target, subscription | Client may filter or sort only by these document paths. `_id` remains a safe direct lookup. |
+| `resultFields` | fetch, insert response, subscription snapshot/delta | Only these top-level fields are returned, plus `_id`. |
+| `inputFields` | insert | Only these top-level client fields are accepted. |
+| `updatePaths` | update | Only these document paths may be changed. |
+
+The server still accepts and overwrites declared `workspaceId` / `ownerId`
+input values so a client cannot turn a field whitelist into a tenant or owner
+selection mechanism. Those server-owned fields are always immutable on update.
+
 ## Stable modes
 
 | Mode | Generic reads and subscriptions | Generic writes | Server-owned fields |
@@ -67,7 +93,8 @@ membership resolver.
 | `rpc_only` | Denied | Denied | None; expose only explicit application RPC methods if needed |
 
 Every listed mode is enforced by the same Go policy engine. Modes are presets,
-not different query implementations and not client-side callbacks.
+and `fields` only narrows those presets; neither creates another query
+implementation or a client-side callback.
 
 ## What a client request means
 

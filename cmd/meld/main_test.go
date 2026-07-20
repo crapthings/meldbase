@@ -556,7 +556,7 @@ func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 		"version":1,
 		"workspaceField":"workspaceId",
 		"collections":[
-			{"collection":"notes","mode":"owner","ownerField":"ownerId"},
+			{"collection":"notes","mode":"owner","ownerField":"ownerId","fields":{"queryPaths":["title"],"resultFields":["title"],"inputFields":["title"],"updatePaths":["title"]}},
 			{"collection":"payroll","mode":"rpc_only"}
 		]
 	}`), 0o600); err != nil {
@@ -574,13 +574,16 @@ func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 		Query struct {
 			Allowed    bool            `json:"allowed"`
 			Constraint json.RawMessage `json:"constraint"`
+			QueryPaths string          `json:"queryPaths"`
 		} `json:"query"`
 		Insert struct {
 			Allowed      bool              `json:"allowed"`
+			InputFields  string            `json:"inputFields"`
 			ServerFields map[string]string `json:"serverFields"`
 		} `json:"insert"`
 		Update struct {
 			Allowed           bool     `json:"allowed"`
+			UpdatePaths       string   `json:"updatePaths"`
 			DeniedUpdatePaths []string `json:"deniedUpdatePaths"`
 		} `json:"update"`
 	}
@@ -590,7 +593,9 @@ func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 	if owner.Mode != "owner" || !owner.Query.Allowed || !strings.Contains(string(owner.Query.Constraint), "workspaceId") ||
 		!strings.Contains(string(owner.Query.Constraint), "ownerId") || !owner.Insert.Allowed ||
 		owner.Insert.ServerFields["workspaceId"] != "team-a" || owner.Insert.ServerFields["ownerId"] != "user-a" ||
-		!owner.Update.Allowed || !reflect.DeepEqual(owner.Update.DeniedUpdatePaths, []string{"ownerId", "workspaceId"}) {
+		owner.Query.QueryPaths != "[title]" || owner.Insert.InputFields != "[ownerId title workspaceId]" ||
+		!owner.Update.Allowed || owner.Update.UpdatePaths != "[title]" ||
+		!reflect.DeepEqual(owner.Update.DeniedUpdatePaths, []string{"ownerId", "workspaceId"}) {
 		t.Fatalf("owner explanation=%s", output.String())
 	}
 
