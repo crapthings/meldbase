@@ -697,6 +697,39 @@ func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 	}
 }
 
+func TestInitBundleLauncherUsesGeneratedManifest(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "meldbase-local")
+	var output bytes.Buffer
+	if err := run([]string{"init", "--dir", root}, &output, &output); err != nil {
+		t.Fatalf("init error=%v output=%s", err, output.String())
+	}
+	argumentsPath := filepath.Join(t.TempDir(), "arguments")
+	fakeBinary := filepath.Join(t.TempDir(), "fake-meld")
+	if err := os.WriteFile(fakeBinary, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$MELDBASE_ARGUMENTS_FILE\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(filepath.Join(root, "start.sh"))
+	command.Env = append(os.Environ(), "MELDBASE_BIN="+fakeBinary, "MELDBASE_ARGUMENTS_FILE="+argumentsPath)
+	raw, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bundle launcher: %v\n%s", err, raw)
+	}
+	arguments, err := os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"serve", "--db", filepath.Join(root, "data", "app.meld"), "--addr", "127.0.0.1:8080",
+		"--jwt-hs256-secret-file", filepath.Join(root, "secrets", "jwt-hs256.secret"),
+		"--jwt-issuer", "meldbase-local", "--jwt-audience", "meldbase-api",
+		"--access-policy-file", filepath.Join(root, "config", "access-policy.json"),
+		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
+	}
+	if got := strings.Split(strings.TrimSpace(string(arguments)), "\n"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("bundle arguments=%q want=%q", got, want)
+	}
+}
+
 func TestInitRefusesExistingOrUnsafeBundleConfiguration(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "meldbase-local")
 	if err := os.Mkdir(root, 0o750); err != nil {
