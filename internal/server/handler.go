@@ -207,7 +207,7 @@ func New(config Config) (*Handler, error) {
 		}
 	}
 	for _, pattern := range config.OriginPatterns {
-		if pattern == "" || pattern == "*" {
+		if unrestrictedRealtimeOriginPattern(pattern) {
 			return nil, errors.New("realtime origin patterns must be non-empty and cannot allow every origin")
 		}
 		if _, err := path.Match(pattern, ""); err != nil {
@@ -260,6 +260,16 @@ func New(config Config) (*Handler, error) {
 	h.mux.HandleFunc("POST /v1/rpc", h.rpc)
 	h.mux.HandleFunc("GET /v1/realtime", h.realtime)
 	return h, nil
+}
+
+func unrestrictedRealtimeOriginPattern(pattern string) bool {
+	if pattern == "" {
+		return true
+	}
+	if _, hostPattern, found := strings.Cut(pattern, "://"); found {
+		pattern = hostPattern
+	}
+	return pattern == "*" || pattern == "*:*"
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

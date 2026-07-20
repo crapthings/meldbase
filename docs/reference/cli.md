@@ -47,7 +47,9 @@ pattern such as `app.example` or a scheme+host pattern such as
 `https://app.example`; use the latter when the scheme matters. The default is
 limited to local development origins. `--public-realtime-url` supplies the
 external `wss://…/v1/realtime` address returned in tickets when a TLS proxy
-terminates in front of the loopback listener.
+terminates in front of the loopback listener. Catch-all patterns such as `*`,
+`*:*`, or `https://*` are rejected at startup; scope a wildcard to a controlled
+suffix such as `https://*.example.com` when that is genuinely required.
 
 The optional embedded dashboard uses `MELDBASE_ADMIN_TOKEN`, with a minimum of
 32 bytes, and must bind to a loopback `--admin-addr`. See

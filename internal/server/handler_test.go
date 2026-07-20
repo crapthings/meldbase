@@ -1177,14 +1177,19 @@ func TestStrictMessagesAndTicketTTLConfiguration(t *testing.T) {
 	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", MaxQueryResultBytes: 16<<20 + 1}); err == nil {
 		t.Fatal("expected excessive query result limit error")
 	}
-	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", OriginPatterns: []string{"*"}}); err == nil {
-		t.Fatal("expected unrestricted realtime origin pattern error")
+	for _, pattern := range []string{"*", "*:*", "https://*", "wss://*:*"} {
+		if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", OriginPatterns: []string{pattern}}); err == nil {
+			t.Fatalf("unrestricted realtime origin pattern %q was accepted", pattern)
+		}
 	}
 	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", OriginPatterns: []string{"[broken"}}); err == nil {
 		t.Fatal("expected invalid realtime origin pattern error")
 	}
 	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", OriginPatterns: []string{"[[]::1]:*"}}); err != nil {
 		t.Fatalf("escaped IPv6 origin pattern rejected: %v", err)
+	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", OriginPatterns: []string{"https://*.example.com"}}); err != nil {
+		t.Fatalf("scoped realtime origin wildcard rejected: %v", err)
 	}
 	if err := meldbase.ValidateStrictJSON([]byte(`{"v":1,"v":1}`), 100); err == nil {
 		t.Fatal("duplicate JSON key accepted")
