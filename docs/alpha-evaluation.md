@@ -49,7 +49,9 @@ boundary.
 4. Exercise the UI with two active workspaces. Confirm that inserts receive the
    server-owned workspace/owner fields, cross-workspace reads are absent, and
    updates to those fields fail.
-5. Create a backup, restore it to a **new** path, then verify the restored file:
+5. Stop every process using the source database, then create a backup, restore
+   it to a **new** path, and verify the restored file. `meld backup` takes the
+   source's exclusive process lock; it is not an online backup command:
 
    ```sh
    meld backup --db ./data/app.meld --out ./backups/app.meld > backup-receipt.json
