@@ -337,3 +337,34 @@ committed roots. User callbacks are never invoked while a storage lock is held.
 
 Packages are introduced when they have executable behavior; empty architecture
 folders are deliberately avoided.
+
+## Extension rules
+
+Meldbase is intentionally opinionated about where a new capability belongs.
+These rules preserve a small core surface as the product evolves:
+
+- **Identity stays outside the engine.** The server verifies a principal with a
+  subject and active workspace; account records, credentials, roles, membership
+  changes and token issuance remain application concerns. A collection is not
+  made special because it happens to contain users.
+- **Generic data access stays finite and declarative.** The collection-access
+  manifest has collaborative, owner and RPC-only surfaces. A proposed mode is
+  valid only when it compiles to the existing server-enforced query/insert/
+  update/delete policy algebra. Do not add modes for roles, approvals, billing,
+  sharing or membership: use an application `Authorizer` or a named RPC.
+- **Dynamic policy is a narrowing layer, never a second write engine.** Worker
+  publications and `QueryPolicyResolver` may narrow reads and subscriptions.
+  Role-dependent writes use a Go `Authorizer` or an explicitly authorized RPC;
+  they must not be inferred from a read publication.
+- **Transport does not create business semantics.** HTTP and realtime consume
+  the same typed query, mutation, policy and RPC contracts. A transport-specific
+  convenience API must not create a second authorization, retry or consistency
+  rule.
+- **One current storage contract during alpha.** A format or policy change may
+  replace an internal alpha design directly, with migration/export guidance and
+  new evidence. Do not retain dormant runtime fallbacks solely to preserve an
+  unshipped implementation.
+
+These rules are also the review bar for generated or agent-authored changes:
+prefer extending an existing typed contract and its tests over adding a parallel
+callback path, configuration dialect or client-only security check.
