@@ -162,6 +162,29 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("arguments=%q want=%q", got, want)
 	}
+	if output, err := run(
+		"MELDBASE_HTTP_ORIGINS=https://app.example,https://admin.example",
+		"MELDBASE_REALTIME_ORIGIN_PATTERNS=https://app.example",
+		"MELDBASE_PUBLIC_REALTIME_URL=wss://api.example/v1/realtime",
+	); err != nil {
+		t.Fatalf("configured launcher: %v\n%s", err, output)
+	}
+	raw, err = os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuredWant := []string{
+		"serve", "--db", "/var/lib/meldbase/data/test.meld", "--addr", "127.0.0.1:8080",
+		"--jwt-hs256-secret-file", secretPath, "--jwt-issuer", "https://identity.example.test/", "--jwt-audience", "meldbase-api",
+		"--access-policy-file", policyPath,
+		"--http-origins", "https://app.example,https://admin.example",
+		"--realtime-origin-patterns", "https://app.example",
+		"--public-realtime-url", "wss://api.example/v1/realtime",
+		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
+	}
+	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, configuredWant) {
+		t.Fatalf("configured arguments=%q want=%q", got, configuredWant)
+	}
 	if output, err := run("MELDBASE_ACCESS_POLICY_FILE="); err == nil || !strings.Contains(output, "must name a readable manifest") {
 		t.Fatalf("missing policy should fail: err=%v output=%q", err, output)
 	}
