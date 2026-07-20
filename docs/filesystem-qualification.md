@@ -425,7 +425,7 @@ The proof records the clean controller-agent revision/runtime, exact adapter
 executable SHA-256, strict request/response, stderr hash, provider operation,
 target identity hash and retained hardware-evidence hash. The signed event
 binds that proof and marker. See
-[physical controller adapter protocol v1](../specs/power-controller-adapter-v1.md).
+[physical controller adapter protocol v1](https://github.com/crapthings/meldbase/blob/main/specs/power-controller-adapter-v1.md).
 Controller timestamps remain a separate clock domain from the guest marker;
 causality comes from the marker hash and signed adapter exchange. Graceful
 reboot, unsigned legacy physical events and key drift are rejected.

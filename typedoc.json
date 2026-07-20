@@ -1,0 +1,18 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "sdk/client",
+    "sdk/react",
+    "sdk/server"
+  ],
+  "entryPointStrategy": "packages",
+  "name": "Meldbase TypeScript API",
+  "out": "docs/public/api/typescript",
+  "readme": "none",
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "hideGenerator": true,
+  "lightHighlightTheme": "github-light-default",
+  "darkHighlightTheme": "github-dark-default"
+}

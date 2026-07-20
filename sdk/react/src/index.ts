@@ -20,7 +20,7 @@ export interface LiveQueryResult<T extends Document> {
   readonly token?: string;
 }
 
-type SupportedLiveQuery<T extends Document> = LiveQuery<T> | RemoteLiveQuery<T>;
+export type SupportedLiveQuery<T extends Document> = LiveQuery<T> | RemoteLiveQuery<T>;
 
 export function useLiveQuery<T extends Document>(
   query: SupportedLiveQuery<T>,

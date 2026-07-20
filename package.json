@@ -8,11 +8,19 @@
   },
   "packageManager": "pnpm@11.10.0",
   "scripts": {
-    "check": "pnpm run check:dashboard && pnpm --filter @meldbase/client check && pnpm --filter @meldbase/client build && pnpm --filter @meldbase/server check && pnpm --filter @meldbase/server build && pnpm --filter @meldbase/react check && pnpm --filter @meldbase/react build && pnpm --filter @meldbase/example-realtime-todos check",
+    "check": "pnpm run docs:build && pnpm run check:dashboard && pnpm --filter @meldbase/client check && pnpm --filter @meldbase/client build && pnpm --filter @meldbase/server check && pnpm --filter @meldbase/server build && pnpm --filter @meldbase/react check && pnpm --filter @meldbase/react build && pnpm --filter @meldbase/example-realtime-todos check",
     "build:dashboard": "pnpm --filter @meldbase/admin-dashboard build",
     "check:dashboard": "pnpm --filter @meldbase/admin-dashboard check && pnpm run build:dashboard",
     "test": "pnpm --filter './sdk/*' test",
     "pack:check": "pnpm --filter './sdk/*' build && node scripts/verify-sdk-packages.mjs",
-    "build:example": "pnpm --filter @meldbase/example-realtime-todos build"
+    "build:example": "pnpm --filter @meldbase/example-realtime-todos build",
+    "docs:api": "typedoc --options typedoc.json",
+    "docs:dev": "pnpm docs:api && vitepress dev docs",
+    "docs:build": "pnpm docs:api && vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "typedoc": "0.28.20",
+    "vitepress": "2.0.0-alpha.18"
   }
 }

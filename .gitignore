@@ -19,3 +19,6 @@ coverage/
 .vscode/
 tmp/
 local-playground/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+docs/public/api/typescript/

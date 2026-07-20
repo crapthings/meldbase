@@ -75,7 +75,7 @@ JWKS endpoint. This template uses HS256; keep the public listener on loopback
 until an application-owned TLS proxy is in place.
 
 For a Linux host using systemd, the repository includes a conservative local
-service template in [`deploy/single-node/systemd`](../deploy/single-node/systemd).
+service template in [`deploy/single-node/systemd`](https://github.com/crapthings/meldbase/tree/main/deploy/single-node/systemd).
 Its launcher forces both listeners to loopback, requires a real admin token and
 JWT/workspace settings, runs as an unprivileged `meldbase` user and permits
 writes only under `/var/lib/meldbase`. It is intentionally not a public-network
@@ -132,7 +132,7 @@ curl --fail http://127.0.0.1:8080/readyz
 requires the database to be readable and writable, and returns HTTP 503 after
 a fail-stop durability error.
 
-## 3. Back up and rehearse recovery
+## 4. Back up and rehearse recovery
 
 The physical backup preserves the source database identity and complete
 physical history. It is a recovery artifact, not an independently writable
@@ -144,8 +144,8 @@ Create a backup and retain both the artifact and its JSON receipt together:
 
 ```sh
 meld backup \
-  --db /srv/meldbase/data/app.meld2 \
-  --out /srv/meldbase/backups/app-20260720.meld2 \
+  --db /srv/meldbase/data/app.meld \
+  --out /srv/meldbase/backups/app-20260720.meld \
   --timeout 10m > /srv/meldbase/backups/app-20260720.receipt.json
 ```
 
@@ -155,12 +155,12 @@ the restored file visible:
 
 ```sh
 meld restore \
-  --in /srv/meldbase/backups/app-20260720.meld2 \
+  --in /srv/meldbase/backups/app-20260720.meld \
   --receipt /srv/meldbase/backups/app-20260720.receipt.json \
-  --out /srv/meldbase/rehearsals/app-20260720-restored.meld2 \
+  --out /srv/meldbase/rehearsals/app-20260720-restored.meld \
   --timeout 10m
-meld inspect --db /srv/meldbase/rehearsals/app-20260720-restored.meld2 --require-compatible
-meld verify --db /srv/meldbase/rehearsals/app-20260720-restored.meld2 --timeout 10m
+meld inspect --db /srv/meldbase/rehearsals/app-20260720-restored.meld --require-compatible
+meld verify --db /srv/meldbase/rehearsals/app-20260720-restored.meld --timeout 10m
 ```
 
 For a repeatable offline drill that retains all evidence, use:
@@ -168,7 +168,7 @@ For a repeatable offline drill that retains all evidence, use:
 ```sh
 scripts/single-node-backup-restore-drill.sh \
   --meld "$(command -v meld)" \
-  --db /srv/meldbase/data/app.meld2 \
+  --db /srv/meldbase/data/app.meld \
   --out-dir /srv/meldbase/rehearsals/20260720 \
   --timeout 10m
 ```
@@ -180,7 +180,7 @@ before treating a new schema or release as recoverable. Copy the finished
 artifact and receipt to the off-host backup destination after local
 verification.
 
-## 4. Upgrade and rollback
+## 5. Upgrade and rollback
 
 Treat an upgrade as an offline operation until the target release's compatibility
 has been qualified:
@@ -200,3 +200,6 @@ Keep the original database file until the new binary has passed the health and
 application checks. Never solve a failed upgrade by overwriting an existing
 database or restore target: all backup and restore commands intentionally
 refuse that operation.
+
+For a routine backup-set layout, retention policy, off-host copy boundary, and
+the full restore/upgrade checklist, use the [backup and upgrade runbook](operations/backup-and-upgrade).

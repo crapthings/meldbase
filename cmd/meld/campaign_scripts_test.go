@@ -118,7 +118,7 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		command := exec.Command("sh", launcher)
 		command.Env = append(os.Environ(),
 			"MELDBASE_BIN="+binary,
-			"MELDBASE_DB=/var/lib/meldbase/data/test.meld2",
+			"MELDBASE_DB=/var/lib/meldbase/data/test.meld",
 			"MELDBASE_ADMIN_TOKEN="+strings.Repeat("a", 32),
 			"MELDBASE_JWT_HS256_SECRET_FILE="+secretPath,
 			"MELDBASE_JWT_ISSUER=https://identity.example.test/",
@@ -138,7 +138,7 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		t.Fatal(err)
 	}
 	want := []string{
-		"serve", "--db", "/var/lib/meldbase/data/test.meld2", "--addr", "127.0.0.1:8080",
+		"serve", "--db", "/var/lib/meldbase/data/test.meld", "--addr", "127.0.0.1:8080",
 		"--jwt-hs256-secret-file", secretPath, "--jwt-issuer", "https://identity.example.test/", "--jwt-audience", "meldbase-api",
 		"--workspace-collections", "projects,tasks,comments", "--workspace-field", "workspaceId",
 		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",

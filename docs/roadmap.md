@@ -10,14 +10,12 @@ second runtime path to carry forward.
 
 ## Next: a dependable single-node package
 
-- [ ] Make the JWT-isolated single-node deployment the documented default,
+- [x] Make the JWT-isolated single-node deployment the documented default,
   including systemd, secret-file permissions, health probes and reverse-proxy
   boundaries.
-- [ ] Provide a repeatable local bootstrap that couples the application identity
-  service, the database JWT configuration and the React playground.
-- [ ] Publish an operator runbook for backup retention, restore rehearsal,
+- [x] Publish an operator runbook for backup retention, restore rehearsal,
   upgrades and rollback-protection checks.
-- [ ] Add a concise documentation index so quick start, storage contract,
+- [x] Add a concise documentation index so quick start, storage contract,
   transport contract and operational guides each have one authoritative home.
 
 ## Evidence before a production claim
@@ -42,6 +40,10 @@ MongoDB wire/BSON compatibility, sharding, distributed transactions, offline
 conflict resolution, geospatial/full-text/vector indexes, TTL, complex
 aggregation and a built-in end-user identity product are outside the current
 roadmap.
+
+An application-owned identity service and the private local playground are also
+outside this repository's product scope. Meldbase documents their integration
+boundary but does not publish a reference user service or demo data plane.
 
 ## Historical material
 

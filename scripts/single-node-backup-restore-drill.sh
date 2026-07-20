@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  single-node-backup-restore-drill.sh --meld /path/to/meld --db /path/to/app.meld2 --out-dir /new/rehearsal-dir [--timeout 10m] [--max-bytes N]
+  single-node-backup-restore-drill.sh --meld /path/to/meld --db /path/to/app.meld --out-dir /new/rehearsal-dir [--timeout 10m] [--max-bytes N]
 
 The database must be offline. The script creates --out-dir exactly once and
 retains the backup, receipt, restored database, and verification reports as
@@ -47,9 +47,9 @@ if [[ -e "$out_dir" ]]; then
 fi
 
 mkdir "$out_dir"
-artifact="$out_dir/physical-backup.meld2"
+artifact="$out_dir/physical-backup.meld"
 receipt="$out_dir/backup-receipt.json"
-restored="$out_dir/restored.meld2"
+restored="$out_dir/restored.meld"
 restore_receipt="$out_dir/restore-receipt.json"
 
 "$meld" inspect --db "$database" --require-compatible >"$out_dir/source-inspect.json"

@@ -4,7 +4,7 @@ set -eu
 # This launcher runs the current JWT/workspace-isolated server path. Keep the
 # public listener on loopback until an application-owned TLS proxy is configured.
 : "${MELDBASE_BIN:=/usr/local/bin/meld}"
-: "${MELDBASE_DB:=/var/lib/meldbase/data/app.meld2}"
+: "${MELDBASE_DB:=/var/lib/meldbase/data/app.meld}"
 : "${MELDBASE_ADDR:=127.0.0.1:8080}"
 : "${MELDBASE_ADMIN_ADDR:=127.0.0.1:9091}"
 : "${MELDBASE_ADMIN_TOKEN:=}"

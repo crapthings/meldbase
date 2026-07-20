@@ -2,8 +2,11 @@
 
 ## Start here
 
-- [Project overview and SDK quick start](../README.md)
+- [Project overview and SDK quick start](https://github.com/crapthings/meldbase#meldbase)
+- [Live todo application example](guide/realtime-todos.md)
+- [Identity, users, and workspace isolation](guide/identity-and-workspaces.md)
 - [Single-node deployment and recovery](single-node-deployment.md)
+- [Backup, recovery, and upgrade runbook](operations/backup-and-upgrade.md)
 - [Current alpha capability audit](mvp-audit.md)
 - [Roadmap](roadmap.md)
 
