@@ -233,6 +233,10 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 			t.Fatalf("manifest %s was accepted", input)
 		}
 	}
+	_, err = ParseCollectionAccessManifestJSON([]byte(`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative","fields":{"queryPaths":["_id"]}}]}`))
+	if err == nil || !strings.Contains(err.Error(), `collection access[0] "tasks"`) || !strings.Contains(err.Error(), "query path is invalid") {
+		t.Fatalf("field diagnostic=%v", err)
+	}
 	emptyFields, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{
 		WorkspaceField: "workspaceId",
 		CollectionAccess: []CollectionAccess{{

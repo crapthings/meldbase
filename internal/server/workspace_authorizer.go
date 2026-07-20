@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -100,31 +101,35 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 		return nil, errors.New("workspace authorizer requires between one and 4096 collection access declarations")
 	}
 	collections := make(map[string]workspaceCollectionAccess, len(access))
-	for _, rule := range access {
+	for index, rule := range access {
+		declaration := fmt.Sprintf("collection access[%d]", index)
+		if rule.Collection != "" {
+			declaration += fmt.Sprintf(" %q", rule.Collection)
+		}
 		if !workspaceIdentifier.MatchString(rule.Collection) {
-			return nil, errors.New("workspace collection name is invalid")
+			return nil, fmt.Errorf("%s: collection name is invalid", declaration)
 		}
 		if _, duplicate := collections[rule.Collection]; duplicate {
-			return nil, errors.New("workspace collection access declarations must be unique")
+			return nil, fmt.Errorf("%s: collection declarations must be unique", declaration)
 		}
 		switch rule.Mode {
 		case CollectionAccessCollaborative, CollectionAccessRPCOnly:
 			if rule.OwnerField != "" {
-				return nil, errors.New("only owner collection access may declare an owner field")
+				return nil, fmt.Errorf("%s: only owner access may declare ownerField", declaration)
 			}
 		case CollectionAccessOwner:
 			if !workspaceIdentifier.MatchString(rule.OwnerField) || rule.OwnerField == config.WorkspaceField {
-				return nil, errors.New("owner collection access requires a distinct simple owner field name")
+				return nil, fmt.Errorf("%s: owner access requires a distinct simple ownerField", declaration)
 			}
 		default:
-			return nil, errors.New("workspace collection access mode is invalid")
+			return nil, fmt.Errorf("%s: mode is invalid", declaration)
 		}
 		fields, err := normalizeCollectionAccessFields(rule.Fields)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s: %w", declaration, err)
 		}
 		if rule.Mode == CollectionAccessRPCOnly && fields != nil {
-			return nil, errors.New("rpc-only collection access cannot declare generic field access")
+			return nil, fmt.Errorf("%s: rpc_only access cannot declare fields", declaration)
 		}
 		rule.Fields = fields
 		canonical, err := json.Marshal(struct {
