@@ -39,3 +39,12 @@ worker credential, never a browser or admin token.
 
 See `docs/server-js-sdk.md` in the repository for protocol and transaction
 semantics.
+
+## Internal layout
+
+The package remains one installable SDK. Its source is split by runtime
+responsibility: `worker.ts` owns the connection lifecycle, `transaction.ts`
+bridges transactional operations, `protocol.ts` validates capability discovery,
+and `definitions.ts` owns public method/publication declarations. These are
+implementation modules; consumers should continue importing only from
+`@meldbase/server`.

@@ -19,8 +19,20 @@
     }
   },
   "files": [
+    "dist/definitions.js",
+    "dist/definitions.d.ts",
+    "dist/errors.js",
+    "dist/errors.d.ts",
     "dist/index.js",
     "dist/index.d.ts",
+    "dist/protocol.js",
+    "dist/protocol.d.ts",
+    "dist/shared.js",
+    "dist/shared.d.ts",
+    "dist/transaction.js",
+    "dist/transaction.d.ts",
+    "dist/types.js",
+    "dist/types.d.ts",
     "dist/worker.js",
     "dist/worker.d.ts"
   ],

@@ -10,7 +10,7 @@ const temporary = mkdtempSync(join(tmpdir(), "meldbase-sdk-pack-"));
 
 const packages = [
   {
-    directory: "sdk/typescript",
+    directory: "sdk/client",
     name: "@meldbase/client",
     expected: [
       "LICENSE", "README.md", "package.json",
@@ -21,7 +21,11 @@ const packages = [
   {
     directory: "sdk/server",
     name: "@meldbase/server",
-    expected: ["LICENSE", "README.md", "package.json", "dist/index.d.ts", "dist/index.js", "dist/worker.d.ts", "dist/worker.js"],
+    expected: [
+      "LICENSE", "README.md", "package.json",
+      ...["definitions", "errors", "index", "protocol", "shared", "transaction", "types", "worker"]
+        .flatMap((name) => [`dist/${name}.d.ts`, `dist/${name}.js`]),
+    ],
   },
   {
     directory: "sdk/react",
@@ -164,7 +168,7 @@ function verifyTypeScriptConsumer() {
     useLiveQuery(remote);
     void result; void method;
   `);
-  const tsc = realPackage("sdk/typescript/node_modules/typescript/bin/tsc");
+  const tsc = realPackage("sdk/client/node_modules/typescript/bin/tsc");
   execFileSync(process.execPath, [tsc, "-p", join(consumer, "tsconfig.json")], { cwd: consumer, stdio: "pipe" });
 }
 

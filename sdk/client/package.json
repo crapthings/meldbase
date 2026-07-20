@@ -6,7 +6,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/crapthings/meldbase.git",
-    "directory": "sdk/typescript"
+    "directory": "sdk/client"
   },
   "homepage": "https://github.com/crapthings/meldbase#readme",
   "bugs": "https://github.com/crapthings/meldbase/issues",

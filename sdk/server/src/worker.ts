@@ -1,147 +1,61 @@
 import {
-  decodeDocument,
   decodeQuerySpec,
   decodeValue,
-  encodeInputDocument,
-  encodeMutationSpec,
   encodeQuerySpec,
   encodeValue,
-  DEFAULT_QUERY_LIMITS,
-  QueryValidationError,
-  decodeProtocolDescriptor,
   MELDBASE_PROTOCOL_VERSION,
-  supportsProtocol,
 } from "@meldbase/client";
-import type { Document, InputDocument, MutationSpec, ProtocolDescriptor, QuerySpec, Value, WireValue } from "@meldbase/client";
+import type { ProtocolDescriptor, WireValue } from "@meldbase/client";
 
-const METHOD_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/;
-const WORKER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
-const COLLECTION_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
-const ID_PATTERN = /^[0-9a-f]{32}$/;
-const ERROR_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+import { publish, rpc, transactional, validatePublicationOptions } from "./definitions.js";
+import { MeldbaseMethodError, MeldbaseWorkerProtocolError } from "./errors.js";
+import { validateWorkerProtocol } from "./protocol.js";
+import {
+  abortableDelay,
+  asError,
+  COLLECTION_PATTERN,
+  deferred,
+  type Deferred,
+  exactKeys,
+  METHOD_PATTERN,
+  parseJSONRecord,
+  parseWorkerURL,
+  record,
+  WORKER_PATTERN,
+} from "./shared.js";
+import { RemoteWriteTransaction } from "./transaction.js";
+import type {
+  MethodContext,
+  MethodDefinition,
+  PublicationContext,
+  PublicationDefinition,
+  WorkerOptions,
+  WorkerSocket,
+  WorkerState,
+} from "./types.js";
 
-export interface Principal {
-  readonly subject: string;
-  readonly tenant: string;
-}
-
-export interface MethodContext {
-  readonly principal: Principal;
-  readonly signal: AbortSignal;
-}
-
-export interface PublicationContext extends MethodContext {
-  readonly collection: string;
-  readonly query: QuerySpec;
-}
-
-export interface WriteTransaction {
-  get(collection: string, id: string): Promise<Document>;
-  insert(collection: string, document: InputDocument): Promise<string>;
-  replace(collection: string, id: string, document: InputDocument): Promise<void>;
-  update(collection: string, id: string, mutation: MutationSpec): Promise<void>;
-  delete(collection: string, id: string): Promise<void>;
-  invalidatePublication(collection: string): Promise<void>;
-}
-
-export type MethodHandler = (context: MethodContext, arguments_: readonly Value[]) => Value | Promise<Value>;
-export type TransactionalMethodHandler = (context: MethodContext, arguments_: readonly Value[], transaction: WriteTransaction) => Value | Promise<Value>;
-
-export type MethodDefinition =
-  | { readonly mode: "rpc"; readonly handler: MethodHandler }
-  | { readonly mode: "transactional"; readonly handler: TransactionalMethodHandler };
-
-export interface PublicationOptions {
-  readonly version: string;
-  readonly maxResults: number;
-  readonly queryPaths: "*" | readonly string[];
-  readonly resultFields: "*" | readonly string[];
-}
-
-export type PublicationHandler = (context: PublicationContext) => QuerySpec | null | Promise<QuerySpec | null>;
-
-export interface PublicationDefinition extends PublicationOptions {
-  readonly handler: PublicationHandler;
-}
-
-export function rpc(handler: MethodHandler): MethodDefinition {
-  if (typeof handler !== "function") throw new TypeError("RPC handler must be a function");
-  return { mode: "rpc", handler };
-}
-
-export function transactional(handler: TransactionalMethodHandler): MethodDefinition {
-  if (typeof handler !== "function") throw new TypeError("Transactional RPC handler must be a function");
-  return { mode: "transactional", handler };
-}
-
-export function publish(options: PublicationOptions, handler: PublicationHandler): PublicationDefinition {
-  if (typeof handler !== "function") throw new TypeError("Publication handler must be a function");
-  validatePublicationOptions(options);
-  return { ...options, handler };
-}
-
-export interface WorkerSocket {
-  readonly readyState: number;
-  send(data: string): void;
-  close(code?: number, reason?: string): void;
-  addEventListener(type: "open" | "close" | "error" | "message", listener: (event: any) => void): void;
-  removeEventListener(type: "open" | "close" | "error" | "message", listener: (event: any) => void): void;
-}
-
-export type WorkerSocketFactory = (url: string, options: { readonly headers: Readonly<Record<string, string>> }) => WorkerSocket;
-export type WorkerState = "idle" | "connecting" | "registering" | "ready" | "stopped";
-
-export interface WorkerOptions {
-  readonly url: string;
-  readonly token: string;
-  readonly workerId: string;
-  readonly methods?: Readonly<Record<string, MethodDefinition>>;
-  readonly publications?: Readonly<Record<string, PublicationDefinition>>;
-  readonly webSocketFactory: WorkerSocketFactory;
-  readonly reconnectMinMs?: number;
-  readonly reconnectMaxMs?: number;
-  readonly onStateChange?: (state: WorkerState) => void;
-  readonly onError?: (error: Error) => void;
-  // Require the Hub to acknowledge the opt-in capability discovery request.
-  readonly requireProtocol?: boolean;
-}
-
-export class MeldbaseMethodError extends Error {
-  readonly code: string;
-
-  constructor(code: string) {
-    if (!ERROR_PATTERN.test(code)) throw new TypeError("Invalid Meldbase method error code");
-    super(`Meldbase method failed: ${code}`);
-    this.name = "MeldbaseMethodError";
-    this.code = code;
-  }
-}
-
-export class MeldbaseWorkerProtocolError extends Error {
-  readonly required: readonly string[];
-  constructor(required: readonly string[]) {
-    super(`Meldbase worker protocol does not support: ${required.join(", ")}`);
-    this.name = "MeldbaseWorkerProtocolError";
-    this.required = Object.freeze([...required]);
-  }
-}
+export { publish, rpc, transactional } from "./definitions.js";
+export { MeldbaseMethodError, MeldbaseWorkerProtocolError } from "./errors.js";
+export type {
+  MethodContext,
+  MethodDefinition,
+  MethodHandler,
+  Principal,
+  PublicationContext,
+  PublicationDefinition,
+  PublicationHandler,
+  PublicationOptions,
+  TransactionalMethodHandler,
+  WorkerOptions,
+  WorkerSocket,
+  WorkerSocketFactory,
+  WorkerState,
+  WriteTransaction,
+} from "./types.js";
 
 interface ActiveCall {
   readonly controller: AbortController;
   readonly transaction?: RemoteWriteTransaction;
-}
-
-interface Deferred<T> {
-  readonly promise: Promise<T>;
-  resolve(value: T): void;
-  reject(error: unknown): void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail; });
-  return { promise, resolve, reject };
 }
 
 export class MeldbaseWorker {
@@ -160,7 +74,7 @@ export class MeldbaseWorker {
 
   constructor(options: WorkerOptions) {
     if (!options || typeof options.webSocketFactory !== "function") throw new TypeError("Worker WebSocket factory is required");
-		if (options.requireProtocol !== undefined && typeof options.requireProtocol !== "boolean") throw new TypeError("requireProtocol must be boolean");
+    if (options.requireProtocol !== undefined && typeof options.requireProtocol !== "boolean") throw new TypeError("requireProtocol must be boolean");
     const url = parseWorkerURL(options.url);
     if (options.token.length < 32 || options.token.length > 4096) throw new TypeError("Worker token must contain between 32 and 4096 bytes");
     if (!WORKER_PATTERN.test(options.workerId)) throw new TypeError("Invalid worker ID");
@@ -230,7 +144,7 @@ export class MeldbaseWorker {
       await abortableDelay(delay, this.#stopController.signal);
       delay = Math.min(this.#options.reconnectMaxMs, delay * 2);
     }
-		if (this.#fatalError) this.#setState("stopped");
+    if (this.#fatalError) this.#setState("stopped");
   }
 
   async #openSession(): Promise<void> {
@@ -255,13 +169,13 @@ export class MeldbaseWorker {
     const onError = () => closed.reject(new Error("Meldbase worker socket failed"));
     const onMessage = (event: { data?: unknown }) => {
       void this.#receive(session, event.data).catch((error) => {
-		const failure = asError(error);
-		if (failure instanceof MeldbaseWorkerProtocolError) {
-			this.#fatalError = failure;
-			this.#ready?.reject(failure);
-			this.#stopController.abort(failure);
-		}
-		this.#options.onError?.(failure);
+        const failure = asError(error);
+        if (failure instanceof MeldbaseWorkerProtocolError) {
+          this.#fatalError = failure;
+          this.#ready?.reject(failure);
+          this.#stopController.abort(failure);
+        }
+        this.#options.onError?.(failure);
         socket.close(1008, "protocol violation");
       });
     };
@@ -298,33 +212,15 @@ export class MeldbaseWorker {
     const frame = parseJSONRecord(data);
     if (frame.v !== MELDBASE_PROTOCOL_VERSION || typeof frame.type !== "string") throw new Error("Invalid worker frame header");
     switch (frame.type) {
-      case "registered":
-		exactKeys(frame, frame.protocol === undefined ? ["v", "type", "sessionId", "limits"] : ["v", "type", "sessionId", "limits", "protocol"]);
+      case "registered": {
+        exactKeys(frame, frame.protocol === undefined ? ["v", "type", "sessionId", "limits"] : ["v", "type", "sessionId", "limits", "protocol"]);
         if (typeof frame.sessionId !== "string" || !record(frame.limits)) throw new Error("Invalid registered frame");
-		if (frame.protocol === undefined && this.#options.requireProtocol) throw new MeldbaseWorkerProtocolError(["protocol.discovery"]);
-		if (frame.protocol !== undefined) {
-			let descriptor: ProtocolDescriptor;
-			try { descriptor = decodeProtocolDescriptor(frame.protocol); }
-			catch { throw new MeldbaseWorkerProtocolError(Object.freeze(["valid_descriptor"])); }
-			const required = new Set<string>();
-			if ([...this.#methods.values()].some((method) => method.mode === "rpc")) required.add("rpc");
-			if ([...this.#methods.values()].some((method) => method.mode === "transactional")) {
-				required.add("rpc.transactional");
-				required.add("transaction.compiled_update");
-				required.add("transaction.invalidate_publication");
-				required.add("transaction.point_operations");
-			}
-			if (this.#publications.size > 0) required.add("publication.policy");
-			const missing = [...required].filter((capability) => !descriptor.capabilities.includes(capability));
-			if (!supportsProtocol(descriptor, MELDBASE_PROTOCOL_VERSION) || missing.length > 0) {
-				if (!descriptor.versions.includes(MELDBASE_PROTOCOL_VERSION)) missing.unshift(`version.${MELDBASE_PROTOCOL_VERSION}`);
-				throw new MeldbaseWorkerProtocolError(Object.freeze(missing));
-			}
-			this.#protocol = descriptor;
-		}
+        const descriptor = validateWorkerProtocol(frame.protocol, this.#options.requireProtocol, this.#methods, this.#publications);
+        if (descriptor) this.#protocol = descriptor;
         this.#setState("ready");
         this.#ready?.resolve();
         return;
+      }
       case "invoke":
         await this.#invoke(frame);
         return;
@@ -442,168 +338,6 @@ export class MeldbaseWorker {
     this.#state = state;
     this.#options.onStateChange?.(state);
   }
-}
-
-class RemoteWriteTransaction implements WriteTransaction {
-  readonly #callId: string;
-  readonly #send: (value: unknown) => void;
-  #nextOperation = 1;
-  #pending: { readonly opId: string; readonly deferred: Deferred<Value> } | undefined;
-  #closed?: Error;
-  readonly #invalidatedPublications = new Set<string>();
-
-  constructor(callId: string, send: (value: unknown) => void) {
-    this.#callId = callId;
-    this.#send = send;
-  }
-
-  async get(collection: string, id: string): Promise<Document> {
-    const value = await this.#operation("get", collection, id);
-    return decodeDocument(encodeValue(value));
-  }
-
-  async insert(collection: string, document: InputDocument): Promise<string> {
-    const value = await this.#operation("insert", collection, undefined, document);
-    if (typeof value !== "string" || !ID_PATTERN.test(value)) throw new Error("Invalid inserted document ID");
-    return value;
-  }
-
-  async replace(collection: string, id: string, document: InputDocument): Promise<void> {
-    await this.#operation("replace", collection, id, document);
-  }
-
-  async update(collection: string, id: string, mutation: MutationSpec): Promise<void> {
-    await this.#operation("update", collection, id, undefined, mutation);
-  }
-
-  async delete(collection: string, id: string): Promise<void> {
-    await this.#operation("delete", collection, id);
-  }
-
-  async invalidatePublication(collection: string): Promise<void> {
-    if (this.#invalidatedPublications.has(collection)) throw new Error("Publication was already invalidated in this transaction");
-    this.#invalidatedPublications.add(collection);
-    try {
-      await this.#operation("invalidate_publication", collection);
-    } catch (error) {
-      this.#invalidatedPublications.delete(collection);
-      throw error;
-    }
-  }
-
-  receive(frame: Record<string, unknown>): void {
-    if (!this.#pending || frame.opId !== this.#pending.opId) throw new Error("Unexpected transaction operation response");
-    const pending = this.#pending;
-    this.#pending = undefined;
-    if (frame.type === "tx_result") {
-      pending.deferred.resolve(decodeValue(frame.result));
-      return;
-    }
-    if (!record(frame.error) || typeof frame.error.code !== "string" || !ERROR_PATTERN.test(frame.error.code)) {
-      pending.deferred.reject(new Error("Invalid transaction error"));
-      return;
-    }
-    pending.deferred.reject(new MeldbaseMethodError(frame.error.code));
-  }
-
-  close(error: Error): void {
-    if (this.#closed) return;
-    this.#closed = error;
-    this.#pending?.deferred.reject(error);
-    this.#pending = undefined;
-  }
-
-  async #operation(operation: string, collection: string, id?: string, document?: InputDocument, mutation?: MutationSpec): Promise<Value> {
-    if (this.#closed) throw this.#closed;
-    if (this.#pending) throw new Error("Transactional operations must be awaited sequentially");
-    if (!COLLECTION_PATTERN.test(collection)) throw new TypeError("Invalid collection name");
-    if (id !== undefined && !ID_PATTERN.test(id)) throw new TypeError("Invalid document ID");
-    const opId = `op-${this.#nextOperation++}`;
-    const response = deferred<Value>();
-    this.#pending = { opId, deferred: response };
-    try {
-      this.#send({
-        v: MELDBASE_PROTOCOL_VERSION, type: "tx_op", callId: this.#callId, opId, operation, collection,
-        ...(id !== undefined ? { id } : {}),
-        ...(document !== undefined ? { document: encodeInputDocument(document) } : {}),
-        ...(mutation !== undefined ? { mutation: encodeMutationSpec(mutation) } : {}),
-      });
-    } catch (error) {
-      this.#pending = undefined;
-      throw error;
-    }
-    return response.promise;
-  }
-}
-
-function parseWorkerURL(raw: string): string {
-  const url = new URL(raw);
-  if ((url.protocol !== "ws:" && url.protocol !== "wss:") || !url.host || url.username || url.password || url.search || url.hash) {
-    throw new TypeError("Worker URL must be an absolute ws(s) URL without credentials or query parameters");
-  }
-  return url.toString();
-}
-
-function validatePublicationOptions(options: PublicationOptions): void {
-  const encodedVersion = options && typeof options.version === "string" ? new TextEncoder().encode(options.version) : new Uint8Array();
-  if (!options || typeof options.version !== "string" || options.version.length === 0 || encodedVersion.byteLength > 128 || new TextDecoder().decode(encodedVersion) !== options.version) {
-    throw new TypeError("Publication version must contain between 1 and 128 UTF-8 bytes");
-  }
-  if (!Number.isSafeInteger(options.maxResults) || options.maxResults <= 0 || options.maxResults > DEFAULT_QUERY_LIMITS.maxLimit) {
-    throw new TypeError("Publication maxResults is outside query limits");
-  }
-  validatePolicyFields(options.queryPaths, true);
-  validatePolicyFields(options.resultFields, false);
-}
-
-function validatePolicyFields(value: "*" | readonly string[], paths: boolean): void {
-  if (value === "*") return;
-  if (!Array.isArray(value) || value.length > 256) throw new TypeError("Publication field policy must be '*' or a bounded array");
-  const seen = new Set<string>();
-  for (const field of value) {
-    if (typeof field !== "string" || seen.has(field)) throw new TypeError("Publication fields must be unique strings");
-    if (paths) {
-      if (field.includes("\0")) throw new TypeError("Publication query paths cannot contain NUL");
-      decodeQuerySpec({ version: 1, where: { op: "exists", path: field, value: true } });
-    } else if (!field || field.includes("\0") || field.includes(".") || field.startsWith("$") || field === "__proto__" || field === "prototype" || field === "constructor") {
-      throw new TypeError(`Unsafe publication result field: ${JSON.stringify(field)}`);
-    }
-    seen.add(field);
-  }
-}
-
-function record(value: unknown): value is Record<string, any> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function parseJSONRecord(raw: string): Record<string, unknown> {
-  let value: unknown;
-  try { value = JSON.parse(raw); } catch { throw new Error("Malformed worker JSON"); }
-  if (!record(value)) throw new Error("Worker frame must be an object");
-  return value;
-}
-
-function exactKeys(record_: Record<string, unknown>, expected: readonly string[]): void {
-  const actual = Object.keys(record_).sort();
-  const wanted = [...expected].sort();
-  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) throw new Error("Worker frame contains unknown or missing fields");
-}
-
-function asError(value: unknown): Error {
-  return value instanceof Error ? value : new Error("Unknown Meldbase worker failure");
-}
-
-function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(done, milliseconds);
-    signal.addEventListener("abort", done, { once: true });
-    function done(): void {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", done);
-      resolve();
-    }
-  });
 }
 
 // Keep the imported wire type part of the generated public declaration graph.

@@ -49,7 +49,7 @@ importers:
     dependencies:
       '@meldbase/client':
         specifier: workspace:*
-        version: link:../../sdk/typescript
+        version: link:../../sdk/client
       '@meldbase/react':
         specifier: workspace:*
         version: link:../../sdk/react
@@ -80,7 +80,7 @@ importers:
     dependencies:
       '@meldbase/client':
         specifier: workspace:*
-        version: link:../../sdk/typescript
+        version: link:../../sdk/client
       '@meldbase/server':
         specifier: workspace:*
         version: link:../../sdk/server
@@ -88,11 +88,20 @@ importers:
         specifier: ^8.21.0
         version: 8.21.0
 
+  sdk/client:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   sdk/react:
     devDependencies:
       '@meldbase/client':
         specifier: workspace:*
-        version: link:../typescript
+        version: link:../client
       '@types/jsdom':
         specifier: ^27.0.0
         version: 27.0.0
@@ -122,16 +131,7 @@ importers:
     dependencies:
       '@meldbase/client':
         specifier: workspace:*
-        version: link:../typescript
-    devDependencies:
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      typescript:
-        specifier: ^5.9.0
-        version: 5.9.3
-
-  sdk/typescript:
+        version: link:../client
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
