@@ -168,6 +168,11 @@ a new authority domain by registering an arbitrary name. A managed collection
 with no connected owner fails closed; collections not listed continue through
 the local `Authorizer` alone.
 
+A publication is a read-visibility extension only: it can narrow HTTP queries
+and realtime subscriptions, but cannot authorize generic inserts, updates, or
+deletes. Put role-dependent writes in a Go `Authorizer` or an explicitly
+authorized RPC method.
+
 The registration contains the static maximum result count, client-query paths
 and projected result fields. Those declarations are hashed into the policy
 version. Per query or subscription, Go sends one `authorize_query` containing

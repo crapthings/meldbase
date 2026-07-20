@@ -150,6 +150,13 @@ depends on other data, commit `invalidatePublication()` with the membership or
 role change so existing subscriptions resynchronize before stale visibility can
 continue.
 
+A Worker `publish()` policy (and `QueryPolicyResolver`) is deliberately
+**read-only**: it governs HTTP queries and subscriptions, never generic
+inserts, updates, or deletes. For a role- or membership-dependent write, use a
+full Go `Authorizer`, or set the collection to `rpc_only` and expose a named
+RPC method with its own `RPCAuthorizer`. This keeps a write decision explicit
+instead of accidentally deriving it from read visibility.
+
 Keep account credentials, password hashes, refresh tokens, and global account
 membership decisions out of generic client collection access. See
 [Identity, users, and workspaces](./identity-and-workspaces) for the identity
