@@ -11,6 +11,7 @@ export type { CallOptions, ClientOptions, RealtimeTicket, RPCTransport, Subscrib
 export { decodeProtocolDescriptor, MELDBASE_PROTOCOL_VERSION, supportsProtocol } from "./protocol.js";
 export type { ProtocolDescriptor } from "./protocol.js";
 export { decodeDocument, decodeQuerySpec, decodeValue, encodeDocument, encodeInputDocument, encodeQuerySpec, encodeValue } from "./wire.js";
+export { newDocumentID } from "./safe-value.js";
 export type { WireQueryExpr, WireQuerySpec, WireValue } from "./wire.js";
 export type {
   CompareOperator,

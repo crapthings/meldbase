@@ -416,6 +416,9 @@ func decodeRPCArguments(rawArguments []json.RawMessage, limits meldbase.QueryLim
 }
 
 func classifyRPCError(err error) (int, string) {
+	if errors.Is(err, meldbase.ErrCommitOutcomeUnknown) {
+		return http.StatusConflict, "rpc_outcome_unknown"
+	}
 	if errors.Is(err, meldbase.ErrDurability) || errors.Is(err, meldbase.ErrClosed) ||
 		errors.Is(err, meldbase.ErrWriteTransactionUnsupported) {
 		return http.StatusServiceUnavailable, "database_unavailable"
