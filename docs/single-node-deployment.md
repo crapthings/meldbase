@@ -139,6 +139,25 @@ curl --fail http://127.0.0.1:8080/livez
 curl --fail http://127.0.0.1:8080/readyz
 ```
 
+### Browser application behind a TLS proxy
+
+Keep Meldbase itself on loopback, then configure the public browser boundary in
+the generated bundle's `config/meldbase.env` or the systemd
+`/etc/meldbase/meldbase.env`. The HTTP list is exact; the WebSocket list can
+also pin the scheme. For one application origin:
+
+```sh
+MELDBASE_PUBLIC_REALTIME_URL=wss://api.example.com/v1/realtime
+MELDBASE_HTTP_ORIGINS=https://app.example.com
+MELDBASE_REALTIME_ORIGIN_PATTERNS=https://app.example.com
+```
+
+Restart the service after editing. The application proxy must forward HTTP
+upgrade requests to `127.0.0.1:8080`; it must not expose the dashboard listener
+at `127.0.0.1:9091`. The ticket endpoint is governed by the exact HTTP origin
+list, while the WebSocket handshake is governed by the realtime pattern list.
+Neither replaces JWT authentication or collection/RPC authorization.
+
 `/livez` says the Go handler is responsive. `/readyz` (and `/health`) also
 requires the database to be readable and writable, and returns HTTP 503 after
 a fail-stop durability error.

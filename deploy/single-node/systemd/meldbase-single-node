@@ -12,6 +12,9 @@ set -eu
 : "${MELDBASE_JWT_ISSUER:=}"
 : "${MELDBASE_JWT_AUDIENCE:=}"
 : "${MELDBASE_ACCESS_POLICY_FILE:=}"
+: "${MELDBASE_PUBLIC_REALTIME_URL:=}"
+: "${MELDBASE_HTTP_ORIGINS:=http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173}"
+: "${MELDBASE_REALTIME_ORIGIN_PATTERNS:=localhost:*,127.0.0.1:*,[[]::1]:*}"
 
 case "$MELDBASE_ADDR" in
   127.*:*|'[::1]':*) ;;
@@ -44,6 +47,12 @@ if [ -z "$MELDBASE_ACCESS_POLICY_FILE" ] || [ ! -r "$MELDBASE_ACCESS_POLICY_FILE
   exit 2
 fi
 set -- --access-policy-file "$MELDBASE_ACCESS_POLICY_FILE"
+set -- "$@" \
+  --http-origins "$MELDBASE_HTTP_ORIGINS" \
+  --realtime-origin-patterns "$MELDBASE_REALTIME_ORIGIN_PATTERNS"
+if [ -n "$MELDBASE_PUBLIC_REALTIME_URL" ]; then
+  set -- "$@" --public-realtime-url "$MELDBASE_PUBLIC_REALTIME_URL"
+fi
 
 exec "$MELDBASE_BIN" serve \
   --db "$MELDBASE_DB" \

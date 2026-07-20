@@ -39,6 +39,16 @@ default; use `--jwt-workspace-claim` only when your issuer uses another claim
 name. The manifest's `workspaceField` remains server-owned for every configured
 collection.
 
+For a browser application behind TLS, configure both boundaries explicitly:
+`--http-origins` is a comma-separated list of exact `http(s)` origins permitted
+to call the API and obtain a realtime ticket; `--realtime-origin-patterns` is a
+comma-separated list of WebSocket Origin patterns. A pattern may be a host
+pattern such as `app.example` or a scheme+host pattern such as
+`https://app.example`; use the latter when the scheme matters. The default is
+limited to local development origins. `--public-realtime-url` supplies the
+external `wss://…/v1/realtime` address returned in tickets when a TLS proxy
+terminates in front of the loopback listener.
+
 The optional embedded dashboard uses `MELDBASE_ADMIN_TOKEN`, with a minimum of
 32 bytes, and must bind to a loopback `--admin-addr`. See
 [observability](../observability) for dashboard and Prometheus details.

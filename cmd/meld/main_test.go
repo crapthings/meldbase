@@ -658,6 +658,8 @@ func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 		"MELDBASE_DB='" + filepath.Join(root, "data", "app.meld") + "'",
 		"MELDBASE_JWT_ISSUER='https://identity.example/'", "MELDBASE_JWT_AUDIENCE='app-api'",
 		"MELDBASE_ACCESS_POLICY_FILE='" + filepath.Join(root, "config", "access-policy.json") + "'", "MELDBASE_ADMIN_TOKEN='",
+		"MELDBASE_HTTP_ORIGINS='http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173'",
+		"MELDBASE_REALTIME_ORIGIN_PATTERNS='localhost:*,127.0.0.1:*,[[]::1]:*'",
 	} {
 		if !strings.Contains(string(config), expected) {
 			t.Fatalf("config missing %q:\n%s", expected, config)
@@ -700,7 +702,12 @@ func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 func TestInitBundleLauncherUsesGeneratedManifest(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "meldbase-local")
 	var output bytes.Buffer
-	if err := run([]string{"init", "--dir", root}, &output, &output); err != nil {
+	if err := run([]string{
+		"init", "--dir", root,
+		"--public-realtime-url", "wss://api.example/v1/realtime",
+		"--http-origins", "https://app.example",
+		"--realtime-origin-patterns", "https://app.example",
+	}, &output, &output); err != nil {
 		t.Fatalf("init error=%v output=%s", err, output.String())
 	}
 	argumentsPath := filepath.Join(t.TempDir(), "arguments")
@@ -723,7 +730,10 @@ func TestInitBundleLauncherUsesGeneratedManifest(t *testing.T) {
 		"--jwt-hs256-secret-file", filepath.Join(root, "secrets", "jwt-hs256.secret"),
 		"--jwt-issuer", "meldbase-local", "--jwt-audience", "meldbase-api",
 		"--access-policy-file", filepath.Join(root, "config", "access-policy.json"),
+		"--http-origins", "https://app.example",
+		"--realtime-origin-patterns", "https://app.example",
 		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
+		"--public-realtime-url", "wss://api.example/v1/realtime",
 	}
 	if got := strings.Split(strings.TrimSpace(string(arguments)), "\n"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("bundle arguments=%q want=%q", got, want)
@@ -810,6 +820,18 @@ func TestServeRollbackAnchorFlagsFailClosed(t *testing.T) {
 func TestDefaultRealtimeURL(t *testing.T) {
 	if got := defaultRealtimeURL(":8080"); got != "ws://localhost:8080/v1/realtime" {
 		t.Fatalf("url = %q", got)
+	}
+}
+
+func TestDefaultBrowserOriginsIncludeEscapedIPv6RealtimePattern(t *testing.T) {
+	if got := defaultHTTPOrigins(); !reflect.DeepEqual(got, []string{"http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"}) {
+		t.Fatalf("HTTP origins=%q", got)
+	}
+	if got := defaultRealtimeOriginPatterns(); !reflect.DeepEqual(got, []string{"localhost:*", "127.0.0.1:*", "[[]::1]:*"}) {
+		t.Fatalf("realtime patterns=%q", got)
+	}
+	if got := configuredOriginList("https://app.example, https://admin.example", defaultHTTPOrigins()); !reflect.DeepEqual(got, []string{"https://app.example", "https://admin.example"}) {
+		t.Fatalf("configured origins=%q", got)
 	}
 }
 

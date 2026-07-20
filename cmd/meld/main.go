@@ -305,6 +305,8 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	path := flags.String("db", "", "database path")
 	address := flags.String("addr", ":8080", "HTTP listen address")
 	realtimeURL := flags.String("public-realtime-url", "", "public ws(s) URL ending in /v1/realtime")
+	httpOrigins := flags.String("http-origins", "", "comma-separated exact browser HTTP(S) origins; defaults to local development origins")
+	realtimeOriginPatterns := flags.String("realtime-origin-patterns", "", "comma-separated WebSocket Origin host or scheme+host patterns; defaults to local development origins")
 	devNoAuth := flags.Bool("dev-no-auth", false, "explicitly allow all requests; development only")
 	jwtHS256SecretFile := flags.String("jwt-hs256-secret-file", "", "private file containing a 32+ byte HS256 JWT secret")
 	jwtJWKSURL := flags.String("jwt-jwks-url", "", "HTTPS OIDC JSON Web Key Set URL for RS256 JWT verification")
@@ -416,6 +418,8 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if *realtimeURL == "" {
 		*realtimeURL = defaultRealtimeURL(*address)
 	}
+	configuredHTTPOrigins := configuredOriginList(*httpOrigins, defaultHTTPOrigins())
+	configuredRealtimeOriginPatterns := configuredOriginList(*realtimeOriginPatterns, defaultRealtimeOriginPatterns())
 	openOptions := meldbase.OpenOptions{}
 	var anchorTransport *http.Transport
 	if *rollbackAnchorPath != "" {
@@ -510,8 +514,8 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	}
 	handler, err := meldserver.New(meldserver.Config{
 		DB: db, Authenticator: authenticator, Authorizer: authorizer, PublicRealtimeURL: *realtimeURL,
-		OriginPatterns:     []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
-		AllowedHTTPOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"}, MaxBodyBytes: 1 << 20,
+		OriginPatterns:     configuredRealtimeOriginPatterns,
+		AllowedHTTPOrigins: configuredHTTPOrigins, MaxBodyBytes: 1 << 20,
 		RPCMethodResolver: rpcMethodResolver, RPCTransactionalMethodResolver: rpcTransactionalMethodResolver, QueryPolicyResolver: queryPolicyResolver,
 		RPCIdempotencyStore: idempotency, RPCAuthorizer: rpcAuthorizer,
 	})
@@ -670,6 +674,24 @@ func splitCommaList(raw string) []string {
 		values[index] = strings.TrimSpace(values[index])
 	}
 	return values
+}
+
+func configuredOriginList(raw string, defaults []string) []string {
+	configured := splitCommaList(raw)
+	if len(configured) != 0 {
+		return configured
+	}
+	return append([]string(nil), defaults...)
+}
+
+func defaultHTTPOrigins() []string {
+	return []string{"http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"}
+}
+
+func defaultRealtimeOriginPatterns() []string {
+	// path.Match treats '[' as syntax. A literal IPv6 host bracket must therefore
+	// use its escaped character-class form.
+	return []string{"localhost:*", "127.0.0.1:*", "[[]::1]:*"}
 }
 
 func defaultRealtimeURL(address string) string {

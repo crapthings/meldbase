@@ -199,6 +199,8 @@ upgrades bypass that HTTP CORS check and use their own host-pattern validation.
 This lets a deployment keep ticket-issuing HTTP endpoints on an exact allowlist
 while configuring a distinct realtime-origin boundary. CORS is a browser
 boundary, not a replacement for authentication or row/field authorization.
+Realtime patterns may match a host or a full scheme+host; use a full
+scheme+host when the browser scheme must be pinned.
 
 The remote SDK requests delta mode. The server first delivers one atomic
 `snapshot`, followed by strictly ordered `delta` frames. The SDK applies those

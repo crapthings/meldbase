@@ -325,7 +325,7 @@ func TestRealtimeOriginPatternsRejectUntrustedBrowserAndAllowConfiguredClient(t 
 	handler, err := New(Config{
 		DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{},
 		PublicRealtimeURL: "ws://placeholder.invalid/v1/realtime",
-		OriginPatterns:    []string{"client.example"},
+		OriginPatterns:    []string{"https://client.example", "[[]::1]:*"},
 		TicketTTL:         time.Minute,
 		ResumeTokenKey:    []byte("0123456789abcdef0123456789abcdef"),
 		MaxBodyBytes:      1 << 16,
@@ -346,6 +346,13 @@ func TestRealtimeOriginPatternsRejectUntrustedBrowserAndAllowConfiguredClient(t 
 	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
 		t.Fatalf("untrusted origin err=%v response=%v", err, response)
 	}
+	schemeTicket := obtainTicket(t, server.URL)
+	_, response, err = websocket.Dial(ctx, schemeTicket.URL, &websocket.DialOptions{HTTPHeader: http.Header{
+		"origin": []string{"http://client.example"},
+	}})
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong origin scheme err=%v response=%v", err, response)
+	}
 
 	allowedTicket := obtainTicket(t, server.URL)
 	connection, response, err := websocket.Dial(ctx, allowedTicket.URL, &websocket.DialOptions{HTTPHeader: http.Header{
@@ -355,6 +362,15 @@ func TestRealtimeOriginPatternsRejectUntrustedBrowserAndAllowConfiguredClient(t 
 		t.Fatalf("configured origin err=%v response=%v", err, response)
 	}
 	defer connection.CloseNow()
+
+	loopbackTicket := obtainTicket(t, server.URL)
+	loopback, response, err := websocket.Dial(ctx, loopbackTicket.URL, &websocket.DialOptions{HTTPHeader: http.Header{
+		"origin": []string{"http://[::1]:5173"},
+	}})
+	if err != nil {
+		t.Fatalf("escaped IPv6 origin pattern err=%v response=%v", err, response)
+	}
+	defer loopback.CloseNow()
 }
 
 func TestLivenessAndReadinessHaveDistinctFailStopSemantics(t *testing.T) {
@@ -1135,6 +1151,15 @@ func TestStrictMessagesAndTicketTTLConfiguration(t *testing.T) {
 	}
 	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", MaxQueryResultBytes: 16<<20 + 1}); err == nil {
 		t.Fatal("expected excessive query result limit error")
+	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", OriginPatterns: []string{"*"}}); err == nil {
+		t.Fatal("expected unrestricted realtime origin pattern error")
+	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", OriginPatterns: []string{"[broken"}}); err == nil {
+		t.Fatal("expected invalid realtime origin pattern error")
+	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", OriginPatterns: []string{"[[]::1]:*"}}); err != nil {
+		t.Fatalf("escaped IPv6 origin pattern rejected: %v", err)
 	}
 	if err := meldbase.ValidateStrictJSON([]byte(`{"v":1,"v":1}`), 100); err == nil {
 		t.Fatal("duplicate JSON key accepted")

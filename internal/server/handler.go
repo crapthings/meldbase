@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -202,6 +204,14 @@ func New(config Config) (*Handler, error) {
 		parsed, err := url.Parse(origin)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return nil, errors.New("allowed HTTP origins must be exact http(s) origins")
+		}
+	}
+	for _, pattern := range config.OriginPatterns {
+		if pattern == "" || pattern == "*" {
+			return nil, errors.New("realtime origin patterns must be non-empty and cannot allow every origin")
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return nil, fmt.Errorf("invalid realtime origin pattern %q: %w", pattern, err)
 		}
 	}
 	rpcSessionID, err := randomToken16()

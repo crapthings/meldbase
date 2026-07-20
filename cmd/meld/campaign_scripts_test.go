@@ -155,6 +155,8 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		"serve", "--db", "/var/lib/meldbase/data/test.meld", "--addr", "127.0.0.1:8080",
 		"--jwt-hs256-secret-file", secretPath, "--jwt-issuer", "https://identity.example.test/", "--jwt-audience", "meldbase-api",
 		"--access-policy-file", policyPath,
+		"--http-origins", "http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173",
+		"--realtime-origin-patterns", "localhost:*,127.0.0.1:*,[[]::1]:*",
 		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
 	}
 	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {
