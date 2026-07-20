@@ -41,6 +41,23 @@ starts. `meld init` generates this file with `collaborative` entries for its
 default local collections. The older `--workspace-collections` form remains a
 compatible shorthand for an all-`collaborative` manifest.
 
+Validate or inspect a manifest without opening a database or starting a server:
+
+```sh
+meld access-policy validate --file /etc/meldbase/access-policy.json
+meld access-policy explain \
+  --file /etc/meldbase/access-policy.json \
+  --subject user_42 \
+  --workspace team_a \
+  --collection private_notes
+```
+
+`validate` prints the canonical manifest. `explain` prints the effective
+generic query constraint, server-owned insert fields, immutable update paths,
+and operation allowance for that simulated principal. It is a static review
+tool: it does not validate a JWT, open a database, or evaluate a custom role or
+membership resolver.
+
 ## Stable modes
 
 | Mode | Generic reads and subscriptions | Generic writes | Server-owned fields |

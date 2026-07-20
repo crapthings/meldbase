@@ -32,6 +32,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return errors.New("usage: meld <init|demo|serve|anchor-serve|anchor-qualification|inspect|verify|backup|restore|durability-check|destructive-volume-check|destructive-process-check|destructive-enospc-check|destructive-power-prepare|destructive-power-controller-keygen|destructive-power-controller-run|destructive-qemu-reset|destructive-qemu-process-kill|destructive-power-recover|destructive-power-receipt-check|destructive-power-matrix-check|destructive-corruption-check|destructive-qemu-eio|destructive-qemu-flush-eio|destructive-qemu-volatile-loss|destructive-manifest-build|storage-soak|qualification-environment-capture|qualification-session-init|qualification-session-record|qualification-session-status|qualification-session-power-status|qualification-session-power-prepare|qualification-session-power-recover|qualification-session-seal|qualification-artifacts-index-build|qualification-artifacts-index-verify|qualification-check|qualification-packet-keygen|qualification-packet-verify|index-build>")
 	}
 	switch args[0] {
+	case "access-policy":
+		return runAccessPolicy(args[1:], stdout, stderr)
 	case "init":
 		return runInit(args[1:], stdout, stderr)
 	case "demo":

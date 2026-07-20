@@ -550,6 +550,71 @@ func TestServeRejectsInvalidCollectionAccessManifestBeforeOpeningDatabase(t *tes
 	}
 }
 
+func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
+	manifestPath := filepath.Join(t.TempDir(), "access-policy.json")
+	if err := os.WriteFile(manifestPath, []byte(`{
+		"version":1,
+		"workspaceField":"workspaceId",
+		"collections":[
+			{"collection":"notes","mode":"owner","ownerField":"ownerId"},
+			{"collection":"payroll","mode":"rpc_only"}
+		]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := run([]string{
+		"access-policy", "explain", "--file", manifestPath,
+		"--subject", "user-a", "--workspace", "team-a", "--collection", "notes",
+	}, &output, &output); err != nil {
+		t.Fatal(err)
+	}
+	var owner struct {
+		Mode  string `json:"mode"`
+		Query struct {
+			Allowed    bool            `json:"allowed"`
+			Constraint json.RawMessage `json:"constraint"`
+		} `json:"query"`
+		Insert struct {
+			Allowed      bool              `json:"allowed"`
+			ServerFields map[string]string `json:"serverFields"`
+		} `json:"insert"`
+		Update struct {
+			Allowed           bool     `json:"allowed"`
+			DeniedUpdatePaths []string `json:"deniedUpdatePaths"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &owner); err != nil {
+		t.Fatal(err)
+	}
+	if owner.Mode != "owner" || !owner.Query.Allowed || !strings.Contains(string(owner.Query.Constraint), "workspaceId") ||
+		!strings.Contains(string(owner.Query.Constraint), "ownerId") || !owner.Insert.Allowed ||
+		owner.Insert.ServerFields["workspaceId"] != "team-a" || owner.Insert.ServerFields["ownerId"] != "user-a" ||
+		!owner.Update.Allowed || !reflect.DeepEqual(owner.Update.DeniedUpdatePaths, []string{"ownerId", "workspaceId"}) {
+		t.Fatalf("owner explanation=%s", output.String())
+	}
+
+	output.Reset()
+	if err := run([]string{
+		"access-policy", "explain", "--file", manifestPath,
+		"--subject", "user-a", "--workspace", "team-a", "--collection", "payroll",
+	}, &output, &output); err != nil {
+		t.Fatal(err)
+	}
+	var rpcOnly struct {
+		Query  struct{ Allowed bool } `json:"query"`
+		Insert struct{ Allowed bool } `json:"insert"`
+		Update struct{ Allowed bool } `json:"update"`
+		Delete struct{ Allowed bool } `json:"delete"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &rpcOnly); err != nil {
+		t.Fatal(err)
+	}
+	if rpcOnly.Query.Allowed || rpcOnly.Insert.Allowed || rpcOnly.Update.Allowed || rpcOnly.Delete.Allowed {
+		t.Fatalf("rpc-only explanation=%s", output.String())
+	}
+}
+
 func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "meldbase-local")
 	var output bytes.Buffer

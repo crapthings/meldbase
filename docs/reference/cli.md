@@ -9,6 +9,7 @@ the embedded Go API or the HTTP/WebSocket server.
 | Command | Purpose |
 | --- | --- |
 | `meld init --dir <new-dir>` | Create a non-overwriting, JWT-secured local single-node bundle. |
+| `meld access-policy validate|explain ...` | Validate or statically explain a strict collection access manifest. |
 | `meld demo` | Exercise durable writes, indexing, reactive updates, reopen, and verification. |
 | `meld serve --db <path> ...` | Run the HTTP/WebSocket server and optional loopback admin dashboard. |
 | `meld inspect --db <path>` | Read compatibility and physical metadata without opening the database. |
