@@ -15,12 +15,15 @@ import (
 )
 
 const adminWireSchemaFormatVersion uint32 = 1
+const adminWireSchemaDeltaFormatVersion uint32 = 2
 
 type adminWireSchemaFixture struct {
 	FormatVersion      uint32                 `json:"formatVersion"`
 	AdminSchemaVersion uint32                 `json:"adminSchemaVersion"`
 	Root               string                 `json:"root"`
 	Fields             []adminWireSchemaField `json:"fields"`
+	Extends            uint32                 `json:"extends,omitempty"`
+	Additions          []adminWireSchemaField `json:"additions,omitempty"`
 }
 
 type adminWireSchemaField struct {
@@ -81,7 +84,8 @@ func TestAdminSampleWireSchemaMatchesJSONEncoder(t *testing.T) {
 
 // TestGenerateAdminSampleWireSchema is an explicit maintainer action. A schema
 // change must first increment SchemaVersion; generation then creates a new
-// fixture name and leaves every historical contract untouched.
+// full fixture or a reviewed delta fixture and leaves every historical contract
+// untouched.
 func TestGenerateAdminSampleWireSchema(t *testing.T) {
 	if os.Getenv("MELDBASE_GENERATE_ADMIN_SCHEMA") != "1" {
 		t.Skip("admin schema generation is an explicit maintainer action")
@@ -194,7 +198,12 @@ func adminJSONWireType(t *testing.T, value reflect.Type) string {
 
 func loadAdminWireSchemaFixture(t *testing.T) adminWireSchemaFixture {
 	t.Helper()
-	path := filepath.Join("testdata", fmt.Sprintf("admin-schema-v%d.json", SchemaVersion))
+	return loadAdminWireSchemaFixtureVersion(t, SchemaVersion)
+}
+
+func loadAdminWireSchemaFixtureVersion(t *testing.T, version uint32) adminWireSchemaFixture {
+	t.Helper()
+	path := filepath.Join("testdata", fmt.Sprintf("admin-schema-v%d.json", version))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -203,10 +212,25 @@ func loadAdminWireSchemaFixture(t *testing.T) adminWireSchemaFixture {
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.FormatVersion != adminWireSchemaFormatVersion || fixture.AdminSchemaVersion != SchemaVersion || fixture.Root != "admin.Sample" {
+	if fixture.AdminSchemaVersion != version || fixture.Root != "admin.Sample" {
 		t.Fatalf("invalid admin schema fixture metadata: %+v", fixture)
 	}
-	return fixture
+	if fixture.FormatVersion == adminWireSchemaFormatVersion {
+		return fixture
+	}
+	if fixture.FormatVersion != adminWireSchemaDeltaFormatVersion || fixture.Extends == 0 || fixture.Extends >= version || len(fixture.Fields) != 0 {
+		t.Fatalf("invalid admin schema delta fixture metadata: %+v", fixture)
+	}
+	base := loadAdminWireSchemaFixtureVersion(t, fixture.Extends)
+	base.AdminSchemaVersion = version
+	base.Fields = append(base.Fields, fixture.Additions...)
+	sort.Slice(base.Fields, func(left, right int) bool { return base.Fields[left].Path < base.Fields[right].Path })
+	for index := 1; index < len(base.Fields); index++ {
+		if base.Fields[index-1].Path == base.Fields[index].Path {
+			t.Fatalf("admin schema delta duplicates path %q", base.Fields[index].Path)
+		}
+	}
+	return base
 }
 
 func collectAdminJSONPaths(t *testing.T, value map[string]any, prefix string, paths map[string]string) {

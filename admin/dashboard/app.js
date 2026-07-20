@@ -74,6 +74,9 @@
     slowConsumer: "slow consumer disconnected",
     persistentFreeSpaceDiscarded: "persistent free map discarded",
     commitRetentionPressure: "commit history exceeds its count or byte budget",
+	commitCoordinatorPressure: "commit coordinator admission pressure",
+	commitCoordinatorRejected: "commit coordinator queue rejected a write",
+	primaryWriteFenceRejected: "primary-write fence rejected a write",
 		indexBuildFailed: "a durable index build requires operator action",
 		indexBuildRetentionPressure: "an index build is pinning commit history beyond its budget",
     storageQuotaExhausted: "physical storage quota is exhausted",
@@ -101,12 +104,14 @@
   }
 
   function update(sample) {
-    if (!sample || sample.version !== 11) return;
+    if (!sample || sample.version !== 16) return;
     const stats = sample.stats;
     const rates = sample.rates;
     const storage = stats.storage;
     const queries = stats.queries;
     const realtime = stats.realtime;
+	const coordinator = stats.commitCoordinator || {};
+	const primaryWriteFence = stats.primaryWriteFence || {};
 	const server = sample.server;
 	const diagnosticStats = stats.diagnostics || {};
 	renderHealth(sample.health);
@@ -130,12 +135,27 @@
     text("shared-views", number(realtime.sharedViews));
     text("pending-batches", `${number(realtime.pendingBatches)} / ${number(realtime.pendingBatchCapacity)}`);
 	text("pending-changes", `${number(realtime.pendingChanges)} / ${number(realtime.pendingChangeCapacity)}`);
+	text("pending-bytes", `${number(realtime.pendingBytes)} / ${number(realtime.pendingByteCapacity)}`);
+	text("watcher-pending-bytes", `${number(realtime.watcherPendingBytes)} / ${number(realtime.watcherByteCapacity)}`);
+	text("dispatch-pending-batches", `${number(realtime.dispatchPendingBatches)} / ${number(realtime.dispatchBatchCapacity)}`);
+	text("dispatch-pending-changes", `${number(realtime.dispatchPendingChanges)} / ${number(realtime.dispatchChangeCapacity)}`);
+	text("dispatch-pending-bytes", `${number(realtime.dispatchPendingBytes)} / ${number(realtime.dispatchByteCapacity)}`);
     text("queue-overflows", number(realtime.queueOverflows));
     text("slow-consumers", number(realtime.slowConsumers));
+
+	text("commit-coordinator-enabled", coordinator.enabled ? "enabled" : "disabled");
+	text("commit-coordinator-pending", coordinator.enabled ? `${number(coordinator.pending)} / ${number(coordinator.pendingCapacity)}` : "not enabled");
+	text("commit-coordinator-admitted", number(coordinator.admitted));
+	text("commit-coordinator-rejected", number(coordinator.admissionRejected));
+	text("commit-coordinator-batches", number(coordinator.batches));
+	text("commit-coordinator-grouped", number(coordinator.groupedTransactions));
+	text("commit-coordinator-unknown", number(coordinator.outcomeUnknown));
 
     text("readers", `${number(storage.activeReaders)} readers`);
     text("physical-pages", number(storage.physicalPages));
 	text("physical-generation", number(storage.generation));
+	text("primary-write-fence", primaryWriteFence.enforced ? "enforced" : primaryWriteFence.configured ? "configured · follower bypass" : "not configured");
+	text("primary-write-fence-checks", `${number(primaryWriteFence.checks)} / ${number(primaryWriteFence.rejected)}`);
 	const rollbackSequenceLag = storage.rollbackProtected && storage.commitSequence > storage.rollbackAnchorSequence ? storage.commitSequence - storage.rollbackAnchorSequence : 0;
 	const rollbackGenerationLag = storage.rollbackProtected && storage.generation > storage.rollbackAnchorGeneration ? storage.generation - storage.rollbackAnchorGeneration : 0;
 	text("rollback-protection", storage.rollbackProtected ? "active · external anchor" : "disabled");
@@ -200,6 +220,7 @@
 	  text("rpc-max", duration(server.rpcMaxLatencyNanos));
 	  text("rpc-idempotency-replays", number(server.rpcIdempotencyReplays));
 	  text("rpc-idempotency-unknown", number(server.rpcIdempotencyUnknown));
+	  text("realtime-outbound-overflows", number(server.realtimeOutboundOverflows));
 	  text("rpc-atomic-commits", number(server.rpcAtomicCommits));
 	  text("rpc-atomic-rollbacks", number(server.rpcAtomicRollbacks));
 	  text("worker-connections", `${number(server.worker?.connectedWorkers)} · ${number(server.worker?.registeredMethods)} methods`);
@@ -215,6 +236,7 @@
 	  text("rpc-max", "—");
 	  text("rpc-idempotency-replays", "—");
 	  text("rpc-idempotency-unknown", "—");
+	  text("realtime-outbound-overflows", "—");
 	  text("rpc-atomic-commits", "—");
 	  text("rpc-atomic-rollbacks", "—");
 	  text("worker-connections", "—");
@@ -347,7 +369,7 @@
     const historyResponse = await request("/v1/stats/history");
     if (!historyResponse.ok) throw new Error(historyResponse.status === 401 ? "Invalid admin token" : `Admin API returned ${historyResponse.status}`);
     const history = await historyResponse.json();
-    if (history.version !== 11 || !Array.isArray(history.samples)) throw new Error("Unsupported admin protocol");
+    if (history.version !== 16 || !Array.isArray(history.samples)) throw new Error("Unsupported admin protocol");
     samples.length = 0;
     history.samples.forEach(update);
     login.hidden = true;

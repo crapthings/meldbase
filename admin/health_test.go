@@ -76,6 +76,77 @@ func TestAssessHealthReportsRecentStorageLimitRejection(t *testing.T) {
 	}
 }
 
+func TestAssessHealthReportsCommitCoordinatorPressureAndRejection(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, CommitCoordinator: meldbase.V2CommitCoordinatorStats{Enabled: true, PendingCapacity: 10, AdmissionRejected: 2}}}
+	current := previous
+	current.Stats.CommitCoordinator.Pending = 9
+	current.Stats.CommitCoordinator.AdmissionRejected++
+	health := assessHealth(&previous, current)
+	if health.Database != HealthCritical || health.Overall != HealthCritical || !health.Signals.CommitCoordinatorPressure || !health.Signals.CommitCoordinatorRejected {
+		t.Fatalf("coordinator pressure health=%+v", health)
+	}
+	current.Stats.CommitCoordinator.Pending = 5
+	health = assessHealth(&previous, current)
+	if health.Database != HealthDegraded || !health.Signals.CommitCoordinatorPressure {
+		t.Fatalf("coordinator degraded health=%+v", health)
+	}
+}
+
+func TestAssessHealthReportsRecentPrimaryWriteFenceRejection(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, PrimaryWriteFence: meldbase.V2PrimaryWriteFenceStats{
+		Configured: true, Enforced: true, Checks: 2, Rejected: 1,
+	}}}
+	current := previous
+	current.Stats.PrimaryWriteFence.Checks++
+	current.Stats.PrimaryWriteFence.Rejected++
+	health := assessHealth(&previous, current)
+	if health.Database != HealthDegraded || health.Overall != HealthDegraded || !health.Signals.PrimaryWriteFenceRejected {
+		t.Fatalf("primary write fence health=%+v", health)
+	}
+}
+
+func TestAssessHealthIncludesCentralDispatchPressure(t *testing.T) {
+	current := Sample{Stats: meldbase.DBStats{Realtime: meldbase.RealtimeStats{
+		DispatchPendingChanges: 9, DispatchChangeCapacity: 10,
+	}}}
+	health := assessHealth(nil, current)
+	if health.Realtime != HealthCritical || health.Overall != HealthCritical || !health.Signals.ReactiveQueuePressure {
+		t.Fatalf("dispatch pressure health=%+v", health)
+	}
+}
+
+func TestAssessHealthIncludesCentralDispatchBytePressure(t *testing.T) {
+	current := Sample{Stats: meldbase.DBStats{Realtime: meldbase.RealtimeStats{
+		DispatchPendingBytes: 9, DispatchByteCapacity: 10,
+	}}}
+	health := assessHealth(nil, current)
+	if health.Realtime != HealthCritical || health.Overall != HealthCritical || !health.Signals.ReactiveQueuePressure {
+		t.Fatalf("dispatch byte pressure health=%+v", health)
+	}
+}
+
+func TestAssessHealthIncludesReactiveHubBytePressure(t *testing.T) {
+	current := Sample{Stats: meldbase.DBStats{Realtime: meldbase.RealtimeStats{
+		PendingBytes: 9, PendingByteCapacity: 10,
+	}}}
+	health := assessHealth(nil, current)
+	if health.Realtime != HealthCritical || health.Overall != HealthCritical || !health.Signals.ReactiveQueuePressure {
+		t.Fatalf("reactive byte pressure health=%+v", health)
+	}
+}
+
+func TestAssessHealthIncludesDirectWatcherBytePressure(t *testing.T) {
+	current := Sample{Stats: meldbase.DBStats{Realtime: meldbase.RealtimeStats{
+		WatcherPendingBytes: 9, WatcherByteCapacity: 10,
+	}}}
+	health := assessHealth(nil, current)
+	if health.Realtime != HealthCritical || health.Overall != HealthCritical || !health.Signals.ReactiveQueuePressure {
+		t.Fatalf("watcher byte pressure health=%+v", health)
+	}
+}
+
 func TestAssessHealthReportsRecentRollbackAnchorFailure(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{Stats: meldbase.DBStats{StartedAt: started}}
@@ -134,6 +205,7 @@ func TestAssessHealthUsesSessionDeltasForTransportAndTransientEvents(t *testing.
 	server := *previous.Server
 	server.RPCBusy++
 	server.RPCIdempotencyUnknown++
+	server.RealtimeOutboundOverflows++
 	server.Worker.ProtocolFailures++
 	current.Server = &server
 	health := assessHealth(&previous, current)

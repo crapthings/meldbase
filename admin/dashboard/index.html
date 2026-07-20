@@ -88,9 +88,26 @@
           <dl>
             <div><dt>Shared views</dt><dd id="shared-views">—</dd></div>
             <div><dt>Pending batches</dt><dd id="pending-batches">—</dd></div>
-            <div><dt>Pending changes</dt><dd id="pending-changes">—</dd></div>
+			<div><dt>Pending changes</dt><dd id="pending-changes">—</dd></div>
+			<div><dt>Pending payload</dt><dd id="pending-bytes">—</dd></div>
+			<div><dt>Watcher payload</dt><dd id="watcher-pending-bytes">—</dd></div>
+			<div><dt>Dispatch batches</dt><dd id="dispatch-pending-batches">—</dd></div>
+			<div><dt>Dispatch changes</dt><dd id="dispatch-pending-changes">—</dd></div>
+			<div><dt>Dispatch payload</dt><dd id="dispatch-pending-bytes">—</dd></div>
             <div><dt>Queue overflows</dt><dd id="queue-overflows">—</dd></div>
             <div><dt>Slow consumers</dt><dd id="slow-consumers">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel detail">
+          <div class="section-heading"><div><p class="eyebrow">Write path</p><h2>Commit coordinator</h2></div><span id="commit-coordinator-enabled" class="pill">disabled</span></div>
+          <dl>
+            <div><dt>Pending admission</dt><dd id="commit-coordinator-pending">—</dd></div>
+            <div><dt>Admitted</dt><dd id="commit-coordinator-admitted">—</dd></div>
+            <div><dt>Queue rejected</dt><dd id="commit-coordinator-rejected">—</dd></div>
+            <div><dt>Batches</dt><dd id="commit-coordinator-batches">—</dd></div>
+            <div><dt>Grouped requests</dt><dd id="commit-coordinator-grouped">—</dd></div>
+            <div><dt>Outcome unknown</dt><dd id="commit-coordinator-unknown">—</dd></div>
           </dl>
         </article>
 
@@ -98,7 +115,9 @@
           <div class="section-heading"><div><p class="eyebrow">Pager</p><h2>Storage health</h2></div><span id="readers" class="pill">0 readers</span></div>
           <dl>
             <div><dt>Physical pages</dt><dd id="physical-pages">—</dd></div>
-			<div><dt>Physical generation</dt><dd id="physical-generation">—</dd></div>
+            <div><dt>Physical generation</dt><dd id="physical-generation">—</dd></div>
+			<div><dt>Primary write fence</dt><dd id="primary-write-fence">—</dd></div>
+			<div><dt>Fence checks / rejected</dt><dd id="primary-write-fence-checks">—</dd></div>
 			<div><dt>Rollback protection</dt><dd id="rollback-protection">—</dd></div>
 			<div><dt>Rollback anchor</dt><dd id="rollback-anchor">—</dd></div>
 			<div><dt>Anchor lag</dt><dd id="rollback-anchor-lag">—</dd></div>
@@ -164,6 +183,7 @@
 			<div><dt>Maximum latency</dt><dd id="rpc-max">—</dd></div>
 			<div><dt>Idempotency replays</dt><dd id="rpc-idempotency-replays">—</dd></div>
 			<div><dt>Outcome unknown</dt><dd id="rpc-idempotency-unknown">—</dd></div>
+			<div><dt>Outbound limits</dt><dd id="realtime-outbound-overflows">—</dd></div>
 			<div><dt>Atomic commits</dt><dd id="rpc-atomic-commits">—</dd></div>
 			<div><dt>Atomic rollbacks</dt><dd id="rpc-atomic-rollbacks">—</dd></div>
 			<div><dt>Method workers</dt><dd id="worker-connections">—</dd></div>

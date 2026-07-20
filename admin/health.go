@@ -29,6 +29,9 @@ type HealthSignals struct {
 	IndexBuildRetentionPressure  bool `json:"indexBuildRetentionPressure"`
 	StorageQuotaExhausted        bool `json:"storageQuotaExhausted"`
 	StorageLimitRejected         bool `json:"storageLimitRejected"`
+	CommitCoordinatorPressure    bool `json:"commitCoordinatorPressure"`
+	CommitCoordinatorRejected    bool `json:"commitCoordinatorRejected"`
+	PrimaryWriteFenceRejected    bool `json:"primaryWriteFenceRejected"`
 	DurabilityFailure            bool `json:"durabilityFailure"`
 	RollbackAnchorDegraded       bool `json:"rollbackAnchorDegraded"`
 	TelemetryDeliveryDropped     bool `json:"telemetryDeliveryDropped"`
@@ -98,6 +101,14 @@ func assessHealth(previous *Sample, current Sample) HealthStatus {
 		health.Signals.StorageQuotaExhausted = true
 		health.Storage = HealthDegraded
 	}
+	coordinatorPressure := ratio(current.Stats.CommitCoordinator.Pending, current.Stats.CommitCoordinator.PendingCapacity)
+	if coordinatorPressure >= 0.9 {
+		health.Signals.CommitCoordinatorPressure = true
+		health.Database = maxHealth(health.Database, HealthCritical)
+	} else if coordinatorPressure >= 0.5 {
+		health.Signals.CommitCoordinatorPressure = true
+		health.Database = maxHealth(health.Database, HealthDegraded)
+	}
 
 	pressure := reactivePressure(current.Stats.Realtime)
 	if pressure >= 0.9 {
@@ -117,6 +128,8 @@ func assessHealth(previous *Sample, current Sample) HealthStatus {
 		health.Signals.RollbackAnchorDegraded = increased(previous.Stats.Storage.RollbackAnchorStore.EndpointFailures, current.Stats.Storage.RollbackAnchorStore.EndpointFailures) ||
 			increased(previous.Stats.Storage.RollbackAnchorStore.ConfigurationFailures, current.Stats.Storage.RollbackAnchorStore.ConfigurationFailures)
 		health.Signals.StorageLimitRejected = increased(previous.Stats.Storage.StorageLimitRejections, current.Stats.Storage.StorageLimitRejections)
+		health.Signals.CommitCoordinatorRejected = increased(previous.Stats.CommitCoordinator.AdmissionRejected, current.Stats.CommitCoordinator.AdmissionRejected)
+		health.Signals.PrimaryWriteFenceRejected = increased(previous.Stats.PrimaryWriteFence.Rejected, current.Stats.PrimaryWriteFence.Rejected)
 		if health.Signals.ReactiveQueueOverflow || health.Signals.SlowConsumer {
 			health.Realtime = maxHealth(health.Realtime, HealthDegraded)
 		}
@@ -128,6 +141,12 @@ func assessHealth(previous *Sample, current Sample) HealthStatus {
 		}
 		if health.Signals.StorageLimitRejected {
 			health.Storage = maxHealth(health.Storage, HealthDegraded)
+		}
+		if health.Signals.CommitCoordinatorRejected {
+			health.Database = maxHealth(health.Database, HealthDegraded)
+		}
+		if health.Signals.PrimaryWriteFenceRejected {
+			health.Database = maxHealth(health.Database, HealthDegraded)
 		}
 	}
 	if previous != nil && increased(previous.Sampler.DroppedDeliveries, current.Sampler.DroppedDeliveries) {
@@ -149,7 +168,8 @@ func assessTransport(health *HealthStatus, previous *Sample, current Sample) {
 	}
 	health.Signals.TransportBusy = increased(previous.Server.RPCBusy, current.Server.RPCBusy) ||
 		increased(previous.Server.Worker.CallsBusy, current.Server.Worker.CallsBusy) ||
-		increased(previous.Server.Worker.PolicyBusy, current.Server.Worker.PolicyBusy)
+		increased(previous.Server.Worker.PolicyBusy, current.Server.Worker.PolicyBusy) ||
+		increased(previous.Server.RealtimeOutboundOverflows, current.Server.RealtimeOutboundOverflows)
 	health.Signals.RPCOutcomeUnknown = increased(previous.Server.RPCIdempotencyUnknown, current.Server.RPCIdempotencyUnknown)
 	health.Signals.WorkerProtocolFailure = increased(previous.Server.Worker.ProtocolFailures, current.Server.Worker.ProtocolFailures)
 	if health.Signals.TransportBusy || health.Signals.RPCOutcomeUnknown || health.Signals.WorkerProtocolFailure {
@@ -160,10 +180,22 @@ func assessTransport(health *HealthStatus, previous *Sample, current Sample) {
 func reactivePressure(stats meldbase.RealtimeStats) float64 {
 	batch := ratio(stats.PendingBatches, stats.PendingBatchCapacity)
 	changes := ratio(stats.PendingChanges, stats.PendingChangeCapacity)
-	if changes > batch {
-		return changes
+	bytes := ratio(stats.PendingBytes, stats.PendingByteCapacity)
+	watcherBytes := ratio(stats.WatcherPendingBytes, stats.WatcherByteCapacity)
+	dispatchBatch := ratio(stats.DispatchPendingBatches, stats.DispatchBatchCapacity)
+	dispatchChanges := ratio(stats.DispatchPendingChanges, stats.DispatchChangeCapacity)
+	dispatchBytes := ratio(stats.DispatchPendingBytes, stats.DispatchByteCapacity)
+	return maxFloat(batch, changes, bytes, watcherBytes, dispatchBatch, dispatchChanges, dispatchBytes)
+}
+
+func maxFloat(values ...float64) float64 {
+	var maximum float64
+	for _, value := range values {
+		if value > maximum {
+			maximum = value
+		}
 	}
-	return batch
+	return maximum
 }
 
 func ratio(value, capacity uint64) float64 {

@@ -48,12 +48,23 @@ func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 	adapter.observe(sink)
 	for name, want := range map[string]int64{
 		"meldbase.up": 1, "meldbase.commit.sequence": 17, "meldbase.document.count": 31,
+		"meldbase.commit.coordinator.enabled": 1, "meldbase.commit.coordinator.pending": 3,
+		"meldbase.commit.coordinator.pending_capacity": 8, "meldbase.commit.coordinator.admitted": 21,
+		"meldbase.commit.coordinator.admission_rejected": 2, "meldbase.commit.coordinator.batch": 10,
+		"meldbase.commit.coordinator.grouped_transaction": 20, "meldbase.commit.coordinator.outcome_unknown": 1,
 		"meldbase.health.overall": 1, "meldbase.health.database": 0,
 		"meldbase.health.realtime": 1, "meldbase.database.write_disabled": 0,
 		"meldbase.recovery.performed": 1, "meldbase.recovery.fallback": 1,
 		"meldbase.recovery.meta.checksum_valid": 2, "meldbase.recovery.meta.root_valid": 1,
 		"meldbase.recovery.main_tail_removed": 17, "meldbase.recovery.wal_replayed": 3,
+		"meldbase.primary_write_fence.configured": 1, "meldbase.primary_write_fence.enforced": 1,
+		"meldbase.primary_write_fence.check": 9, "meldbase.primary_write_fence.rejection": 2,
 		"meldbase.query.count": 11, "meldbase.realtime.queue.overflow": 2,
+		"meldbase.realtime.dispatch.pending.batch": 2, "meldbase.realtime.dispatch.pending.change": 3,
+		"meldbase.realtime.dispatch.pending.size": 4, "meldbase.realtime.dispatch.pending.batch_capacity": 1024,
+		"meldbase.realtime.dispatch.pending.change_capacity": 8192, "meldbase.realtime.dispatch.pending.max_size": 67108864,
+		"meldbase.realtime.pending.size": 6, "meldbase.realtime.pending.max_size": 67108864,
+		"meldbase.realtime.watcher.pending.size": 7, "meldbase.realtime.watcher.pending.max_size": 134217728,
 		"meldbase.write_transaction.active": 1, "meldbase.write_transaction.started": 10,
 		"meldbase.write_transaction.committed": 4, "meldbase.write_transaction.noop": 2,
 		"meldbase.write_transaction.conflict": 3, "meldbase.write_transaction.aborted": 1,
@@ -83,7 +94,8 @@ func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 		"meldbase.backup.attempt": 3, "meldbase.backup.completed": 2,
 		"meldbase.backup.failure": 1, "meldbase.backup.last.size": 1048576,
 		"meldbase.server.connection.active": 2, "meldbase.rpc.request": 19,
-		"meldbase.worker.policy.invalidation": 6, "meldbase.admin.delivery.dropped": 7,
+		"meldbase.realtime.outbound.queue.overflow": 8,
+		"meldbase.worker.policy.invalidation":       6, "meldbase.admin.delivery.dropped": 7,
 	} {
 		if got, exists := sink.ints[name]; !exists || got != want {
 			t.Fatalf("%s=%d/%t want=%d", name, got, exists, want)
@@ -169,7 +181,7 @@ func TestAdapterContractHasUniqueSafeNamesAndNoDynamicIdentity(t *testing.T) {
 		t.Fatalf("aggregate contract unexpectedly small: %d instruments", len(seen))
 	}
 	public := Instruments()
-	if SchemaVersion != 8 || len(public) != len(seen) || public[0].Name != "meldbase.up" {
+	if SchemaVersion != 12 || len(public) != len(seen) || public[0].Name != "meldbase.up" {
 		t.Fatalf("public schema version=%d instruments=%d/%d first=%+v", SchemaVersion, len(public), len(seen), public[0])
 	}
 	public[0].Name = "mutated"
@@ -196,10 +208,21 @@ func representativeSample() admin.Sample {
 				SchemaVersion: 1, Engine: "v2", Recovered: true, FallbackToOlderRoot: true,
 				ChecksumValidMetaSlots: 2, RootValidMetaSlots: 1, MainTailBytesRemoved: 17, WALRecordsReplayed: 3,
 			},
-			Commits:      meldbase.CommitStats{Total: 9, Changes: 13},
-			Transactions: meldbase.WriteTransactionStats{Active: 1, Started: 10, Committed: 4, Noops: 2, Conflicts: 3, Aborted: 1},
-			Queries:      meldbase.QueryStats{Total: 11, Failed: 1, ActiveCursors: 2, DocumentsExamined: 22, DocumentsReturned: 10},
-			Realtime:     meldbase.RealtimeStats{SharedViews: 3, QuerySubscribers: 4, QueueOverflows: 2, SlowConsumers: 1, PendingBatchCapacity: 1024, PendingChangeCapacity: 65536},
+			Commits: meldbase.CommitStats{Total: 9, Changes: 13},
+			CommitCoordinator: meldbase.V2CommitCoordinatorStats{
+				Enabled: true, Pending: 3, PendingCapacity: 8, Admitted: 21, AdmissionRejected: 2,
+				Batches: 10, GroupedTransactions: 20, OutcomeUnknown: 1,
+			},
+			PrimaryWriteFence: meldbase.V2PrimaryWriteFenceStats{Configured: true, Enforced: true, Checks: 9, Rejected: 2},
+			Transactions:      meldbase.WriteTransactionStats{Active: 1, Started: 10, Committed: 4, Noops: 2, Conflicts: 3, Aborted: 1},
+			Queries:           meldbase.QueryStats{Total: 11, Failed: 1, ActiveCursors: 2, DocumentsExamined: 22, DocumentsReturned: 10},
+			Realtime: meldbase.RealtimeStats{
+				SharedViews: 3, QuerySubscribers: 4, QueueOverflows: 2, SlowConsumers: 1,
+				PendingBytes: 6, PendingBatchCapacity: 1024, PendingChangeCapacity: 65536, PendingByteCapacity: 67108864,
+				WatcherPendingBytes: 7, WatcherByteCapacity: 134217728,
+				DispatchPendingBatches: 2, DispatchPendingChanges: 3, DispatchPendingBytes: 4,
+				DispatchBatchCapacity: 1024, DispatchChangeCapacity: 8192, DispatchByteCapacity: 67108864,
+			},
 			Durability: meldbase.DurabilityStats{
 				WALAppends: 8, WALCurrentBytes: 4096, WALCurrentCommits: 2, WALAppendNanos: 9_000_000,
 				CheckpointAttempts: 4, CheckpointsCompleted: 3, AutomaticCheckpoints: 3,
@@ -231,7 +254,7 @@ func representativeSample() admin.Sample {
 		Rates:   admin.Rates{Valid: true, PageCacheHitRatio: 0.8, DocumentCacheHitRatio: 0.75},
 		Sampler: admin.SamplerStatus{DroppedDeliveries: 7},
 		Server: &meldserver.ServerStats{
-			ActiveConnections: 2, RPCRequests: 19, RPCActive: 1, RPCTotalNanos: 12_000_000,
+			ActiveConnections: 2, RealtimeOutboundOverflows: 8, RPCRequests: 19, RPCActive: 1, RPCTotalNanos: 12_000_000,
 			Worker: meldserver.WorkerHubStats{ConnectedWorkers: 1, PolicyInvalidations: 6},
 		},
 	}

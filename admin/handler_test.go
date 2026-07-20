@@ -219,7 +219,8 @@ func TestEmbeddedDashboardIsOptInAndContainsNoData(t *testing.T) {
 	version := strconv.FormatUint(uint64(SchemaVersion), 10)
 	if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/javascript") ||
 		!strings.Contains(script, "sample.version !== "+version) || !strings.Contains(script, "history.version !== "+version) ||
-		!strings.Contains(script, "rollbackAnchorGeneration") || !strings.Contains(script, "rollback-anchor-backend") {
+		!strings.Contains(script, "rollbackAnchorGeneration") || !strings.Contains(script, "rollback-anchor-backend") ||
+		!strings.Contains(script, "commitCoordinator") || !strings.Contains(script, "commit-coordinator-pending") {
 		t.Fatalf("dashboard script status=%d headers=%v", response.Code, response.Header())
 	}
 

@@ -18,7 +18,7 @@ var (
 	ErrSubscriberLimit = errors.New("meldbase admin: subscriber limit reached")
 )
 
-const SchemaVersion uint32 = 11
+const SchemaVersion uint32 = 16
 
 // StatsSource is implemented by *meldbase.DB.
 type StatsSource interface {
