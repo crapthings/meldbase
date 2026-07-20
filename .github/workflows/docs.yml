@@ -5,10 +5,19 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/docs.yml"
-      - "README.md"
       - "docs/**"
+      - "sdk/**"
       - "package.json"
       - "pnpm-lock.yaml"
+      - "typedoc.json"
+  pull_request:
+    paths:
+      - ".github/workflows/docs.yml"
+      - "docs/**"
+      - "sdk/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "typedoc.json"
   workflow_dispatch:
 
 permissions:

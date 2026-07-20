@@ -10,6 +10,8 @@ WebSockets when an application needs a server boundary.
 It is designed for product teams that want a small, application-owned data
 layer—not a hosted MongoDB clone, an ORM, or a distributed database to operate.
 
+**[Read the documentation →](https://crapthings.github.io/meldbase/)**
+
 ## Why Meldbase
 
 - **Start local.** Open one file from Go; there is no separate database service
@@ -205,7 +207,9 @@ are the authoritative boundary.
 
 ## Documentation
 
-- [Documentation index](docs/README.md)
+- **[Documentation site](https://crapthings.github.io/meldbase/)** — guides,
+  operations runbooks, HTTP reference, and generated TypeScript API reference.
+- [Documentation index in this repository](docs/README.md)
 - [Architecture](docs/architecture.md)
 - [Query and index contract](docs/query.md)
 - [Reactive queries and durable changes](docs/reactive.md)
