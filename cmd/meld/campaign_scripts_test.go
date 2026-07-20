@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -94,5 +95,61 @@ func TestQualificationLinuxFoundationDryRunPinsDestructiveOrder(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "attested=true") {
 		t.Fatalf("foundation environment stage lacks physical controller attestation: %q", lines[0])
+	}
+}
+
+func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) {
+	repository, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	argumentsPath := filepath.Join(directory, "arguments")
+	binary := filepath.Join(directory, "fake-meld")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$MELDBASE_ARGUMENTS_FILE\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(repository, "deploy", "single-node", "systemd", "meldbase-single-node")
+	run := func(extra ...string) (string, error) {
+		command := exec.Command("sh", launcher)
+		command.Env = append(os.Environ(),
+			"MELDBASE_BIN="+binary,
+			"MELDBASE_DB=/var/lib/meldbase/data/test.meld2",
+			"MELDBASE_ADMIN_TOKEN="+strings.Repeat("a", 32),
+			"MELDBASE_ARGUMENTS_FILE="+argumentsPath,
+		)
+		command.Env = append(command.Env, extra...)
+		raw, err := command.CombinedOutput()
+		return string(raw), err
+	}
+	if output, err := run(); err != nil {
+		t.Fatalf("launcher: %v\n%s", err, output)
+	}
+	raw, err := os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"serve", "--db", "/var/lib/meldbase/data/test.meld2", "--addr", "127.0.0.1:8080", "--dev-no-auth",
+		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
+	}
+	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("arguments=%q want=%q", got, want)
+	}
+	if output, err := run("MELDBASE_ADDR=0.0.0.0:8080"); err == nil || !strings.Contains(output, "loopback") {
+		t.Fatalf("public listener should fail: err=%v output=%q", err, output)
+	}
+
+	unit, err := os.ReadFile(filepath.Join(repository, "deploy", "single-node", "systemd", "meldbase.service"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"User=meldbase", "EnvironmentFile=/etc/meldbase/meldbase.env", "UMask=0077", "NoNewPrivileges=true",
+		"ProtectSystem=strict", "ReadWritePaths=/var/lib/meldbase", "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+	} {
+		if !strings.Contains(string(unit), required) {
+			t.Fatalf("service is missing %q", required)
+		}
 	}
 }

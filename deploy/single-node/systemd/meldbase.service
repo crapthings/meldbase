@@ -1,0 +1,35 @@
+[Unit]
+Description=Meldbase local single-node development service
+After=local-fs.target
+RequiresMountsFor=/var/lib/meldbase
+
+[Service]
+Type=simple
+User=meldbase
+Group=meldbase
+WorkingDirectory=/var/lib/meldbase
+EnvironmentFile=/etc/meldbase/meldbase.env
+ExecStart=/usr/local/libexec/meldbase/meldbase-single-node
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+
+# The V2 database is the only state that this unit may write.
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/meldbase
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

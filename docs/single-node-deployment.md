@@ -42,6 +42,30 @@ production endpoint. Put a production authentication and TLS boundary in the
 application that constructs `server.New`, rather than exposing
 `--dev-no-auth`.
 
+For a Linux host using systemd, the repository includes a conservative local
+service template in [`deploy/single-node/systemd`](../deploy/single-node/systemd).
+Its launcher forces both listeners to loopback, rejects a placeholder or short
+admin token, runs as an unprivileged `meldbase` user and permits writes only
+under `/var/lib/meldbase`. It is intentionally not a production network
+deployment recipe.
+
+```sh
+sudo useradd --system --home-dir /var/lib/meldbase --shell /usr/sbin/nologin meldbase
+sudo install -d -o meldbase -g meldbase -m 0750 /var/lib/meldbase/data
+sudo install -d -o root -g meldbase -m 0750 /etc/meldbase
+sudo install -m 0755 deploy/single-node/systemd/meldbase-single-node /usr/local/libexec/meldbase/meldbase-single-node
+sudo install -m 0640 deploy/single-node/systemd/meldbase.env.example /etc/meldbase/meldbase.env
+sudo install -m 0644 deploy/single-node/systemd/meldbase.service /etc/systemd/system/meldbase.service
+sudoedit /etc/meldbase/meldbase.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now meldbase
+```
+
+Before enabling the service, replace `MELDBASE_ADMIN_TOKEN` with the output of
+`openssl rand -hex 32`. Keep the primary listener at `127.0.0.1:8080` and
+access it only through an application-owned authentication/TLS boundary. Check
+startup with `systemctl status meldbase` and `journalctl -u meldbase`.
+
 For a local process with the embedded dashboard, generate a long random token,
 keep it out of shell history where practical, and bind the dashboard only to
 loopback:

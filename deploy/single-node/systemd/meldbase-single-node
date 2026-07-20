@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+# This launcher is intentionally limited to the CLI's local development mode.
+# Keep both listeners on loopback: meld serve has no production authenticator.
+: "${MELDBASE_BIN:=/usr/local/bin/meld}"
+: "${MELDBASE_DB:=/var/lib/meldbase/data/app.meld2}"
+: "${MELDBASE_ADDR:=127.0.0.1:8080}"
+: "${MELDBASE_ADMIN_ADDR:=127.0.0.1:9091}"
+: "${MELDBASE_ADMIN_TOKEN:=}"
+
+case "$MELDBASE_ADDR" in
+  127.*:*|'[::1]':*) ;;
+  *)
+    printf '%s\n' 'MELDBASE_ADDR must be a loopback address while --dev-no-auth is in use' >&2
+    exit 2
+    ;;
+esac
+case "$MELDBASE_ADMIN_ADDR" in
+  127.*:*|'[::1]':*) ;;
+  *)
+    printf '%s\n' 'MELDBASE_ADMIN_ADDR must be a loopback address' >&2
+    exit 2
+    ;;
+esac
+if [ "${#MELDBASE_ADMIN_TOKEN}" -lt 32 ] || [ "$MELDBASE_ADMIN_TOKEN" = CHANGE_ME_GENERATE_A_RANDOM_TOKEN ]; then
+  printf '%s\n' 'MELDBASE_ADMIN_TOKEN must be a unique random token of at least 32 bytes' >&2
+  exit 2
+fi
+
+exec "$MELDBASE_BIN" serve \
+  --db "$MELDBASE_DB" \
+  --addr "$MELDBASE_ADDR" \
+  --dev-no-auth \
+  --admin-addr "$MELDBASE_ADMIN_ADDR" \
+  --admin-diagnostics \
+  --admin-metrics
