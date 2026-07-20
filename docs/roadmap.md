@@ -150,7 +150,8 @@
   rejection, V2 required-feature negotiation, resumable shadow construction,
   backup/compaction/verification coverage and an additive golden fixture.
 - [x] Safe no-overwrite `CompactToV2` logical compaction with verification,
-  new identity/resume-token boundary and bounded observability.
+  snapshot-at-admission concurrent-write semantics, Close coordination, new
+  identity/resume-token boundary and bounded observability.
 - [x] Explicit epoch-safe page reuse protected by both valid meta roots and all
   active reader/replay roots, with cache-safe post-publication reuse.
 - [x] Add disk-full publication/reuse fault matrices and a configurable large-DB
@@ -258,6 +259,27 @@
   order, fixed power IDs/boundaries and non-overlapping chronology.
 - [ ] Add multi-hour release soak evidence under concurrent writes, readers,
   reclamation conflicts and repeated reopen.
+
+## M9 — production operation and fenced HA
+
+- [x] Provide a signed local V2 primary write fence, controller-side exact-CAS
+  lease primitives, authenticated quorum-member storage, private mTLS
+  grant/renew/revoke transport, certificate rotation pins and a fail-closed
+  primary renewal supervisor.
+- [x] Provide authenticated bootstrap/tail replication transports, a read-only
+  follower state machine, durable source acknowledgements and a conservative
+  connected-source promotion-readiness policy.
+- [ ] Define and operate an independent controller membership/election and
+  client-routing service, including controller outage, node replacement,
+  certificate/key rotation and old-primary isolation procedures. This is a
+  deployment control plane, not a hidden database-local election feature.
+- [ ] Produce retained real-volume Level-4/5 filesystem and multi-hour release
+  soak evidence for each supported production matrix before claiming a
+  production-qualified persistence or HA deployment.
+- [ ] Exercise a complete failure matrix on independent nodes: source loss,
+  controller loss, stale old primary, quorum minority, follower lag, restore,
+  and operator-led promotion. Automatic partitioned promotion remains out of
+  scope without a synchronous/quorum-commit RPO design.
 
 Explicitly deferred: MongoDB wire/BSON compatibility, clustering, sharding,
 distributed transactions, offline conflict resolution, geospatial/full-text/vector
