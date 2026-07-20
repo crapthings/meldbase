@@ -22,11 +22,21 @@ meld init --dir ./meldbase-local
 ```
 
 `init` refuses an existing directory; it never rotates or overwrites a running
-deployment's credentials. Its generated `config/meldbase.env` and
-`secrets/jwt-hs256.secret` are mode `0600`. The issuer, audience and
-workspace-scoped collections default to `meldbase-local`, `meldbase-api` and
-`projects,tasks,comments`; set the matching values on creation with
-`--jwt-issuer`, `--jwt-audience` and `--workspace-collections`.
+deployment's credentials. Its generated `config/meldbase.env`,
+`config/access-policy.json`, and `secrets/jwt-hs256.secret` are mode `0600`.
+The issuer, audience and initial collaborative `projects`, `tasks`, and
+`comments` policy default to `meldbase-local` and `meldbase-api`. Edit the
+manifest before exposing a generic data API, then validate it without starting
+the server:
+
+```sh
+meld access-policy validate --file ./meldbase-local/config/access-policy.json
+```
+
+Use `--jwt-issuer`, `--jwt-audience` and `--workspace-collections` to change
+the compatible all-collaborative shorthand at creation time. See
+[collection access policies](./guide/access-policies) for owner-only,
+RPC-only, and field-limited declarations.
 
 The command does not create application accounts or mint JWTs. The application
 identity service must sign tokens with the generated secret and include `sub`,
@@ -87,6 +97,7 @@ sudo install -d -o meldbase -g meldbase -m 0750 /var/lib/meldbase/data
 sudo install -d -o root -g meldbase -m 0750 /etc/meldbase
 sudo install -m 0755 deploy/single-node/systemd/meldbase-single-node /usr/local/libexec/meldbase/meldbase-single-node
 sudo install -m 0640 deploy/single-node/systemd/meldbase.env.example /etc/meldbase/meldbase.env
+sudo install -o root -g meldbase -m 0640 deploy/single-node/systemd/access-policy.json.example /etc/meldbase/access-policy.json
 sudo install -m 0644 deploy/single-node/systemd/meldbase.service /etc/systemd/system/meldbase.service
 sudoedit /etc/meldbase/meldbase.env
 sudo systemctl daemon-reload
@@ -94,11 +105,13 @@ sudo systemctl enable --now meldbase
 ```
 
 Before enabling the service, replace `MELDBASE_ADMIN_TOKEN`, write at least 32
-random bytes to `/etc/meldbase/jwt-hs256.secret`, and set the issuer, audience
-and workspace-scoped collections in `meldbase.env`. Keep the primary listener
-at `127.0.0.1:8080` and access it through an application-owned TLS boundary.
-The JWT must contain `sub`, `exp`, the configured `iss` and `aud`, plus
-`workspace_id`. Check startup with `systemctl status meldbase` and
+random bytes to `/etc/meldbase/jwt-hs256.secret`, and edit/validate
+`/etc/meldbase/access-policy.json`. The launcher passes that strict manifest to
+`meld serve`; it also accepts the older `MELDBASE_WORKSPACE_COLLECTIONS`
+shorthand, but the two settings are mutually exclusive. Keep the primary
+listener at `127.0.0.1:8080` and access it through an application-owned TLS
+boundary. The JWT must contain `sub`, `exp`, the configured `iss` and `aud`,
+plus `workspace_id`. Check startup with `systemctl status meldbase` and
 `journalctl -u meldbase`.
 
 For a local process with the embedded dashboard, provide the same JWT settings
@@ -112,8 +125,7 @@ meld serve \
   --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
   --jwt-issuer https://identity.example/ \
   --jwt-audience meldbase-api \
-  --workspace-collections projects,tasks,comments \
-  --workspace-field workspaceId \
+  --access-policy-file /etc/meldbase/access-policy.json \
   --admin-addr 127.0.0.1:9091 \
   --admin-diagnostics \
   --admin-metrics

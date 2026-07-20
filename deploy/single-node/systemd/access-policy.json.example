@@ -1,0 +1,10 @@
+{
+  "$schema": "https://crapthings.github.io/meldbase/schemas/collection-access-manifest-v1.schema.json",
+  "version": 1,
+  "workspaceField": "workspaceId",
+  "collections": [
+    {"collection": "projects", "mode": "collaborative"},
+    {"collection": "tasks", "mode": "collaborative"},
+    {"collection": "comments", "mode": "collaborative"}
+  ]
+}

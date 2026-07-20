@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# This launcher runs the current JWT/workspace-isolated server path. Keep the
+# This launcher runs the current JWT/collection-policy server path. Keep the
 # public listener on loopback until an application-owned TLS proxy is configured.
 : "${MELDBASE_BIN:=/usr/local/bin/meld}"
 : "${MELDBASE_DB:=/var/lib/meldbase/data/app.meld}"
@@ -11,6 +11,7 @@ set -eu
 : "${MELDBASE_JWT_HS256_SECRET_FILE:=}"
 : "${MELDBASE_JWT_ISSUER:=}"
 : "${MELDBASE_JWT_AUDIENCE:=}"
+: "${MELDBASE_ACCESS_POLICY_FILE:=}"
 : "${MELDBASE_WORKSPACE_COLLECTIONS:=}"
 : "${MELDBASE_WORKSPACE_FIELD:=workspaceId}"
 
@@ -36,8 +37,24 @@ if [ -z "$MELDBASE_JWT_HS256_SECRET_FILE" ] || [ ! -r "$MELDBASE_JWT_HS256_SECRE
   printf '%s\n' 'MELDBASE_JWT_HS256_SECRET_FILE must name a readable 32+ byte secret file' >&2
   exit 2
 fi
-if [ -z "$MELDBASE_JWT_ISSUER" ] || [ -z "$MELDBASE_JWT_AUDIENCE" ] || [ -z "$MELDBASE_WORKSPACE_COLLECTIONS" ]; then
-  printf '%s\n' 'MELDBASE_JWT_ISSUER, MELDBASE_JWT_AUDIENCE and MELDBASE_WORKSPACE_COLLECTIONS are required' >&2
+if [ -z "$MELDBASE_JWT_ISSUER" ] || [ -z "$MELDBASE_JWT_AUDIENCE" ]; then
+  printf '%s\n' 'MELDBASE_JWT_ISSUER and MELDBASE_JWT_AUDIENCE are required' >&2
+  exit 2
+fi
+if [ -n "$MELDBASE_ACCESS_POLICY_FILE" ] && [ -n "$MELDBASE_WORKSPACE_COLLECTIONS" ]; then
+  printf '%s\n' 'MELDBASE_ACCESS_POLICY_FILE and MELDBASE_WORKSPACE_COLLECTIONS are mutually exclusive' >&2
+  exit 2
+fi
+if [ -n "$MELDBASE_ACCESS_POLICY_FILE" ]; then
+  if [ ! -r "$MELDBASE_ACCESS_POLICY_FILE" ]; then
+    printf '%s\n' 'MELDBASE_ACCESS_POLICY_FILE must name a readable manifest' >&2
+    exit 2
+  fi
+  set -- --access-policy-file "$MELDBASE_ACCESS_POLICY_FILE"
+elif [ -n "$MELDBASE_WORKSPACE_COLLECTIONS" ]; then
+  set -- --workspace-collections "$MELDBASE_WORKSPACE_COLLECTIONS" --workspace-field "$MELDBASE_WORKSPACE_FIELD"
+else
+  printf '%s\n' 'MELDBASE_ACCESS_POLICY_FILE or MELDBASE_WORKSPACE_COLLECTIONS is required' >&2
   exit 2
 fi
 
@@ -47,8 +64,7 @@ exec "$MELDBASE_BIN" serve \
   --jwt-hs256-secret-file "$MELDBASE_JWT_HS256_SECRET_FILE" \
   --jwt-issuer "$MELDBASE_JWT_ISSUER" \
   --jwt-audience "$MELDBASE_JWT_AUDIENCE" \
-  --workspace-collections "$MELDBASE_WORKSPACE_COLLECTIONS" \
-  --workspace-field "$MELDBASE_WORKSPACE_FIELD" \
+  "$@" \
   --admin-addr "$MELDBASE_ADMIN_ADDR" \
   --admin-diagnostics \
   --admin-metrics

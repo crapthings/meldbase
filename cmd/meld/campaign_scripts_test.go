@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	meldserver "github.com/crapthings/meldbase/server"
 )
 
 func TestDestructiveQEMUMatrixDryRunPinsLegacyAndSessionTrials(t *testing.T) {
@@ -106,7 +108,11 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 	directory := t.TempDir()
 	argumentsPath := filepath.Join(directory, "arguments")
 	secretPath := filepath.Join(directory, "jwt.secret")
+	policyPath := filepath.Join(directory, "access-policy.json")
 	if err := os.WriteFile(secretPath, []byte(strings.Repeat("s", 32)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(policyPath, []byte(`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"projects","mode":"collaborative"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(directory, "fake-meld")
@@ -114,6 +120,14 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		t.Fatal(err)
 	}
 	launcher := filepath.Join(repository, "deploy", "single-node", "systemd", "meldbase-single-node")
+	policyExample := filepath.Join(repository, "deploy", "single-node", "systemd", "access-policy.json.example")
+	policyRaw, err := os.ReadFile(policyExample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := meldserver.ParseCollectionAccessManifestJSON(policyRaw); err != nil {
+		t.Fatalf("systemd access policy example: %v", err)
+	}
 	run := func(extra ...string) (string, error) {
 		command := exec.Command("sh", launcher)
 		command.Env = append(os.Environ(),
@@ -146,6 +160,25 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("arguments=%q want=%q", got, want)
 	}
+	if output, err := run("MELDBASE_WORKSPACE_COLLECTIONS=", "MELDBASE_ACCESS_POLICY_FILE="+policyPath); err != nil {
+		t.Fatalf("manifest launcher: %v\n%s", err, output)
+	}
+	raw, err = os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []string{
+		"serve", "--db", "/var/lib/meldbase/data/test.meld", "--addr", "127.0.0.1:8080",
+		"--jwt-hs256-secret-file", secretPath, "--jwt-issuer", "https://identity.example.test/", "--jwt-audience", "meldbase-api",
+		"--access-policy-file", policyPath,
+		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
+	}
+	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("manifest arguments=%q want=%q", got, want)
+	}
+	if output, err := run("MELDBASE_ACCESS_POLICY_FILE=" + policyPath); err == nil || !strings.Contains(output, "mutually exclusive") {
+		t.Fatalf("mixed policy settings should fail: err=%v output=%q", err, output)
+	}
 	if output, err := run("MELDBASE_ADDR=0.0.0.0:8080"); err == nil || !strings.Contains(output, "loopback") {
 		t.Fatalf("public listener should fail: err=%v output=%q", err, output)
 	}
@@ -161,5 +194,9 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		if !strings.Contains(string(unit), required) {
 			t.Fatalf("service is missing %q", required)
 		}
+	}
+	environment, err := os.ReadFile(filepath.Join(repository, "deploy", "single-node", "systemd", "meldbase.env.example"))
+	if err != nil || !strings.Contains(string(environment), "MELDBASE_ACCESS_POLICY_FILE=/etc/meldbase/access-policy.json") {
+		t.Fatalf("environment example=%q err=%v", environment, err)
 	}
 }
