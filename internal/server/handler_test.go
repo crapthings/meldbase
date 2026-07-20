@@ -320,6 +320,43 @@ func TestHTTPOriginAllowlistAndBoundedPreflight(t *testing.T) {
 	}
 }
 
+func TestRealtimeOriginPatternsRejectUntrustedBrowserAndAllowConfiguredClient(t *testing.T) {
+	db := meldbase.New()
+	handler, err := New(Config{
+		DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{},
+		PublicRealtimeURL: "ws://placeholder.invalid/v1/realtime",
+		OriginPatterns:    []string{"client.example"},
+		TicketTTL:         time.Minute,
+		ResumeTokenKey:    []byte("0123456789abcdef0123456789abcdef"),
+		MaxBodyBytes:      1 << 16,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	handler.config.PublicRealtimeURL = "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/realtime"
+	t.Cleanup(func() { server.Close(); _ = db.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	blockedTicket := obtainTicket(t, server.URL)
+	_, response, err := websocket.Dial(ctx, blockedTicket.URL, &websocket.DialOptions{HTTPHeader: http.Header{
+		"origin": []string{"https://attacker.example"},
+	}})
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("untrusted origin err=%v response=%v", err, response)
+	}
+
+	allowedTicket := obtainTicket(t, server.URL)
+	connection, response, err := websocket.Dial(ctx, allowedTicket.URL, &websocket.DialOptions{HTTPHeader: http.Header{
+		"origin": []string{"https://client.example"},
+	}})
+	if err != nil {
+		t.Fatalf("configured origin err=%v response=%v", err, response)
+	}
+	defer connection.CloseNow()
+}
+
 func TestLivenessAndReadinessHaveDistinctFailStopSemantics(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	for _, path := range []string{"/health", "/readyz"} {

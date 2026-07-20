@@ -254,7 +254,12 @@ func New(config Config) (*Handler, error) {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("origin")
-	if origin != "" {
+	// A WebSocket upgrade has its own Origin enforcement in realtime via
+	// websocket.Accept. Do not apply the HTTP CORS allowlist here: deployments
+	// may intentionally use a narrower exact CORS policy for ticket issuance
+	// and a separate host-pattern policy for the realtime connection.
+	isRealtimeUpgrade := r.Method == http.MethodGet && r.URL.Path == "/v1/realtime"
+	if origin != "" && !isRealtimeUpgrade {
 		if !containsString(h.config.AllowedHTTPOrigins, origin) {
 			writeError(w, http.StatusForbidden, "origin_forbidden")
 			return

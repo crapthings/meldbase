@@ -195,8 +195,10 @@ that connection rather than automatically retried forever.
 HTTP CORS and WebSocket origins are separate policies. HTTP requests with an
 `Origin` header must match an exact configured http(s) origin; preflight accepts
 only `GET`/`POST` and the `Authorization`/`Content-Type` headers. WebSocket
-upgrades continue to use host-pattern validation. CORS is a browser boundary,
-not a replacement for authentication or row/field authorization.
+upgrades bypass that HTTP CORS check and use their own host-pattern validation.
+This lets a deployment keep ticket-issuing HTTP endpoints on an exact allowlist
+while configuring a distinct realtime-origin boundary. CORS is a browser
+boundary, not a replacement for authentication or row/field authorization.
 
 The remote SDK requests delta mode. The server first delivers one atomic
 `snapshot`, followed by strictly ordered `delta` frames. The SDK applies those
