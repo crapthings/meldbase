@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -754,6 +759,174 @@ func TestInitRefusesExistingOrUnsafeBundleConfiguration(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("unsafe address error=%v", err)
 	}
+}
+
+func TestServeProductionWiresJWTPolicyAndBrowserBoundary(t *testing.T) {
+	const childEnvironment = "MELDBASE_TEST_SERVE_PRODUCTION_CHILD"
+	if os.Getenv(childEnvironment) == "1" {
+		err := run([]string{
+			"serve", "--db", os.Getenv("MELDBASE_TEST_SERVE_DB"), "--addr", "127.0.0.1:0",
+			"--jwt-hs256-secret-file", os.Getenv("MELDBASE_TEST_JWT_SECRET"),
+			"--jwt-issuer", "https://identity.example/", "--jwt-audience", "app-api",
+			"--access-policy-file", os.Getenv("MELDBASE_TEST_ACCESS_POLICY"),
+			"--http-origins", "https://app.example",
+			"--realtime-origin-patterns", "https://app.example",
+			"--public-realtime-url", "wss://api.example/v1/realtime",
+		}, os.Stdout, os.Stderr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	directory := t.TempDir()
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	secretPath := filepath.Join(directory, "jwt.secret")
+	if err := os.WriteFile(secretPath, secret, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(directory, "access-policy.json")
+	if err := os.WriteFile(policyPath, []byte(`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"tasks","mode":"collaborative"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestServeProductionWiresJWTPolicyAndBrowserBoundary$")
+	command.Env = append(os.Environ(),
+		childEnvironment+"=1",
+		"MELDBASE_TEST_SERVE_DB="+filepath.Join(directory, "app.meld"),
+		"MELDBASE_TEST_JWT_SECRET="+secretPath,
+		"MELDBASE_TEST_ACCESS_POLICY="+policyPath,
+	)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	defer func() {
+		if !stopped && command.Process != nil {
+			_ = command.Process.Signal(syscall.SIGTERM)
+			_ = command.Wait()
+		}
+	}()
+	startup := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		if scanner.Scan() {
+			startup <- scanner.Text()
+			return
+		}
+		startup <- ""
+	}()
+	var line string
+	select {
+	case line = <-startup:
+	case <-time.After(5 * time.Second):
+		_ = command.Process.Signal(syscall.SIGTERM)
+		waitErr := command.Wait()
+		stopped = true
+		t.Fatalf("production serve did not start: wait=%v stderr=%s", waitErr, stderr.String())
+	}
+	const prefix = "Meldbase listening on http://"
+	if !strings.HasPrefix(line, prefix) {
+		waitErr := command.Wait()
+		stopped = true
+		t.Fatalf("production serve startup=%q wait=%v stderr=%s", line, waitErr, stderr.String())
+	}
+	address := strings.Fields(strings.TrimPrefix(line, prefix))[0]
+	baseURL := "http://" + address
+	token := signedServeTestJWT(t, secret, map[string]any{
+		"iss": "https://identity.example/", "aud": "app-api", "sub": "user-a", "workspace_id": "team-a",
+		"exp": time.Now().Add(time.Minute).Unix(),
+	})
+
+	blocked, err := http.NewRequest(http.MethodGet, baseURL+"/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked.Header.Set("origin", "https://attacker.example")
+	response, err := http.DefaultClient.Do(blocked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("untrusted HTTP origin status=%d", response.StatusCode)
+	}
+
+	ticketRequest, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/realtime/tickets", nil)
+	ticketRequest.Header.Set("authorization", "Bearer "+token)
+	ticketRequest.Header.Set("origin", "https://app.example")
+	response, err = http.DefaultClient.Do(ticketRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ticket struct {
+		URL string `json:"url"`
+	}
+	decodeErr := json.NewDecoder(response.Body).Decode(&ticket)
+	response.Body.Close()
+	if decodeErr != nil || response.StatusCode != http.StatusOK || response.Header.Get("access-control-allow-origin") != "https://app.example" || ticket.URL != "wss://api.example/v1/realtime" {
+		t.Fatalf("ticket status=%d url=%q allow=%q err=%v", response.StatusCode, ticket.URL, response.Header.Get("access-control-allow-origin"), decodeErr)
+	}
+
+	insert, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/collections/tasks/documents", strings.NewReader(`{"version":1,"document":{"t":"object","v":[["title",{"t":"string","v":"scoped"}]]}}`))
+	insert.Header.Set("authorization", "Bearer "+token)
+	response, err = http.DefaultClient.Do(insert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("scoped insert status=%d", response.StatusCode)
+	}
+
+	otherToken := signedServeTestJWT(t, secret, map[string]any{
+		"iss": "https://identity.example/", "aud": "app-api", "sub": "user-b", "workspace_id": "team-b",
+		"exp": time.Now().Add(time.Minute).Unix(),
+	})
+	query, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/collections/tasks/query", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}}}`))
+	query.Header.Set("authorization", "Bearer "+otherToken)
+	response, err = http.DefaultClient.Do(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Documents []json.RawMessage `json:"documents"`
+	}
+	decodeErr = json.NewDecoder(response.Body).Decode(&result)
+	response.Body.Close()
+	if decodeErr != nil || response.StatusCode != http.StatusOK || len(result.Documents) != 0 {
+		t.Fatalf("cross-workspace query status=%d documents=%d err=%v", response.StatusCode, len(result.Documents), decodeErr)
+	}
+
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("production serve shutdown: %v\nstderr=%s", err, stderr.String())
+	}
+	stopped = true
+}
+
+func signedServeTestJWT(t *testing.T, secret []byte, claims map[string]any) string {
+	t.Helper()
+	header, err := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsigned := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte(unsigned))
+	return unsigned + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func TestServeWithoutWorkerControlStartsAndStopsCleanly(t *testing.T) {
