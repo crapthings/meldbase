@@ -129,6 +129,72 @@ func TestFileFallsBackFromCorruptNewestRootAndTruncatesPartialTail(t *testing.T)
 	}
 }
 
+func TestOpenRequireGraphAuditRejectsDeepCorruptionWithoutMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "graph-audit.meld2")
+	file, _, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := [16]byte{0xa7, 1}
+	if _, err := file.ApplyDocumentTransaction(DocumentTransaction{TransactionID: [16]byte{1}, Mutations: []DocumentMutation{{
+		Collection: "items", DocumentID: id, Operation: DocumentInsert, Document: []byte("value"),
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	root, err := file.DatabaseRoot()
+	if err != nil || root.CatalogRoot == 0 {
+		t.Fatalf("root=%+v err=%v", root, err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := flipByte(raw, int64(root.CatalogRoot)*PageSize+PageHeaderSize); err != nil {
+		_ = raw.Close()
+		t.Fatal(err)
+	}
+	if _, err := raw.Seek(0, 2); err != nil {
+		_ = raw.Close()
+		t.Fatal(err)
+	}
+	if _, err := raw.Write([]byte("crash-tail")); err != nil {
+		_ = raw.Close()
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if audited, _, _, err := OpenWithOptions(path, OpenOptions{RequireGraphAudit: true}); audited != nil || !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("audited open file=%v err=%v", audited, err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatal("failed graph audit modified the database")
+	}
+
+	// The fast metadata-only open remains available for normal large-database
+	// startup. It must not be mistaken for a structural integrity audit.
+	fast, _, _, err := OpenWithOptions(path, OpenOptions{})
+	if err != nil {
+		t.Fatalf("fast open unexpectedly rejected deep corruption: %v", err)
+	}
+	if err := fast.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCommitFaultsReopenAtExactlyOldOrNewGeneration(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "base.meld2")
 	file, _, err := Open(base)

@@ -14,9 +14,10 @@ import (
 )
 
 type testRollbackAnchorStore struct {
-	anchor  RollbackAnchor
-	exists  bool
-	saveErr error
+	anchor      RollbackAnchor
+	exists      bool
+	saveErr     error
+	saveThenErr error
 }
 
 type blockingAdvanceRollbackAnchorStore struct {
@@ -63,7 +64,7 @@ func (store *testRollbackAnchorStore) Advance(ctx context.Context, anchor Rollba
 		return ErrRollbackAnchor
 	}
 	store.anchor, store.exists = anchor, true
-	return nil
+	return store.saveThenErr
 }
 
 func TestFileRollbackAnchorStoreRejectsCorruptionAndRegression(t *testing.T) {
@@ -87,8 +88,8 @@ func TestFileRollbackAnchorStoreRejectsCorruptionAndRegression(t *testing.T) {
 	if err := storeValue.Advance(context.Background(), RollbackAnchor{DatabaseID: identity, MinimumCommitSequence: 7, MinimumGeneration: 7}); !errors.Is(err, ErrRollbackAnchor) {
 		t.Fatalf("generation regression error=%v", err)
 	}
-	if err := storeValue.Advance(context.Background(), RollbackAnchor{DatabaseID: identity, MinimumCommitSequence: 9, MinimumGeneration: 9}); !errors.Is(err, ErrRollbackAnchor) {
-		t.Fatalf("invalid coordinate error=%v", err)
+	if err := storeValue.Advance(context.Background(), RollbackAnchor{DatabaseID: identity, MinimumCommitSequence: 9, MinimumGeneration: 0}); !errors.Is(err, ErrRollbackAnchor) {
+		t.Fatalf("zero generation error=%v", err)
 	}
 	other := first
 	other.DatabaseID[0]++

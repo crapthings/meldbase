@@ -100,6 +100,9 @@ func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []
 	reservation := indexBuildReservation(c.name, definition.Name)
 	c.db.mu.Lock()
 	defer c.db.mu.Unlock()
+	if c.db.replicaReadOnly {
+		return IndexBuildID{}, ErrReplicaReadOnly
+	}
 	store, ok := c.db.durability.(*v2DurableStore)
 	if !ok || store == nil || store.file == nil {
 		return IndexBuildID{}, ErrIndexBuildUnsupported
@@ -449,6 +452,12 @@ func (db *DB) finalizeIndexBuild(ctx context.Context, store *v2DurableStore, met
 	}
 	if db.token != meta.AppliedSequence {
 		return ErrWriteConflict
+	}
+	// Finalization is a logical catalog commit: it makes an index visible to
+	// queries and replication. A stale primary must not be able to publish that
+	// visibility point after its lease/epoch was revoked.
+	if err := db.validateV2PrimaryWriteFence(db.token + 1); err != nil {
+		return err
 	}
 	var transactionID [16]byte
 	if _, err := rand.Read(transactionID[:]); err != nil {

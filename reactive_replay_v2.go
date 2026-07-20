@@ -13,12 +13,13 @@ import (
 // process-local reactive views. It remains internal until Storage V2 becomes a
 // supported public open path.
 type v2ReactiveReplayView struct {
-	collection   string
-	collectionID uint32
-	query        QuerySpec
-	seed         maphash.Seed
-	order        *reactiveCollectionOrder
-	state        *reactiveViewState
+	collection     string
+	collectionID   uint32
+	query          QuerySpec
+	seed           maphash.Seed
+	order          *reactiveCollectionOrder
+	state          *reactiveViewState
+	resourceLimits ResourceLimits
 }
 
 type replayOrderCheckpoint struct {
@@ -32,9 +33,22 @@ type replayOrderItem struct {
 	exists   bool
 }
 
-func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string, query QuerySpec) (*v2ReactiveReplayView, error) {
+func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string, query QuerySpec, suppliedLimits ...ResourceLimits) (*v2ReactiveReplayView, error) {
 	if snapshot == nil || !collectionNamePattern.MatchString(collection) {
 		return nil, ErrInvalidCollection
+	}
+	if len(suppliedLimits) > 1 {
+		return nil, ErrCorrupt
+	}
+	limits, err := normalizeResourceLimits(ResourceLimits{})
+	if err != nil {
+		return nil, err
+	}
+	if len(suppliedLimits) == 1 {
+		limits, err = normalizeResourceLimits(suppliedLimits[0])
+		if err != nil {
+			return nil, err
+		}
 	}
 	token := snapshot.Sequence()
 	meta, exists, err := snapshot.CollectionMeta(collection)
@@ -43,7 +57,7 @@ func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string
 	}
 	view := &v2ReactiveReplayView{
 		collection: collection, query: query, seed: maphash.MakeSeed(),
-		order: &reactiveCollectionOrder{token: token, positions: make(map[DocumentID]uint64)},
+		order: &reactiveCollectionOrder{token: token, positions: make(map[DocumentID]uint64)}, resourceLimits: limits,
 	}
 	if !exists {
 		view.state = &reactiveViewState{token: token, snapshot: QuerySnapshot{Token: token}}
@@ -57,6 +71,7 @@ func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string
 	}
 	defer iterator.Close()
 	entries := make([]reactiveTreeEntry, 0)
+	var memberCount, memberBytes uint64
 	var scanned uint64
 	for iterator.Next() {
 		record := iterator.Record()
@@ -74,7 +89,15 @@ func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string
 		view.order.positions[id] = record.InsertionPosition
 		scanned++
 		if query.Match(document) {
-			entries = append(entries, reactiveTreeEntry{id: id, member: reactiveMember{document: document, position: record.InsertionPosition}})
+			size, err := canonicalDocumentSize(document)
+			if err != nil {
+				return nil, err
+			}
+			memberCount, memberBytes, err = admitReactiveViewMember(limits, memberCount, memberBytes, size)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, reactiveTreeEntry{id: id, member: reactiveMember{document: document, position: record.InsertionPosition, bytes: size}})
 		}
 	}
 	if err := iterator.Err(); err != nil {
@@ -85,7 +108,7 @@ func newV2ReactiveReplayView(snapshot *storagev2.ReadSnapshot, collection string
 	}
 	byID, ordered := buildReactiveTrees(view.seed, query, entries)
 	view.state = &reactiveViewState{
-		token: token, byID: byID, ordered: ordered,
+		token: token, memberCount: memberCount, memberBytes: memberBytes, byID: byID, ordered: ordered,
 		snapshot: QuerySnapshot{Token: token, Documents: materializeReactiveOrder(ordered, query.skip, query.limit)},
 	}
 	return view, nil
@@ -143,7 +166,11 @@ func (view *v2ReactiveReplayView) ApplyCommit(stream *storagev2.LiveCommitStream
 		return QuerySnapshot{}, nil, ErrCorrupt
 	}
 	previous := view.state
-	next, valid := transitionReactiveViewState(previous, view.query, view.order, view.seed, batch.Sequence, changes)
+	next, valid, err := transitionReactiveViewState(previous, view.query, view.order, view.seed, batch.Sequence, changes, view.resourceLimits)
+	if err != nil {
+		view.restoreOrder(checkpoint)
+		return QuerySnapshot{}, nil, err
+	}
 	if !valid {
 		view.restoreOrder(checkpoint)
 		return QuerySnapshot{}, nil, ErrCorrupt
@@ -189,7 +216,7 @@ func (view *v2ReactiveReplayView) restoreOrder(checkpoint replayOrderCheckpoint)
 }
 
 func convertV2ReplayChange(change storagev2.ResolvedCommitChange) (Change, error) {
-	converted := Change{DocumentID: DocumentID(change.DocumentID)}
+	converted := Change{DocumentID: DocumentID(change.DocumentID), ChangedPaths: append([]string(nil), change.ChangedPaths...)}
 	decodeBefore := func() error {
 		document, err := decodeV2ReplayDocument(change.Before, change.DocumentID)
 		if err != nil {
@@ -203,7 +230,13 @@ func convertV2ReplayChange(change storagev2.ResolvedCommitChange) (Change, error
 		if err != nil {
 			return err
 		}
+		size, err := canonicalDocumentSize(document)
+		if err != nil {
+			return err
+		}
 		converted.After = &document
+		converted.afterCanonicalBytes = size
+		converted.afterCanonicalBytesKnown = true
 		return nil
 	}
 	switch change.Operation {

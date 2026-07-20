@@ -30,7 +30,15 @@ type v2DurableStore struct {
 	rollbackAnchorNanos      atomic.Uint64
 	rollbackAnchorMaxNanos   atomic.Uint64
 	compactMu                sync.Mutex
-	preparedIndexBuild       struct {
+	// testCompactionSnapshotHook pauses a compaction after it has pinned its
+	// immutable source snapshot. It is package-test-only proof that the long
+	// copy/verification phase does not hold db.mu and block writers.
+	testCompactionSnapshotHook func()
+	// testQuerySnapshotHook pauses a V2 query snapshot after its immutable
+	// storage root is pinned. It proves cold reactive construction scans without
+	// retaining db.mu.
+	testQuerySnapshotHook func()
+	preparedIndexBuild    struct {
 		active     bool
 		sequence   uint64
 		collection string
@@ -108,6 +116,14 @@ func OpenV2WithOptions(path string, options V2Options) (*DB, error) {
 	if err := validateRecoveryMode(options.Recovery); err != nil {
 		return nil, err
 	}
+	replayDeliveryTimeout, err := normalizeV2ReplayDeliveryTimeout(options.ReplayDeliveryTimeout)
+	if err != nil {
+		return nil, err
+	}
+	coordinatorOptions, err := normalizeV2CommitCoordinatorOptions(options.CommitCoordinator)
+	if err != nil {
+		return nil, err
+	}
 	resourceLimits, err := normalizeResourceLimits(options.ResourceLimits)
 	if err != nil {
 		return nil, err
@@ -156,6 +172,8 @@ func OpenV2WithOptions(path string, options V2Options) (*DB, error) {
 	}
 	file, meta, recovery, err := storagev2.OpenWithOptions(path, storagev2.OpenOptions{
 		RequireClean:              options.Recovery == RecoveryRequireClean,
+		RequireGraphAudit:         options.RequireGraphAudit,
+		RequirePrivateFileMode:    options.RequirePrivateFileMode,
 		ExpectedDatabaseID:        expectedID,
 		MinimumCommitSequence:     minimumSequence,
 		MinimumGeneration:         minimumGeneration,
@@ -206,7 +224,7 @@ func OpenV2WithOptions(path string, options V2Options) (*DB, error) {
 		store.rollbackAnchorSequence.Store(meta.CommitSequence)
 		store.rollbackAnchorGeneration.Store(meta.Generation)
 	}
-	source := &v2QueryReplaySource{file: file}
+	source := &v2QueryReplaySource{file: file, deliveryTimeout: replayDeliveryTimeout, resourceLimits: resourceLimits}
 	db := &DB{
 		startedAt: time.Now(), closedCh: make(chan struct{}), collections: collections, watchers: make(map[uint64]*changeWatcher),
 		token: meta.CommitSequence, durability: store, replaySource: source, querySource: store,
@@ -219,7 +237,11 @@ func OpenV2WithOptions(path string, options V2Options) (*DB, error) {
 			MetaRedundancyDegraded: recovery.MetaRedundancyDegraded,
 			AccelerationDegraded:   recovery.FreeSpaceLoadDegraded,
 		}),
+		replicaReadOnly:   options.Follower,
+		primaryWriteFence: options.PrimaryWriteFence,
 	}
+	source.onSlowConsumer = func() { db.metrics.slowConsumers.Add(1) }
+	source.onResourceLimit = func() { db.metrics.resourceLimitRejections.Add(1) }
 	builds, err := file.IndexBuilds()
 	if err != nil {
 		return fail(mapStorageV2Error(err))
@@ -247,6 +269,10 @@ func OpenV2WithOptions(path string, options V2Options) (*DB, error) {
 	persistentDocuments := file.StorageStats().DocumentCount
 	db.initializeLogicalStats(&persistentDocuments)
 	db.reactive = newReactiveHub(db)
+	db.dispatcher = newChangeDispatcher(db)
+	if coordinatorOptions.Enabled && !options.Follower {
+		db.commitCoordinator = newV2CommitCoordinator(db, store, coordinatorOptions)
+	}
 	return db, nil
 }
 
@@ -257,6 +283,9 @@ func (store *v2DurableStore) openQuerySnapshot() (queryStorageSnapshot, error) {
 	snapshot, err := store.file.OpenSnapshot()
 	if err != nil {
 		return nil, mapStorageV2Error(err)
+	}
+	if store.testQuerySnapshotHook != nil {
+		store.testQuerySnapshotHook()
 	}
 	return &v2QueryStorageSnapshot{snapshot: snapshot, documents: store.documents}, nil
 }
@@ -271,6 +300,23 @@ func (snapshot *v2QueryStorageSnapshot) Sequence() uint64 {
 		return 0
 	}
 	return snapshot.snapshot.Sequence()
+}
+
+func (snapshot *v2QueryStorageSnapshot) CollectionVersion(collection string) (queryStorageCollectionVersion, bool, error) {
+	if snapshot == nil || snapshot.snapshot == nil {
+		return queryStorageCollectionVersion{}, false, ErrClosed
+	}
+	meta, exists, err := snapshot.snapshot.CollectionMeta(collection)
+	if err != nil {
+		return queryStorageCollectionVersion{}, false, mapStorageV2Error(err)
+	}
+	if !exists {
+		return queryStorageCollectionVersion{}, false, nil
+	}
+	if meta.ID == 0 || meta.UpdatedSequence == 0 {
+		return queryStorageCollectionVersion{}, false, ErrCorrupt
+	}
+	return queryStorageCollectionVersion{ID: meta.ID, UpdatedSequence: meta.UpdatedSequence, NextDocumentPosition: meta.NextDocumentPosition}, true, nil
 }
 
 func (snapshot *v2QueryStorageSnapshot) GetDocumentRecord(collection string, id DocumentID) (queryStorageDocument, bool, error) {
@@ -447,7 +493,7 @@ func loadV2Collections(snapshot *storagev2.ReadSnapshot) (map[string]*collection
 }
 
 func (store *v2DurableStore) appendDBCommit(ctx context.Context, db *DB, token uint64, changes []Change) error {
-	_, err := store.appendDBCommitWithSystem(ctx, db, token, changes, nil, nil)
+	_, err := store.appendDBCommitWithSystem(ctx, db, token, changes, nil, nil, nil)
 	return err
 }
 
@@ -458,11 +504,15 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 	changes []Change,
 	systems []systemrecord.Mutation,
 	preconditions []storagev2.DocumentPrecondition,
+	collectionPreconditions []storagev2.CollectionPrecondition,
 ) (systemrecord.Result, error) {
 	if store == nil || store.file == nil || len(changes) == 0 {
 		return systemrecord.Result{}, ErrCorrupt
 	}
 	if err := contextError(ctx); err != nil {
+		return systemrecord.Result{}, err
+	}
+	if err := db.validateV2PrimaryWriteFence(token); err != nil {
 		return systemrecord.Result{}, err
 	}
 	var transactionID [16]byte
@@ -503,60 +553,11 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 			FieldPath: change.Index.Field, Fields: storageV2IndexFields(*change.Index), Unique: change.Index.Unique, Entries: entries,
 		})
 	} else {
-		mutations := make([]storagev2.DocumentMutation, len(changes))
-		for index, change := range changes {
-			if err := contextError(ctx); err != nil {
-				return systemrecord.Result{}, err
-			}
-			operation := storagev2.DocumentInsert
-			switch change.Operation {
-			case InsertOperation:
-				operation = storagev2.DocumentInsert
-			case UpdateOperation:
-				operation = storagev2.DocumentUpdate
-			case DeleteOperation:
-				operation = storagev2.DocumentDelete
-			default:
-				return systemrecord.Result{}, ErrCorrupt
-			}
-			mutation := storagev2.DocumentMutation{Collection: change.Collection, DocumentID: [16]byte(change.DocumentID), Operation: operation}
-			if change.After != nil {
-				mutation.Document, err = encodeStoredDocument(*change.After)
-				if err != nil {
-					return systemrecord.Result{}, err
-				}
-			}
-			data := db.collections[change.Collection]
-			if data != nil {
-				names := make([]string, 0, len(data.indexes))
-				for name := range data.indexes {
-					names = append(names, name)
-				}
-				sort.Strings(names)
-				for _, name := range names {
-					definition := data.indexes[name].definition
-					item := storagev2.IndexMutation{Name: name}
-					if change.Before != nil {
-						item.BeforeKey, _, err = indexDocumentKey(definition, *change.Before)
-						if err != nil {
-							return systemrecord.Result{}, err
-						}
-					}
-					if change.After != nil {
-						item.AfterKey, _, err = indexDocumentKey(definition, *change.After)
-						if err != nil {
-							return systemrecord.Result{}, err
-						}
-					}
-					mutation.Indexes = append(mutation.Indexes, item)
-				}
-			}
-			mutations[index] = mutation
+		documentTransaction, prepareErr := store.prepareDocumentTransaction(ctx, db, transactionID, changes, preconditions, collectionPreconditions)
+		if prepareErr != nil {
+			return systemrecord.Result{}, prepareErr
 		}
 		if err = contextError(ctx); err == nil {
-			documentTransaction := storagev2.DocumentTransaction{
-				TransactionID: transactionID, Preconditions: preconditions, Mutations: mutations,
-			}
 			if len(systems) == 0 {
 				sequence, err = store.file.ApplyDocumentTransaction(documentTransaction)
 				result.Applied = err == nil
@@ -584,7 +585,7 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 	if err != nil {
 		db.metrics.v2RejectedTransactions.Add(1)
 		mapped := mapStorageV2Error(err)
-		if !errors.Is(mapped, ErrDuplicateKey) && !errors.Is(mapped, ErrInvalidIndex) &&
+		if !errors.Is(mapped, ErrDuplicateID) && !errors.Is(mapped, ErrDuplicateKey) && !errors.Is(mapped, ErrInvalidIndex) &&
 			!errors.Is(mapped, ErrResourceLimit) && !errors.Is(mapped, ErrWriteConflict) {
 			db.fatalErr = fmt.Errorf("%w: %v", ErrDurability, mapped)
 			return systemrecord.Result{}, db.fatalErr
@@ -609,6 +610,208 @@ func (store *v2DurableStore) appendDBCommitWithSystem(
 	updateAtomicMax(&db.metrics.v2CommitMaxNanos, elapsed)
 	result.Applied = true
 	return result, nil
+}
+
+// prepareDocumentTransaction converts one already-authorized logical Change
+// batch to the storage-neutral transaction form. It intentionally reads only
+// immutable schema/index definitions from db.collections; V2 document state is
+// authoritative in the storage snapshot. The group publisher reuses this exact
+// conversion for every member.
+func (store *v2DurableStore) prepareDocumentTransaction(
+	ctx context.Context,
+	db *DB,
+	transactionID [16]byte,
+	changes []Change,
+	preconditions []storagev2.DocumentPrecondition,
+	collectionPreconditions []storagev2.CollectionPrecondition,
+) (storagev2.DocumentTransaction, error) {
+	if store == nil || db == nil || transactionID == ([16]byte{}) || len(changes) == 0 {
+		return storagev2.DocumentTransaction{}, ErrCorrupt
+	}
+	mutations := make([]storagev2.DocumentMutation, len(changes))
+	for index, change := range changes {
+		if err := contextError(ctx); err != nil {
+			return storagev2.DocumentTransaction{}, err
+		}
+		operation := storagev2.DocumentInsert
+		switch change.Operation {
+		case InsertOperation:
+			operation = storagev2.DocumentInsert
+		case UpdateOperation:
+			operation = storagev2.DocumentUpdate
+		case DeleteOperation:
+			operation = storagev2.DocumentDelete
+		default:
+			return storagev2.DocumentTransaction{}, ErrCorrupt
+		}
+		mutation := storagev2.DocumentMutation{
+			Collection: change.Collection, DocumentID: [16]byte(change.DocumentID), Operation: operation,
+			ChangedPaths: append([]string(nil), change.ChangedPaths...),
+		}
+		var err error
+		if change.After != nil {
+			mutation.Document, err = encodeStoredDocument(*change.After)
+			if err != nil {
+				return storagev2.DocumentTransaction{}, err
+			}
+		}
+		data := db.collections[change.Collection]
+		if data != nil {
+			names := make([]string, 0, len(data.indexes))
+			for name := range data.indexes {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				definition := data.indexes[name].definition
+				item := storagev2.IndexMutation{Name: name}
+				if change.Before != nil {
+					item.BeforeKey, _, err = indexDocumentKey(definition, *change.Before)
+					if err != nil {
+						return storagev2.DocumentTransaction{}, err
+					}
+				}
+				if change.After != nil {
+					item.AfterKey, _, err = indexDocumentKey(definition, *change.After)
+					if err != nil {
+						return storagev2.DocumentTransaction{}, err
+					}
+				}
+				mutation.Indexes = append(mutation.Indexes, item)
+			}
+		}
+		mutations[index] = mutation
+	}
+	return storagev2.DocumentTransaction{TransactionID: transactionID, Preconditions: preconditions, CollectionPreconditions: collectionPreconditions, Mutations: mutations}, nil
+}
+
+// commitV2ChangeBatchesLocked is the DB-side companion to V2's private group
+// publisher. The caller holds db.mu and supplies already-authorized, immutable
+// logical batches in admission order. V2's optional CommitCoordinator reaches
+// this boundary only for ordinary InsertMany requests after it owns admission,
+// cancellation and conflict partitioning; special writes stay exclusive.
+func (db *DB) commitV2ChangeBatchesLocked(ctx context.Context, store *v2DurableStore, batches []ChangeBatch) error {
+	return db.commitV2ChangeBatchesWithPreconditionsLocked(ctx, store, batches, nil, nil)
+}
+
+// commitV2ChangeBatchesWithPreconditionsLocked is the coordinator's complete
+// document group boundary. Every logical member owns an independent point read
+// set, validated against the preceding logical CatalogRoot inside the same V2
+// WriteTxn. That is the required foundation for future grouped Update/Delete:
+// an old query selection can never overwrite a document changed by an earlier
+// admitted member or an exclusive write.
+//
+// The caller holds db.mu. A nil preconditions slice means no member requires a
+// read set (the ordinary InsertMany coordinator path); otherwise its length
+// must exactly match batches.
+func (db *DB) commitV2ChangeBatchesWithPreconditionsLocked(
+	ctx context.Context,
+	store *v2DurableStore,
+	batches []ChangeBatch,
+	preconditions [][]storagev2.DocumentPrecondition,
+	collectionPreconditions [][]storagev2.CollectionPrecondition,
+) error {
+	if db == nil || store == nil || store.file == nil || len(batches) < 2 || len(batches) > 256 {
+		return ErrCorrupt
+	}
+	if preconditions != nil && len(preconditions) != len(batches) {
+		return ErrCorrupt
+	}
+	if collectionPreconditions != nil && len(collectionPreconditions) != len(batches) {
+		return ErrCorrupt
+	}
+	if db.closed {
+		return ErrClosed
+	}
+	if db.fatalErr != nil {
+		return db.fatalErr
+	}
+	currentStore, ok := db.durability.(*v2DurableStore)
+	if !ok || currentStore != store {
+		return ErrWriteConflict
+	}
+	if uint64(len(batches)) > ^uint64(0)-db.token {
+		return ErrCorrupt
+	}
+	for index := range batches {
+		if err := db.validateV2PrimaryWriteFence(db.token + uint64(index) + 1); err != nil {
+			return err
+		}
+	}
+	transactions := make([]storagev2.DocumentTransaction, len(batches))
+	for index, batch := range batches {
+		if err := contextError(ctx); err != nil {
+			return err
+		}
+		if batch.Token != db.token+uint64(index)+1 || len(batch.Changes) == 0 {
+			return ErrCorrupt
+		}
+		var transactionID [16]byte
+		if _, err := rand.Read(transactionID[:]); err != nil {
+			return err
+		}
+		var readSet []storagev2.DocumentPrecondition
+		var collectionReadSet []storagev2.CollectionPrecondition
+		if preconditions != nil {
+			readSet = preconditions[index]
+		}
+		if collectionPreconditions != nil {
+			collectionReadSet = collectionPreconditions[index]
+		}
+		transaction, err := store.prepareDocumentTransaction(ctx, db, transactionID, batch.Changes, readSet, collectionReadSet)
+		if err != nil {
+			return err
+		}
+		transactions[index] = transaction
+	}
+	db.metrics.v2CommitAttempts.Add(uint64(len(batches)))
+	started := time.Now()
+	sequences, err := store.file.ApplyDocumentTransactionGroup(transactions)
+	if err != nil {
+		mapped := mapStorageV2Error(err)
+		if !errors.Is(mapped, ErrDuplicateID) && !errors.Is(mapped, ErrDuplicateKey) && !errors.Is(mapped, ErrInvalidIndex) && !errors.Is(mapped, ErrResourceLimit) && !errors.Is(mapped, ErrWriteConflict) {
+			db.metrics.v2RejectedTransactions.Add(uint64(len(batches)))
+			db.fatalErr = fmt.Errorf("%w: %v", ErrDurability, mapped)
+			return db.fatalErr
+		}
+		// The coordinator now replays this all-or-nothing candidate through the
+		// original per-request path. Count the final individual outcome there;
+		// otherwise one duplicate would appear as every group member rejected.
+		return mapped
+	}
+	if len(sequences) != len(batches) {
+		db.fatalErr = fmt.Errorf("%w: V2 grouped commit sequence count", ErrDurability)
+		return db.fatalErr
+	}
+	for index, sequence := range sequences {
+		if sequence != db.token+uint64(index)+1 {
+			db.fatalErr = fmt.Errorf("%w: V2 grouped commit sequence mismatch", ErrDurability)
+			return db.fatalErr
+		}
+	}
+	if store.rollbackAnchor != nil {
+		if err := store.advanceRollbackAnchor(ctx, sequences[len(sequences)-1]); err != nil {
+			db.metrics.v2RejectedTransactions.Add(uint64(len(batches)))
+			db.fatalErr = fmt.Errorf("%w: grouped commit sequence %d but %w", ErrDurability, sequences[len(sequences)-1], err)
+			return db.fatalErr
+		}
+	}
+	for index, batch := range batches {
+		for _, change := range batch.Changes {
+			if db.collections[change.Collection] == nil {
+				db.collections[change.Collection] = newCollectionData()
+			}
+		}
+		db.token = sequences[index]
+		batch.Token = sequences[index]
+		db.recordLiveCommit(batch)
+		db.publish(batch)
+	}
+	elapsed := uint64(time.Since(started))
+	db.metrics.v2CommittedTransactions.Add(uint64(len(batches)))
+	db.metrics.v2CommitNanos.Add(elapsed)
+	updateAtomicMax(&db.metrics.v2CommitMaxNanos, elapsed)
+	return nil
 }
 
 func (store *v2DurableStore) advanceRollbackAnchor(ctx context.Context, minimumSequence uint64) error {
@@ -894,12 +1097,16 @@ func mapStorageV2Error(err error) error {
 		return fmt.Errorf("%w: %v", ErrRollbackDetected, err)
 	case errors.Is(err, storagev2.ErrDatabaseIdentity):
 		return fmt.Errorf("%w: %v", ErrDatabaseIdentity, err)
+	case errors.Is(err, storagev2.ErrInsecureFileMode):
+		return ErrInsecureFileMode
 	case errors.Is(err, storagev2.ErrUnsupportedFormat), errors.Is(err, storagev2.ErrUnsupportedFeature):
 		return fmt.Errorf("%w: %v", ErrUnsupportedFormat, err)
 	case errors.Is(err, storagev2.ErrReclamationConflict):
 		return fmt.Errorf("%w: %v", ErrReclamationConflict, err)
 	case errors.Is(err, storagev2.ErrUniqueConflict):
 		return ErrDuplicateKey
+	case errors.Is(err, storagev2.ErrDocumentExists):
+		return ErrDuplicateID
 	case errors.Is(err, storagev2.ErrIndexExists):
 		return ErrInvalidIndex
 	case errors.Is(err, storagev2.ErrIndexBuildExists):
@@ -912,6 +1119,12 @@ func mapStorageV2Error(err error) error {
 		return ErrWriteConflict
 	case errors.Is(err, storagev2.ErrIndexBuildHistoryLost):
 		return ErrHistoryLost
+	case errors.Is(err, storagev2.ErrHistoryLost):
+		return ErrHistoryLost
+	case errors.Is(err, storagev2.ErrDurableConsumerExists):
+		return ErrDurableConsumerExists
+	case errors.Is(err, storagev2.ErrDurableConsumerNotFound):
+		return ErrDurableConsumerNotFound
 	case errors.Is(err, storagev2.ErrIndexKeyTooLarge):
 		return ErrInvalidIndex
 	case errors.Is(err, storagev2.ErrStorageLimit):

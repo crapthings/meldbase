@@ -72,20 +72,30 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 	if query.HasModifiers() {
 		return UpdateResult{}, fmt.Errorf("%w: mutation query cannot sort, skip, or limit", ErrInvalidFilter)
 	}
+	if coordinator := c.db.commitCoordinator; coordinator != nil {
+		return coordinator.submitUpdate(ctx, c.name, query, mutation, one, maxAffected)
+	}
 	c.db.mu.Lock()
+	result, err := c.updateQueryLocked(ctx, query, mutation, one, maxAffected)
+	c.db.mu.Unlock()
+	return result, err
+}
+
+// updateQueryLocked preserves the original filter-selection and publication
+// semantics for one request. The V2 coordinator uses it for single requests
+// and logical-conflict fallback after a speculative group has been rejected.
+// The caller holds db.mu.
+func (c *Collection) updateQueryLocked(ctx context.Context, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (UpdateResult, error) {
 	if c.db.closed {
-		c.db.mu.Unlock()
 		return UpdateResult{}, ErrClosed
 	}
 	if c.db.fatalErr != nil {
-		c.db.mu.Unlock()
 		return UpdateResult{}, c.db.fatalErr
 	}
 	data := c.db.collections[c.name]
 	selectionLimit, resourceBounded := c.db.boundedMutationSelection(maxAffected, one)
 	selected, err := c.selectMutationDocumentsLocked(ctx, query, one, selectionLimit)
 	if err != nil {
-		c.db.mu.Unlock()
 		if resourceBounded && errors.Is(err, ErrMutationLimit) {
 			c.db.metrics.resourceLimitRejections.Add(1)
 			return UpdateResult{}, fmt.Errorf("%w: transaction changes exceed limit %d", ErrResourceLimit, c.db.resourceLimits.MaxTransactionChanges)
@@ -93,7 +103,6 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 		return UpdateResult{}, err
 	}
 	if len(selected) > 0 && data == nil {
-		c.db.mu.Unlock()
 		return UpdateResult{}, ErrCorrupt
 	}
 	changes := []pendingUpdate{}
@@ -101,18 +110,15 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 	for _, document := range selected {
 		id, exists := document.ID()
 		if !exists {
-			c.db.mu.Unlock()
 			return UpdateResult{}, ErrCorrupt
 		}
 		after := document.Clone()
 		for _, operation := range mutation.operations {
 			if err := applyUpdateOperation(after, operation); err != nil {
-				c.db.mu.Unlock()
 				return UpdateResult{}, err
 			}
 		}
 		if err := after.Validate(); err != nil {
-			c.db.mu.Unlock()
 			return UpdateResult{}, err
 		}
 		if !after.Equal(document) {
@@ -121,25 +127,26 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 		}
 	}
 	events := make([]Change, len(changes))
+	changedPaths := mutation.Paths()
 	var token uint64
 	if len(changes) > 0 {
 		token = c.db.token + 1
 	}
 	for i, change := range changes {
 		before, after := change.before.Clone(), change.after.Clone()
-		events[i] = Change{Collection: c.name, Operation: UpdateOperation, DocumentID: change.id, Before: &before, After: &after}
+		events[i] = Change{
+			Collection: c.name, Operation: UpdateOperation, DocumentID: change.id, Before: &before, After: &after,
+			ChangedPaths: append([]string(nil), changedPaths...),
+		}
 	}
 	if err := c.db.validateTransactionResource(events); err != nil {
-		c.db.mu.Unlock()
 		return UpdateResult{}, err
 	}
 	if err := data.validateIndexUpdates(changes); err != nil {
-		c.db.mu.Unlock()
 		return UpdateResult{}, err
 	}
 	if len(events) > 0 {
 		if err := c.db.appendCommit(ctx, token, events); err != nil {
-			c.db.mu.Unlock()
 			return UpdateResult{}, err
 		}
 		c.db.token = token
@@ -156,7 +163,6 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 		c.db.recordLiveCommit(batch)
 		c.db.publish(batch)
 	}
-	c.db.mu.Unlock()
 	return result, nil
 }
 

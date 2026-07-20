@@ -29,6 +29,11 @@ var documentRecordMagic = [8]byte{'M', 'E', 'L', 'D', 'R', 'E', 'C', '2'}
 // a durability failure.
 var ErrDocumentConflict = errors.New("meldbase storage v2: document precondition conflicted")
 
+// ErrDocumentExists distinguishes an insert collision from an optimistic
+// update/delete precondition conflict. The public DB maps it to ErrDuplicateID
+// so a grouped candidate can fall back to ordinary per-request semantics.
+var ErrDocumentExists = errors.New("meldbase storage v2: document already exists")
+
 const documentRecordHeaderBytes = 24
 
 type CollectionMeta struct {
@@ -67,11 +72,28 @@ type DocumentPrecondition struct {
 	ExpectedHash   [32]byte
 }
 
+// CollectionPrecondition binds a predicate or range read to the exact
+// collection generation observed by a transaction snapshot. It is deliberately
+// broader than a future index-range fence: any document or published-index
+// change to the collection invalidates it, which prevents phantoms without
+// trusting a process-local query plan.
+//
+// ExpectedID and ExpectedUpdatedSequence are required only when ExpectedExists
+// is true. A missing collection is a valid read state and conflicts if another
+// transaction creates it before publication.
+type CollectionPrecondition struct {
+	Collection              string
+	ExpectedExists          bool
+	ExpectedID              uint32
+	ExpectedUpdatedSequence uint64
+}
+
 type DocumentTransaction struct {
-	TransactionID [16]byte
-	CommittedAt   time.Time
-	Preconditions []DocumentPrecondition
-	Mutations     []DocumentMutation
+	TransactionID           [16]byte
+	CommittedAt             time.Time
+	Preconditions           []DocumentPrecondition
+	CollectionPreconditions []CollectionPrecondition
+	Mutations               []DocumentMutation
 }
 
 // DocumentSystemTransaction atomically publishes document mutations and a
@@ -121,6 +143,68 @@ func (f *File) ApplyDocumentTransaction(transaction DocumentTransaction) (uint64
 	return result.Sequence, err
 }
 
+// ApplyDocumentTransactionGroup builds several ordered logical document
+// commits in one physical copy-on-write generation. It is an internal storage
+// primitive for the future CommitCoordinator; callers receive one sequence per
+// logical member, while recovery observes either the whole group or none of it.
+// System-record CAS is intentionally excluded until its separate idempotency
+// and rollback-anchor matrix has group evidence.
+func (f *File) ApplyDocumentTransactionGroup(transactions []DocumentTransaction) ([]uint64, error) {
+	if f == nil || len(transactions) < 2 || len(transactions) > 256 {
+		return nil, ErrCorrupt
+	}
+	seen := make(map[[16]byte]struct{}, len(transactions))
+	for index := range transactions {
+		transaction := &transactions[index]
+		if allZero(transaction.TransactionID[:]) || len(transaction.Mutations) == 0 {
+			return nil, ErrCorrupt
+		}
+		if _, duplicate := seen[transaction.TransactionID]; duplicate {
+			return nil, ErrCorrupt
+		}
+		seen[transaction.TransactionID] = struct{}{}
+		if transaction.CommittedAt.IsZero() {
+			transaction.CommittedAt = time.Now()
+		}
+	}
+	sequences := make([]uint64, len(transactions))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.file == nil || f.fatalErr != nil {
+		if f.fatalErr != nil {
+			return nil, f.fatalErr
+		}
+		return nil, ErrCorrupt
+	}
+	if uint64(len(transactions)) > math.MaxUint64-f.meta.CommitSequence {
+		return nil, ErrCorrupt
+	}
+	err := f.updateUnlockedAdvance(uint64(len(transactions)), func(tx *WriteTxn) (DatabaseRoot, error) {
+		base := tx.BaseRoot()
+		for index, transaction := range transactions {
+			if base.CommitSequence == math.MaxUint64 {
+				return DatabaseRoot{}, ErrCorrupt
+			}
+			tx.sequence = base.CommitSequence + 1
+			result := SystemRecordResult{}
+			next, err := applyDocumentSystemTransactionInWriteTxn(tx, base, transaction, nil, &result)
+			if err != nil {
+				return DatabaseRoot{}, err
+			}
+			if !result.Applied || result.Sequence != tx.sequence || next.CommitSequence != tx.sequence {
+				return DatabaseRoot{}, ErrCorrupt
+			}
+			sequences[index] = tx.sequence
+			base = next
+		}
+		return base, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sequences, nil
+}
+
 // ApplyDocumentSystemTransaction applies all document mutations only if every
 // system-record precondition matches. A mismatch returns Applied=false and the
 // isolated current value of the first mismatch without publishing any change.
@@ -151,267 +235,291 @@ func (f *File) applyDocumentSystemTransaction(transaction DocumentTransaction, s
 	}
 	var result SystemRecordResult
 	err := f.Update(func(tx *WriteTxn) (DatabaseRoot, error) {
-		base := tx.BaseRoot()
-		catalog, err := tx.OpenTree(base.CatalogRoot, TreeCatalog)
-		if err != nil {
-			return DatabaseRoot{}, err
-		}
-		states := make(map[string]*collectionWriteState)
-		seenDocuments := make(map[string]struct{}, len(transaction.Mutations))
-		pending := make([]pendingDocumentChange, 0, len(transaction.Mutations))
-		pendingIndexes := make([]pendingIndexMutation, 0)
-		newCollections := uint64(0)
-		documentDelta := int64(0)
-		if err := validateDocumentPreconditions(tx, catalog, transaction.Preconditions); err != nil {
-			return DatabaseRoot{}, err
-		}
+		return applyDocumentSystemTransactionInWriteTxn(tx, tx.BaseRoot(), transaction, systemRecords, &result)
+	})
+	if len(systemRecords) > 0 && errors.Is(err, errSystemCASMismatch) {
+		return result, nil
+	}
+	return result, err
+}
 
-		for _, mutation := range transaction.Mutations {
-			if !validCollectionName(mutation.Collection) || allZero(mutation.DocumentID[:]) ||
-				mutation.Operation < DocumentInsert || mutation.Operation > DocumentDelete || len(mutation.Document) > maxDocumentBytes {
+// applyDocumentSystemTransactionInWriteTxn applies one logical document
+// transaction to base using a caller-owned COW WriteTxn. Keeping this operation
+// independent of File.Update is the foundation for a future group publisher:
+// multiple logical CommitBatch records can then be built in sequence and made
+// visible by one final Meta publication. The current public path still invokes
+// it exactly once per File.Update.
+func applyDocumentSystemTransactionInWriteTxn(
+	tx *WriteTxn,
+	base DatabaseRoot,
+	transaction DocumentTransaction,
+	systemRecords []SystemRecordMutation,
+	result *SystemRecordResult,
+) (DatabaseRoot, error) {
+	if tx == nil || result == nil {
+		return DatabaseRoot{}, ErrCorrupt
+	}
+	catalog, err := tx.OpenTree(base.CatalogRoot, TreeCatalog)
+	if err != nil {
+		return DatabaseRoot{}, err
+	}
+	states := make(map[string]*collectionWriteState)
+	seenDocuments := make(map[string]struct{}, len(transaction.Mutations))
+	pending := make([]pendingDocumentChange, 0, len(transaction.Mutations))
+	pendingIndexes := make([]pendingIndexMutation, 0)
+	newCollections := uint64(0)
+	documentDelta := int64(0)
+	if err := validateCollectionPreconditions(catalog, transaction.CollectionPreconditions); err != nil {
+		return DatabaseRoot{}, err
+	}
+	if err := validateDocumentPreconditions(tx, catalog, transaction.Preconditions); err != nil {
+		return DatabaseRoot{}, err
+	}
+
+	for _, mutation := range transaction.Mutations {
+		if !validCollectionName(mutation.Collection) || allZero(mutation.DocumentID[:]) ||
+			mutation.Operation < DocumentInsert || mutation.Operation > DocumentDelete || len(mutation.Document) > maxDocumentBytes {
+			return DatabaseRoot{}, ErrCorrupt
+		}
+		if mutation.Operation == DocumentDelete {
+			if len(mutation.Document) != 0 {
 				return DatabaseRoot{}, ErrCorrupt
 			}
-			if mutation.Operation == DocumentDelete {
-				if len(mutation.Document) != 0 {
-					return DatabaseRoot{}, ErrCorrupt
-				}
-			} else if len(mutation.Document) == 0 {
-				return DatabaseRoot{}, ErrCorrupt
-			}
-			identity := mutation.Collection + "\x00" + string(mutation.DocumentID[:])
-			if _, duplicate := seenDocuments[identity]; duplicate {
-				return DatabaseRoot{}, errors.New("meldbase storage v2: duplicate document mutation")
-			}
-			seenDocuments[identity] = struct{}{}
+		} else if len(mutation.Document) == 0 {
+			return DatabaseRoot{}, ErrCorrupt
+		}
+		identity := mutation.Collection + "\x00" + string(mutation.DocumentID[:])
+		if _, duplicate := seenDocuments[identity]; duplicate {
+			return DatabaseRoot{}, errors.New("meldbase storage v2: duplicate document mutation")
+		}
+		seenDocuments[identity] = struct{}{}
 
-			state := states[mutation.Collection]
-			if state == nil {
-				state = &collectionWriteState{name: mutation.Collection}
-				encoded, exists, err := catalog.Get([]byte(mutation.Collection))
-				if err != nil {
-					return DatabaseRoot{}, err
-				}
-				if exists {
-					state.meta, err = decodeCollectionMeta(encoded)
-					if err != nil {
-						return DatabaseRoot{}, err
-					}
-				} else {
-					newCollections++
-					if base.CollectionCount+newCollections > math.MaxUint32 {
-						return DatabaseRoot{}, ErrCorrupt
-					}
-					state.created = true
-					state.meta = CollectionMeta{ID: uint32(base.CollectionCount + newCollections), CreatedSequence: tx.Sequence()}
-				}
-				state.originalRoot = state.meta.PrimaryRoot
-				state.tree, err = tx.OpenTree(state.meta.PrimaryRoot, TreePrimary)
-				if err != nil {
-					return DatabaseRoot{}, err
-				}
-				state.order, err = tx.OpenTree(state.meta.OrderRoot, TreeOrder)
-				if err != nil {
-					return DatabaseRoot{}, err
-				}
-				if state.tree.root.count != state.meta.DocumentCount || state.order.root.count != state.meta.DocumentCount {
-					return DatabaseRoot{}, ErrCorrupt
-				}
-				if err := tx.loadCollectionIndexes(state); err != nil {
-					return DatabaseRoot{}, err
-				}
-				states[mutation.Collection] = state
-			}
-
-			stored, exists, err := state.tree.Get(mutation.DocumentID[:])
+		state := states[mutation.Collection]
+		if state == nil {
+			state = &collectionWriteState{name: mutation.Collection}
+			encoded, exists, err := catalog.Get([]byte(mutation.Collection))
 			if err != nil {
 				return DatabaseRoot{}, err
 			}
-			if (mutation.Operation == DocumentInsert && exists) || (mutation.Operation != DocumentInsert && !exists) {
-				return DatabaseRoot{}, errors.New("meldbase storage v2: document mutation precondition failed")
-			}
-			position := uint64(0)
 			if exists {
-				position, _, err = tx.loadDocumentRecord(stored)
+				state.meta, err = decodeCollectionMeta(encoded)
 				if err != nil {
 					return DatabaseRoot{}, err
 				}
-				owner, orderExists, err := state.order.Get(insertionPositionKey(position))
-				if err != nil || !orderExists || !bytes.Equal(owner, mutation.DocumentID[:]) {
-					return DatabaseRoot{}, ErrCorrupt
-				}
-			}
-			if mutation.Operation == DocumentInsert {
-				if state.meta.NextDocumentPosition == math.MaxUint64 {
-					return DatabaseRoot{}, ErrCorrupt
-				}
-				position = state.meta.NextDocumentPosition + 1
-			}
-			indexChanges, err := prepareIndexMutations(state, mutation, position)
-			if err != nil {
-				return DatabaseRoot{}, err
-			}
-			pendingIndexes = append(pendingIndexes, indexChanges...)
-			change := CommitChange{
-				CollectionID: state.meta.ID, DocumentID: mutation.DocumentID, Operation: mutation.Operation,
-				ChangedPaths: append([]string(nil), mutation.ChangedPaths...),
-			}
-			if mutation.Operation != DocumentInsert {
-				change.BeforeRef = &DocumentVersionRef{PrimaryRoot: state.originalRoot, DocumentID: mutation.DocumentID}
-			}
-			if mutation.Operation == DocumentDelete {
-				removed, err := state.tree.Delete(mutation.DocumentID[:])
-				if err != nil || !removed {
-					return DatabaseRoot{}, ErrCorrupt
-				}
-				state.meta.DocumentCount--
-				orderRemoved, err := state.order.Delete(insertionPositionKey(position))
-				if err != nil || !orderRemoved {
-					return DatabaseRoot{}, ErrCorrupt
-				}
-				documentDelta--
 			} else {
-				if mutation.Operation == DocumentInsert {
-					state.meta.NextDocumentPosition++
-					if position != state.meta.NextDocumentPosition {
-						return DatabaseRoot{}, ErrCorrupt
-					}
-					key := insertionPositionKey(position)
-					if _, duplicate, err := state.order.Get(key); err != nil || duplicate {
-						if err != nil {
-							return DatabaseRoot{}, err
-						}
-						return DatabaseRoot{}, ErrCorrupt
-					}
-					if err := state.order.Put(key, mutation.DocumentID[:]); err != nil {
-						return DatabaseRoot{}, err
-					}
+				newCollections++
+				if base.CollectionCount+newCollections > math.MaxUint32 {
+					return DatabaseRoot{}, ErrCorrupt
 				}
-				descriptor, err := tx.storeDocumentRecord(position, mutation.Document)
-				if err != nil {
-					return DatabaseRoot{}, err
-				}
-				if err := state.tree.Put(mutation.DocumentID[:], descriptor); err != nil {
-					return DatabaseRoot{}, err
-				}
-				if mutation.Operation == DocumentInsert {
-					state.meta.DocumentCount++
-					documentDelta++
-				}
+				state.created = true
+				state.meta = CollectionMeta{ID: uint32(base.CollectionCount + newCollections), CreatedSequence: tx.Sequence()}
 			}
-			pending = append(pending, pendingDocumentChange{change: change, state: state})
-		}
-		if err := applyIndexMutations(pendingIndexes); err != nil {
-			return DatabaseRoot{}, err
-		}
-
-		names := make([]string, 0, len(states))
-		for name := range states {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		catalogChanges := make([]CommitChange, 0, newCollections)
-		for _, name := range names {
-			state := states[name]
-			indexNames := make([]string, 0, len(state.indexes))
-			for indexName, index := range state.indexes {
-				if index.changed {
-					indexNames = append(indexNames, indexName)
-				}
-			}
-			sort.Strings(indexNames)
-			for _, indexName := range indexNames {
-				index := state.indexes[indexName]
-				index.meta.Root, err = index.tree.Flush()
-				if err != nil {
-					return DatabaseRoot{}, err
-				}
-				index.meta.UpdatedSequence = tx.Sequence()
-				encoded, err := encodeIndexMeta(index.meta)
-				if err != nil {
-					return DatabaseRoot{}, err
-				}
-				if err := state.indexCatalog.Put([]byte(indexName), encoded); err != nil {
-					return DatabaseRoot{}, err
-				}
-			}
-			if len(indexNames) > 0 {
-				state.meta.IndexCatalogRoot, err = state.indexCatalog.Flush()
-				if err != nil {
-					return DatabaseRoot{}, err
-				}
-			}
-			state.meta.PrimaryRoot, err = state.tree.Flush()
+			state.originalRoot = state.meta.PrimaryRoot
+			state.tree, err = tx.OpenTree(state.meta.PrimaryRoot, TreePrimary)
 			if err != nil {
 				return DatabaseRoot{}, err
 			}
-			state.meta.OrderRoot, err = state.order.Flush()
+			state.order, err = tx.OpenTree(state.meta.OrderRoot, TreeOrder)
 			if err != nil {
 				return DatabaseRoot{}, err
 			}
 			if state.tree.root.count != state.meta.DocumentCount || state.order.root.count != state.meta.DocumentCount {
 				return DatabaseRoot{}, ErrCorrupt
 			}
-			state.meta.UpdatedSequence = tx.Sequence()
-			encoded, err := encodeCollectionMeta(state.meta)
-			if err != nil {
+			if err := tx.loadCollectionIndexes(state); err != nil {
 				return DatabaseRoot{}, err
 			}
-			if err := catalog.Put([]byte(name), encoded); err != nil {
-				return DatabaseRoot{}, err
-			}
-			if state.created {
-				catalogChanges = append(catalogChanges, CommitChange{CollectionID: state.meta.ID, CollectionName: name, Operation: CommitCatalog, ChangedPaths: []string{"_catalog"}, After: encoded})
-			}
+			states[mutation.Collection] = state
 		}
-		for _, systemRecord := range systemRecords {
-			current, applied, err := tx.applySystemRecordMutation(catalog, systemRecord)
-			if err != nil {
-				return DatabaseRoot{}, err
-			}
-			if !applied {
-				result.Current = current
-				return DatabaseRoot{}, errSystemCASMismatch
-			}
-		}
-		catalogRoot, err := catalog.Flush()
+
+		stored, exists, err := state.tree.Get(mutation.DocumentID[:])
 		if err != nil {
 			return DatabaseRoot{}, err
 		}
-		changes := make([]CommitChange, 0, len(pending)+len(catalogChanges))
-		changes = append(changes, catalogChanges...)
-		for _, item := range pending {
-			if item.change.Operation != DocumentDelete {
-				item.change.AfterRef = &DocumentVersionRef{PrimaryRoot: item.state.meta.PrimaryRoot, DocumentID: item.change.DocumentID}
-			}
-			changes = append(changes, item.change)
+		if mutation.Operation == DocumentInsert && exists {
+			return DatabaseRoot{}, ErrDocumentExists
 		}
-		commitLogRoot, oldest, err := tx.AppendCommitRetained(base.CommitLogRoot, base.OldestRetainedSequence, CommitBatch{
-			Sequence: tx.Sequence(), TransactionID: transaction.TransactionID, CommittedAt: transaction.CommittedAt,
-			CatalogRoot: catalogRoot, Changes: changes,
-		})
+		if mutation.Operation != DocumentInsert && !exists {
+			return DatabaseRoot{}, ErrDocumentConflict
+		}
+		position := uint64(0)
+		if exists {
+			position, _, err = tx.loadDocumentRecord(stored)
+			if err != nil {
+				return DatabaseRoot{}, err
+			}
+			owner, orderExists, err := state.order.Get(insertionPositionKey(position))
+			if err != nil || !orderExists || !bytes.Equal(owner, mutation.DocumentID[:]) {
+				return DatabaseRoot{}, ErrCorrupt
+			}
+		}
+		if mutation.Operation == DocumentInsert {
+			if state.meta.NextDocumentPosition == math.MaxUint64 {
+				return DatabaseRoot{}, ErrCorrupt
+			}
+			position = state.meta.NextDocumentPosition + 1
+		}
+		indexChanges, err := prepareIndexMutations(state, mutation, position)
 		if err != nil {
 			return DatabaseRoot{}, err
 		}
-		if documentDelta < 0 && uint64(-documentDelta) > base.DocumentCount {
+		pendingIndexes = append(pendingIndexes, indexChanges...)
+		change := CommitChange{
+			CollectionID: state.meta.ID, DocumentID: mutation.DocumentID, Operation: mutation.Operation,
+			ChangedPaths: append([]string(nil), mutation.ChangedPaths...),
+		}
+		if mutation.Operation != DocumentInsert {
+			change.BeforeRef = &DocumentVersionRef{PrimaryRoot: state.originalRoot, DocumentID: mutation.DocumentID}
+		}
+		if mutation.Operation == DocumentDelete {
+			removed, err := state.tree.Delete(mutation.DocumentID[:])
+			if err != nil || !removed {
+				return DatabaseRoot{}, ErrCorrupt
+			}
+			state.meta.DocumentCount--
+			orderRemoved, err := state.order.Delete(insertionPositionKey(position))
+			if err != nil || !orderRemoved {
+				return DatabaseRoot{}, ErrCorrupt
+			}
+			documentDelta--
+		} else {
+			if mutation.Operation == DocumentInsert {
+				state.meta.NextDocumentPosition++
+				if position != state.meta.NextDocumentPosition {
+					return DatabaseRoot{}, ErrCorrupt
+				}
+				key := insertionPositionKey(position)
+				if _, duplicate, err := state.order.Get(key); err != nil || duplicate {
+					if err != nil {
+						return DatabaseRoot{}, err
+					}
+					return DatabaseRoot{}, ErrCorrupt
+				}
+				if err := state.order.Put(key, mutation.DocumentID[:]); err != nil {
+					return DatabaseRoot{}, err
+				}
+			}
+			descriptor, err := tx.storeDocumentRecord(position, mutation.Document)
+			if err != nil {
+				return DatabaseRoot{}, err
+			}
+			if err := state.tree.Put(mutation.DocumentID[:], descriptor); err != nil {
+				return DatabaseRoot{}, err
+			}
+			if mutation.Operation == DocumentInsert {
+				state.meta.DocumentCount++
+				documentDelta++
+			}
+		}
+		pending = append(pending, pendingDocumentChange{change: change, state: state})
+	}
+	if err := applyIndexMutations(pendingIndexes); err != nil {
+		return DatabaseRoot{}, err
+	}
+
+	names := make([]string, 0, len(states))
+	for name := range states {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	catalogChanges := make([]CommitChange, 0, newCollections)
+	for _, name := range names {
+		state := states[name]
+		indexNames := make([]string, 0, len(state.indexes))
+		for indexName, index := range state.indexes {
+			if index.changed {
+				indexNames = append(indexNames, indexName)
+			}
+		}
+		sort.Strings(indexNames)
+		for _, indexName := range indexNames {
+			index := state.indexes[indexName]
+			index.meta.Root, err = index.tree.Flush()
+			if err != nil {
+				return DatabaseRoot{}, err
+			}
+			index.meta.UpdatedSequence = tx.Sequence()
+			encoded, err := encodeIndexMeta(index.meta)
+			if err != nil {
+				return DatabaseRoot{}, err
+			}
+			if err := state.indexCatalog.Put([]byte(indexName), encoded); err != nil {
+				return DatabaseRoot{}, err
+			}
+		}
+		if len(indexNames) > 0 {
+			state.meta.IndexCatalogRoot, err = state.indexCatalog.Flush()
+			if err != nil {
+				return DatabaseRoot{}, err
+			}
+		}
+		state.meta.PrimaryRoot, err = state.tree.Flush()
+		if err != nil {
+			return DatabaseRoot{}, err
+		}
+		state.meta.OrderRoot, err = state.order.Flush()
+		if err != nil {
+			return DatabaseRoot{}, err
+		}
+		if state.tree.root.count != state.meta.DocumentCount || state.order.root.count != state.meta.DocumentCount {
 			return DatabaseRoot{}, ErrCorrupt
 		}
-		documentCount := base.DocumentCount
-		if documentDelta >= 0 {
-			documentCount += uint64(documentDelta)
-		} else {
-			documentCount -= uint64(-documentDelta)
+		state.meta.UpdatedSequence = tx.Sequence()
+		encoded, err := encodeCollectionMeta(state.meta)
+		if err != nil {
+			return DatabaseRoot{}, err
 		}
-		result.Sequence, result.Applied = tx.Sequence(), true
-		return DatabaseRoot{
-			CommitSequence: tx.Sequence(), CatalogRoot: catalogRoot, CommitLogRoot: commitLogRoot,
-			OldestRetainedSequence: oldest, CatalogGeneration: base.CatalogGeneration + newCollections,
-			DocumentCount: documentCount, CollectionCount: base.CollectionCount + newCollections,
-		}, nil
-	})
-	if len(systemRecords) > 0 && errors.Is(err, errSystemCASMismatch) {
-		return result, nil
+		if err := catalog.Put([]byte(name), encoded); err != nil {
+			return DatabaseRoot{}, err
+		}
+		if state.created {
+			catalogChanges = append(catalogChanges, CommitChange{CollectionID: state.meta.ID, CollectionName: name, Operation: CommitCatalog, ChangedPaths: []string{"_catalog"}, After: encoded})
+		}
 	}
-	return result, err
+	for _, systemRecord := range systemRecords {
+		current, applied, err := tx.applySystemRecordMutation(catalog, systemRecord)
+		if err != nil {
+			return DatabaseRoot{}, err
+		}
+		if !applied {
+			result.Current = current
+			return DatabaseRoot{}, errSystemCASMismatch
+		}
+	}
+	catalogRoot, err := catalog.Flush()
+	if err != nil {
+		return DatabaseRoot{}, err
+	}
+	changes := make([]CommitChange, 0, len(pending)+len(catalogChanges))
+	changes = append(changes, catalogChanges...)
+	for _, item := range pending {
+		if item.change.Operation != DocumentDelete {
+			item.change.AfterRef = &DocumentVersionRef{PrimaryRoot: item.state.meta.PrimaryRoot, DocumentID: item.change.DocumentID}
+		}
+		changes = append(changes, item.change)
+	}
+	commitLogRoot, oldest, err := tx.AppendCommitRetained(base.CommitLogRoot, base.OldestRetainedSequence, CommitBatch{
+		Sequence: tx.Sequence(), TransactionID: transaction.TransactionID, CommittedAt: transaction.CommittedAt,
+		CatalogRoot: catalogRoot, Changes: changes,
+	})
+	if err != nil {
+		return DatabaseRoot{}, err
+	}
+	if documentDelta < 0 && uint64(-documentDelta) > base.DocumentCount {
+		return DatabaseRoot{}, ErrCorrupt
+	}
+	documentCount := base.DocumentCount
+	if documentDelta >= 0 {
+		documentCount += uint64(documentDelta)
+	} else {
+		documentCount -= uint64(-documentDelta)
+	}
+	result.Sequence, result.Applied = tx.Sequence(), true
+	return DatabaseRoot{
+		CommitSequence: tx.Sequence(), CatalogRoot: catalogRoot, CommitLogRoot: commitLogRoot,
+		OldestRetainedSequence: oldest, CatalogGeneration: base.CatalogGeneration + newCollections,
+		DocumentCount: documentCount, CollectionCount: base.CollectionCount + newCollections,
+	}, nil
 }
 
 func validateDocumentPreconditions(tx *WriteTxn, catalog *MutableTree, preconditions []DocumentPrecondition) error {
@@ -474,6 +582,42 @@ func validateDocumentPreconditions(tx *WriteTxn, catalog *MutableTree, precondit
 	return nil
 }
 
+func validateCollectionPreconditions(catalog *MutableTree, preconditions []CollectionPrecondition) error {
+	if catalog == nil {
+		return ErrCorrupt
+	}
+	seen := make(map[string]struct{}, len(preconditions))
+	for _, precondition := range preconditions {
+		if !validCollectionName(precondition.Collection) ||
+			(precondition.ExpectedExists && (precondition.ExpectedID == 0 || precondition.ExpectedUpdatedSequence == 0)) ||
+			(!precondition.ExpectedExists && (precondition.ExpectedID != 0 || precondition.ExpectedUpdatedSequence != 0)) {
+			return ErrCorrupt
+		}
+		if _, duplicate := seen[precondition.Collection]; duplicate {
+			return ErrCorrupt
+		}
+		seen[precondition.Collection] = struct{}{}
+		encoded, exists, err := catalog.Get([]byte(precondition.Collection))
+		if err != nil {
+			return err
+		}
+		if exists != precondition.ExpectedExists {
+			return ErrDocumentConflict
+		}
+		if !exists {
+			continue
+		}
+		meta, err := decodeCollectionMeta(encoded)
+		if err != nil {
+			return err
+		}
+		if meta.ID != precondition.ExpectedID || meta.UpdatedSequence != precondition.ExpectedUpdatedSequence {
+			return ErrDocumentConflict
+		}
+	}
+	return nil
+}
+
 // ValidateDocumentPreconditions checks one point read set against the current
 // immutable root under the file read lock without publishing a generation.
 func (f *File) ValidateDocumentPreconditions(preconditions []DocumentPrecondition) error {
@@ -498,6 +642,34 @@ func (f *File) ValidateDocumentPreconditions(preconditions []DocumentPreconditio
 		return err
 	}
 	return validateDocumentPreconditions(tx, catalog, preconditions)
+}
+
+// ValidateCollectionPreconditions checks broad collection snapshot fences
+// without publishing a generation. ApplyDocumentTransaction performs the same
+// validation inside its atomic write transaction, which is the required commit
+// path for phantom-safe callers.
+func (f *File) ValidateCollectionPreconditions(preconditions []CollectionPrecondition) error {
+	if f == nil {
+		return ErrCorrupt
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.file == nil {
+		return errors.New("meldbase storage v2: file is closed")
+	}
+	root, err := f.databaseRootUnlocked()
+	if err != nil {
+		return err
+	}
+	tx := &WriteTxn{
+		file: f, generation: f.meta.Generation, sequence: f.meta.CommitSequence,
+		nextPage: f.nextPage, byID: make(map[uint64][]byte),
+	}
+	catalog, err := tx.OpenTree(root.CatalogRoot, TreeCatalog)
+	if err != nil {
+		return err
+	}
+	return validateCollectionPreconditions(catalog, preconditions)
 }
 
 func insertionPositionKey(position uint64) []byte {

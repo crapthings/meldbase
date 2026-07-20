@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
 )
@@ -200,5 +202,140 @@ func TestCompactToV2FailsClosedWithoutOverwriting(t *testing.T) {
 	cancel()
 	if err := db.CompactToV2(cancelled, filepath.Join(directory, "cancelled.meld2")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled compaction error=%v", err)
+	}
+}
+
+func TestCompactToV2PinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
+	directory := t.TempDir()
+	db, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	items := db.Collection("items")
+	id, err := items.InsertOne(context.Background(), Document{"value": String("before")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := db.durability.(*v2DurableStore)
+	snapshotPinned, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	store.testCompactionSnapshotHook = func() {
+		once.Do(func() { close(snapshotPinned) })
+		<-release
+	}
+	defer func() { store.testCompactionSnapshotHook = nil }()
+	destination := filepath.Join(directory, "compact.meld2")
+	compacted := make(chan error, 1)
+	go func() { compacted <- db.CompactToV2(context.Background(), destination) }()
+	select {
+	case <-snapshotPinned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("compaction did not pin a source snapshot")
+	}
+
+	written := make(chan error, 1)
+	go func() {
+		_, err := items.UpdateOne(context.Background(), Filter{"_id": id}, Update{"$set": map[string]any{"value": "after"}})
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		if err != nil {
+			close(release)
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("concurrent write waited for compacted snapshot copy")
+	}
+	close(release)
+	select {
+	case err := <-compacted:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("compaction did not finish")
+	}
+
+	current, err := items.FindOne(context.Background(), Filter{"_id": id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, _ := current["value"].StringValue(); value != "after" {
+		t.Fatalf("source value=%q", value)
+	}
+	compactedDB, err := OpenV2(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer compactedDB.Close()
+	compactedDocument, err := compactedDB.Collection("items").FindOne(context.Background(), Filter{"_id": id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, _ := compactedDocument["value"].StringValue(); value != "before" {
+		t.Fatalf("compacted snapshot included post-snapshot write=%q", value)
+	}
+}
+
+func TestV2CloseWaitsForPinnedCompactionSnapshot(t *testing.T) {
+	directory := t.TempDir()
+	db, err := OpenV2(filepath.Join(directory, "source.meld2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	store := db.durability.(*v2DurableStore)
+	pinned, release := make(chan struct{}), make(chan struct{})
+	store.testCompactionSnapshotHook = func() {
+		close(pinned)
+		<-release
+	}
+	destination := filepath.Join(directory, "compact.meld2")
+	compacted := make(chan error, 1)
+	go func() { compacted <- db.CompactToV2(context.Background(), destination) }()
+	select {
+	case <-pinned:
+	case <-time.After(3 * time.Second):
+		_ = db.Close()
+		t.Fatal("compaction did not pin its snapshot")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- db.Close() }()
+	select {
+	case err := <-closed:
+		close(release)
+		t.Fatalf("Close completed while compaction still held source snapshot: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-compacted:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("compaction did not finish")
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close did not resume after compaction")
+	}
+	store.testCompactionSnapshotHook = nil
+	compactedDB, err := OpenV2(destination)
+	if err != nil {
+		t.Fatalf("compacted destination was not durable before Close: %v", err)
+	}
+	if err := compactedDB.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

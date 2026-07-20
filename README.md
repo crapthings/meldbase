@@ -286,12 +286,18 @@ unique-key conflict. Uniqueness applies only to complete tuples. Legacy V1
 deliberately rejects compound and descending definitions.
 
 `RunWriteTransaction` reads one immutable V2 snapshot, supports `GetOne`,
-`InsertOne`, `ReplaceOne`, `UpdateOne` and `DeleteOne`, and publishes all
-effective changes under one commit token. It provides read-your-writes inside
-the callback. A callback error or `ErrWriteConflict` publishes nothing; a no-op
-does not advance the sequence. Keep callbacks short: do not retain the
-transaction, call normal database methods, perform network I/O or create
-external side effects. Legacy V1 and the in-memory engine return
+`Find`, `InsertOne`, `ReplaceOne`, `UpdateOne` and `DeleteOne`, and publishes
+all effective changes under one commit token. `Find` uses the same compiled
+query syntax and sees earlier writes from its callback. It installs a durable
+collection snapshot fence, so any concurrent document or published-index change
+to that collection returns `ErrWriteConflict` rather than admitting a phantom.
+The first implementation intentionally uses a collection-wide conflict domain;
+it is serializable but may conflict for unrelated writes in the same
+collection. Candidate count and bytes are bounded by the transaction resource
+limits. A callback error or `ErrWriteConflict` publishes nothing; a no-op does
+not advance the sequence. Keep callbacks short: do not retain the transaction,
+call normal database methods, perform network I/O or create external side
+effects. Legacy V1 and the in-memory engine return
 `ErrWriteTransactionUnsupported`.
 
 The TypeScript remote client also provides typed request/response RPC. HTTP is
@@ -378,7 +384,9 @@ definitions, but intentionally assigns a new database identity. Existing V1
 realtime resume tokens therefore resynchronize instead of crossing formats.
 
 V2 can compact live state into a separately verified file without overwriting
-the source:
+the source. It pins one source snapshot briefly, then copies and verifies it
+without blocking later commits; writes that finish after that snapshot are not
+included in the compacted file:
 
 ```go
 if err := db.CompactToV2(ctx, "app-compacted.meld2"); err != nil {
@@ -470,6 +478,17 @@ if errors.Is(err, meldbase.ErrRecoveryRequired) {
 
 There is no online API for clearing durability fail-stop.
 
+For a production process that prefers a slower startup to serving from a
+structurally corrupt deep V2 page, opt into the protected-graph audit. It runs
+before automatic crash-tail removal and does not replace the offline semantic
+index verifier:
+
+```go
+db, err := meldbase.OpenV2WithOptions("app.meld2", meldbase.V2Options{
+  RequireGraphAudit: true,
+})
+```
+
 Write admission and V2 replay history are configured at open and remain
 immutable for that handle. Zero fields select the production defaults:
 
@@ -479,6 +498,9 @@ db, err := meldbase.OpenWithOptions("app.meld2", meldbase.OpenOptions{
     MaxCommits: 25_000,
     MaxBytes:   512 << 20,
   },
+  // A full replay-consumer buffer is terminated after this interval so it
+  // cannot indefinitely pin retained history. Zero selects five seconds.
+  V2ReplayDeliveryTimeout: 5 * time.Second,
   V2StorageLimits: meldbase.V2StorageLimits{MaxFileBytes: 16 << 30},
   ResourceLimits: meldbase.ResourceLimits{
     MaxDocumentBytes:      8 << 20,
@@ -486,6 +508,8 @@ db, err := meldbase.OpenWithOptions("app.meld2", meldbase.OpenOptions{
     MaxTransactionChanges: 5_000,
     MaxIndexBuildEntries:  500_000,
     MaxIndexBuildBytes:    128 << 20,
+    MaxReactiveViewDocuments: 10_000,
+    MaxReactiveViewBytes:     64 << 20,
   },
 })
 ```

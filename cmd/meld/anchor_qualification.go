@@ -504,7 +504,7 @@ func validateAnchorQualificationReceipt(receipt anchorQualificationReceipt) erro
 		seen[member.MemberID] = struct{}{}
 		switch member.State {
 		case string(anchorhttp.ReplicaAvailable):
-			if !member.Exists || member.MinimumGeneration <= member.MinimumCommitSequence {
+			if !member.Exists || member.MinimumGeneration == 0 {
 				return errors.New("available anchor qualification member lacks a valid anchor")
 			}
 			if member.DatabaseIDHex != receipt.Database.DatabaseIDHex {

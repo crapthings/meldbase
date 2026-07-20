@@ -251,7 +251,11 @@ func zeroDatabaseID(value [16]byte) bool {
 }
 
 func validRollbackAnchor(anchor RollbackAnchor) bool {
-	return !zeroDatabaseID(anchor.DatabaseID) && anchor.MinimumGeneration > anchor.MinimumCommitSequence
+	// Commit sequence counts logical operations, while generation counts physical
+	// Meta publications. A group commit can advance several logical sequences
+	// in one generation, so they are independent monotonic coordinates rather
+	// than a fixed-offset pair.
+	return !zeroDatabaseID(anchor.DatabaseID) && anchor.MinimumGeneration > 0
 }
 
 func rollbackProtectionConfigured(protection V2RollbackProtection) bool {

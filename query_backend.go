@@ -9,11 +9,21 @@ type querySnapshotSource interface {
 
 type queryStorageSnapshot interface {
 	Sequence() uint64
+	CollectionVersion(collection string) (queryStorageCollectionVersion, bool, error)
 	GetDocumentRecord(collection string, id DocumentID) (queryStorageDocument, bool, error)
 	Indexes(collection string) ([]queryStorageIndex, error)
 	OpenIndexIterator(collection, index string, start, end []byte, limit int) (queryStorageIndexIterator, error)
 	OpenCollectionIterator(collection string) (queryStorageDocumentIterator, error)
 	Close() error
+}
+
+// queryStorageCollectionVersion is the immutable collection fence exposed by
+// a snapshot. It intentionally contains no page root: callers use it only for
+// optimistic validation, while page topology remains storage-private.
+type queryStorageCollectionVersion struct {
+	ID                   uint32
+	UpdatedSequence      uint64
+	NextDocumentPosition uint64
 }
 
 type queryStorageDocument struct {

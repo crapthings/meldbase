@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
 )
@@ -41,7 +42,11 @@ func (subscription *QueryReplaySubscription) Close() {
 // so callers depend on the transport-independent QueryReplaySource contract,
 // not Storage V2 implementation details.
 type v2QueryReplaySource struct {
-	file *storagev2.File
+	file            *storagev2.File
+	deliveryTimeout time.Duration
+	onSlowConsumer  func()
+	onResourceLimit func()
+	resourceLimits  ResourceLimits
 }
 
 func (source *v2QueryReplaySource) OpenQueryReplay(ctx context.Context, collection string, query QuerySpec, afterToken uint64, buffer int) (*QueryReplaySubscription, error) {
@@ -55,11 +60,23 @@ func (source *v2QueryReplaySource) OpenQueryReplay(ctx context.Context, collecti
 		}
 		return nil, replayCorrupt(err)
 	}
-	view, err := newV2ReactiveReplayView(snapshot, collection, query)
+	limits := source.resourceLimits
+	if limits.MaxReactiveViewDocuments == 0 || limits.MaxReactiveViewBytes == 0 {
+		limits, err = normalizeResourceLimits(limits)
+		if err != nil {
+			_ = snapshot.Close()
+			_ = stream.Close()
+			return nil, err
+		}
+	}
+	view, err := newV2ReactiveReplayView(snapshot, collection, query, limits)
 	if closeErr := snapshot.Close(); err == nil && closeErr != nil {
 		err = closeErr
 	}
 	if err != nil {
+		if errors.Is(err, ErrResourceLimit) && source.onResourceLimit != nil {
+			source.onResourceLimit()
+		}
 		_ = stream.Close()
 		return nil, err
 	}
@@ -89,6 +106,9 @@ func (source *v2QueryReplaySource) OpenQueryReplay(ctx context.Context, collecti
 			}
 			_, shared, err := view.ApplyCommit(stream, batch)
 			if err != nil {
+				if errors.Is(err, ErrResourceLimit) && source.onResourceLimit != nil {
+					source.onResourceLimit()
+				}
 				errorsOut <- err
 				return
 			}
@@ -96,13 +116,42 @@ func (source *v2QueryReplaySource) OpenQueryReplay(ctx context.Context, collecti
 				continue
 			}
 			delta := cloneSharedQueryDelta(shared, visibleToken)
-			select {
-			case <-child.Done():
+			if !source.deliver(child, deltas, delta) {
+				if child.Err() == nil && source.onSlowConsumer != nil {
+					source.onSlowConsumer()
+					errorsOut <- ErrSlowConsumer
+				}
 				return
-			case deltas <- delta:
-				visibleToken = delta.Token
 			}
+			visibleToken = delta.Token
 		}
 	}()
 	return subscription, nil
+}
+
+// deliver bounds a stalled replay consumer. The immediate send preserves the
+// normal zero-allocation path; only a full caller buffer allocates a timer.
+// Ending the stream releases its durable replay pin so retention can recover.
+func (source *v2QueryReplaySource) deliver(ctx context.Context, deltas chan<- QueryDelta, delta QueryDelta) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case deltas <- delta:
+		return true
+	default:
+	}
+	timeout := DefaultV2ReplayDeliveryTimeout
+	if source != nil && source.deliveryTimeout > 0 {
+		timeout = source.deliveryTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case deltas <- delta:
+		return true
+	case <-timer.C:
+		return false
+	}
 }

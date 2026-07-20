@@ -90,6 +90,51 @@ func BenchmarkCommitReplayOneChange(b *testing.B) {
 	}
 }
 
+// BenchmarkDocumentTransactionGroupTwo is compared with the sequential form
+// on the same target volume when evaluating the CommitCoordinator. Both retain
+// two logical CommitBatch records; only the group publishes one physical Meta
+// generation and therefore one pair of persistence barriers.
+func BenchmarkDocumentTransactionGroupTwo(b *testing.B) {
+	benchmarkDocumentTransactionPair(b, true)
+}
+
+func BenchmarkDocumentTransactionSequentialTwo(b *testing.B) {
+	benchmarkDocumentTransactionPair(b, false)
+}
+
+func benchmarkDocumentTransactionPair(b *testing.B, grouped bool) {
+	b.Helper()
+	path := filepath.Join(b.TempDir(), "transaction-pair.meld2")
+	file, _, err := Open(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer file.Close()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		firstID, secondID := benchmarkDocumentID(iteration*2), benchmarkDocumentID(iteration*2+1)
+		first := DocumentTransaction{TransactionID: benchmarkDocumentID(iteration*2 + 10_000_000), Mutations: []DocumentMutation{{
+			Collection: "items", DocumentID: firstID, Operation: DocumentInsert, Document: []byte("first"),
+		}}}
+		second := DocumentTransaction{TransactionID: benchmarkDocumentID(iteration*2 + 10_000_001), Mutations: []DocumentMutation{{
+			Collection: "items", DocumentID: secondID, Operation: DocumentInsert, Document: []byte("second"),
+		}}}
+		if grouped {
+			if _, err := file.ApplyDocumentTransactionGroup([]DocumentTransaction{first, second}); err != nil {
+				b.Fatal(err)
+			}
+			continue
+		}
+		if _, err := file.ApplyDocumentTransaction(first); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := file.ApplyDocumentTransaction(second); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkHistoricalSnapshotOpen(b *testing.B) {
 	file := benchmarkCommitHistory(b, 100)
 	defer file.Close()

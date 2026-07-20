@@ -24,6 +24,7 @@ type WriteTransaction struct {
 	snapshot        queryStorageSnapshot
 	baseToken       uint64
 	entries         map[writeTransactionKey]*writeTransactionEntry
+	collections     map[string]storagev2.CollectionPrecondition
 	systemMutations []systemrecord.Mutation
 	commitHooks     []func(uint64)
 	systemBytes     uint64
@@ -83,6 +84,108 @@ type writeTransactionEntry struct {
 	baseBytes    uint64
 	currentBytes uint64
 	exists       bool
+}
+
+// Find evaluates query against the transaction's immutable V2 snapshot plus
+// its own staged point writes. It installs a collection snapshot fence, so any
+// concurrent document or published-index change in that collection causes the
+// eventual commit to return ErrWriteConflict rather than admitting a phantom.
+//
+// The first range-read primitive intentionally uses a collection-wide fence.
+// It is serializable and independent of a process-local index plan; a future
+// narrower predicate-fence implementation can refine conflicts without
+// weakening this API's correctness contract.
+func (tx *WriteTransaction) Find(collection string, query QuerySpec) (QuerySnapshot, error) {
+	if err := tx.validateCollection(collection); err != nil {
+		return QuerySnapshot{}, err
+	}
+	if _, err := MarshalQuerySpecJSON(query); err != nil {
+		return QuerySnapshot{}, err
+	}
+	version, exists, err := tx.snapshot.CollectionVersion(collection)
+	if err != nil {
+		return QuerySnapshot{}, err
+	}
+	if err := tx.recordCollectionRead(collection, exists, version); err != nil {
+		return QuerySnapshot{}, err
+	}
+	iterator, err := tx.snapshot.OpenCollectionIterator(collection)
+	if err != nil {
+		return QuerySnapshot{}, err
+	}
+	defer iterator.Close()
+	candidates := make([]queryCandidate, 0)
+	seen := make(map[DocumentID]struct{})
+	var candidateBytes uint64
+	add := func(document Document, position uint64) error {
+		if document == nil || position == 0 || !query.Match(document) {
+			return nil
+		}
+		if uint64(len(candidates)) >= tx.db.resourceLimits.MaxTransactionChanges {
+			tx.db.metrics.resourceLimitRejections.Add(1)
+			return fmt.Errorf("%w: transaction query candidates exceed limit %d", ErrResourceLimit, tx.db.resourceLimits.MaxTransactionChanges)
+		}
+		size, err := canonicalDocumentSize(document)
+		if err != nil {
+			return err
+		}
+		if candidateBytes > tx.db.resourceLimits.MaxTransactionBytes || size > tx.db.resourceLimits.MaxTransactionBytes-candidateBytes {
+			tx.db.metrics.resourceLimitRejections.Add(1)
+			return fmt.Errorf("%w: transaction query candidates exceed byte limit %d", ErrResourceLimit, tx.db.resourceLimits.MaxTransactionBytes)
+		}
+		candidateBytes += size
+		candidates = append(candidates, queryCandidate{document: document, position: position})
+		return nil
+	}
+	for iterator.Next() {
+		record := iterator.Record()
+		candidate, err := decodeQueryStorageCandidate(record)
+		if err != nil {
+			return QuerySnapshot{}, err
+		}
+		id := candidate.documentID()
+		if _, duplicate := seen[id]; duplicate {
+			return QuerySnapshot{}, ErrCorrupt
+		}
+		seen[id] = struct{}{}
+		if entry := tx.entries[writeTransactionKey{collection: collection, id: id}]; entry != nil {
+			if err := add(entry.current, candidate.position); err != nil {
+				return QuerySnapshot{}, err
+			}
+			continue
+		}
+		if err := add(candidate.document, candidate.position); err != nil {
+			return QuerySnapshot{}, err
+		}
+	}
+	if err := iterator.Err(); err != nil {
+		return QuerySnapshot{}, err
+	}
+	if err := iterator.Close(); err != nil {
+		return QuerySnapshot{}, err
+	}
+
+	inserted := make([]writeTransactionKey, 0)
+	for key, entry := range tx.entries {
+		if key.collection == collection && !entry.exists && entry.current != nil {
+			inserted = append(inserted, key)
+		}
+	}
+	sort.Slice(inserted, func(left, right int) bool { return string(inserted[left].id[:]) < string(inserted[right].id[:]) })
+	position := uint64(0)
+	if exists {
+		position = version.NextDocumentPosition
+	}
+	for _, key := range inserted {
+		if position == ^uint64(0) {
+			return QuerySnapshot{}, ErrCorrupt
+		}
+		position++
+		if err := add(tx.entries[key].current, position); err != nil {
+			return QuerySnapshot{}, err
+		}
+	}
+	return QuerySnapshot{Token: tx.baseToken, Documents: query.executeMatched(candidates)}, nil
 }
 
 // GetOne returns one document by intrinsic ID from the transaction's current
@@ -261,6 +364,28 @@ func (tx *WriteTransaction) load(collection string, id DocumentID) (*writeTransa
 	return entry, nil
 }
 
+func (tx *WriteTransaction) recordCollectionRead(collection string, exists bool, version queryStorageCollectionVersion) error {
+	if tx == nil || !tx.active || tx.collections == nil {
+		return ErrClosed
+	}
+	precondition := storagev2.CollectionPrecondition{Collection: collection, ExpectedExists: exists}
+	if exists {
+		if version.ID == 0 || version.UpdatedSequence == 0 {
+			return ErrCorrupt
+		}
+		precondition.ExpectedID = version.ID
+		precondition.ExpectedUpdatedSequence = version.UpdatedSequence
+	}
+	if current, recorded := tx.collections[collection]; recorded {
+		if current != precondition {
+			return ErrCorrupt
+		}
+		return nil
+	}
+	tx.collections[collection] = precondition
+	return nil
+}
+
 // setCurrent replaces one retained overlay value without cumulative accounting
 // across repeated updates. The immutable base copy remains charged until the
 // callback finishes because changes and point preconditions still need it.
@@ -305,6 +430,19 @@ func (tx *WriteTransaction) preconditions() []storagev2.DocumentPrecondition {
 			Collection: key.collection, DocumentID: [16]byte(key.id),
 			ExpectedExists: entry.exists, ExpectedHash: entry.baseHash,
 		}
+	}
+	return result
+}
+
+func (tx *WriteTransaction) collectionPreconditions() []storagev2.CollectionPrecondition {
+	collections := make([]string, 0, len(tx.collections))
+	for collection := range tx.collections {
+		collections = append(collections, collection)
+	}
+	sort.Strings(collections)
+	result := make([]storagev2.CollectionPrecondition, len(collections))
+	for index, collection := range collections {
+		result[index] = tx.collections[collection]
 	}
 	return result
 }
@@ -371,7 +509,7 @@ func (db *DB) beginWriteTransaction(ctx context.Context) (*WriteTransaction, *v2
 	}
 	tx := &WriteTransaction{
 		db: db, ctx: ctx, active: true, snapshot: snapshot, baseToken: baseToken,
-		entries: make(map[writeTransactionKey]*writeTransactionEntry),
+		entries: make(map[writeTransactionKey]*writeTransactionEntry), collections: make(map[string]storagev2.CollectionPrecondition),
 	}
 	return tx, store, nil
 }
@@ -411,12 +549,41 @@ func (db *DB) commitWriteTransaction(
 	if !ok || currentStore != store || tx == nil {
 		return systemrecord.Result{}, false, ErrWriteConflict
 	}
+	return db.commitPreparedWriteTransactionLocked(ctx, store, changes, systemMutations, tx.preconditions(), tx.collectionPreconditions(), tx.commitHooks)
+}
+
+// commitPreparedWriteTransactionLocked publishes already-frozen V2 point
+// writes while db.mu is held. It is shared by the direct transaction path and
+// the CommitCoordinator's conflict fallback: neither path reevaluates a user
+// callback after its snapshot has closed.
+func (db *DB) commitPreparedWriteTransactionLocked(
+	ctx context.Context,
+	store *v2DurableStore,
+	changes []Change,
+	systemMutations []systemrecord.Mutation,
+	preconditions []storagev2.DocumentPrecondition,
+	collectionPreconditions []storagev2.CollectionPrecondition,
+	commitHooks []func(uint64),
+) (systemrecord.Result, bool, error) {
+	if db == nil || store == nil || len(changes) == 0 {
+		return systemrecord.Result{}, false, ErrCorrupt
+	}
+	if db.closed {
+		return systemrecord.Result{}, false, ErrClosed
+	}
+	if db.fatalErr != nil {
+		return systemrecord.Result{}, false, db.fatalErr
+	}
+	currentStore, ok := db.durability.(*v2DurableStore)
+	if !ok || currentStore != store {
+		return systemrecord.Result{}, false, ErrWriteConflict
+	}
 	token := db.token + 1
 	if token == 0 {
 		return systemrecord.Result{}, true, ErrCorrupt
 	}
 	diagnostic := db.beginDiagnostic(DiagnosticCommit)
-	result, err := store.appendDBCommitWithSystem(ctx, db, token, changes, systemMutations, tx.preconditions())
+	result, err := store.appendDBCommitWithSystem(ctx, db, token, changes, systemMutations, preconditions, collectionPreconditions)
 	db.finishCommitDiagnostic(diagnostic, len(changes), err)
 	if err != nil || !result.Applied {
 		return result, true, err
@@ -427,7 +594,7 @@ func (db *DB) commitWriteTransaction(
 		}
 	}
 	db.token = token
-	for _, hook := range tx.commitHooks {
+	for _, hook := range commitHooks {
 		hook(token)
 	}
 	batch := ChangeBatch{Token: token, Changes: changes}
@@ -453,8 +620,12 @@ func (db *DB) validateWriteTransactionSnapshot(tx *WriteTransaction, store *v2Du
 		return ErrWriteConflict
 	}
 	preconditions := tx.preconditions()
-	if len(preconditions) == 0 {
+	collectionPreconditions := tx.collectionPreconditions()
+	if len(preconditions) == 0 && len(collectionPreconditions) == 0 {
 		return nil
+	}
+	if err := mapStorageV2Error(store.file.ValidateCollectionPreconditions(collectionPreconditions)); err != nil {
+		return err
 	}
 	return mapStorageV2Error(store.file.ValidateDocumentPreconditions(preconditions))
 }
@@ -523,7 +694,13 @@ func (db *DB) RunWriteTransaction(ctx context.Context, build func(*WriteTransact
 		return err
 	}
 
-	result, _, err := db.commitWriteTransaction(ctx, tx, store, changes, nil)
+	var result systemrecord.Result
+	if coordinator := db.commitCoordinator; coordinator != nil {
+		err = coordinator.submitWriteTransaction(ctx, changes, tx.preconditions(), tx.collectionPreconditions())
+		result.Applied = err == nil
+	} else {
+		result, _, err = db.commitWriteTransaction(ctx, tx, store, changes, nil)
+	}
 	if err == nil && !result.Applied {
 		return ErrCorrupt
 	}

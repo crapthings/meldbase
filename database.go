@@ -19,10 +19,13 @@ var fallbackDatabaseIdentityCounter atomic.Uint64
 type Operation string
 
 const (
-	InsertOperation      Operation = "insert"
-	UpdateOperation      Operation = "update"
-	DeleteOperation      Operation = "delete"
-	CreateIndexOperation Operation = "create_index"
+	InsertOperation Operation = "insert"
+	UpdateOperation Operation = "update"
+	DeleteOperation Operation = "delete"
+	// CreateCollectionOperation is emitted only by the durable database change
+	// feed. Ordinary collection creation remains implicit for CRUD callers.
+	CreateCollectionOperation Operation = "create_collection"
+	CreateIndexOperation      Operation = "create_index"
 )
 
 type IndexDefinition struct {
@@ -42,6 +45,31 @@ type Change struct {
 	Before     *Document
 	After      *Document
 	Index      *IndexDefinition
+
+	// ChangedPaths is the sorted, deduplicated set of document paths changed by
+	// an Update operation when the writer can prove it. A nil value means the
+	// changed field set is unknown and consumers must conservatively treat the
+	// whole document as affected. Insert, delete and catalog changes intentionally
+	// use that conservative form: their membership and visible payload may change
+	// through any query path.
+	//
+	// The slice is immutable once a Change enters the dispatcher. Public watcher
+	// deliveries receive an independent copy via cloneChange.
+	ChangedPaths []string
+
+	// dispatchBytes is an internal, canonical accounting weight for the data
+	// retained by the asynchronous change-dispatch boundary. It is populated
+	// while the write path already validates document resource limits, avoiding
+	// a second document walk after a successful durable commit.
+	dispatchBytes      uint64
+	dispatchBytesKnown bool
+
+	// afterCanonicalBytes is populated alongside dispatchBytes. Shared reactive
+	// views use it to avoid re-encoding the same immutable After document once
+	// per matching view. Replay and private test changes retain a safe canonical
+	// fallback when this write-path cache is unavailable.
+	afterCanonicalBytes      uint64
+	afterCanonicalBytesKnown bool
 }
 
 type ChangeBatch struct {
@@ -59,6 +87,7 @@ type DB struct {
 	feedMu                    sync.Mutex
 	nextWatcher               uint64
 	watchers                  map[uint64]*changeWatcher
+	pendingWatcherBytes       uint64 // protected by feedMu
 	store                     *durableStore
 	durability                durabilityBackend
 	replaySource              QueryReplaySource
@@ -77,6 +106,18 @@ type DB struct {
 	indexBuildReservations    map[string]struct{}
 	indexBuildSchedulerActive bool
 	v2StorageLimits           V2StorageLimits
+	dispatcher                *changeDispatcher
+	commitCoordinator         *v2CommitCoordinator
+	// replicationSourceLeases provides process-local single-active ownership for
+	// an authenticated primary-side replica identity. It is not a distributed
+	// leader lease; it only prevents two transport connections in this DB from
+	// racing one durable consumer checkpoint.
+	replicationSourceLeases map[string]struct{}
+	// replicaReadOnly is set only by OpenV2Follower. Application mutations are
+	// rejected at the common durable commit boundary; follower.Apply bypasses
+	// that boundary only after it validates the next source token under db.mu.
+	replicaReadOnly   bool
+	primaryWriteFence V2PrimaryWriteFence
 }
 
 type collectionData struct {
@@ -102,9 +143,24 @@ func (d *collectionData) rebuildPositions() {
 }
 
 type changeWatcher struct {
-	collection string
-	events     chan ChangeBatch
-	done       chan error
+	collection   string
+	afterToken   uint64
+	maxBatches   int
+	maxBytes     uint64
+	events       chan ChangeBatch
+	done         chan error
+	queue        []queuedChangeBatch // protected by DB.feedMu
+	pendingBytes uint64              // protected by DB.feedMu
+	changed      chan struct{}       // protected by DB.feedMu
+	stop         chan struct{}       // closed under DB.feedMu
+	stopped      chan struct{}
+	closed       bool
+	terminalErr  error
+}
+
+type queuedChangeBatch struct {
+	batch ChangeBatch
+	bytes uint64
 }
 
 func New() *DB {
@@ -125,6 +181,7 @@ func NewWithOptions(options DatabaseOptions) (*DB, error) {
 		resourceLimits: resourceLimits,
 	}
 	db.reactive = newReactiveHub(db)
+	db.dispatcher = newChangeDispatcher(db)
 	db.initializeLogicalStats(nil)
 	if _, err := rand.Read(db.databaseID[:]); err != nil {
 		// The identity is a namespace binding, not a secret. Keep the infallible
@@ -139,6 +196,25 @@ func NewWithOptions(options DatabaseOptions) (*DB, error) {
 	return db, nil
 }
 func (db *DB) Close() error {
+	// Stop V2 admission before taking db.mu: a running coordinator owns work
+	// that will shortly need that mutex to publish, so reversing this order
+	// would deadlock Close against an in-flight group.
+	if db != nil && db.commitCoordinator != nil {
+		db.commitCoordinator.close()
+	}
+	// A V2 compaction retains an immutable storage snapshot after it releases
+	// db.mu so ordinary writes can continue. Closing the underlying file during
+	// that copy would invalidate its pinned readers, therefore Close joins the
+	// same gate before it closes the durable store. Compaction takes this gate
+	// before its short db.mu read section, so this ordering cannot deadlock.
+	var compactionStore *v2DurableStore
+	if db != nil {
+		compactionStore, _ = db.durability.(*v2DurableStore)
+		if compactionStore != nil {
+			compactionStore.compactMu.Lock()
+			defer compactionStore.compactMu.Unlock()
+		}
+	}
 	db.mu.Lock()
 	if db.closed {
 		db.mu.Unlock()
@@ -154,19 +230,52 @@ func (db *DB) Close() error {
 		diagnostics.closed.Store(true)
 	}
 	db.mu.Unlock()
+	if db.dispatcher != nil {
+		db.dispatcher.close()
+	}
 	if db.reactive != nil {
 		db.reactive.close()
 	}
 	db.feedMu.Lock()
+	stopping := make([]*changeWatcher, 0, len(db.watchers))
 	for id, watcher := range db.watchers {
-		delete(db.watchers, id)
-		close(watcher.events)
-		close(watcher.done)
+		db.finishChangeWatcherLocked(id, watcher, nil)
+		stopping = append(stopping, watcher)
 	}
 	db.feedMu.Unlock()
+	for _, watcher := range stopping {
+		<-watcher.stopped
+	}
 	return closeErr
 }
 func (db *DB) Collection(name string) *Collection { return &Collection{db: db, name: name} }
+
+// DatabaseID returns the stable, non-secret V2/V1 database namespace used to
+// bind resume and replication protocols. It is not an authentication token.
+func (db *DB) DatabaseID() [16]byte {
+	if db == nil {
+		return [16]byte{}
+	}
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	return db.databaseID
+}
+
+// CommitCoordinatorStats returns a bounded snapshot of the optional V2
+// admission scheduler. It performs no I/O. DBStats includes the same snapshot
+// in the versioned admin schema; this method is convenient for direct callers.
+func (db *DB) CommitCoordinatorStats() V2CommitCoordinatorStats {
+	if db == nil {
+		return V2CommitCoordinatorStats{}
+	}
+	db.mu.RLock()
+	coordinator := db.commitCoordinator
+	db.mu.RUnlock()
+	if coordinator == nil {
+		return V2CommitCoordinatorStats{}
+	}
+	return coordinator.stats()
+}
 
 type Collection struct {
 	db   *DB
@@ -176,6 +285,12 @@ type Collection struct {
 func (c *Collection) InsertOne(ctx context.Context, document Document) (DocumentID, error) {
 	ids, err := c.InsertMany(ctx, []Document{document})
 	if err != nil {
+		// A coordinator admission may race caller cancellation after the
+		// document ID is assigned. Preserve that ID with ErrCommitOutcomeUnknown
+		// so InsertOne callers can reconcile the durable outcome too.
+		if errors.Is(err, ErrCommitOutcomeUnknown) && len(ids) == 1 {
+			return ids[0], err
+		}
 		return DocumentID{}, err
 	}
 	return ids[0], nil
@@ -229,41 +344,59 @@ func (c *Collection) InsertMany(ctx context.Context, documents []Document) ([]Do
 		seenIDs[id] = struct{}{}
 		copies[index], ids[index] = copy, id
 	}
-	c.db.mu.Lock()
-	if c.db.closed {
-		c.db.mu.Unlock()
-		return nil, ErrClosed
-	}
-	if c.db.fatalErr != nil {
-		c.db.mu.Unlock()
-		return nil, c.db.fatalErr
-	}
-	data := c.db.collections[c.name]
-	if data != nil && c.db.querySource == nil {
-		for _, id := range ids {
-			if _, exists := data.documents[id]; exists {
-				c.db.mu.Unlock()
-				return nil, ErrDuplicateID
-			}
-		}
-		if err := data.validateIndexBatchInsert(ids, copies); err != nil {
-			c.db.mu.Unlock()
-			return nil, err
-		}
-	}
 	changes := make([]Change, len(copies))
 	for index, copy := range copies {
 		after := copy.Clone()
 		changes[index] = Change{Collection: c.name, Operation: InsertOperation, DocumentID: ids[index], After: &after}
 	}
 	if err := c.db.validateTransactionResource(changes); err != nil {
-		c.db.mu.Unlock()
 		return nil, err
+	}
+	if coordinator := c.db.commitCoordinator; coordinator != nil {
+		return coordinator.submit(ctx, c.name, ids, copies, changes)
+	}
+	c.db.mu.Lock()
+	err := c.commitInsertManyLocked(ctx, ids, copies, changes)
+	c.db.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return append([]DocumentID(nil), ids...), nil
+}
+
+// commitInsertManyLocked retains the original single-request commit semantics.
+// It is also the logical-conflict fallback for the V2 coordinator: a grouped
+// attempt is all-or-nothing, while independent public requests must retain
+// their individual success or duplicate-key outcomes.
+//
+// The caller holds db.mu and has already validated immutable input/resource
+// bounds. ctx is intentionally supplied by the caller: direct CRUD preserves
+// normal context behavior, while an admitted coordinator request uses a
+// background context because cancellation after admission cannot prove absence.
+func (c *Collection) commitInsertManyLocked(ctx context.Context, ids []DocumentID, copies []Document, changes []Change) error {
+	if c == nil || c.db == nil || len(ids) == 0 || len(ids) != len(copies) || len(changes) != len(copies) {
+		return ErrCorrupt
+	}
+	if c.db.closed {
+		return ErrClosed
+	}
+	if c.db.fatalErr != nil {
+		return c.db.fatalErr
+	}
+	data := c.db.collections[c.name]
+	if data != nil && c.db.querySource == nil {
+		for _, id := range ids {
+			if _, exists := data.documents[id]; exists {
+				return ErrDuplicateID
+			}
+		}
+		if err := data.validateIndexBatchInsert(ids, copies); err != nil {
+			return err
+		}
 	}
 	token := c.db.token + 1
 	if err := c.db.appendCommit(ctx, token, changes); err != nil {
-		c.db.mu.Unlock()
-		return nil, err
+		return err
 	}
 	if data == nil {
 		data = newCollectionData()
@@ -282,8 +415,7 @@ func (c *Collection) InsertMany(ctx context.Context, documents []Document) ([]Do
 	batch := ChangeBatch{Token: token, Changes: changes}
 	c.db.recordLiveCommit(batch)
 	c.db.publish(batch)
-	c.db.mu.Unlock()
-	return append([]DocumentID(nil), ids...), nil
+	return nil
 }
 
 func (c *Collection) Find(ctx context.Context, filter Filter, options ...QueryOptions) (*Cursor, error) {
@@ -412,20 +544,30 @@ func (c *Collection) deleteQuery(ctx context.Context, query QuerySpec, one bool,
 	if query.HasModifiers() {
 		return DeleteResult{}, fmt.Errorf("%w: mutation query cannot sort, skip, or limit", ErrInvalidFilter)
 	}
+	if coordinator := c.db.commitCoordinator; coordinator != nil {
+		return coordinator.submitDelete(ctx, c.name, query, one, maxAffected)
+	}
 	c.db.mu.Lock()
+	result, err := c.deleteQueryLocked(ctx, query, one, maxAffected)
+	c.db.mu.Unlock()
+	return result, err
+}
+
+// deleteQueryLocked is the original one-request mutation path. The V2
+// coordinator reuses it for a singleton or after a group-level logical
+// conflict so filter semantics and affected-count results remain identical.
+// The caller holds db.mu.
+func (c *Collection) deleteQueryLocked(ctx context.Context, query QuerySpec, one bool, maxAffected int) (DeleteResult, error) {
 	if c.db.closed {
-		c.db.mu.Unlock()
 		return DeleteResult{}, ErrClosed
 	}
 	if c.db.fatalErr != nil {
-		c.db.mu.Unlock()
 		return DeleteResult{}, c.db.fatalErr
 	}
 	data := c.db.collections[c.name]
 	selectionLimit, resourceBounded := c.db.boundedMutationSelection(maxAffected, one)
 	selected, err := c.selectMutationDocumentsLocked(ctx, query, one, selectionLimit)
 	if err != nil {
-		c.db.mu.Unlock()
 		if resourceBounded && errors.Is(err, ErrMutationLimit) {
 			c.db.metrics.resourceLimitRejections.Add(1)
 			return DeleteResult{}, fmt.Errorf("%w: transaction changes exceed limit %d", ErrResourceLimit, c.db.resourceLimits.MaxTransactionChanges)
@@ -433,7 +575,6 @@ func (c *Collection) deleteQuery(ctx context.Context, query QuerySpec, one bool,
 		return DeleteResult{}, err
 	}
 	if len(selected) > 0 && data == nil {
-		c.db.mu.Unlock()
 		return DeleteResult{}, ErrCorrupt
 	}
 	changes := make([]Change, len(selected))
@@ -441,7 +582,6 @@ func (c *Collection) deleteQuery(ctx context.Context, query QuerySpec, one bool,
 	for index, document := range selected {
 		id, exists := document.ID()
 		if !exists || id.IsZero() {
-			c.db.mu.Unlock()
 			return DeleteResult{}, ErrCorrupt
 		}
 		before := document.Clone()
@@ -449,14 +589,12 @@ func (c *Collection) deleteQuery(ctx context.Context, query QuerySpec, one bool,
 		deleted[id] = struct{}{}
 	}
 	if err := c.db.validateTransactionResource(changes); err != nil {
-		c.db.mu.Unlock()
 		return DeleteResult{}, err
 	}
 	var token uint64
 	if len(changes) > 0 {
 		token = c.db.token + 1
 		if err := c.db.appendCommit(ctx, token, changes); err != nil {
-			c.db.mu.Unlock()
 			return DeleteResult{}, err
 		}
 		if c.db.querySource == nil {
@@ -479,7 +617,6 @@ func (c *Collection) deleteQuery(ctx context.Context, query QuerySpec, one bool,
 	if len(changes) > 0 {
 		c.db.publish(ChangeBatch{Token: token, Changes: changes})
 	}
-	c.db.mu.Unlock()
 	return DeleteResult{DeletedCount: int64(len(changes))}, nil
 }
 
@@ -487,6 +624,25 @@ func (db *DB) DatabaseIdentity() [16]byte {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	return db.databaseID
+}
+
+// validateV2PrimaryWriteFence is called under the V2 writer admission lock.
+// It intentionally performs no I/O itself; see V2PrimaryWriteFence.
+func (db *DB) validateV2PrimaryWriteFence(nextCommitSequence uint64) error {
+	if db == nil || db.replicaReadOnly || db.primaryWriteFence == nil {
+		return nil
+	}
+	if nextCommitSequence == 0 {
+		return ErrCorrupt
+	}
+	db.metrics.primaryWriteFenceChecks.Add(1)
+	if err := db.primaryWriteFence.ValidateV2PrimaryWrite(PrimaryWriteFenceRequest{
+		DatabaseID: db.databaseID, NextCommitSequence: nextCommitSequence,
+	}); err != nil {
+		db.metrics.primaryWriteFenceRejected.Add(1)
+		return fmt.Errorf("%w: %w", ErrPrimaryWriteFence, err)
+	}
+	return nil
 }
 
 func (db *DB) CanResumeFrom(token uint64) bool {
@@ -700,26 +856,33 @@ func (db *DB) WatchChanges(ctx context.Context, collection string, buffer int) (
 	if buffer <= 0 || buffer > 4096 {
 		return nil, nil, fmt.Errorf("invalid change buffer")
 	}
+	// Holding the database read lock until the watcher is registered creates a
+	// precise subscription boundary. A dispatcher may still hold older batches
+	// that were acknowledged before this call; afterToken prevents those from
+	// being delivered to a newly registered watcher.
 	db.mu.RLock()
-	closed := db.closed
-	db.mu.RUnlock()
-	if closed {
+	if db.closed {
+		db.mu.RUnlock()
 		return nil, nil, ErrClosed
 	}
+	afterToken := db.token
 	db.feedMu.Lock()
 	db.nextWatcher++
 	id := db.nextWatcher
-	watcher := &changeWatcher{collection: collection, events: make(chan ChangeBatch, buffer), done: make(chan error, 1)}
+	watcher := &changeWatcher{
+		collection: collection, afterToken: afterToken, maxBatches: buffer, maxBytes: maxPendingChangeWatcherBytes,
+		events: make(chan ChangeBatch), done: make(chan error, 1),
+		changed: make(chan struct{}), stop: make(chan struct{}), stopped: make(chan struct{}),
+	}
 	db.watchers[id] = watcher
 	db.feedMu.Unlock()
+	db.mu.RUnlock()
+	go db.runChangeWatcher(watcher)
 	go func() {
 		<-ctx.Done()
 		db.feedMu.Lock()
 		if current, ok := db.watchers[id]; ok {
-			delete(db.watchers, id)
-			current.done <- ctx.Err()
-			close(current.events)
-			close(current.done)
+			db.finishChangeWatcherLocked(id, current, ctx.Err())
 		}
 		db.feedMu.Unlock()
 	}()
@@ -727,14 +890,35 @@ func (db *DB) WatchChanges(ctx context.Context, collection string, buffer int) (
 }
 
 func (db *DB) publish(batch ChangeBatch) {
+	if db == nil || len(batch.Changes) == 0 {
+		return
+	}
+	if db.dispatcher != nil {
+		db.metrics.publishedBatches.Add(1)
+		db.metrics.publishedChanges.Add(uint64(len(batch.Changes)))
+		db.dispatcher.enqueue(batch)
+		return
+	}
+	// Constructors initialize the dispatcher. Retain the direct path only for
+	// defensive compatibility with private test fixtures built before it.
 	db.metrics.publishedBatches.Add(1)
 	db.metrics.publishedChanges.Add(uint64(len(batch.Changes)))
 	if db.reactive != nil {
 		db.reactive.notify(batch)
 	}
+	db.deliverChangeWatchers(batch)
+}
+
+func (db *DB) deliverChangeWatchers(batch ChangeBatch) {
+	if db == nil || len(batch.Changes) == 0 {
+		return
+	}
 	db.feedMu.Lock()
 	defer db.feedMu.Unlock()
 	for id, watcher := range db.watchers {
+		if batch.Token <= watcher.afterToken {
+			continue
+		}
 		filtered := make([]Change, 0, len(batch.Changes))
 		for _, change := range batch.Changes {
 			if watcher.collection == change.Collection {
@@ -744,15 +928,113 @@ func (db *DB) publish(batch ChangeBatch) {
 		if len(filtered) == 0 {
 			continue
 		}
-		select {
-		case watcher.events <- ChangeBatch{Token: batch.Token, Changes: filtered}:
-			db.metrics.watcherDeliveries.Add(1)
-		default:
+		delivery := ChangeBatch{Token: batch.Token, Changes: filtered}
+		bytes := changeBatchDispatchBytes(delivery)
+		if watcher.maxBatches <= 0 || watcher.maxBytes == 0 || len(watcher.queue) >= watcher.maxBatches ||
+			bytes > watcher.maxBytes || watcher.pendingBytes > watcher.maxBytes-bytes ||
+			bytes > maxPendingChangeWatchersBytes || db.pendingWatcherBytes > maxPendingChangeWatchersBytes-bytes {
 			db.metrics.slowConsumers.Add(1)
-			delete(db.watchers, id)
-			watcher.done <- ErrSlowConsumer
-			close(watcher.events)
-			close(watcher.done)
+			db.finishChangeWatcherLocked(id, watcher, ErrSlowConsumer)
+			continue
+		}
+		watcher.queue = append(watcher.queue, queuedChangeBatch{batch: delivery, bytes: bytes})
+		watcher.pendingBytes += bytes
+		db.pendingWatcherBytes += bytes
+		db.metrics.watcherDeliveries.Add(1)
+		close(watcher.changed)
+		watcher.changed = make(chan struct{})
+	}
+}
+
+func (db *DB) failChangeWatchers(err error) {
+	if db == nil {
+		return
+	}
+	db.feedMu.Lock()
+	defer db.feedMu.Unlock()
+	for id, watcher := range db.watchers {
+		db.metrics.slowConsumers.Add(1)
+		db.finishChangeWatcherLocked(id, watcher, err)
+	}
+}
+
+func (db *DB) finishChangeWatcherLocked(id uint64, watcher *changeWatcher, err error) {
+	if watcher == nil || watcher.closed {
+		return
+	}
+	delete(db.watchers, id)
+	watcher.closed = true
+	watcher.terminalErr = err
+	if watcher.pendingBytes > db.pendingWatcherBytes {
+		// All queue ownership changes are serialized by feedMu. A mismatch means
+		// an internal accounting fault; retaining an underflowed gauge would be
+		// less safe than dropping the watcher backlog at this terminal boundary.
+		db.pendingWatcherBytes = 0
+	} else {
+		db.pendingWatcherBytes -= watcher.pendingBytes
+	}
+	watcher.queue = nil
+	watcher.pendingBytes = 0
+	close(watcher.stop)
+}
+
+// runChangeWatcher forwards one internally budgeted queue to the public
+// channel. Only this goroutine sends or closes events, preventing a close/send
+// race while commit delivery stays non-blocking under feedMu.
+func (db *DB) runChangeWatcher(watcher *changeWatcher) {
+	if db == nil || watcher == nil {
+		return
+	}
+	defer close(watcher.stopped)
+	defer close(watcher.events)
+	defer func() {
+		db.feedMu.Lock()
+		err := watcher.terminalErr
+		db.feedMu.Unlock()
+		if err != nil {
+			watcher.done <- err
+		}
+		close(watcher.done)
+	}()
+	for {
+		db.feedMu.Lock()
+		if watcher.closed {
+			db.feedMu.Unlock()
+			return
+		}
+		if len(watcher.queue) == 0 {
+			changed, stop := watcher.changed, watcher.stop
+			db.feedMu.Unlock()
+			select {
+			case <-stop:
+				return
+			case <-changed:
+			}
+			continue
+		}
+		queued := watcher.queue[0]
+		stop := watcher.stop
+		db.feedMu.Unlock()
+
+		select {
+		case <-stop:
+			return
+		case watcher.events <- queued.batch:
+			db.feedMu.Lock()
+			if !watcher.closed && len(watcher.queue) > 0 {
+				current := watcher.queue[0]
+				if current.batch.Token == queued.batch.Token && current.bytes == queued.bytes {
+					watcher.queue[0] = queuedChangeBatch{}
+					watcher.queue = watcher.queue[1:]
+					watcher.pendingBytes -= current.bytes
+					if current.bytes > db.pendingWatcherBytes {
+						db.pendingWatcherBytes = 0
+					} else {
+						db.pendingWatcherBytes -= current.bytes
+					}
+				}
+			}
+			db.feedMu.Unlock()
 		}
 	}
 }
@@ -770,6 +1052,7 @@ func cloneChange(change Change) Change {
 		value := *change.Index
 		change.Index = &value
 	}
+	change.ChangedPaths = append([]string(nil), change.ChangedPaths...)
 	return change
 }
 func contextError(ctx context.Context) error {

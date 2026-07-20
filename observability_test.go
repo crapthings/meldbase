@@ -100,7 +100,12 @@ func TestStatsTrackCoreWorkWithoutUserData(t *testing.T) {
 		t.Fatalf("invalid timing stats: %+v", initial)
 	}
 	if initial.WritesDisabled || initial.Realtime.PendingBatchCapacity != maxPendingReactiveBatches ||
-		initial.Realtime.PendingChangeCapacity != maxPendingReactiveChanges {
+		initial.Realtime.PendingChangeCapacity != maxPendingReactiveChanges ||
+		initial.Realtime.PendingByteCapacity != maxPendingReactiveBytes ||
+		initial.Realtime.WatcherByteCapacity != maxPendingChangeWatchersBytes ||
+		initial.Realtime.DispatchBatchCapacity != maxPendingChangeDispatchBatches ||
+		initial.Realtime.DispatchChangeCapacity != maxPendingChangeDispatchChanges ||
+		initial.Realtime.DispatchByteCapacity != maxPendingChangeDispatchBytes {
 		t.Fatalf("initial health/capacity stats: %+v", initial)
 	}
 

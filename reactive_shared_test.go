@@ -241,6 +241,45 @@ func TestReactiveQueueOverflowFallsBackToFullRecompute(t *testing.T) {
 	}
 }
 
+func TestReactiveQueueByteOverflowFallsBackToFullRecompute(t *testing.T) {
+	db := New()
+	defer db.Close()
+	collection := db.Collection("items")
+	query, _ := CompileQuery(Filter{}, QueryOptions{})
+	subscription, err := collection.SubscribeQuery(context.Background(), query, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	_ = receiveSnapshot(t, subscription.Snapshots)
+
+	document := Document{"_id": ID(DocumentID{9: 1}), "payload": String("a document image that crosses only the reactive byte budget")}
+	base, ok := changeDispatchBaseBytes(Change{Collection: "items", Operation: InsertOperation})
+	if !ok {
+		t.Fatal("change dispatch base size is invalid")
+	}
+	size, err := canonicalDocumentSize(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.reactive.mu.Lock()
+	db.reactive.maxBatches = 8
+	db.reactive.maxChanges = 8
+	db.reactive.maxBytes = base + size - 1
+	db.reactive.mu.Unlock()
+	if _, err := collection.InsertOne(context.Background(), document); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := receiveSnapshot(t, subscription.Snapshots)
+	if len(snapshot.Documents) != 1 {
+		t.Fatalf("byte fallback snapshot = %+v", snapshot)
+	}
+	stats := db.Stats().Realtime
+	if stats.QueueOverflows != 1 || stats.FullViewRecomputes != 1 || stats.PendingBytes != 0 {
+		t.Fatalf("byte overflow stats = %+v", stats)
+	}
+}
+
 func waitForRealtimeStats(t *testing.T, db *DB, predicate func(RealtimeStats) bool) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

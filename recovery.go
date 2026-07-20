@@ -16,29 +16,130 @@ const (
 )
 
 // OpenOptions configures format-neutral Open. V1Checkpoint is ignored for V2;
-// V2 retention/storage fields are ignored for V1, while V2RollbackProtection
-// is rejected for V1 so a requested safety boundary is never silently absent.
+// V2 retention/replay/storage fields are ignored for V1, while
+// V2RollbackProtection is rejected for V1 so a requested safety boundary is
+// never silently absent.
 type OpenOptions struct {
-	Recovery             RecoveryMode
-	V1Checkpoint         V1CheckpointPolicy
-	V2CommitRetention    V2CommitRetentionPolicy
-	ResourceLimits       ResourceLimits
-	V2StorageLimits      V2StorageLimits
-	V2RollbackProtection V2RollbackProtection
+	Recovery                RecoveryMode
+	V1Checkpoint            V1CheckpointPolicy
+	V2CommitRetention       V2CommitRetentionPolicy
+	V2ReplayDeliveryTimeout time.Duration
+	V2CommitCoordinator     V2CommitCoordinatorOptions
+	ResourceLimits          ResourceLimits
+	V2StorageLimits         V2StorageLimits
+	V2RollbackProtection    V2RollbackProtection
+	// V2RequireGraphAudit performs a structural full-graph audit before a V2
+	// open succeeds. It is ignored for V1, whose recovery has a distinct WAL
+	// validation contract.
+	V2RequireGraphAudit bool
+	// V2RequirePrivateFileMode rejects an existing V2 database that grants
+	// group or other Unix permission bits. It is ignored for V1.
+	V2RequirePrivateFileMode bool
+	// V2PrimaryWriteFence is forwarded only when Open selects V2. Open rejects
+	// an existing legacy V1 file when this boundary is requested, so a caller
+	// cannot silently lose primary-fence enforcement through format detection.
+	V2PrimaryWriteFence V2PrimaryWriteFence
 }
 
 // V2Options configures explicitly selected Storage V2 opening.
 type V2Options struct {
-	Recovery           RecoveryMode
-	CommitRetention    V2CommitRetentionPolicy
-	ResourceLimits     ResourceLimits
-	StorageLimits      V2StorageLimits
-	RollbackProtection V2RollbackProtection
+	Recovery              RecoveryMode
+	CommitRetention       V2CommitRetentionPolicy
+	ReplayDeliveryTimeout time.Duration
+	CommitCoordinator     V2CommitCoordinatorOptions
+	ResourceLimits        ResourceLimits
+	StorageLimits         V2StorageLimits
+	RollbackProtection    V2RollbackProtection
+	// RequireGraphAudit rejects a V2 database at startup when any page
+	// protected by the current or fallback Meta root is structurally invalid.
+	// It is intentionally opt-in because audit cost grows with database size.
+	// This does not replace the offline semantic index verifier.
+	RequireGraphAudit bool
+	// RequirePrivateFileMode rejects a V2 file with group/world permission
+	// bits instead of silently changing operator-owned permissions.
+	RequirePrivateFileMode bool
+	// PrimaryWriteFence optionally proves that this local database still holds
+	// external primary authority before every business V2 commit. It is not
+	// consulted by a read-only follower applying an already validated source
+	// batch. The guard must be local, non-blocking and safe for concurrent use;
+	// controller I/O/lease renewal belongs outside Meldbase's writer lock.
+	PrimaryWriteFence V2PrimaryWriteFence
+	// Follower marks this local open as a replica. Normal application writes
+	// fail with ErrReplicaReadOnly; only V2Follower.Apply may advance it.
+	Follower bool
+}
+
+// V2PrimaryWriteFence is the local enforcement hook for an external primary
+// election/fencing system. Its implementation normally checks an atomically
+// refreshed lease epoch and expiry, not the network. Returning an error rejects
+// the whole logical commit before V2 storage mutation; it never poisons the
+// database or advances a token.
+//
+// Implementations must not call back into DB and must return promptly: the
+// check runs while the V2 writer has admitted a commit. Election, renewal,
+// certificate rotation and old-primary revocation remain external concerns.
+type V2PrimaryWriteFence interface {
+	ValidateV2PrimaryWrite(PrimaryWriteFenceRequest) error
+}
+
+// PrimaryWriteFenceRequest binds a proposed primary mutation to this database
+// identity and exact next logical commit sequence. A lease implementation must
+// reject when its external authority/epoch/expiry no longer permits that write.
+type PrimaryWriteFenceRequest struct {
+	DatabaseID         [16]byte
+	NextCommitSequence uint64
+}
+
+// V2CommitCoordinatorOptions controls optional group commit for ordinary V2
+// InsertMany, filter Update and filter Delete operations. It is disabled by
+// default, so opening an existing database never changes write scheduling
+// unexpectedly.
+//
+// A coordinator group has one physical V2 Meta publication but retains one
+// logical commit token for every admitted write request. Public write
+// transactions, atomic RPC, index builds and other maintenance operations
+// remain exclusive commits. When rollback protection is configured, the
+// coordinator advances the external anchor only after the group's final Meta
+// publication is durable and before acknowledging any member.
+type V2CommitCoordinatorOptions struct {
+	Enabled    bool
+	MaxBatch   int
+	MaxPending int
+	MaxDelay   time.Duration
+}
+
+const (
+	DefaultV2CommitCoordinatorMaxBatch   = 32
+	DefaultV2CommitCoordinatorMaxPending = 1024
+)
+
+const DefaultV2CommitCoordinatorMaxDelay = time.Millisecond
+
+func normalizeV2CommitCoordinatorOptions(options V2CommitCoordinatorOptions) (V2CommitCoordinatorOptions, error) {
+	if !options.Enabled {
+		return V2CommitCoordinatorOptions{}, nil
+	}
+	if options.MaxBatch == 0 {
+		options.MaxBatch = DefaultV2CommitCoordinatorMaxBatch
+	}
+	if options.MaxPending == 0 {
+		options.MaxPending = DefaultV2CommitCoordinatorMaxPending
+	}
+	if options.MaxDelay == 0 {
+		options.MaxDelay = DefaultV2CommitCoordinatorMaxDelay
+	}
+	if options.MaxBatch < 2 || options.MaxBatch > 256 || options.MaxPending < options.MaxBatch ||
+		options.MaxPending > 65_536 || options.MaxDelay < 0 || options.MaxDelay > time.Second {
+		return V2CommitCoordinatorOptions{}, ErrInvalidCommitCoordinatorOptions
+	}
+	return options, nil
 }
 
 // RollbackAnchor is trusted state retained outside the database device. A
 // server must never accept the same identity below either an acknowledged
 // logical commit sequence or physical maintenance generation after restart.
+// The coordinates are independently monotonic: one group may advance several
+// logical sequences while publishing a single physical generation.
 type RollbackAnchor struct {
 	DatabaseID            [16]byte
 	MinimumCommitSequence uint64
@@ -126,7 +227,20 @@ type V2CommitRetentionPolicy struct {
 const (
 	DefaultV2CommitRetentionMaxCommits uint64 = 10_000
 	DefaultV2CommitRetentionMaxBytes   uint64 = 256 << 20
+	// DefaultV2ReplayDeliveryTimeout bounds how long a replay source can wait
+	// for a full caller buffer before it releases the retained-history lease.
+	DefaultV2ReplayDeliveryTimeout = 5 * time.Second
 )
+
+func normalizeV2ReplayDeliveryTimeout(timeout time.Duration) (time.Duration, error) {
+	if timeout == 0 {
+		return DefaultV2ReplayDeliveryTimeout, nil
+	}
+	if timeout < time.Millisecond || timeout > time.Minute {
+		return 0, ErrInvalidReplayDeliveryTimeout
+	}
+	return timeout, nil
+}
 
 func validateRecoveryMode(mode RecoveryMode) error {
 	if mode != RecoveryAutomatic && mode != RecoveryRequireClean {

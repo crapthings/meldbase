@@ -417,7 +417,7 @@ func (store *QuorumStore) Advance(ctx context.Context, anchor meldbase.RollbackA
 		return ErrQuorum
 	}
 	store.metrics.advances.Add(1)
-	if anchor.DatabaseID == ([16]byte{}) || anchor.MinimumGeneration <= anchor.MinimumCommitSequence {
+	if anchor.DatabaseID == ([16]byte{}) || anchor.MinimumGeneration == 0 {
 		store.metrics.protocolFailures.Add(1)
 		return ErrProtocol
 	}
@@ -699,7 +699,7 @@ func encodeAnchor(anchor meldbase.RollbackAnchor) wireAnchor {
 }
 
 func decodeAnchor(record wireAnchor) (meldbase.RollbackAnchor, error) {
-	if record.Version != ProtocolVersion || len(record.DatabaseID) != 32 || record.DatabaseID != strings.ToLower(record.DatabaseID) || record.MinimumGeneration <= record.MinimumCommitSequence {
+	if record.Version != ProtocolVersion || len(record.DatabaseID) != 32 || record.DatabaseID != strings.ToLower(record.DatabaseID) || record.MinimumGeneration == 0 {
 		return meldbase.RollbackAnchor{}, ErrProtocol
 	}
 	identity, err := hex.DecodeString(record.DatabaseID)

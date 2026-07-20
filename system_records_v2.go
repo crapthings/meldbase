@@ -50,6 +50,13 @@ func (backend *dbSystemRecordBackend) CompareAndSwap(ctx context.Context, mutati
 		db.mu.Unlock()
 		return systemrecord.Result{}, errors.New("meldbase: durable system records require storage V2")
 	}
+	// Private system records are still durable logical commits. They back RPC
+	// idempotency and policy state, so a revoked primary must not advance them
+	// independently of public business writes.
+	if err := db.validateV2PrimaryWriteFence(db.token + 1); err != nil {
+		db.mu.Unlock()
+		return systemrecord.Result{}, err
+	}
 	db.metrics.v2CommitAttempts.Add(1)
 	started := time.Now()
 	result, err := store.file.ApplySystemRecordTransaction(v2.SystemRecordTransaction{

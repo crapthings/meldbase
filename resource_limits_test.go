@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIndexBuildLimitsRejectAtomicallyAcrossEngines(t *testing.T) {
@@ -168,6 +169,126 @@ func TestInvalidResourceLimitsFailBeforeOpen(t *testing.T) {
 	path := t.TempDir() + "/database.meld"
 	if _, err := OpenWithOptions(path, OpenOptions{ResourceLimits: invalid}); !errors.Is(err, ErrInvalidResourceLimits) {
 		t.Fatalf("open error = %v", err)
+	}
+}
+
+func TestReactiveViewResourceLimitsRejectInitialAndIncrementalGrowth(t *testing.T) {
+	limits := ResourceLimits{MaxReactiveViewDocuments: 1, MaxReactiveViewBytes: 1024}
+	initial, err := NewWithOptions(DatabaseOptions{ResourceLimits: limits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer initial.Close()
+	items := initial.Collection("items")
+	if _, err := items.InsertMany(context.Background(), []Document{{"value": Int(1)}, {"value": Int(2)}}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subscription, err := items.SubscribeQueryDeltas(context.Background(), query, 2); subscription != nil || !errors.Is(err, ErrResourceLimit) {
+		t.Fatalf("initial reactive admission subscription=%v err=%v", subscription, err)
+	}
+	if stats := initial.Stats(); stats.Resources.Rejections != 1 || stats.Realtime.SharedViews != 0 {
+		t.Fatalf("initial reactive stats=%+v", stats)
+	}
+
+	growing, err := NewWithOptions(DatabaseOptions{ResourceLimits: limits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer growing.Close()
+	items = growing.Collection("items")
+	if _, err := items.InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
+		t.Fatal(err)
+	}
+	subscription, err := items.SubscribeQueryDeltas(context.Background(), query, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	if len(subscription.Initial.Documents) != 1 {
+		t.Fatalf("initial documents=%d", len(subscription.Initial.Documents))
+	}
+	if _, err := items.InsertOne(context.Background(), Document{"value": Int(2)}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-subscription.Errors:
+		if !errors.Is(err, ErrResourceLimit) {
+			t.Fatalf("incremental reactive error=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("incremental reactive limit did not terminate view")
+	}
+	if stats := growing.Stats(); stats.Resources.Rejections != 1 || stats.Realtime.SharedViews != 0 || stats.Realtime.QuerySubscribers != 0 {
+		t.Fatalf("incremental reactive stats=%+v", stats)
+	}
+}
+
+func TestReactiveViewByteLimitUsesCanonicalDocumentBytes(t *testing.T) {
+	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{
+		MaxReactiveViewDocuments: 10, MaxReactiveViewBytes: 64,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"value": String(strings.Repeat("x", 80))}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subscription, err := db.Collection("items").SubscribeQueryDeltas(context.Background(), query, 1); subscription != nil || !errors.Is(err, ErrResourceLimit) {
+		t.Fatalf("byte-limited reactive admission subscription=%v err=%v", subscription, err)
+	}
+}
+
+func TestV2ReplayReactiveViewResourceLimitTerminatesAndReleasesLease(t *testing.T) {
+	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "replay-view-limit.meld2"), V2Options{
+		ResourceLimits: ResourceLimits{MaxReactiveViewDocuments: 1, MaxReactiveViewBytes: 1024},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	items := db.Collection("items")
+	if _, err := items.InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := db.OpenQueryReplay(context.Background(), "items", query, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replay.Close()
+	if _, err := items.InsertOne(context.Background(), Document{"value": Int(2)}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-replay.Errors:
+		if !errors.Is(err, ErrResourceLimit) {
+			t.Fatalf("replay resource error=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replay resource limit did not terminate")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		stats := db.Stats()
+		if stats.Resources.Rejections == 1 && stats.Storage.ActiveReplayLeases == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("replay resource stats=%+v", stats)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

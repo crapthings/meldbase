@@ -12,6 +12,10 @@ const (
 	DefaultMaxTransactionChanges uint64 = 10_000
 	DefaultMaxIndexBuildEntries  uint64 = 1_000_000
 	DefaultMaxIndexBuildBytes    uint64 = 256 << 20
+	// Reactive views retain matching document versions for incremental ordering
+	// and updates, not merely the page currently emitted to a subscriber.
+	DefaultMaxReactiveViewDocuments uint64 = 10_000
+	DefaultMaxReactiveViewBytes     uint64 = 64 << 20
 )
 
 // ResourceLimits bounds work admitted by write and index-maintenance APIs. Zero values
@@ -19,11 +23,13 @@ const (
 // limits use the canonical typed binary representation, independent of Go heap
 // layout, JSON spelling, storage generation, or transport compression.
 type ResourceLimits struct {
-	MaxDocumentBytes      uint64 `json:"maxDocumentBytes"`
-	MaxTransactionBytes   uint64 `json:"maxTransactionBytes"`
-	MaxTransactionChanges uint64 `json:"maxTransactionChanges"`
-	MaxIndexBuildEntries  uint64 `json:"maxIndexBuildEntries"`
-	MaxIndexBuildBytes    uint64 `json:"maxIndexBuildBytes"`
+	MaxDocumentBytes         uint64 `json:"maxDocumentBytes"`
+	MaxTransactionBytes      uint64 `json:"maxTransactionBytes"`
+	MaxTransactionChanges    uint64 `json:"maxTransactionChanges"`
+	MaxIndexBuildEntries     uint64 `json:"maxIndexBuildEntries"`
+	MaxIndexBuildBytes       uint64 `json:"maxIndexBuildBytes"`
+	MaxReactiveViewDocuments uint64 `json:"maxReactiveViewDocuments"`
+	MaxReactiveViewBytes     uint64 `json:"maxReactiveViewBytes"`
 }
 
 // DatabaseOptions configures an in-memory database.
@@ -45,6 +51,12 @@ func normalizeResourceLimits(limits ResourceLimits) (ResourceLimits, error) {
 	if limits.MaxIndexBuildBytes == 0 {
 		limits.MaxIndexBuildBytes = DefaultMaxIndexBuildBytes
 	}
+	if limits.MaxReactiveViewDocuments == 0 {
+		limits.MaxReactiveViewDocuments = DefaultMaxReactiveViewDocuments
+	}
+	if limits.MaxReactiveViewBytes == 0 {
+		limits.MaxReactiveViewBytes = DefaultMaxReactiveViewBytes
+	}
 	if limits.MaxDocumentBytes > maxStoredDocumentBody {
 		return ResourceLimits{}, fmt.Errorf("%w: MaxDocumentBytes exceeds the storage format maximum", ErrInvalidResourceLimits)
 	}
@@ -58,6 +70,19 @@ func normalizeResourceLimits(limits ResourceLimits) (ResourceLimits, error) {
 		return ResourceLimits{}, fmt.Errorf("%w: MaxIndexBuildEntries exceeds the format maximum", ErrInvalidResourceLimits)
 	}
 	return limits, nil
+}
+
+// admitReactiveViewMember accounts the immutable matching version retained by
+// one shared reactive view. It uses canonical document bytes rather than Go
+// heap estimates, making the contract stable across storage engines.
+func admitReactiveViewMember(limits ResourceLimits, count, bytes, documentBytes uint64) (uint64, uint64, error) {
+	if count >= limits.MaxReactiveViewDocuments {
+		return 0, 0, fmt.Errorf("%w: reactive view documents exceed limit %d", ErrResourceLimit, limits.MaxReactiveViewDocuments)
+	}
+	if bytes > limits.MaxReactiveViewBytes || documentBytes > limits.MaxReactiveViewBytes-bytes {
+		return 0, 0, fmt.Errorf("%w: reactive view bytes exceed limit %d", ErrResourceLimit, limits.MaxReactiveViewBytes)
+	}
+	return count + 1, bytes + documentBytes, nil
 }
 
 // indexBuildBudget accounts the exact eventual Secondary key bytes: encoded
@@ -158,7 +183,9 @@ func (db *DB) validateTransactionResourceExtra(changes []Change, extraBytes uint
 		db.metrics.resourceLimitRejections.Add(1)
 		return fmt.Errorf("%w: transaction bytes exceed limit %d", ErrResourceLimit, db.resourceLimits.MaxTransactionBytes)
 	}
-	for _, change := range changes {
+	for index := range changes {
+		change := &changes[index]
+		dispatchBytes, validDispatchBytes := changeDispatchBaseBytes(*change)
 		for _, document := range []*Document{change.Before, change.After} {
 			if document == nil {
 				continue
@@ -172,7 +199,18 @@ func (db *DB) validateTransactionResourceExtra(changes []Change, extraBytes uint
 				return fmt.Errorf("%w: transaction bytes exceed limit %d", ErrResourceLimit, db.resourceLimits.MaxTransactionBytes)
 			}
 			total += size
+			if !validDispatchBytes || size > ^uint64(0)-dispatchBytes {
+				validDispatchBytes = false
+			} else {
+				dispatchBytes += size
+			}
+			if document == change.After {
+				change.afterCanonicalBytes = size
+				change.afterCanonicalBytesKnown = true
+			}
 		}
+		change.dispatchBytes = dispatchBytes
+		change.dispatchBytesKnown = validDispatchBytes
 	}
 	return nil
 }

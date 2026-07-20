@@ -11,6 +11,10 @@ import (
 const (
 	maxPendingReactiveBatches = 1024
 	maxPendingReactiveChanges = 64 * 1024
+	// The hub can be rebuilding a view while the dispatcher continues to hand it
+	// ordered batches, so it needs its own byte boundary rather than relying on
+	// the upstream dispatch queue.
+	maxPendingReactiveBytes uint64 = 64 << 20
 )
 
 // reactiveHub owns one canonical view per effective collection/query pair.
@@ -25,8 +29,10 @@ type reactiveHub struct {
 	orders         map[string]*reactiveCollectionOrder
 	queue          []ChangeBatch
 	pendingChanges int
+	pendingBytes   uint64
 	maxBatches     int
 	maxChanges     int
+	maxBytes       uint64
 	prioritySeed   maphash.Seed
 	resync         map[string]struct{}
 	changed        chan struct{}
@@ -54,15 +60,25 @@ type sharedReactiveView struct {
 // reactiveViewState is immutable after publication. Member documents and the
 // output snapshot never alias public subscriber documents.
 type reactiveViewState struct {
-	token    uint64
-	byID     *reactiveIDNode
-	ordered  *reactiveOrderNode
-	snapshot QuerySnapshot
+	token       uint64
+	memberCount uint64
+	memberBytes uint64
+	byID        *reactiveIDNode
+	ordered     *reactiveOrderNode
+	snapshot    QuerySnapshot
 }
 
 type reactiveMember struct {
 	document Document
 	position uint64
+	bytes    uint64
+}
+
+func reactiveMemberCanonicalBytes(member reactiveMember) (uint64, error) {
+	if member.bytes != 0 {
+		return member.bytes, nil
+	}
+	return canonicalDocumentSize(member.document)
 }
 
 // One order table is shared by every query on a collection. It preserves the
@@ -103,6 +119,7 @@ func newReactiveHub(db *DB) *reactiveHub {
 		orders:       make(map[string]*reactiveCollectionOrder),
 		maxBatches:   maxPendingReactiveBatches,
 		maxChanges:   maxPendingReactiveChanges,
+		maxBytes:     maxPendingReactiveBytes,
 		prioritySeed: maphash.MakeSeed(),
 		resync:       make(map[string]struct{}),
 		changed:      make(chan struct{}), done: make(chan struct{}),
@@ -110,6 +127,14 @@ func newReactiveHub(db *DB) *reactiveHub {
 }
 
 func (hub *reactiveHub) subscribe(ctx context.Context, collection string, query QuerySpec, canonical []byte, buffer int, cancel context.CancelFunc, deltas bool) (*sharedQuerySubscriber, error) {
+	return hub.subscribeMode(ctx, collection, query, canonical, buffer, cancel, deltas, true)
+}
+
+// subscribeMode establishes a subscriber with a short database read-lock
+// boundary. Cold V2 collections may build their first immutable view outside
+// that boundary and then prove the snapshot token is still current before
+// registration; all warm/retry paths retain the established lock-held logic.
+func (hub *reactiveHub) subscribeMode(ctx context.Context, collection string, query QuerySpec, canonical []byte, buffer int, cancel context.CancelFunc, deltas, allowColdStorage bool) (*sharedQuerySubscriber, error) {
 	if hub == nil || hub.db == nil {
 		return nil, ErrClosed
 	}
@@ -124,6 +149,7 @@ func (hub *reactiveHub) subscribe(ctx context.Context, collection string, query 
 
 	hub.mu.Lock()
 	view := hub.views[key]
+	coldStorage := allowColdStorage && db.querySource != nil && len(hub.byCollection[collection]) == 0
 	if view != nil {
 		state := view.state.Load()
 		if state != nil && state.token == currentToken {
@@ -139,12 +165,16 @@ func (hub *reactiveHub) subscribe(ctx context.Context, collection string, query 
 		}
 	}
 	hub.mu.Unlock()
+	if coldStorage {
+		db.mu.RUnlock()
+		return hub.subscribeColdStorage(ctx, collection, query, canonical, buffer, cancel, deltas)
+	}
 
 	order := hub.ensureOrder(collection)
 	var refreshed *reactiveViewState
 	var err error
 	if db.querySource != nil {
-		states, buildErr := buildStorageReactiveViewStates(db.querySource, currentToken, collection, []QuerySpec{query}, order, hub.prioritySeed)
+		states, buildErr := buildStorageReactiveViewStates(db.querySource, currentToken, collection, []QuerySpec{query}, order, hub.prioritySeed, db.resourceLimits)
 		if buildErr == nil {
 			refreshed = states[0]
 		}
@@ -152,10 +182,13 @@ func (hub *reactiveHub) subscribe(ctx context.Context, collection string, query 
 	} else {
 		data := db.collections[collection]
 		if err = order.rebuild(data, currentToken); err == nil {
-			refreshed, err = buildReactiveViewState(query, data, order, hub.prioritySeed, currentToken)
+			refreshed, err = buildReactiveViewState(query, data, order, hub.prioritySeed, currentToken, db.resourceLimits)
 		}
 	}
 	if err != nil {
+		if errors.Is(err, ErrResourceLimit) {
+			db.metrics.resourceLimitRejections.Add(1)
+		}
 		db.mu.RUnlock()
 		return nil, err
 	}
@@ -223,6 +256,94 @@ func (hub *reactiveHub) subscribe(ctx context.Context, collection string, query 
 	return subscriber, nil
 }
 
+const maxColdReactiveSubscriptionAttempts = 3
+
+// subscribeColdStorage avoids holding db.mu while a first V2 view scans its
+// immutable storage snapshot. A current-token check under db.mu before
+// publication closes the snapshot/register gap; repeated write contention
+// falls back to the original lock-held path rather than weakening ordering.
+func (hub *reactiveHub) subscribeColdStorage(ctx context.Context, collection string, query QuerySpec, canonical []byte, buffer int, cancel context.CancelFunc, deltas bool) (*sharedQuerySubscriber, error) {
+	if hub == nil || hub.db == nil || hub.db.querySource == nil {
+		return nil, ErrClosed
+	}
+	db, key := hub.db, collection+"\x00"+string(canonical)
+	for attempt := 0; attempt < maxColdReactiveSubscriptionAttempts; attempt++ {
+		db.mu.RLock()
+		if db.closed {
+			db.mu.RUnlock()
+			return nil, ErrClosed
+		}
+		token := db.token
+		db.mu.RUnlock()
+
+		order := &reactiveCollectionOrder{positions: make(map[DocumentID]uint64)}
+		states, err := buildStorageReactiveViewStates(db.querySource, token, collection, []QuerySpec{query}, order, hub.prioritySeed, db.resourceLimits)
+		if err != nil {
+			if errors.Is(err, ErrResourceLimit) {
+				db.metrics.resourceLimitRejections.Add(1)
+			}
+			return nil, err
+		}
+		refreshed := states[0]
+
+		db.mu.RLock()
+		if db.closed {
+			db.mu.RUnlock()
+			return nil, ErrClosed
+		}
+		if db.token != token {
+			db.mu.RUnlock()
+			continue
+		}
+		hub.mu.Lock()
+		if hub.closed {
+			hub.mu.Unlock()
+			db.mu.RUnlock()
+			return nil, ErrClosed
+		}
+		if existing := hub.views[key]; existing != nil {
+			state := existing.state.Load()
+			if state != nil && state.token == token {
+				subscriber, err := hub.addSubscriberLocked(existing, state.snapshot, buffer, cancel, deltas)
+				hub.mu.Unlock()
+				db.mu.RUnlock()
+				if err != nil {
+					return nil, err
+				}
+				db.metrics.sharedViewReuses.Add(1)
+				hub.watchContext(ctx, key, existing, subscriber)
+				return subscriber, nil
+			}
+		}
+		// Another query on this collection began while the cold snapshot was
+		// scanning. Its shared order may be advancing, so retain the original
+		// lock-held path instead of installing an independent order table.
+		if len(hub.byCollection[collection]) != 0 {
+			hub.mu.Unlock()
+			db.mu.RUnlock()
+			return hub.subscribeMode(ctx, collection, query, canonical, buffer, cancel, deltas, false)
+		}
+		view := &sharedReactiveView{
+			key: key, collection: collection, query: query,
+			dependencies: dependencySignature(query), subscribers: make(map[uint64]*sharedQuerySubscriber),
+		}
+		view.state.Store(refreshed)
+		hub.orders[collection] = order
+		hub.views[key] = view
+		hub.byCollection[collection] = map[string]*sharedReactiveView{key: view}
+		db.metrics.sharedViews.Add(1)
+		subscriber, err := hub.addSubscriberLocked(view, refreshed.snapshot, buffer, cancel, deltas)
+		hub.mu.Unlock()
+		db.mu.RUnlock()
+		if err != nil {
+			return nil, err
+		}
+		hub.watchContext(ctx, key, view, subscriber)
+		return subscriber, nil
+	}
+	return hub.subscribeMode(ctx, collection, query, canonical, buffer, cancel, deltas, false)
+}
+
 func dependencySignature(query QuerySpec) reactiveDependencySignature {
 	_, limited := query.Limit()
 	return reactiveDependencySignature{
@@ -277,7 +398,7 @@ func (order *reactiveCollectionOrder) replace(token, next uint64, positions map[
 // views being rebuilt. Only matching documents are retained by each view; the
 // collection-wide structure stores IDs and insertion positions, not decoded
 // documents. Snapshot and iterator pins are released before publication.
-func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken uint64, collection string, queries []QuerySpec, order *reactiveCollectionOrder, seed maphash.Seed) ([]*reactiveViewState, error) {
+func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken uint64, collection string, queries []QuerySpec, order *reactiveCollectionOrder, seed maphash.Seed, limits ResourceLimits) ([]*reactiveViewState, error) {
 	if source == nil || order == nil || len(queries) == 0 {
 		return nil, ErrCorrupt
 	}
@@ -300,6 +421,8 @@ func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken ui
 	positions := make(map[DocumentID]uint64)
 	positionOwners := make(map[uint64]DocumentID)
 	entries := make([][]reactiveTreeEntry, len(queries))
+	memberCounts := make([]uint64, len(queries))
+	memberBytes := make([]uint64, len(queries))
 	var next uint64
 	for iterator.Next() {
 		record := iterator.Record()
@@ -318,10 +441,23 @@ func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken ui
 		if record.Position > next {
 			next = record.Position
 		}
+		var documentBytes uint64
+		documentBytesKnown := false
 		for index, query := range queries {
 			if query.Match(record.Decoded) {
+				if !documentBytesKnown {
+					documentBytes, err = canonicalDocumentSize(record.Decoded)
+					if err != nil {
+						return nil, finish(err)
+					}
+					documentBytesKnown = true
+				}
+				memberCounts[index], memberBytes[index], err = admitReactiveViewMember(limits, memberCounts[index], memberBytes[index], documentBytes)
+				if err != nil {
+					return nil, finish(err)
+				}
 				entries[index] = append(entries[index], reactiveTreeEntry{
-					id: id, member: reactiveMember{document: record.Decoded, position: record.Position},
+					id: id, member: reactiveMember{document: record.Decoded, position: record.Position, bytes: documentBytes},
 				})
 			}
 		}
@@ -333,7 +469,7 @@ func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken ui
 	for index, query := range queries {
 		byID, ordered := buildReactiveTrees(seed, query, entries[index])
 		states[index] = &reactiveViewState{
-			token: expectedToken, byID: byID, ordered: ordered,
+			token: expectedToken, memberCount: memberCounts[index], memberBytes: memberBytes[index], byID: byID, ordered: ordered,
 			snapshot: QuerySnapshot{Token: expectedToken, Documents: materializeReactiveOrder(ordered, query.skip, query.limit)},
 		}
 	}
@@ -341,8 +477,9 @@ func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken ui
 	return states, nil
 }
 
-func buildReactiveViewState(query QuerySpec, data *collectionData, order *reactiveCollectionOrder, seed maphash.Seed, token uint64) (*reactiveViewState, error) {
+func buildReactiveViewState(query QuerySpec, data *collectionData, order *reactiveCollectionOrder, seed maphash.Seed, token uint64, limits ResourceLimits) (*reactiveViewState, error) {
 	entries := make([]reactiveTreeEntry, 0)
+	var memberCount, memberBytes uint64
 	order.mu.RLock()
 	defer order.mu.RUnlock()
 	if data != nil {
@@ -356,17 +493,25 @@ func buildReactiveViewState(query QuerySpec, data *collectionData, order *reacti
 				return nil, ErrCorrupt
 			}
 			if query.Match(document) {
+				size, err := canonicalDocumentSize(document)
+				if err != nil {
+					return nil, err
+				}
+				memberCount, memberBytes, err = admitReactiveViewMember(limits, memberCount, memberBytes, size)
+				if err != nil {
+					return nil, err
+				}
 				// collectionData owns immutable document versions: updates replace a
 				// complete Document rather than mutating it. The view may share that
 				// internal version; public snapshots still clone at the boundary.
-				member := reactiveMember{document: document, position: position}
+				member := reactiveMember{document: document, position: position, bytes: size}
 				entries = append(entries, reactiveTreeEntry{id: id, member: member})
 			}
 		}
 	}
 	byID, ordered := buildReactiveTrees(seed, query, entries)
 	documents := materializeReactiveOrder(ordered, query.skip, query.limit)
-	return &reactiveViewState{token: token, byID: byID, ordered: ordered, snapshot: QuerySnapshot{Token: token, Documents: documents}}, nil
+	return &reactiveViewState{token: token, memberCount: memberCount, memberBytes: memberBytes, byID: byID, ordered: ordered, snapshot: QuerySnapshot{Token: token, Documents: documents}}, nil
 }
 
 func publishNewerViewState(view *sharedReactiveView, next *reactiveViewState) (published, changed bool, previous *reactiveViewState) {
@@ -444,32 +589,66 @@ func (hub *reactiveHub) notify(batch ChangeBatch) {
 			continue
 		}
 		views := hub.byCollection[change.Collection]
-		if len(views) > 0 {
+		staleViews := uint64(0)
+		for _, view := range views {
+			state := view.state.Load()
+			if state == nil || state.token < batch.Token {
+				staleViews++
+			}
+		}
+		if staleViews > 0 {
 			relevant[change.Collection] = struct{}{}
-			wakeups += uint64(len(views))
+			wakeups += staleViews
 		}
 	}
 	if len(relevant) == 0 {
 		return
 	}
-	overflow := len(hub.queue) >= hub.maxBatches ||
-		hub.pendingChanges > hub.maxChanges || len(batch.Changes) > hub.maxChanges-hub.pendingChanges
+	bytes := changeBatchDispatchBytes(batch)
+	overflow := hub.maxBatches <= 0 || hub.maxChanges <= 0 || hub.maxBytes == 0 || len(hub.queue) >= hub.maxBatches ||
+		hub.pendingChanges > hub.maxChanges || len(batch.Changes) > hub.maxChanges-hub.pendingChanges ||
+		bytes > hub.maxBytes || hub.pendingBytes > hub.maxBytes-bytes
 	if overflow {
 		for collection := range hub.byCollection {
 			hub.resync[collection] = struct{}{}
 		}
 		hub.queue = nil
 		hub.pendingChanges = 0
+		hub.pendingBytes = 0
 		hub.db.metrics.reactiveQueueOverflows.Add(1)
 	} else {
 		// Commit code transfers immutable ownership to the hub. One shared slice
 		// is retained regardless of subscriber count.
 		hub.queue = append(hub.queue, batch)
 		hub.pendingChanges += len(batch.Changes)
+		hub.pendingBytes += bytes
 	}
 	hub.db.metrics.watcherDeliveries.Add(wakeups)
 	hub.db.metrics.pendingReactiveBatches.Store(uint64(len(hub.queue)))
 	hub.db.metrics.pendingReactiveChanges.Store(uint64(hub.pendingChanges))
+	hub.db.metrics.pendingReactiveBytes.Store(hub.pendingBytes)
+	close(hub.changed)
+	hub.changed = make(chan struct{})
+}
+
+// resyncAll is the safe loss-of-continuity path used by the upstream change
+// dispatcher. It never synthesizes a delta across omitted commits: each live
+// view is rebuilt from one current atomic database snapshot instead.
+func (hub *reactiveHub) resyncAll() {
+	if hub == nil {
+		return
+	}
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	if hub.closed || !hub.started {
+		return
+	}
+	for collection := range hub.byCollection {
+		hub.resync[collection] = struct{}{}
+	}
+	if len(hub.resync) == 0 {
+		return
+	}
 	close(hub.changed)
 	hub.changed = make(chan struct{})
 }
@@ -501,6 +680,7 @@ func (hub *reactiveHub) processPending() {
 	batches := append([]ChangeBatch(nil), hub.queue...)
 	hub.queue = nil
 	hub.pendingChanges = 0
+	hub.pendingBytes = 0
 	resync := make([]string, 0, len(hub.resync))
 	for collection := range hub.resync {
 		resync = append(resync, collection)
@@ -508,6 +688,7 @@ func (hub *reactiveHub) processPending() {
 	}
 	hub.db.metrics.pendingReactiveBatches.Store(0)
 	hub.db.metrics.pendingReactiveChanges.Store(0)
+	hub.db.metrics.pendingReactiveBytes.Store(0)
 	hub.mu.Unlock()
 
 	for _, collection := range resync {
@@ -597,7 +778,14 @@ func (order *reactiveCollectionOrder) position(id DocumentID) (uint64, bool) {
 func (hub *reactiveHub) applyViewBatch(view *sharedReactiveView, order *reactiveCollectionOrder, token uint64, changes []Change) bool {
 	for {
 		current := view.state.Load()
-		next, valid := transitionReactiveViewState(current, view.query, order, hub.prioritySeed, token, changes)
+		next, valid, err := transitionReactiveViewState(current, view.query, order, hub.prioritySeed, token, changes, hub.db.resourceLimits)
+		if err != nil {
+			if errors.Is(err, ErrResourceLimit) {
+				hub.db.metrics.resourceLimitRejections.Add(1)
+			}
+			hub.failView(view, err)
+			return true
+		}
 		if !valid {
 			return false
 		}
@@ -626,14 +814,15 @@ func (hub *reactiveHub) applyViewBatch(view *sharedReactiveView, order *reactive
 // transitionReactiveViewState is the single incremental membership/order
 // algorithm used by both process-local commits and durable historical replay.
 // It is pure with respect to view state; order must already include the batch.
-func transitionReactiveViewState(current *reactiveViewState, query QuerySpec, order *reactiveCollectionOrder, seed maphash.Seed, token uint64, changes []Change) (*reactiveViewState, bool) {
+func transitionReactiveViewState(current *reactiveViewState, query QuerySpec, order *reactiveCollectionOrder, seed maphash.Seed, token uint64, changes []Change, limits ResourceLimits) (*reactiveViewState, bool, error) {
 	if current == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	if token <= current.token {
-		return current, true
+		return current, true, nil
 	}
 	byID, ordered := current.byID, current.ordered
+	memberCount, memberBytes := current.memberCount, current.memberBytes
 	mutated := false
 	for _, change := range changes {
 		if change.Operation == CreateIndexOperation {
@@ -643,9 +832,15 @@ func transitionReactiveViewState(current *reactiveViewState, query QuerySpec, or
 		beforeMatches := change.Before != nil && query.Match(*change.Before)
 		afterMatches := change.After != nil && query.Match(*change.After)
 		if beforeMatches != wasMember {
-			return nil, false
+			return nil, false, nil
 		}
 		if wasMember && !afterMatches {
+			memberSize, err := reactiveMemberCanonicalBytes(member)
+			if err != nil || memberCount == 0 || memberSize > memberBytes {
+				return nil, false, err
+			}
+			memberCount--
+			memberBytes -= memberSize
 			byID = reactiveIDDelete(byID, change.DocumentID)
 			ordered = reactiveOrderDelete(ordered, query, change.DocumentID, member)
 			mutated = true
@@ -659,30 +854,184 @@ func transitionReactiveViewState(current *reactiveViewState, query QuerySpec, or
 			var exists bool
 			position, exists = order.position(change.DocumentID)
 			if !exists {
-				return nil, false
+				return nil, false, nil
 			}
 		}
 		if wasMember {
+			memberSize, err := reactiveMemberCanonicalBytes(member)
+			if err != nil || memberCount == 0 || memberSize > memberBytes {
+				return nil, false, err
+			}
+			memberCount--
+			memberBytes -= memberSize
 			byID = reactiveIDDelete(byID, change.DocumentID)
 			ordered = reactiveOrderDelete(ordered, query, change.DocumentID, member)
 		}
 		// The commit transfers this immutable After version to the state. Public
 		// snapshot and delta boundaries remain responsible for deep cloning.
-		nextMember := reactiveMember{document: *change.After, position: position}
+		size, err := changeAfterCanonicalBytes(change)
+		if err != nil {
+			return nil, false, err
+		}
+		memberCount, memberBytes, err = admitReactiveViewMember(limits, memberCount, memberBytes, size)
+		if err != nil {
+			return nil, false, err
+		}
+		nextMember := reactiveMember{document: *change.After, position: position, bytes: size}
 		byID = reactiveIDPut(byID, seed, change.DocumentID, nextMember)
 		ordered = reactiveOrderPut(ordered, seed, query, change.DocumentID, nextMember)
 		mutated = true
 	}
-	next := &reactiveViewState{token: token, byID: byID, ordered: ordered}
+	next := &reactiveViewState{token: token, memberCount: memberCount, memberBytes: memberBytes, byID: byID, ordered: ordered}
 	if mutated {
 		next.snapshot = QuerySnapshot{Token: token, Documents: materializeReactiveOrder(ordered, query.skip, query.limit)}
 	} else {
 		next.snapshot = QuerySnapshot{Token: token, Documents: current.snapshot.Documents}
 	}
-	return next, true
+	return next, true, nil
+}
+
+func changeAfterCanonicalBytes(change Change) (uint64, error) {
+	if change.After == nil {
+		return 0, ErrCorrupt
+	}
+	if change.afterCanonicalBytesKnown {
+		return change.afterCanonicalBytes, nil
+	}
+	return canonicalDocumentSize(*change.After)
+}
+
+type reactiveRebuildTarget struct {
+	view  *sharedReactiveView
+	query QuerySpec
+}
+
+// tryFullRecomputeStorageCollection rebuilds every existing view from one V2
+// snapshot without retaining db.mu during the scan. It succeeds only when both
+// the database token and the exact collection view set are unchanged at the
+// handoff. Replacing the shared order at that token makes queued older batches
+// harmless (their token is already covered); later commits are admitted only
+// after the new states are visible.
+func (hub *reactiveHub) tryFullRecomputeStorageCollection(collection string) bool {
+	if hub == nil || hub.db == nil || hub.db.querySource == nil {
+		return false
+	}
+	db := hub.db
+	hub.mu.Lock()
+	group := hub.byCollection[collection]
+	if hub.closed || len(group) == 0 {
+		hub.mu.Unlock()
+		return true
+	}
+	targets := make([]reactiveRebuildTarget, 0, len(group))
+	for _, view := range group {
+		targets = append(targets, reactiveRebuildTarget{view: view, query: view.query})
+	}
+	hub.mu.Unlock()
+
+	for attempt := 0; attempt < maxColdReactiveSubscriptionAttempts; attempt++ {
+		db.mu.RLock()
+		if db.closed {
+			db.mu.RUnlock()
+			hub.failCollection(collection, ErrClosed)
+			return true
+		}
+		token := db.token
+		db.mu.RUnlock()
+		queries := make([]QuerySpec, len(targets))
+		for index, target := range targets {
+			queries[index] = target.query
+		}
+		temporaryOrder := &reactiveCollectionOrder{positions: make(map[DocumentID]uint64)}
+		states, err := buildStorageReactiveViewStates(db.querySource, token, collection, queries, temporaryOrder, hub.prioritySeed, db.resourceLimits)
+		if err != nil {
+			if errors.Is(err, ErrResourceLimit) {
+				db.metrics.resourceLimitRejections.Add(1)
+			}
+			hub.failCollection(collection, err)
+			return true
+		}
+
+		db.mu.RLock()
+		if db.closed {
+			db.mu.RUnlock()
+			hub.failCollection(collection, ErrClosed)
+			return true
+		}
+		if db.token != token {
+			db.mu.RUnlock()
+			continue
+		}
+		hub.mu.Lock()
+		current := hub.byCollection[collection]
+		stable := !hub.closed && len(current) == len(targets)
+		if stable {
+			for _, target := range targets {
+				if current[target.view.key] != target.view {
+					stable = false
+					break
+				}
+			}
+		}
+		order := hub.orders[collection]
+		if order == nil {
+			stable = false
+		}
+		if !stable {
+			hub.mu.Unlock()
+			db.mu.RUnlock()
+			return false
+		}
+		order.replace(token, temporaryOrder.next, temporaryOrder.positions)
+		hub.mu.Unlock()
+		type rebuiltDelivery struct {
+			view     *sharedReactiveView
+			previous *reactiveViewState
+			next     *reactiveViewState
+		}
+		deliveries := make([]rebuiltDelivery, 0, len(targets))
+		// Publish before releasing db.mu: a later write may then only advance
+		// from this complete token, never from the state that triggered this
+		// rebuild. Delivery itself is deliberately deferred until after unlock.
+		for index, target := range targets {
+			view, next := target.view, states[index]
+			published, changed, previous := publishNewerViewState(view, next)
+			if !published {
+				continue
+			}
+			db.metrics.queryRecomputes.Add(1)
+			db.metrics.fullViewRecomputes.Add(1)
+			if !changed {
+				continue
+			}
+			deliveries = append(deliveries, rebuiltDelivery{view: view, previous: previous, next: next})
+		}
+		db.mu.RUnlock()
+		for _, delivery := range deliveries {
+			delta, err := buildSharedQueryDelta(delivery.previous.snapshot.Documents, delivery.next.snapshot.Documents, delivery.next.snapshot.Token)
+			if err != nil {
+				hub.failView(delivery.view, err)
+				continue
+			}
+			db.metrics.sharedDeltas.Add(1)
+			hub.deliverView(delivery.view, delivery.next.snapshot, delta)
+		}
+		return true
+	}
+	return false
 }
 
 func (hub *reactiveHub) fullRecomputeCollection(collection string) {
+	if hub != nil && hub.db != nil && hub.db.querySource != nil && hub.tryFullRecomputeStorageCollection(collection) {
+		return
+	}
+	hub.fullRecomputeCollectionLocked(collection)
+}
+
+// fullRecomputeCollectionLocked retains the original lock-held rebuild as the
+// conservative fallback when a V2 storage handoff cannot prove one stable
+// snapshot/current-view boundary.
+func (hub *reactiveHub) fullRecomputeCollectionLocked(collection string) {
 	db := hub.db
 	db.mu.RLock()
 	if db.closed {
@@ -708,8 +1057,11 @@ func (hub *reactiveHub) fullRecomputeCollection(collection string) {
 		for index, view := range views {
 			queries[index] = view.query
 		}
-		states, err := buildStorageReactiveViewStates(db.querySource, token, collection, queries, order, hub.prioritySeed)
+		states, err := buildStorageReactiveViewStates(db.querySource, token, collection, queries, order, hub.prioritySeed, db.resourceLimits)
 		if err != nil {
+			if errors.Is(err, ErrResourceLimit) {
+				db.metrics.resourceLimitRejections.Add(1)
+			}
 			db.mu.RUnlock()
 			hub.failCollection(collection, err)
 			return
@@ -725,8 +1077,11 @@ func (hub *reactiveHub) fullRecomputeCollection(collection string) {
 			return
 		}
 		for _, view := range views {
-			next, err := buildReactiveViewState(view.query, data, order, hub.prioritySeed, token)
+			next, err := buildReactiveViewState(view.query, data, order, hub.prioritySeed, token, db.resourceLimits)
 			if err != nil {
+				if errors.Is(err, ErrResourceLimit) {
+					db.metrics.resourceLimitRejections.Add(1)
+				}
 				db.mu.RUnlock()
 				hub.failCollection(collection, err)
 				return
@@ -734,7 +1089,15 @@ func (hub *reactiveHub) fullRecomputeCollection(collection string) {
 			rebuilt = append(rebuilt, rebuiltView{view: view, state: next})
 		}
 	}
-	db.mu.RUnlock()
+	type rebuiltDelivery struct {
+		view     *sharedReactiveView
+		previous *reactiveViewState
+		next     *reactiveViewState
+	}
+	deliveries := make([]rebuiltDelivery, 0, len(rebuilt))
+	// Keep publication inside the token read-lock. A writer that follows can
+	// therefore apply its batch only to this complete rebuild, while subscriber
+	// delivery remains outside the lock.
 	for _, item := range rebuilt {
 		view, next := item.view, item.state
 		published, changed, previous := publishNewerViewState(view, next)
@@ -744,14 +1107,18 @@ func (hub *reactiveHub) fullRecomputeCollection(collection string) {
 		db.metrics.queryRecomputes.Add(1)
 		db.metrics.fullViewRecomputes.Add(1)
 		if changed {
-			delta, err := buildSharedQueryDelta(previous.snapshot.Documents, next.snapshot.Documents, next.snapshot.Token)
-			if err != nil {
-				hub.failView(view, err)
-				continue
-			}
-			db.metrics.sharedDeltas.Add(1)
-			hub.deliverView(view, next.snapshot, delta)
+			deliveries = append(deliveries, rebuiltDelivery{view: view, previous: previous, next: next})
 		}
+	}
+	db.mu.RUnlock()
+	for _, delivery := range deliveries {
+		delta, err := buildSharedQueryDelta(delivery.previous.snapshot.Documents, delivery.next.snapshot.Documents, delivery.next.snapshot.Token)
+		if err != nil {
+			hub.failView(delivery.view, err)
+			continue
+		}
+		db.metrics.sharedDeltas.Add(1)
+		hub.deliverView(delivery.view, delivery.next.snapshot, delta)
 	}
 }
 
@@ -932,6 +1299,7 @@ func (hub *reactiveHub) close() {
 	hub.db.metrics.querySubscribers.Store(0)
 	hub.db.metrics.pendingReactiveBatches.Store(0)
 	hub.db.metrics.pendingReactiveChanges.Store(0)
+	hub.db.metrics.pendingReactiveBytes.Store(0)
 	hub.mu.Unlock()
 	for _, subscriber := range subscribers {
 		subscriber.finish(ErrClosed)

@@ -26,19 +26,21 @@ type DBStats struct {
 	Indexes              uint64        `json:"indexes"`
 	ActiveChangeWatchers uint64        `json:"activeChangeWatchers"`
 
-	Commits      CommitStats           `json:"commits"`
-	Transactions WriteTransactionStats `json:"writeTransactions"`
-	Queries      QueryStats            `json:"queries"`
-	Realtime     RealtimeStats         `json:"realtime"`
-	Durability   DurabilityStats       `json:"durability"`
-	Storage      StorageStats          `json:"storage"`
-	Compaction   CompactionStats       `json:"compaction"`
-	Reclamation  ReclamationStats      `json:"reclamation"`
-	Backup       BackupStats           `json:"backup"`
-	Diagnostics  DiagnosticStats       `json:"diagnostics"`
-	Recovery     RecoveryReport        `json:"recovery"`
-	Resources    ResourceStats         `json:"resources"`
-	IndexBuilds  IndexBuildStats       `json:"indexBuilds"`
+	Commits           CommitStats              `json:"commits"`
+	Transactions      WriteTransactionStats    `json:"writeTransactions"`
+	Queries           QueryStats               `json:"queries"`
+	Realtime          RealtimeStats            `json:"realtime"`
+	CommitCoordinator V2CommitCoordinatorStats `json:"commitCoordinator"`
+	PrimaryWriteFence V2PrimaryWriteFenceStats `json:"primaryWriteFence"`
+	Durability        DurabilityStats          `json:"durability"`
+	Storage           StorageStats             `json:"storage"`
+	Compaction        CompactionStats          `json:"compaction"`
+	Reclamation       ReclamationStats         `json:"reclamation"`
+	Backup            BackupStats              `json:"backup"`
+	Diagnostics       DiagnosticStats          `json:"diagnostics"`
+	Recovery          RecoveryReport           `json:"recovery"`
+	Resources         ResourceStats            `json:"resources"`
+	IndexBuilds       IndexBuildStats          `json:"indexBuilds"`
 }
 
 type ResourceStats struct {
@@ -81,6 +83,33 @@ type CommitStats struct {
 	Changes uint64 `json:"changes"`
 }
 
+// V2CommitCoordinatorStats is a fixed-cardinality snapshot of the optional
+// V2 write-admission scheduler. It is included in DBStats and the versioned
+// admin schema, so applications can alert on admission pressure without
+// inspecting a mutable queue or adding application labels.
+type V2CommitCoordinatorStats struct {
+	Enabled             bool   `json:"enabled"`
+	Pending             uint64 `json:"pending"`
+	PendingCapacity     uint64 `json:"pendingCapacity"`
+	Admitted            uint64 `json:"admitted"`
+	AdmissionRejected   uint64 `json:"admissionRejected"`
+	Batches             uint64 `json:"batches"`
+	GroupedTransactions uint64 `json:"groupedTransactions"`
+	OutcomeUnknown      uint64 `json:"outcomeUnknown"`
+}
+
+// V2PrimaryWriteFenceStats is a fixed-cardinality view of the optional
+// external primary-write guard. Configured means a guard was supplied at open;
+// Enforced is false while a read-only follower applies validated source
+// history. Checks and Rejected count only actual primary write admissions.
+// No lease, epoch, endpoint, database ID, or controller detail is exposed.
+type V2PrimaryWriteFenceStats struct {
+	Configured bool   `json:"configured"`
+	Enforced   bool   `json:"enforced"`
+	Checks     uint64 `json:"checks"`
+	Rejected   uint64 `json:"rejected"`
+}
+
 // WriteTransactionStats describes public optimistic point transactions. Every
 // started callback reaches exactly one terminal counter. These aggregates do
 // not contain collection, document, principal, or callback identifiers.
@@ -114,8 +143,18 @@ type RealtimeStats struct {
 	QueueOverflows         uint64 `json:"queueOverflows"`
 	PendingBatches         uint64 `json:"pendingBatches"`
 	PendingChanges         uint64 `json:"pendingChanges"`
+	PendingBytes           uint64 `json:"pendingBytes"`
 	PendingBatchCapacity   uint64 `json:"pendingBatchCapacity"`
 	PendingChangeCapacity  uint64 `json:"pendingChangeCapacity"`
+	PendingByteCapacity    uint64 `json:"pendingByteCapacity"`
+	WatcherPendingBytes    uint64 `json:"watcherPendingBytes"`
+	WatcherByteCapacity    uint64 `json:"watcherByteCapacity"`
+	DispatchPendingBatches uint64 `json:"dispatchPendingBatches"`
+	DispatchPendingChanges uint64 `json:"dispatchPendingChanges"`
+	DispatchPendingBytes   uint64 `json:"dispatchPendingBytes"`
+	DispatchBatchCapacity  uint64 `json:"dispatchBatchCapacity"`
+	DispatchChangeCapacity uint64 `json:"dispatchChangeCapacity"`
+	DispatchByteCapacity   uint64 `json:"dispatchByteCapacity"`
 	SharedDeltas           uint64 `json:"sharedDeltas"`
 	DeltaDeliveries        uint64 `json:"deltaDeliveries"`
 	DeltaOperations        uint64 `json:"deltaOperations"`
@@ -266,6 +305,7 @@ type dbMetrics struct {
 	incrementalBatches, incrementalViewUpdates            atomic.Uint64
 	fullViewRecomputes, reactiveQueueOverflows            atomic.Uint64
 	pendingReactiveBatches, pendingReactiveChanges        atomic.Uint64
+	pendingReactiveBytes                                  atomic.Uint64
 	sharedDeltas, deltaDeliveries, deltaOperations        atomic.Uint64
 
 	walAppends, walPayloadBytes, walCurrentBytes, walCurrentCommits atomic.Uint64
@@ -273,9 +313,10 @@ type dbMetrics struct {
 	checkpointAttempts, checkpointsCompleted, checkpointFailures    atomic.Uint64
 	automaticCheckpoints, checkpointNanos, checkpointMaxNanos       atomic.Uint64
 
-	v2CommitAttempts, v2CommittedTransactions atomic.Uint64
-	v2RejectedTransactions, v2CommitNanos     atomic.Uint64
-	v2CommitMaxNanos                          atomic.Uint64
+	v2CommitAttempts, v2CommittedTransactions          atomic.Uint64
+	v2RejectedTransactions, v2CommitNanos              atomic.Uint64
+	v2CommitMaxNanos                                   atomic.Uint64
+	primaryWriteFenceChecks, primaryWriteFenceRejected atomic.Uint64
 
 	compactionActive, compactionAttempts, compactionCompleted     atomic.Uint64
 	compactionFailed, compactionInputBytes, compactionOutputBytes atomic.Uint64
@@ -308,6 +349,9 @@ func (db *DB) Stats() DBStats {
 		return stats
 	}
 
+	var coordinator *v2CommitCoordinator
+	var dispatcher *changeDispatcher
+	var dispatch changeDispatcherStats
 	db.mu.RLock()
 	stats.StartedAt = db.startedAt
 	stats.Recovery = db.recovery
@@ -319,6 +363,10 @@ func (db *DB) Stats() DBStats {
 	stats.Collections = db.metrics.collections.Load()
 	stats.Documents = db.metrics.documents.Load()
 	stats.Indexes = db.metrics.indexes.Load()
+	stats.PrimaryWriteFence.Configured = db.primaryWriteFence != nil
+	stats.PrimaryWriteFence.Enforced = stats.PrimaryWriteFence.Configured && !db.replicaReadOnly
+	coordinator = db.commitCoordinator
+	dispatcher = db.dispatcher
 	if provider, ok := db.durability.(storageStatsBackend); ok {
 		stats.Storage = provider.storageDBStats()
 		if stats.Storage.Engine == "v2" {
@@ -343,12 +391,20 @@ func (db *DB) Stats() DBStats {
 		stats.IndexBuilds.PersistentBytes = persistent.PersistentBytes
 	}
 	db.mu.RUnlock()
+	if coordinator != nil {
+		stats.CommitCoordinator = coordinator.stats()
+	}
+	if dispatcher != nil {
+		dispatch = dispatcher.stats()
+	}
 	if !stats.StartedAt.IsZero() {
 		stats.Uptime = now.Sub(stats.StartedAt)
 	}
 
+	var watcherPendingBytes uint64
 	db.feedMu.Lock()
 	stats.ActiveChangeWatchers = uint64(len(db.watchers))
+	watcherPendingBytes = db.pendingWatcherBytes
 	db.feedMu.Unlock()
 	stats.ActiveChangeWatchers += db.metrics.querySubscribers.Load()
 
@@ -362,6 +418,8 @@ func (db *DB) Stats() DBStats {
 		Conflicts: db.metrics.writeTransactionsConflicts.Load(), Aborted: db.metrics.writeTransactionsAborted.Load(),
 	}
 	stats.Resources.Rejections = db.metrics.resourceLimitRejections.Load()
+	stats.PrimaryWriteFence.Checks = db.metrics.primaryWriteFenceChecks.Load()
+	stats.PrimaryWriteFence.Rejected = db.metrics.primaryWriteFenceRejected.Load()
 	db.metrics.indexBuildLastMu.Lock()
 	lastIndexBuildEntries, lastIndexBuildBytes := db.metrics.indexBuildLastEntries, db.metrics.indexBuildLastBytes
 	lastIndexBuildNanos := db.metrics.indexBuildLastNanos
@@ -403,8 +461,18 @@ func (db *DB) Stats() DBStats {
 		QueueOverflows:         db.metrics.reactiveQueueOverflows.Load(),
 		PendingBatches:         db.metrics.pendingReactiveBatches.Load(),
 		PendingChanges:         db.metrics.pendingReactiveChanges.Load(),
+		PendingBytes:           db.metrics.pendingReactiveBytes.Load(),
 		PendingBatchCapacity:   maxPendingReactiveBatches,
 		PendingChangeCapacity:  maxPendingReactiveChanges,
+		PendingByteCapacity:    maxPendingReactiveBytes,
+		WatcherPendingBytes:    watcherPendingBytes,
+		WatcherByteCapacity:    maxPendingChangeWatchersBytes,
+		DispatchPendingBatches: dispatch.pendingBatches,
+		DispatchPendingChanges: dispatch.pendingChanges,
+		DispatchPendingBytes:   dispatch.pendingBytes,
+		DispatchBatchCapacity:  dispatch.batchCapacity,
+		DispatchChangeCapacity: dispatch.changeCapacity,
+		DispatchByteCapacity:   dispatch.byteCapacity,
 		SharedDeltas:           db.metrics.sharedDeltas.Load(),
 		DeltaDeliveries:        db.metrics.deltaDeliveries.Load(),
 		DeltaOperations:        db.metrics.deltaOperations.Load(),

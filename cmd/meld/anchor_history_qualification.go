@@ -349,7 +349,7 @@ func anchorHistoryValueFromWire(value anchorHistoryWireValue) (qualification.Anc
 		}
 		return qualification.AnchorHistoryValue{}, nil
 	}
-	if !anchorQualificationHex(value.DatabaseIDHex, 16) || value.MinimumGeneration <= value.MinimumCommitSequence {
+	if !anchorQualificationHex(value.DatabaseIDHex, 16) || value.MinimumGeneration == 0 {
 		return qualification.AnchorHistoryValue{}, errors.New("existing value is invalid")
 	}
 	decoded, _ := hex.DecodeString(value.DatabaseIDHex)
@@ -417,7 +417,7 @@ func validateAnchorHistoryQualificationReceipt(receipt anchorHistoryQualificatio
 		}
 		seen[member.MemberID] = struct{}{}
 		if member.State == string(anchorhttp.ReplicaAvailable) {
-			if !member.Exists || !anchorQualificationHex(member.DatabaseIDHex, 16) || member.MinimumGeneration <= member.MinimumCommitSequence {
+			if !member.Exists || !anchorQualificationHex(member.DatabaseIDHex, 16) || member.MinimumGeneration == 0 {
 				return errors.New("available history qualification member has an invalid anchor")
 			}
 		} else if member.Exists || member.DatabaseIDHex != "" || member.MinimumCommitSequence != 0 || member.MinimumGeneration != 0 {
