@@ -158,6 +158,9 @@ func TestCollectionAccessModesEnforceOwnerAndRPCOnlyBoundaries(t *testing.T) {
 	if _, leaked := visible["ownerId"]; leaked {
 		t.Fatalf("owner field leaked through result policy: %+v", visible)
 	}
+	if _, leaked := visible["workspaceId"]; leaked {
+		t.Fatalf("workspace field leaked through result policy: %+v", visible)
+	}
 	forbiddenQuery := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/query", tokenA, `{"version":1,"query":{"version":1,"where":{"op":"exists","path":"ownerId","value":true}}}`)
 	forbiddenQuery.Body.Close()
 	if forbiddenQuery.StatusCode != http.StatusForbidden {
@@ -201,6 +204,19 @@ func TestCollectionAccessModesEnforceOwnerAndRPCOnlyBoundaries(t *testing.T) {
 	rpcOnly.Body.Close()
 	if rpcOnly.StatusCode != http.StatusForbidden {
 		t.Fatalf("rpc-only query status=%d", rpcOnly.StatusCode)
+	}
+	for _, test := range []struct {
+		name, target, body string
+	}{
+		{name: "insert", target: "/v1/collections/payroll/documents", body: `{"version":1,"document":{"t":"object","v":[["amount",{"t":"int64","v":"10"}]]}}`},
+		{name: "update", target: "/v1/collections/payroll/mutations", body: `{"version":1,"action":"updateMany","query":{"version":1,"where":{"op":"true"}},"update":{"version":1,"operations":[{"op":"set","path":"amount","value":{"t":"int64","v":"20"}}]}}`},
+		{name: "delete", target: "/v1/collections/payroll/mutations", body: `{"version":1,"action":"deleteMany","query":{"version":1,"where":{"op":"true"}}}`},
+	} {
+		response := postWorkspaceRequest(t, api.URL+test.target, tokenA, test.body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("rpc-only %s status=%d", test.name, response.StatusCode)
+		}
 	}
 }
 
