@@ -14,7 +14,8 @@
     "test": "pnpm --filter './sdk/*' test",
     "pack:check": "pnpm --filter './sdk/*' build && node scripts/verify-sdk-packages.mjs",
     "build:example": "pnpm --filter @meldbase/example-realtime-todos build",
-    "docs:api": "typedoc --options typedoc.json",
+    "build:docs-sdk": "pnpm --filter @meldbase/client build && pnpm --filter @meldbase/server build && pnpm --filter @meldbase/react build",
+    "docs:api": "pnpm run build:docs-sdk && typedoc --options typedoc.json",
     "docs:dev": "pnpm docs:api && vitepress dev docs",
     "docs:build": "pnpm docs:api && vitepress build docs",
     "docs:preview": "vitepress preview docs"
