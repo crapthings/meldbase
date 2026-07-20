@@ -58,6 +58,7 @@ export default defineConfig({
           text: "Start here",
           items: [
             { text: "Getting started", link: "/guide/getting-started" },
+            { text: "Evaluate safely", link: "/alpha-evaluation" },
             { text: "Current capability audit", link: "/mvp-audit" },
             { text: "Roadmap", link: "/roadmap" },
           ],

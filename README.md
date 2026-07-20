@@ -212,6 +212,7 @@ are the authoritative boundary.
 - **[Documentation site](https://crapthings.github.io/meldbase/)** — guides,
   operations runbooks, HTTP reference, and generated TypeScript API reference.
 - [Documentation index in this repository](docs/README.md)
+- [Safe alpha evaluation](docs/alpha-evaluation.md)
 - [Architecture](docs/architecture.md)
 - [Query and index contract](docs/query.md)
 - [Reactive queries and durable changes](docs/reactive.md)

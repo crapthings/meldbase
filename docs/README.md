@@ -6,6 +6,7 @@
 - [Live todo application example](guide/realtime-todos.md)
 - [Identity, users, and workspace isolation](guide/identity-and-workspaces.md)
 - [Collection access policies](guide/access-policies.md)
+- [Evaluate Meldbase safely](alpha-evaluation.md)
 - [Single-node deployment and recovery](single-node-deployment.md)
 - [Backup, recovery, and upgrade runbook](operations/backup-and-upgrade.md)
 - [Current alpha capability audit](mvp-audit.md)
