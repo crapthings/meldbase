@@ -47,6 +47,17 @@ func (db *DB) BackupV2(ctx context.Context, destination string) (result BackupV2
 	}
 	store.compactMu.Lock()
 	defer store.compactMu.Unlock()
+	return db.backupV2WithStoreLocked(ctx, absoluteDestination, store)
+}
+
+// backupV2WithStoreLocked is the physical-copy half shared by ordinary
+// backups and archive bootstrap. The caller holds store.compactMu, which also
+// makes DB.Close wait until a newly created durable checkpoint has either been
+// paired with its verified snapshot or removed on failure.
+func (db *DB) backupV2WithStoreLocked(ctx context.Context, absoluteDestination string, store *v2DurableStore) (result BackupV2Result, resultErr error) {
+	if db == nil || store == nil || store.file == nil || absoluteDestination == "" {
+		return result, ErrBackupUnsupported
+	}
 	db.metrics.backupAttempts.Add(1)
 	db.metrics.backupActive.Add(1)
 	started := time.Now()

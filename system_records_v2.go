@@ -50,6 +50,13 @@ func (backend *dbSystemRecordBackend) CompareAndSwap(ctx context.Context, mutati
 		db.mu.Unlock()
 		return systemrecord.Result{}, errors.New("meldbase: durable system records require storage V2")
 	}
+	// Private system records are still durable logical commits. They back RPC
+	// idempotency and policy state, so a revoked primary must not advance them
+	// independently of public business writes.
+	if err := db.validateV2PrimaryWriteFence(db.token + 1); err != nil {
+		db.mu.Unlock()
+		return systemrecord.Result{}, err
+	}
 	db.metrics.v2CommitAttempts.Add(1)
 	started := time.Now()
 	result, err := store.file.ApplySystemRecordTransaction(v2.SystemRecordTransaction{
@@ -75,6 +82,14 @@ func (backend *dbSystemRecordBackend) CompareAndSwap(ctx context.Context, mutati
 		db.fatalErr = fmt.Errorf("%w: V2 system commit sequence mismatch", ErrDurability)
 		db.mu.Unlock()
 		return systemrecord.Result{}, db.fatalErr
+	}
+	if store.rollbackAnchor != nil {
+		if anchorErr := store.advanceRollbackAnchor(ctx, result.Sequence); anchorErr != nil {
+			db.metrics.v2RejectedTransactions.Add(1)
+			db.fatalErr = fmt.Errorf("%w: committed system sequence %d but %w", ErrDurability, result.Sequence, anchorErr)
+			db.mu.Unlock()
+			return systemrecord.Result{}, db.fatalErr
+		}
 	}
 	db.token = result.Sequence
 	elapsed := uint64(time.Since(started))

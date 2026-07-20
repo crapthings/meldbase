@@ -61,6 +61,32 @@ func TestDurabilityCheckRejectsInvalidSourceRevision(t *testing.T) {
 	}
 }
 
+func TestDurabilityCheckPublishesNoOverwriteDurableReceipt(t *testing.T) {
+	directory := t.TempDir()
+	receiptPath := filepath.Join(t.TempDir(), "durability.json")
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"durability-check", "--dir", directory, "--out", receiptPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("durability check error=%v stderr=%s", err, stderr.String())
+	}
+	var fromOutput, fromFile durabilityCheckResult
+	if err := json.Unmarshal(stdout.Bytes(), &fromOutput); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &fromFile); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fromOutput, fromFile) {
+		t.Fatalf("stdout and durable receipt differ")
+	}
+	if err := run([]string{"durability-check", "--dir", directory, "--out", receiptPath}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "exists") {
+		t.Fatalf("no-overwrite error=%v", err)
+	}
+}
+
 func TestDurabilityCheckCleanSourceRequiresClaimedRevision(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{"durability-check", "--dir", t.TempDir(), "--require-clean-source"}, &output, &output)
@@ -417,6 +443,38 @@ func TestServeRequiresExplicitUnsafeDevelopmentMode(t *testing.T) {
 	err := run([]string{"serve", "--db", filepath.Join(t.TempDir(), "data.meld")}, &output, &output)
 	if err == nil || !strings.Contains(err.Error(), "--dev-no-auth") {
 		t.Fatalf("serve error = %v", err)
+	}
+}
+
+func TestServeRollbackAnchorFlagsFailClosed(t *testing.T) {
+	var output bytes.Buffer
+	err := run([]string{
+		"serve", "--db", filepath.Join(t.TempDir(), "data.meld"), "--dev-no-auth", "--rollback-anchor-init",
+	}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "--rollback-anchor-init requires --rollback-anchor") {
+		t.Fatalf("anchor initialization error=%v", err)
+	}
+	directory := t.TempDir()
+	err = run([]string{
+		"serve", "--db", filepath.Join(directory, "data.meld"), "--dev-no-auth",
+		"--rollback-anchor", filepath.Join(directory, "data.anchor"), "--rollback-anchor-timeout", "0s",
+	}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "--rollback-anchor-timeout must be positive") {
+		t.Fatalf("anchor timeout error=%v", err)
+	}
+	err = run([]string{
+		"serve", "--db", filepath.Join(directory, "remote.meld"), "--dev-no-auth",
+		"--rollback-anchor", filepath.Join(directory, "data.anchor"), "--rollback-anchor-cluster", "cluster-a",
+	}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("mixed local/remote anchor error=%v", err)
+	}
+	err = run([]string{
+		"serve", "--db", filepath.Join(directory, "remote.meld"), "--dev-no-auth",
+		"--rollback-anchor-cluster", "cluster-a",
+	}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "remote rollback anchor requires") {
+		t.Fatalf("partial remote anchor error=%v", err)
 	}
 }
 

@@ -1,6 +1,6 @@
 import type { DeleteResult, Document, Filter, InputDocument, MutationResult, QuerySpec, Update, Value } from "./types.js";
 import type { QueryOptions } from "./query.js";
-import { cloneDocument, cloneValue, valueEquals } from "./safe-value.js";
+import { cloneDocument, cloneValue, newDocumentID, valueEquals } from "./safe-value.js";
 import { compileQuery, executeQuery, matches } from "./query.js";
 import { applyMutation, compileUpdate } from "./mutation.js";
 
@@ -53,7 +53,7 @@ export class LocalCollection<T extends Document = Document> {
 
   insertOne(document: InputDocument): T {
     const fields = cloneValue(document as { readonly [key: string]: Value }) as Record<string, Value>;
-    if (fields._id === undefined) fields._id = newLocalID();
+    if (fields._id === undefined) fields._id = newDocumentID();
     const copy = cloneDocument(fields as T);
     this.insert(copy);
     return cloneDocument(copy);
@@ -129,7 +129,6 @@ export class LocalCollection<T extends Document = Document> {
   }
 }
 
-function newLocalID(): string { const bytes = crypto.getRandomValues(new Uint8Array(16)); return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
 function cloneSnapshot<T extends Document>(documents: readonly T[]): T[] {
   return documents.map(cloneDocument);

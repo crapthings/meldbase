@@ -30,8 +30,16 @@ For every implemented fetch and subscription, the server applies:
 2. collection/action policy;
 3. row predicate injected into the plan (not post-filtered after pagination);
 4. field projection/redaction before serialization;
-5. query depth/node/result/byte limits;
-6. subscription-count and outbound-buffer limits.
+5. query depth/node/result limits plus separately configured HTTP-result and
+   realtime-frame byte limits;
+6. subscription-count, outbound-frame, and outbound-byte queue limits.
+
+The database also admits each shared reactive view by its full matching-member
+count and canonical document bytes. A query `limit` bounds the emitted window,
+not the internal matching set needed for stable incremental ordering. Exceeding
+that database resource limit returns the fixed `resource_limit_exceeded` error;
+the client must narrow the query or use pagination rather than rely on a large
+unbounded subscription.
 
 Authorizer results are frozen at this boundary: allowed-path/field maps,
 constraints, and server-owned insert fields are copied into server-owned state.
@@ -118,6 +126,14 @@ operation in `MeldbaseRemoteError`. It does not infer that a mutation is safe to
 retry. Callers may retry only under an application-level idempotency contract
 after readiness recovers. Reads may be retried after recovery.
 
+The TypeScript remote client assigns a random 128-bit `_id` before an insert is
+sent when the caller omitted one, and requires the successful response to carry
+that exact ID. If a coordinator admission races cancellation, the existing
+`rpc_outcome_unknown` transport code means the write may be durable; the caller
+still has that `_id` and can reconcile with an authorized point query instead of
+submitting a duplicate. Non-SDK clients should likewise supply their own stable
+document ID whenever they need this recovery property.
+
 Database resource admission failures use HTTP 413 and the fixed
 `resource_limit_exceeded` code. This is a terminal rejection: no document,
 index, Commit Log entry or reactive event was published. The client should
@@ -181,7 +197,15 @@ snapshots to the native `LiveQuery` callback and React `useLiveQuery` store.
 Callbacks run from a microtask outside socket parsing and receive deep clones, so
 listener mutation cannot corrupt synchronization state.
 
-The client validates exact delta operation shapes, IDs, anchors, subscription
+Before a query snapshot or delta accumulates its wire documents, the server
+enforces the applicable result/frame byte budget. An oversized result receives
+the terminal `resource_limit_exceeded` error for that request/subscription and
+does not enter the socket queue. The server then serializes every remaining
+outbound realtime frame before it enters that queue. A connection whose
+queued/in-flight frames exceed its configured byte budget is closed rather than
+retaining an unbounded backlog. This is a transport slow-consumer boundary: the
+database write remains committed and the client reconnects from its last opaque
+token. The client validates exact delta operation shapes, IDs, anchors, subscription
 identity and the opaque token chain. It also enforces inbound byte, snapshot
 document, delta operation, and resulting document limits. A malformed or
 out-of-order frame closes the connection as a protocol failure; the client never

@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -18,10 +19,27 @@ var (
 	ErrRecoveryRequired    = errors.New("meldbase storage v2: recovery required")
 	ErrInvalidStorageLimit = errors.New("meldbase storage v2: invalid storage limit")
 	ErrStorageLimit        = errors.New("meldbase storage v2: storage limit exceeded")
+	ErrStaleSnapshot       = errors.New("meldbase storage v2: commit sequence is below the required minimum")
+	ErrDatabaseIdentity    = errors.New("meldbase storage v2: unexpected database identity")
+	ErrInsecureFileMode    = errors.New("meldbase storage v2: database file permissions are not owner-private")
 )
 
 type OpenOptions struct {
-	RequireClean              bool
+	RequireClean bool
+	// RequireGraphAudit verifies every page protected by either valid Meta root
+	// before Open succeeds. It is deliberately opt-in: ordinary V2 startup is
+	// metadata-only so large databases do not pay an unbounded open pause.
+	// Unlike VerifyPathContext it is a structural audit only; callers needing
+	// Secondary-to-document semantic proof must run the offline verifier.
+	RequireGraphAudit bool
+	// RequirePrivateFileMode rejects a database whose existing Unix permission
+	// bits grant group or other access. It never chmods an operator-owned file:
+	// callers choose this fail-closed boundary explicitly for deployments where
+	// the database can contain secrets.
+	RequirePrivateFileMode    bool
+	ExpectedDatabaseID        [16]byte
+	MinimumCommitSequence     uint64
+	MinimumGeneration         uint64
 	CommitRetentionMaxCommits uint64
 	CommitRetentionMaxBytes   uint64
 	MaxFileBytes              uint64
@@ -41,6 +59,19 @@ const (
 	faultAfterDataSync
 	faultAfterMetaWrite
 	faultAfterMetaSync
+)
+
+// QualificationBoundary identifies a physical publication boundary exposed
+// only to repository-internal destructive qualification runners. It is not a
+// storage or application API contract.
+type QualificationBoundary string
+
+const (
+	QualificationAfterPageWrite QualificationBoundary = "after-page-write"
+	QualificationBeforeDataSync QualificationBoundary = "before-data-sync"
+	QualificationAfterDataSync  QualificationBoundary = "after-data-sync"
+	QualificationAfterMetaWrite QualificationBoundary = "after-meta-write"
+	QualificationAfterMetaSync  QualificationBoundary = "after-meta-sync"
 )
 
 type File struct {
@@ -153,8 +184,19 @@ func OpenWithOptions(path string, options OpenOptions) (*File, Meta, OpenReport,
 	if err != nil {
 		return nil, Meta{}, OpenReport{}, err
 	}
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	requireExisting := options.MinimumCommitSequence > 0 || options.MinimumGeneration > 0 || !allZero(options.ExpectedDatabaseID[:])
+	openFlags := os.O_RDWR | os.O_CREATE
+	if requireExisting {
+		openFlags = os.O_RDWR
+	}
+	file, err := os.OpenFile(path, openFlags, 0o600)
 	if err != nil {
+		if requireExisting && errors.Is(err, os.ErrNotExist) {
+			if !allZero(options.ExpectedDatabaseID[:]) {
+				return nil, Meta{}, OpenReport{}, fmt.Errorf("%w: database does not exist", ErrDatabaseIdentity)
+			}
+			return nil, Meta{}, OpenReport{}, fmt.Errorf("%w: database does not exist", ErrStaleSnapshot)
+		}
 		return nil, Meta{}, OpenReport{}, err
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
@@ -170,7 +212,16 @@ func OpenWithOptions(path string, options OpenOptions) (*File, Meta, OpenReport,
 	if err != nil {
 		return cleanup(err)
 	}
+	if options.RequirePrivateFileMode && (!info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0) {
+		return cleanup(ErrInsecureFileMode)
+	}
 	if info.Size() == 0 {
+		if requireExisting {
+			if !allZero(options.ExpectedDatabaseID[:]) {
+				return cleanup(fmt.Errorf("%w: database is empty", ErrDatabaseIdentity))
+			}
+			return cleanup(fmt.Errorf("%w: database is empty", ErrStaleSnapshot))
+		}
 		meta := Meta{Generation: 1, PhysicalPageCount: 2}
 		if _, err := rand.Read(meta.DatabaseID[:]); err != nil {
 			return cleanup(err)
@@ -209,16 +260,17 @@ func OpenWithOptions(path string, options OpenOptions) (*File, Meta, OpenReport,
 		return cleanup(err)
 	}
 	report := state.openReport(uint64(info.Size() - effectiveSize))
+	if !allZero(options.ExpectedDatabaseID[:]) && state.meta.DatabaseID != options.ExpectedDatabaseID {
+		return cleanup(ErrDatabaseIdentity)
+	}
+	if state.meta.CommitSequence < options.MinimumCommitSequence {
+		return cleanup(fmt.Errorf("%w: found %d, require at least %d", ErrStaleSnapshot, state.meta.CommitSequence, options.MinimumCommitSequence))
+	}
+	if state.meta.Generation < options.MinimumGeneration {
+		return cleanup(fmt.Errorf("%w: found generation %d, require at least %d", ErrStaleSnapshot, state.meta.Generation, options.MinimumGeneration))
+	}
 	if options.RequireClean && (report.FallbackToOlderRoot || report.MetaRedundancyDegraded || report.TrailingBytesRemoved != 0) {
 		return cleanup(ErrRecoveryRequired)
-	}
-	if effectiveSize != info.Size() {
-		if err := file.Truncate(effectiveSize); err != nil {
-			return cleanup(err)
-		}
-		if err := file.Sync(); err != nil {
-			return cleanup(err)
-		}
 	}
 	opened := state.open(file)
 	opened.commitRetentionMax = normalizedCommitRetention(options.CommitRetentionMaxCommits)
@@ -248,7 +300,66 @@ func OpenWithOptions(path string, options OpenOptions) (*File, Meta, OpenReport,
 			}
 		}
 	}
+	if options.RequireGraphAudit {
+		// Run before removing a provable unaligned crash tail. A failed explicit
+		// audit therefore remains read-only even when automatic recovery is
+		// otherwise enabled.
+		if _, _, err := opened.reachabilityUnlocked(context.Background()); err != nil {
+			_ = opened.Close()
+			return nil, Meta{}, report, err
+		}
+	}
+	if effectiveSize != info.Size() {
+		if err := file.Truncate(effectiveSize); err != nil {
+			_ = opened.Close()
+			return nil, Meta{}, report, err
+		}
+		if err := file.Sync(); err != nil {
+			_ = opened.Close()
+			return nil, Meta{}, report, err
+		}
+	}
 	return opened, state.meta, report, nil
+}
+
+// OpenForQualification installs a synchronous boundary hook before returning
+// an otherwise normal V2 file. The hook may block while an external controller
+// cuts power, exhausts a disposable volume or terminates the process. This
+// entry point lives in internal/storage so external applications cannot opt
+// into qualification behavior accidentally.
+func OpenForQualification(path string, options OpenOptions, hook func(QualificationBoundary) error) (*File, Meta, OpenReport, error) {
+	if hook == nil {
+		return nil, Meta{}, OpenReport{}, errors.New("meldbase storage v2: nil qualification hook")
+	}
+	file, meta, report, err := OpenWithOptions(path, options)
+	if err != nil {
+		return nil, Meta{}, report, err
+	}
+	file.fault = func(point faultPoint) error {
+		boundary, ok := qualificationBoundary(point)
+		if !ok {
+			return ErrCorrupt
+		}
+		return hook(boundary)
+	}
+	return file, meta, report, nil
+}
+
+func qualificationBoundary(point faultPoint) (QualificationBoundary, bool) {
+	switch point {
+	case faultAfterPageWrite:
+		return QualificationAfterPageWrite, true
+	case faultBeforeDataSync:
+		return QualificationBeforeDataSync, true
+	case faultAfterDataSync:
+		return QualificationAfterDataSync, true
+	case faultAfterMetaWrite:
+		return QualificationAfterMetaWrite, true
+	case faultAfterMetaSync:
+		return QualificationAfterMetaSync, true
+	default:
+		return "", false
+	}
 }
 
 func normalizedCommitRetention(value uint64) uint64 {
@@ -390,6 +501,18 @@ func (f *File) Update(build func(*WriteTxn) (DatabaseRoot, error)) error {
 }
 
 func (f *File) updateUnlocked(advanceSequence bool, build func(*WriteTxn) (DatabaseRoot, error)) error {
+	advance := uint64(0)
+	if advanceSequence {
+		advance = 1
+	}
+	return f.updateUnlockedAdvance(advance, build)
+}
+
+// updateUnlockedAdvance publishes one physical COW generation whose logical
+// commit sequence advances by advance. Normal callers use zero (maintenance)
+// or one. The internal document-group primitive uses a value greater than one
+// after constructing every intermediate CommitBatch in the same WriteTxn.
+func (f *File) updateUnlockedAdvance(advance uint64, build func(*WriteTxn) (DatabaseRoot, error)) error {
 	if f.file == nil {
 		return errors.New("meldbase storage v2: file is closed")
 	}
@@ -401,11 +524,11 @@ func (f *File) updateUnlocked(advanceSequence bool, build func(*WriteTxn) (Datab
 		return err
 	}
 	generation := f.meta.Generation + 1
-	sequence := f.meta.CommitSequence
-	if advanceSequence {
-		sequence++
+	if advance > math.MaxUint64-f.meta.CommitSequence {
+		return ErrCorrupt
 	}
-	if generation == 0 || (advanceSequence && sequence == 0) {
+	sequence := f.meta.CommitSequence + advance
+	if generation == 0 || (advance > 0 && sequence == 0) {
 		return ErrCorrupt
 	}
 	tx := &WriteTxn{
@@ -505,7 +628,7 @@ func (f *File) updateUnlocked(advanceSequence bool, build func(*WriteTxn) (Datab
 			f.retentionPressureEvents.Add(1)
 		}
 	}
-	if advanceSequence {
+	if advance > 0 {
 		close(f.changed)
 		f.changed = make(chan struct{})
 	}
@@ -661,6 +784,7 @@ func (f *File) StorageStats() StorageStats {
 	f.mu.RLock()
 	stats := StorageStats{
 		PageSize:                PageSize,
+		Generation:              f.meta.Generation,
 		PhysicalPages:           f.nextPage,
 		CommitSequence:          f.meta.CommitSequence,
 		OldestRetainedSequence:  f.meta.OldestRetainedSequence,

@@ -6,12 +6,56 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
 )
 
 var recoveryBenchmarkSink RecoveryReport
+
+func TestV2RequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix mode bits are not a Windows security boundary")
+	}
+	path := filepath.Join(t.TempDir(), "private-mode.meld2")
+	db, err := OpenV2(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if strict, err := OpenV2WithOptions(path, V2Options{RequirePrivateFileMode: true}); strict != nil || !errors.Is(err, ErrInsecureFileMode) {
+		t.Fatalf("strict V2 open db=%v err=%v", strict, err)
+	}
+	if strict, err := OpenWithOptions(path, OpenOptions{V2RequirePrivateFileMode: true}); strict != nil || !errors.Is(err, ErrInsecureFileMode) {
+		t.Fatalf("strict format-neutral open db=%v err=%v", strict, err)
+	}
+	// Default opening remains compatible with intentionally group-managed
+	// deployment files; strict mode never chmods an operator-owned artifact.
+	compatible, err := OpenV2(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compatible.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o640 {
+		t.Fatalf("default open changed permissions info=%v err=%v", info, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	strict, err := OpenV2WithOptions(path, V2Options{RequirePrivateFileMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer strict.Close()
+}
 
 func TestRecoveryReportV1AccountsForCheckpointReplayAndProvableTails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "recovery-v1.meld")
@@ -184,6 +228,83 @@ func TestRecoveryReportV2AccountsForRootFallbackAndTailRemoval(t *testing.T) {
 		report.ChecksumValidMetaSlots != 2 || report.RootValidMetaSlots != 1 ||
 		report.MainTailBytesRemoved != uint64(len(tail)) || report.CommitSequenceAfter != 1 {
 		t.Fatalf("V2 recovery report=%+v newest=%+v", report, newest)
+	}
+}
+
+func TestPublicV2GraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "public-graph-audit.meld2")
+	db, err := OpenV2(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	storage, _, err := storagev2.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := storage.DatabaseRoot()
+	if closeErr := storage.Close(); err != nil {
+		t.Fatal(err)
+	} else if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if root.CatalogRoot == 0 {
+		t.Fatal("missing catalog root")
+	}
+	raw, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byteAtPayload := []byte{0}
+	if _, err := raw.ReadAt(byteAtPayload, int64(root.CatalogRoot)*storagev2.PageSize+storagev2.PageHeaderSize); err != nil {
+		_ = raw.Close()
+		t.Fatal(err)
+	}
+	byteAtPayload[0] ^= 0xff
+	if _, err := raw.WriteAt(byteAtPayload, int64(root.CatalogRoot)*storagev2.PageSize+storagev2.PageHeaderSize); err != nil {
+		_ = raw.Close()
+		t.Fatal(err)
+	}
+	if _, err := raw.Seek(0, 2); err != nil {
+		_ = raw.Close()
+		t.Fatal(err)
+	}
+	if _, err := raw.Write([]byte("public-crash-tail")); err != nil {
+		_ = raw.Close()
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := mustReadRecoveryFile(t, path)
+
+	openers := []struct {
+		name string
+		open func() (*DB, error)
+	}{
+		{name: "explicit-v2", open: func() (*DB, error) {
+			return OpenV2WithOptions(path, V2Options{RequireGraphAudit: true})
+		}},
+		{name: "format-neutral", open: func() (*DB, error) {
+			return OpenWithOptions(path, OpenOptions{V2RequireGraphAudit: true})
+		}},
+	}
+	for _, opener := range openers {
+		t.Run(opener.name, func(t *testing.T) {
+			opened, err := opener.open()
+			if opened != nil || !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("open db=%v err=%v", opened, err)
+			}
+			if after := mustReadRecoveryFile(t, path); !bytes.Equal(after, before) {
+				t.Fatal("failed public graph audit modified the database")
+			}
+		})
 	}
 }
 

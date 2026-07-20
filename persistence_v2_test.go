@@ -212,6 +212,220 @@ func TestOpenV2ProvidesGapFreeQueryReplay(t *testing.T) {
 	}
 }
 
+func TestColdV2ReactiveSubscriptionPinsSnapshotWithoutBlockingWriter(t *testing.T) {
+	db, err := OpenV2(filepath.Join(t.TempDir(), "cold-reactive.meld2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	items := db.Collection("items")
+	if _, err := items.InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := db.durability.(*v2DurableStore)
+	pinned, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	store.testQuerySnapshotHook = func() {
+		once.Do(func() {
+			close(pinned)
+			<-release
+		})
+	}
+	defer func() { store.testQuerySnapshotHook = nil }()
+	type subscriptionResult struct {
+		subscription *QueryDeltaSubscription
+		err          error
+	}
+	result := make(chan subscriptionResult, 1)
+	go func() {
+		subscription, err := items.SubscribeQueryDeltas(context.Background(), query, 2)
+		result <- subscriptionResult{subscription: subscription, err: err}
+	}()
+	select {
+	case <-pinned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cold subscription did not pin storage snapshot")
+	}
+	written := make(chan error, 1)
+	go func() {
+		_, err := items.InsertOne(context.Background(), Document{"value": Int(2)})
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		if err != nil {
+			close(release)
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("write waited for cold reactive snapshot scan")
+	}
+	close(release)
+	select {
+	case outcome := <-result:
+		if outcome.err != nil {
+			t.Fatal(outcome.err)
+		}
+		defer outcome.subscription.Close()
+		if outcome.subscription.Initial.Token != db.Stats().CommitSequence || len(outcome.subscription.Initial.Documents) != 2 {
+			t.Fatalf("initial=%+v sequence=%d", outcome.subscription.Initial, db.Stats().CommitSequence)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cold subscription did not retry to a current snapshot")
+	}
+}
+
+func TestWarmV2ReactiveRecomputePinsSnapshotWithoutBlockingWriter(t *testing.T) {
+	db, err := OpenV2(filepath.Join(t.TempDir(), "warm-reactive.meld2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	items := db.Collection("items")
+	if _, err := items.InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscription, err := items.SubscribeQueryDeltas(context.Background(), query, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+
+	store := db.durability.(*v2DurableStore)
+	pinned, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	store.testQuerySnapshotHook = func() {
+		once.Do(func() {
+			close(pinned)
+			<-release
+		})
+	}
+	defer func() { store.testQuerySnapshotHook = nil }()
+	recomputed := make(chan struct{})
+	go func() {
+		db.reactive.fullRecomputeCollection("items")
+		close(recomputed)
+	}()
+	select {
+	case <-pinned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("warm recompute did not pin storage snapshot")
+	}
+	written := make(chan error, 1)
+	go func() {
+		_, err := items.InsertOne(context.Background(), Document{"value": Int(2)})
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		if err != nil {
+			close(release)
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("write waited for warm reactive snapshot scan")
+	}
+	close(release)
+	select {
+	case <-recomputed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("warm reactive recompute did not converge")
+	}
+
+	state := subscription.Initial
+	deadline := time.After(3 * time.Second)
+	for state.Token < db.Stats().CommitSequence {
+		select {
+		case delta := <-subscription.Deltas:
+			state, err = ApplyQueryDelta(state, delta)
+			if err != nil {
+				t.Fatal(err)
+			}
+		case err := <-subscription.Errors:
+			t.Fatalf("subscription error=%v", err)
+		case <-deadline:
+			t.Fatalf("subscription did not converge: state=%+v sequence=%d", state, db.Stats().CommitSequence)
+		}
+	}
+	if state.Token != db.Stats().CommitSequence || len(state.Documents) != 2 {
+		t.Fatalf("state=%+v sequence=%d", state, db.Stats().CommitSequence)
+	}
+}
+
+func TestV2UpdateChangedPathsReachWatchersAndDurableCommitLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "changed-paths.meld2")
+	db, err := OpenV2(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := db.Collection("items")
+	id, err := items.InsertOne(context.Background(), Document{
+		"title": String("before"), "score": Int(1), "owner": Object(Document{"name": String("old")}),
+	})
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	events, eventErrors, err := db.WatchChanges(context.Background(), "items", 1)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if _, err := items.UpdateOne(context.Background(), Filter{"_id": id}, Update{
+		"$inc": map[string]any{"score": 1},
+		"$set": map[string]any{"title": "after", "owner.name": "new"},
+	}); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	var watched ChangeBatch
+	select {
+	case watched = <-events:
+	case err := <-eventErrors:
+		_ = db.Close()
+		t.Fatalf("watch error=%v", err)
+	case <-time.After(3 * time.Second):
+		_ = db.Close()
+		t.Fatal("watch did not receive update")
+	}
+	wantPaths := []string{"owner.name", "score", "title"}
+	if len(watched.Changes) != 1 || !reflect.DeepEqual(watched.Changes[0].ChangedPaths, wantPaths) {
+		_ = db.Close()
+		t.Fatalf("watch batch=%+v want paths=%v", watched, wantPaths)
+	}
+	// Watcher delivery owns its metadata just as it owns document images.
+	watched.Changes[0].ChangedPaths[0] = "mutated"
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenV2(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	store := reopened.durability.(*v2DurableStore)
+	cursor, err := store.file.OpenCommitCursor(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cursor.Close()
+	commit, ok, err := cursor.Next()
+	if err != nil || !ok || commit.Sequence != 2 || len(commit.Changes) != 1 || !reflect.DeepEqual(commit.Changes[0].ChangedPaths, wantPaths) {
+		t.Fatalf("commit=%+v ok=%t err=%v want paths=%v", commit, ok, err, wantPaths)
+	}
+}
+
 func TestOpenV2StatsTrackRejectedTransactionAndResetOnReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-v2-stats.meld2")
 	db, err := OpenV2(path)

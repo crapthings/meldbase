@@ -32,7 +32,12 @@ test("remote query uses HTTP AST and realtime ticket keeps credentials out of We
     const url = String(input);
     requests.push({ url, ...(init ? { init } : {}) });
     if (url.endsWith("/v1/realtime/tickets")) return Response.json({ url: "wss://db.example/realtime", ticket: "single-use-secret" });
-    if (url.endsWith("/documents")) return Response.json({ version: 1, document: encodeDocument({ _id: "00000000000000000000000000000003", title: "created" }) }, { status: 201 });
+    if (url.endsWith("/documents")) {
+      const body = JSON.parse(init?.body as string) as { document: { v: Array<[string, { t: string; v: string }]> } };
+      const id = body.document.v.find(([field]) => field === "_id")?.[1]?.v;
+      if (typeof id !== "string") throw new Error("remote insert omitted client document ID");
+      return Response.json({ version: 1, document: encodeDocument({ _id: id, title: "created" }) }, { status: 201 });
+    }
     if (url.endsWith("/mutations")) {
       const body = JSON.parse(init?.body as string) as { action: string };
       return body.action.startsWith("update") ? Response.json({ version: 1, matchedCount: 2, modifiedCount: 2 }) : Response.json({ version: 1, deletedCount: 1 });
@@ -48,9 +53,9 @@ test("remote query uses HTTP AST and realtime ticket keeps credentials out of We
   const query = client.collection<Document>("todos").find({ done: false });
   assert.deepEqual((await query.fetch()).map((item) => item._id), ["00000000000000000000000000000001"]);
   const inserted = await client.collection<Document>("todos").insertOne({ title: "created" });
-  assert.equal(inserted._id, "00000000000000000000000000000003");
+  assert.match(inserted._id, /^[0-9a-f]{32}$/);
   const insertBody = JSON.parse(requests[1]?.init?.body as string) as { document: { v: Array<[string, unknown]> } };
-  assert.equal(insertBody.document.v.some(([field]) => field === "_id"), false);
+  assert.equal(insertBody.document.v.some(([field]) => field === "_id"), true);
   assert.deepEqual(await client.collection("todos").updateMany({ done: false }, { $set: { done: true } }), { matchedCount: 2, modifiedCount: 2 });
   assert.deepEqual(await client.collection("todos").deleteOne({ done: true }), { deletedCount: 1 });
 
@@ -254,6 +259,21 @@ test("data operations and subscriptions expose stable remote error codes", async
   assert.equal(subscriptionError instanceof MeldbaseRemoteError, true);
   assert.equal((subscriptionError as MeldbaseRemoteError).code, "database_unavailable");
   unsubscribe();
+  client.close();
+});
+
+test("remote insert owns its ID before transport and rejects a substituted response", async () => {
+  let suppliedID: string | undefined;
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async (_input, init) => {
+      const body = JSON.parse(init?.body as string) as { document: { v: Array<[string, { v: string }]> } };
+      suppliedID = body.document.v.find(([field]) => field === "_id")?.[1]?.v;
+      return Response.json({ version: 1, document: encodeDocument({ _id: "00000000000000000000000000000009", title: "wrong" }) }, { status: 201 });
+    },
+  });
+  await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), /changed document ID/);
+  assert.match(suppliedID ?? "", /^[0-9a-f]{32}$/);
   client.close();
 });
 

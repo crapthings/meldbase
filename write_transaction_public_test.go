@@ -336,6 +336,152 @@ func TestRunWriteTransactionAllowsDisjointConcurrentCommit(t *testing.T) {
 	}
 }
 
+func TestRunWriteTransactionFindRejectsCollectionPhantomAndSeesOwnWrites(t *testing.T) {
+	db, err := OpenV2(filepath.Join(t.TempDir(), "public-range-transaction.meld2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	first, second, order := DocumentID{15: 1}, DocumentID{15: 2}, DocumentID{15: 3}
+	if _, err := db.Collection("items").InsertMany(context.Background(), []Document{
+		{"_id": ID(first), "rank": Int(1)},
+		{"_id": ID(second), "rank": Int(2)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("orders").InsertOne(context.Background(), Document{"_id": ID(order), "state": String("pending")}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{"rank": map[string]any{"$gte": int64(1)}}, QueryOptions{Sort: []SortField{{Path: "rank", Direction: -1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve := mustCompileTransactionUpdate(t, Update{"$set": map[string]any{"state": "approved"}})
+	ready, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- db.RunWriteTransaction(context.Background(), func(tx *WriteTransaction) error {
+			snapshot, err := tx.Find("items", query)
+			if err != nil || snapshot.Token != 2 || len(snapshot.Documents) != 2 || !snapshot.Documents[0]["rank"].Equal(Int(2)) {
+				return errors.Join(err, ErrCorrupt)
+			}
+			if err := tx.UpdateOne("orders", order, approve); err != nil {
+				return err
+			}
+			close(ready)
+			<-release
+			return nil
+		})
+	}()
+	<-ready
+	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"rank": Int(3)}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-done; !errors.Is(err, ErrWriteConflict) {
+		t.Fatalf("range phantom transaction err=%v", err)
+	}
+	orderDocument, err := db.Collection("orders").FindOne(context.Background(), Filter{"_id": order})
+	if err != nil || !orderDocument["state"].Equal(String("pending")) {
+		t.Fatalf("phantom-conflicted order=%v err=%v", orderDocument, err)
+	}
+	// A range read is fenced per collection, not globally: an independent
+	// orders write must not turn this read-only items transaction into a false
+	// conflict.
+	ready, release = make(chan struct{}), make(chan struct{})
+	done = make(chan error, 1)
+	go func() {
+		done <- db.RunWriteTransaction(context.Background(), func(tx *WriteTransaction) error {
+			if _, err := tx.Find("items", query); err != nil {
+				return err
+			}
+			close(ready)
+			<-release
+			return nil
+		})
+	}()
+	<-ready
+	if _, err := db.Collection("orders").UpdateOne(context.Background(), Filter{"_id": order}, Update{"$set": map[string]any{"state": "outside"}}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("disjoint range read err=%v", err)
+	}
+
+	all, err := CompileQuery(Filter{}, QueryOptions{Sort: []SortField{{Path: "rank", Direction: -1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inserted := DocumentID{15: 9}
+	if err := db.RunWriteTransaction(context.Background(), func(tx *WriteTransaction) error {
+		if _, err := tx.InsertOne("items", Document{"_id": ID(inserted), "rank": Int(4)}); err != nil {
+			return err
+		}
+		snapshot, err := tx.Find("items", all)
+		if err != nil || len(snapshot.Documents) != 4 || !snapshot.Documents[0]["_id"].Equal(ID(inserted)) {
+			return errors.Join(err, ErrCorrupt)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("own-write range query err=%v", err)
+	}
+}
+
+func TestRunWriteTransactionFindFenceSurvivesCommitCoordinator(t *testing.T) {
+	db, err := OpenV2WithOptions(filepath.Join(t.TempDir(), "coordinated-range-transaction.meld2"), V2Options{
+		CommitCoordinator: V2CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	item, order := DocumentID{15: 1}, DocumentID{15: 2}
+	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"_id": ID(item), "rank": Int(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("orders").InsertOne(context.Background(), Document{"_id": ID(order), "state": String("pending")}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := mustCompileTransactionUpdate(t, Update{"$set": map[string]any{"state": "approved"}})
+	ready, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- db.RunWriteTransaction(context.Background(), func(tx *WriteTransaction) error {
+			if _, err := tx.Find("items", query); err != nil {
+				return err
+			}
+			if err := tx.UpdateOne("orders", order, update); err != nil {
+				return err
+			}
+			close(ready)
+			<-release
+			return nil
+		})
+	}()
+	<-ready
+	if _, err := db.Collection("items").InsertOne(context.Background(), Document{"rank": Int(2)}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-done; !errors.Is(err, ErrWriteConflict) {
+		t.Fatalf("coordinated range conflict err=%v", err)
+	}
+}
+
+func mustCompileTransactionUpdate(t *testing.T, update Update) MutationSpec {
+	t.Helper()
+	compiled, err := CompileUpdate(update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return compiled
+}
+
 func TestRunWriteTransactionMaintainsIndexCreatedAfterSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-write-concurrent-index.meld2")
 	db, err := OpenV2(path)

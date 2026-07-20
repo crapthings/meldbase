@@ -11,10 +11,10 @@ import (
 const PrometheusContentType = "text/plain; version=0.0.4; charset=utf-8"
 
 // The fixed schema currently renders below this size even with the optional
-// transport families. Pre-growing once avoids the 32 KiB -> 64 KiB buffer copy
+// transport families. Pre-growing once avoids a late buffer growth and copy
 // on every scrape. Keep BenchmarkMarshalPrometheus's output-B metric and tests
 // visible when adding families so this remains an optimization, never a limit.
-const prometheusInitialCapacity = 40 << 10
+const prometheusInitialCapacity = 48 << 10
 
 type prometheusSample struct {
 	labels  string
@@ -76,6 +76,18 @@ func MarshalPrometheus(sample Sample) []byte {
 
 	writePrometheusFamily(&output, "meldbase_commits_total", "Committed database transactions in this process session.", "counter", counterUint(stats.Commits.Total))
 	writePrometheusFamily(&output, "meldbase_commit_changes_total", "Logical changes in committed transactions in this process session.", "counter", counterUint(stats.Commits.Changes))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_enabled", "Whether the optional V2 commit coordinator is enabled.", "gauge", gaugeBool(stats.CommitCoordinator.Enabled))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_pending", "Current requests waiting for V2 commit-coordinator admission.", "gauge", gaugeUint(stats.CommitCoordinator.Pending))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_pending_capacity", "Fixed V2 commit-coordinator pending-request capacity.", "gauge", gaugeUint(stats.CommitCoordinator.PendingCapacity))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_admitted_total", "Requests admitted by the V2 commit coordinator.", "counter", counterUint(stats.CommitCoordinator.Admitted))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_admission_rejected_total", "Requests rejected because the V2 commit-coordinator queue was full.", "counter", counterUint(stats.CommitCoordinator.AdmissionRejected))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_batches_total", "Commit-coordinator batches processed.", "counter", counterUint(stats.CommitCoordinator.Batches))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_grouped_transactions_total", "Logical requests processed in multi-member V2 commit-coordinator batches.", "counter", counterUint(stats.CommitCoordinator.GroupedTransactions))
+	writePrometheusFamily(&output, "meldbase_commit_coordinator_outcome_unknown_total", "Admitted requests whose caller canceled before its durable outcome was known.", "counter", counterUint(stats.CommitCoordinator.OutcomeUnknown))
+	writePrometheusFamily(&output, "meldbase_primary_write_fence_configured", "Whether an external V2 primary-write fence was configured at open.", "gauge", gaugeBool(stats.PrimaryWriteFence.Configured))
+	writePrometheusFamily(&output, "meldbase_primary_write_fence_enforced", "Whether the external V2 primary-write fence currently guards local writes.", "gauge", gaugeBool(stats.PrimaryWriteFence.Enforced))
+	writePrometheusFamily(&output, "meldbase_primary_write_fence_checks_total", "V2 primary-write fence checks before logical primary commits.", "counter", counterUint(stats.PrimaryWriteFence.Checks))
+	writePrometheusFamily(&output, "meldbase_primary_write_fence_rejections_total", "V2 primary-write fence checks that rejected a local write.", "counter", counterUint(stats.PrimaryWriteFence.Rejected))
 	writePrometheusFamily(&output, "meldbase_write_transaction_active", "Public optimistic write transaction callbacks currently active.", "gauge", gaugeUint(stats.Transactions.Active))
 	writePrometheusFamily(&output, "meldbase_write_transaction_started_total", "Public optimistic write transaction callbacks started.", "counter", counterUint(stats.Transactions.Started))
 	writePrometheusFamily(&output, "meldbase_write_transaction_outcomes_total", "Public optimistic write transaction callbacks by fixed terminal outcome.", "counter",
@@ -106,8 +118,18 @@ func MarshalPrometheus(sample Sample) []byte {
 	writePrometheusFamily(&output, "meldbase_realtime_query_subscribers", "Current number of reactive query subscribers.", "gauge", gaugeUint(stats.Realtime.QuerySubscribers))
 	writePrometheusFamily(&output, "meldbase_realtime_pending_batches", "Current number of pending reactive commit batches.", "gauge", gaugeUint(stats.Realtime.PendingBatches))
 	writePrometheusFamily(&output, "meldbase_realtime_pending_changes", "Current number of pending reactive logical changes.", "gauge", gaugeUint(stats.Realtime.PendingChanges))
+	writePrometheusFamily(&output, "meldbase_realtime_pending_bytes", "Current canonical document-image bytes pending in the reactive hub.", "gauge", gaugeUint(stats.Realtime.PendingBytes))
 	writePrometheusFamily(&output, "meldbase_realtime_pending_batch_capacity", "Fixed reactive pending-batch capacity.", "gauge", gaugeUint(stats.Realtime.PendingBatchCapacity))
 	writePrometheusFamily(&output, "meldbase_realtime_pending_change_capacity", "Fixed reactive pending-change capacity.", "gauge", gaugeUint(stats.Realtime.PendingChangeCapacity))
+	writePrometheusFamily(&output, "meldbase_realtime_pending_byte_capacity", "Fixed reactive canonical document-image byte capacity.", "gauge", gaugeUint(stats.Realtime.PendingByteCapacity))
+	writePrometheusFamily(&output, "meldbase_realtime_watcher_pending_bytes", "Current canonical document-image bytes pending across direct Go change watchers.", "gauge", gaugeUint(stats.Realtime.WatcherPendingBytes))
+	writePrometheusFamily(&output, "meldbase_realtime_watcher_byte_capacity", "Fixed aggregate canonical document-image byte capacity across direct Go change watchers.", "gauge", gaugeUint(stats.Realtime.WatcherByteCapacity))
+	writePrometheusFamily(&output, "meldbase_realtime_dispatch_pending_batches", "Current batches waiting in the central change dispatcher.", "gauge", gaugeUint(stats.Realtime.DispatchPendingBatches))
+	writePrometheusFamily(&output, "meldbase_realtime_dispatch_pending_changes", "Current logical changes waiting in the central change dispatcher.", "gauge", gaugeUint(stats.Realtime.DispatchPendingChanges))
+	writePrometheusFamily(&output, "meldbase_realtime_dispatch_pending_bytes", "Current canonical document-image bytes waiting in the central change dispatcher.", "gauge", gaugeUint(stats.Realtime.DispatchPendingBytes))
+	writePrometheusFamily(&output, "meldbase_realtime_dispatch_batch_capacity", "Fixed central change-dispatcher batch capacity.", "gauge", gaugeUint(stats.Realtime.DispatchBatchCapacity))
+	writePrometheusFamily(&output, "meldbase_realtime_dispatch_change_capacity", "Fixed central change-dispatcher change capacity.", "gauge", gaugeUint(stats.Realtime.DispatchChangeCapacity))
+	writePrometheusFamily(&output, "meldbase_realtime_dispatch_byte_capacity", "Fixed central change-dispatcher canonical document-image byte capacity.", "gauge", gaugeUint(stats.Realtime.DispatchByteCapacity))
 	writePrometheusFamily(&output, "meldbase_realtime_queue_overflows_total", "Reactive queue overflow fallbacks in this process session.", "counter", counterUint(stats.Realtime.QueueOverflows))
 	writePrometheusFamily(&output, "meldbase_realtime_slow_consumers_total", "Slow business-data consumers disconnected in this process session.", "counter", counterUint(stats.Realtime.SlowConsumers))
 	writePrometheusFamily(&output, "meldbase_realtime_incremental_batches_total", "Commit batches applied incrementally to reactive views.", "counter", counterUint(stats.Realtime.IncrementalBatches))
@@ -117,6 +139,7 @@ func MarshalPrometheus(sample Sample) []byte {
 	if server := sample.Server; server != nil {
 		writePrometheusFamily(&output, "meldbase_server_active_connections", "Current authenticated realtime WebSocket connections.", "gauge", gaugeUint(server.ActiveConnections))
 		writePrometheusFamily(&output, "meldbase_server_connections_accepted_total", "Authenticated realtime WebSocket connections accepted in this server session.", "counter", counterUint(server.ConnectionsAccepted))
+		writePrometheusFamily(&output, "meldbase_realtime_outbound_queue_overflows_total", "Realtime connections closed because their outbound frame or byte budget was exceeded.", "counter", counterUint(server.RealtimeOutboundOverflows))
 		writePrometheusFamily(&output, "meldbase_rpc_requests_total", "Valid HTTP and WebSocket RPC call envelopes received.", "counter", counterUint(server.RPCRequests))
 		writePrometheusFamily(&output, "meldbase_rpc_active", "Current executing RPC method handlers.", "gauge", gaugeUint(server.RPCActive))
 		writePrometheusFamily(&output, "meldbase_rpc_succeeded_total", "RPC method executions completed successfully.", "counter", counterUint(server.RPCSucceeded))
@@ -169,6 +192,35 @@ func MarshalPrometheus(sample Sample) []byte {
 	writePrometheusFamily(&output, "meldbase_checkpoint_max_duration_seconds", "Maximum successful V1 checkpoint duration in this process session.", "gauge", gaugeDuration(stats.Durability.CheckpointMaxLatency))
 
 	writePrometheusFamily(&output, "meldbase_storage_page_size_bytes", "Storage page size in bytes.", "gauge", gaugeUint(stats.Storage.PageSize))
+	writePrometheusFamily(&output, "meldbase_storage_generation", "Current physical V2 publication generation.", "gauge", gaugeUint(stats.Storage.Generation))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_protected", "Whether acknowledged V2 commits are gated by an external rollback anchor.", "gauge", gaugeBool(stats.Storage.RollbackProtected))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_sequence", "Last rollback-anchor sequence durably read back in this process.", "gauge", gaugeUint(stats.Storage.RollbackAnchorSequence))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_generation", "Last rollback-anchor generation durably read back in this process.", "gauge", gaugeUint(stats.Storage.RollbackAnchorGeneration))
+	rollbackLag := uint64(0)
+	if stats.Storage.RollbackProtected && stats.Storage.CommitSequence > stats.Storage.RollbackAnchorSequence {
+		rollbackLag = stats.Storage.CommitSequence - stats.Storage.RollbackAnchorSequence
+	}
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_lag", "Logical commits by which the database is ahead of its rollback anchor.", "gauge", gaugeUint(rollbackLag))
+	rollbackGenerationLag := uint64(0)
+	if stats.Storage.RollbackProtected && stats.Storage.Generation > stats.Storage.RollbackAnchorGeneration {
+		rollbackGenerationLag = stats.Storage.Generation - stats.Storage.RollbackAnchorGeneration
+	}
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_generation_lag", "Physical generations by which the database is ahead of its rollback anchor.", "gauge", gaugeUint(rollbackGenerationLag))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_failures_total", "Rollback-anchor durable save or read-back failures.", "counter", counterUint(stats.Storage.RollbackAnchorFailures))
+	anchorStore := stats.Storage.RollbackAnchorStore
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_replicas", "Configured rollback-anchor replicas.", "gauge", gaugeUint(anchorStore.Replicas))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_quorum", "Rollback-anchor replicas required for a majority.", "gauge", gaugeUint(anchorStore.Quorum))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_store_loads_total", "Rollback-anchor store load operations.", "counter", counterUint(anchorStore.Loads))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_store_advances_total", "Rollback-anchor store advance operations.", "counter", counterUint(anchorStore.Advances))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_endpoint_failures_total", "Rollback-anchor endpoint failures observed before an operation completed.", "counter", counterUint(anchorStore.EndpointFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_quorum_failures_total", "Rollback-anchor operations that failed to reach quorum.", "counter", counterUint(anchorStore.QuorumFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_conflicts_total", "Rollback-anchor incomparable-history or identity conflicts.", "counter", counterUint(anchorStore.Conflicts))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_authentication_failures_total", "Rollback-anchor authentication failures.", "counter", counterUint(anchorStore.AuthenticationFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_protocol_failures_total", "Rollback-anchor protocol validation failures.", "counter", counterUint(anchorStore.ProtocolFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_configuration_failures_total", "Rollback-anchor static configuration or member identity failures.", "counter", counterUint(anchorStore.ConfigurationFailures))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_timeout_seconds", "Configured deadline for each rollback-anchor interaction.", "gauge", gaugeDuration(stats.Storage.RollbackAnchorTimeout))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_duration_seconds_total", "Accumulated synchronous rollback-anchor update duration.", "counter", counterNanos(stats.Storage.RollbackAnchorNanos))
+	writePrometheusFamily(&output, "meldbase_storage_rollback_anchor_max_duration_seconds", "Maximum synchronous rollback-anchor update duration.", "gauge", gaugeDuration(stats.Storage.RollbackAnchorMaxLatency))
 	writePrometheusFamily(&output, "meldbase_storage_physical_pages", "Current physical page high-water count.", "gauge", gaugeUint(stats.Storage.PhysicalPages))
 	writePrometheusFamily(&output, "meldbase_storage_used_bytes", "Current V2 physical file high-water bytes.", "gauge", gaugeUint(stats.Storage.StorageUsedBytes))
 	writePrometheusFamily(&output, "meldbase_storage_max_bytes", "Configured V2 physical file high-water quota.", "gauge", gaugeUint(stats.Storage.StorageMaxBytes))

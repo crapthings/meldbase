@@ -84,9 +84,15 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 	}
 	switch format {
 	case StorageFormatV1:
+		if rollbackProtectionConfigured(options.V2RollbackProtection) {
+			return nil, ErrInvalidRollbackProtection
+		}
+		if options.V2PrimaryWriteFence != nil {
+			return nil, fmt.Errorf("%w: primary write fence requires storage V2", ErrUnsupportedFormat)
+		}
 		return OpenV1WithOptions(path, V1Options{Checkpoint: options.V1Checkpoint, Recovery: options.Recovery, ResourceLimits: options.ResourceLimits})
 	case StorageFormatV2:
-		return OpenV2WithOptions(path, V2Options{Recovery: options.Recovery, CommitRetention: options.V2CommitRetention, ResourceLimits: options.ResourceLimits, StorageLimits: options.V2StorageLimits})
+		return OpenV2WithOptions(path, V2Options{Recovery: options.Recovery, CommitRetention: options.V2CommitRetention, ReplayDeliveryTimeout: options.V2ReplayDeliveryTimeout, CommitCoordinator: options.V2CommitCoordinator, ResourceLimits: options.ResourceLimits, StorageLimits: options.V2StorageLimits, RollbackProtection: options.V2RollbackProtection, RequireGraphAudit: options.V2RequireGraphAudit, RequirePrivateFileMode: options.V2RequirePrivateFileMode, PrimaryWriteFence: options.V2PrimaryWriteFence})
 	case StorageFormatUnknown:
 		// A missing main file beside any V1 WAL may represent an incomplete
 		// restore or operator mistake. Never create a V2 main file that would
@@ -96,7 +102,7 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return nil, statErr
 		}
-		return OpenV2WithOptions(path, V2Options{Recovery: options.Recovery, CommitRetention: options.V2CommitRetention, ResourceLimits: options.ResourceLimits, StorageLimits: options.V2StorageLimits})
+		return OpenV2WithOptions(path, V2Options{Recovery: options.Recovery, CommitRetention: options.V2CommitRetention, ReplayDeliveryTimeout: options.V2ReplayDeliveryTimeout, CommitCoordinator: options.V2CommitCoordinator, ResourceLimits: options.ResourceLimits, StorageLimits: options.V2StorageLimits, RollbackProtection: options.V2RollbackProtection, RequireGraphAudit: options.V2RequireGraphAudit, RequirePrivateFileMode: options.V2RequirePrivateFileMode, PrimaryWriteFence: options.V2PrimaryWriteFence})
 	default:
 		return nil, ErrCorrupt
 	}
@@ -186,6 +192,7 @@ func OpenV1WithOptions(path string, options V1Options) (*DB, error) {
 		return nil, err
 	}
 	db.reactive = newReactiveHub(db)
+	db.dispatcher = newChangeDispatcher(db)
 	return db, nil
 }
 
@@ -221,6 +228,9 @@ func (db *DB) Sync() error {
 }
 
 func (db *DB) appendCommit(ctx context.Context, token uint64, changes []Change) error {
+	if db != nil && db.replicaReadOnly {
+		return ErrReplicaReadOnly
+	}
 	if db.durability == nil {
 		return nil
 	}

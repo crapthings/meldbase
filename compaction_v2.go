@@ -14,10 +14,12 @@ import (
 	storagev2 "github.com/crapthings/meldbase/internal/storage/v2"
 )
 
-// CompactToV2 writes the current logical V2 state into a new, atomically
+// CompactToV2 writes one current logical V2 snapshot into a new, atomically
 // published V2 file. It never overwrites destination or mutates the source.
-// The compacted database deliberately receives a new identity and commit-log
-// history, so callers must treat every old resume token as invalid.
+// Writes which commit after the source snapshot is pinned may continue and are
+// intentionally absent from the destination. The compacted database receives a
+// new identity and commit-log history, so callers must treat every old resume
+// token as invalid.
 func (db *DB) CompactToV2(ctx context.Context, destination string) (resultErr error) {
 	options := V2DestinationOptions{}
 	if db != nil {
@@ -65,41 +67,58 @@ func (db *DB) CompactToV2WithOptions(ctx context.Context, destination string, op
 		}
 	}()
 
+	// Only the snapshot admission is under db.mu. The storage snapshot pins its
+	// own immutable root, so the potentially long copy and verification stages
+	// must not stall ordinary V2 writers.
 	db.mu.RLock()
-	defer db.mu.RUnlock()
 	if db.closed {
+		db.mu.RUnlock()
 		return ErrClosed
 	}
 	if db.fatalErr != nil {
+		db.mu.RUnlock()
 		return db.fatalErr
 	}
 	builds, err := store.file.IndexBuilds()
 	if err != nil {
+		db.mu.RUnlock()
 		return mapStorageV2Error(err)
 	}
 	if len(builds) != 0 {
+		db.mu.RUnlock()
 		return fmt.Errorf("%w: %d durable index build(s) must finish or abort before compaction", ErrWriteConflict, len(builds))
 	}
 	if absoluteDestination == store.path {
+		db.mu.RUnlock()
 		return ErrCompactionDestinationExists
 	}
 	if _, err := os.Lstat(absoluteDestination); err == nil {
+		db.mu.RUnlock()
 		return ErrCompactionDestinationExists
 	} else if !errors.Is(err, fs.ErrNotExist) {
+		db.mu.RUnlock()
 		return err
 	}
 	if info, err := os.Stat(store.path); err == nil {
 		db.metrics.compactionInputBytes.Store(uint64(info.Size()))
 	} else {
+		db.mu.RUnlock()
 		return err
 	}
 	source, err := store.file.OpenSnapshot()
 	if err != nil {
+		db.mu.RUnlock()
 		return mapStorageV2Error(err)
 	}
-	defer source.Close()
 	if source.Sequence() != db.token {
+		db.mu.RUnlock()
+		_ = source.Close()
 		return ErrCorrupt
+	}
+	db.mu.RUnlock()
+	defer source.Close()
+	if store.testCompactionSnapshotHook != nil {
+		store.testCompactionSnapshotHook()
 	}
 
 	directory := filepath.Dir(absoluteDestination)

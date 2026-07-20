@@ -21,6 +21,14 @@ server / SDK
 Lower layers never import server, transport, or UI concepts. A committed change
 is the single source for storage visibility, index maintenance, and live events.
 
+Replication and failover remain above this dependency chain. The core can emit
+durable, ordered change history and enforce a locally checked primary write
+fence, but it does not elect leaders or make asynchronous replication lossless.
+The optional primary-lease integrations provide fenced controller primitives;
+they require deployment-owned quorum membership, renewal, identity, clock and
+promotion-readiness policy. A promotion without independently proven follower
+history is refused rather than presented as an HA success.
+
 Durable RPC idempotency follows the same dependency rule. The transport owns
 method authorization and wire envelopes, while V2 owns a private COW system tree
 and compare-and-set record transitions. Internal idempotency state is never a
@@ -184,11 +192,16 @@ The point overlay is admitted while the callback runs, not only at commit:
 tracked points are bounded by `MaxTransactionChanges`, and retained immutable
 base plus current canonical document bytes share `MaxTransactionBytes` with
 staged private System mutations. Replacing the same overlay value adjusts its
-charge instead of accumulating it. The current API deliberately exposes no
-range reads; a future transactional range-query API must add predicate/range
-validation before claiming phantom-safe serializability. V1 is rejected rather
-than extending the frozen legacy WAL transaction-v1 grammar with mixed-operation
-semantics an older reader cannot understand.
+charge instead of accumulating it. `WriteTransaction.Find` scans one pinned
+snapshot plus the callback overlay and records a persistent
+`CollectionPrecondition` containing the collection identity and
+`UpdatedSequence`. The storage transaction validates that fence atomically with
+point reads and writes, so a concurrent document, collection creation or
+published-index change cannot create a phantom. The initial collection-wide
+fence is intentionally conservative; a later index-range fence may reduce
+false conflicts but must preserve this serializability contract. V1 is rejected
+rather than extending the frozen legacy WAL transaction-v1 grammar with
+mixed-operation semantics an older reader cannot understand.
 
 Open freezes a non-sensitive `RecoveryReport` after storage validation and
 before the DB is returned. It describes selected Meta/root redundancy, removed
@@ -269,7 +282,11 @@ index also deletes through local borrow/merge rather than rebuilding the tree.
 mutating them; an unknown non-empty or mixed-family file fails closed.
 `InspectStorageFormat` checksum-validates both Meta slots and reports the newest
 revision/features/identity without acquiring the writer lock. Its compatibility
-bit is a negotiation result, not a substitute for `Open` graph validation.
+bit is a negotiation result, not a substitute for structural validation.
+Normal V2 open validates the selected Meta/root and required catalog metadata,
+not every protected page. `V2Options.RequireGraphAudit` is the explicit startup
+mode that walks both protected graphs before serving; it is structural only and
+is intentionally opt-in because its cost grows with database size.
 `VerifyV2File` occupies the explicit offline layer between them: a shared-lock,
 read-only audit reuses normal Meta selection, walks both protected business
 graphs, proves published Secondary-to-Primary key correctness and
@@ -326,9 +343,11 @@ writer boundary, copies and hashes the exact page-aligned file, performs physica
 reachability plus public reopen verification, and publishes through a synced
 no-overwrite destination link. It preserves database identity, Meta generation
 and Commit Log history, so only one descendant may be writable in that identity
-domain. `CompactToV2` rebuilds live logical state under a new identity when an
-independent fork is intended. Both operations serialize with V2 maintenance and
-compaction, and expose only fixed aggregate observability fields.
+domain. `CompactToV2` rebuilds one pinned logical snapshot under a new identity
+when an independent fork is intended. It serializes with another compaction and
+with close, but releases the database writer immediately after snapshot
+admission; commits that follow that boundary remain in the source only. Both
+operations expose only fixed aggregate observability fields.
 
 ## Concurrency model
 

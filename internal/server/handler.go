@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -31,6 +32,9 @@ type Config struct {
 	ResumeTokenKey                 []byte
 	ResumeTokenTTL                 time.Duration
 	MaxBodyBytes                   int
+	MaxQueryResultBytes            int
+	MaxRealtimeFrameBytes          int
+	MaxRealtimeOutboundBytes       int
 	MaxSubscriptionsPerConnection  int
 	QueryLimits                    meldbase.QueryLimits
 	ReplaySource                   meldbase.QueryReplaySource
@@ -91,6 +95,24 @@ func New(config Config) (*Handler, error) {
 	}
 	if config.MaxBodyBytes <= 0 {
 		config.MaxBodyBytes = 1 << 20
+	}
+	if config.MaxQueryResultBytes <= 0 {
+		config.MaxQueryResultBytes = config.MaxBodyBytes
+	}
+	if config.MaxQueryResultBytes > 16<<20 {
+		return nil, errors.New("max query result bytes exceeds 16 MiB")
+	}
+	if config.MaxRealtimeFrameBytes <= 0 {
+		config.MaxRealtimeFrameBytes = config.MaxBodyBytes
+	}
+	if config.MaxRealtimeFrameBytes < 1024 || config.MaxRealtimeFrameBytes > 16<<20 {
+		return nil, errors.New("max realtime frame bytes must be between 1 KiB and 16 MiB")
+	}
+	if config.MaxRealtimeOutboundBytes <= 0 {
+		config.MaxRealtimeOutboundBytes = 8 * config.MaxRealtimeFrameBytes
+	}
+	if config.MaxRealtimeOutboundBytes < config.MaxRealtimeFrameBytes || config.MaxRealtimeOutboundBytes > 64<<20 {
+		return nil, errors.New("max realtime outbound bytes must be between one frame and 64 MiB")
 	}
 	if config.MaxSubscriptionsPerConnection <= 0 {
 		config.MaxSubscriptionsPerConnection = 32
@@ -497,19 +519,29 @@ func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		documents, err := cursor.All(r.Context())
+		defer cursor.Close()
+		budget, err := newWirePayloadBudget(h.config.MaxQueryResultBytes, httpQueryEnvelopeBytes)
 		if err != nil {
 			return err
 		}
-		encoded = make([]json.RawMessage, len(documents))
-		for i, document := range documents {
+		encoded = make([]json.RawMessage, 0)
+		for {
+			document, exists, err := cursor.Next(r.Context())
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return nil
+			}
 			raw, err := meldbase.MarshalWireDocument(project(document, policy))
 			if err != nil {
 				return err
 			}
-			encoded[i] = raw
+			if err := budget.add(raw); err != nil {
+				return err
+			}
+			encoded = append(encoded, raw)
 		}
-		return nil
 	})
 	if !authorized {
 		writeError(w, http.StatusForbidden, "policy_expired")
@@ -567,17 +599,21 @@ func (h *Handler) issueTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 type socketSession struct {
-	handler    *Handler
-	principal  Principal
-	ctx        context.Context
-	cancel     context.CancelFunc
-	connection *websocket.Conn
-	outgoing   chan any
-	mu         sync.Mutex
-	byRequest  map[string]*socketSubscription
-	byServer   map[string]*socketSubscription
-	rpcCalls   map[string]context.CancelFunc
+	handler       *Handler
+	principal     Principal
+	ctx           context.Context
+	cancel        context.CancelFunc
+	connection    *websocket.Conn
+	outgoing      chan socketOutbound
+	outgoingMu    sync.Mutex
+	outgoingBytes uint64
+	mu            sync.Mutex
+	byRequest     map[string]*socketSubscription
+	byServer      map[string]*socketSubscription
+	rpcCalls      map[string]context.CancelFunc
 }
+
+type socketOutbound struct{ data []byte }
 type socketSubscription struct {
 	requestID, serverID string
 	cancel              context.CancelFunc
@@ -591,7 +627,7 @@ func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
 	connection.SetReadLimit(int64(h.config.MaxBodyBytes))
 	ctx, cancel := context.WithCancel(context.Background())
 	session := &socketSession{
-		handler: h, ctx: ctx, cancel: cancel, connection: connection, outgoing: make(chan any, 64),
+		handler: h, ctx: ctx, cancel: cancel, connection: connection, outgoing: make(chan socketOutbound, 64),
 		byRequest: make(map[string]*socketSubscription), byServer: make(map[string]*socketSubscription),
 		rpcCalls: make(map[string]context.CancelFunc),
 	}
@@ -853,7 +889,7 @@ func (s *socketSession) startResumedDeltaSubscription(requestID, collection stri
 					if err != nil {
 						return err
 					}
-					operations, err := encodeVisibleDelta(visible)
+					operations, err := encodeVisibleDelta(visible, s.handler.config.MaxRealtimeFrameBytes)
 					if err != nil {
 						return err
 					}
@@ -871,7 +907,11 @@ func (s *socketSession) startResumedDeltaSubscription(requestID, collection stri
 					return
 				}
 				if err != nil {
-					s.policyResync(subscription)
+					if engineErrorCode(err, "") == "resource_limit_exceeded" {
+						s.subscriptionError(requestID, "resource_limit_exceeded")
+					} else {
+						s.policyResync(subscription)
+					}
 					return
 				}
 			}
@@ -923,13 +963,9 @@ func (s *socketSession) startSnapshotSubscription(requestID, collection string, 
 					return
 				}
 				authorized, err := underQueryPolicy(policy, func() error {
-					documents := make([]json.RawMessage, len(snapshot.Documents))
-					for i, document := range snapshot.Documents {
-						raw, err := meldbase.MarshalWireDocument(project(document, policy))
-						if err != nil {
-							return err
-						}
-						documents[i] = raw
+					documents, err := encodeProjectedDocuments(snapshot.Documents, policy, s.handler.config.MaxRealtimeFrameBytes, realtimeEnvelopeBytes)
+					if err != nil {
+						return err
 					}
 					resumeToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, snapshot.Token)
 					if err != nil {
@@ -942,7 +978,7 @@ func (s *socketSession) startSnapshotSubscription(requestID, collection string, 
 					return
 				}
 				if err != nil {
-					s.subscriptionError(requestID, "snapshot_failed")
+					s.subscriptionError(requestID, engineErrorCode(err, "snapshot_failed"))
 					return
 				}
 			}
@@ -983,7 +1019,7 @@ func (s *socketSession) startDeltaSubscription(requestID, collection string, que
 		if err != nil {
 			return err
 		}
-		initialDocuments, err := encodeVisibleDocuments(initialVisible)
+		initialDocuments, err := encodeVisibleDocuments(initialVisible, s.handler.config.MaxRealtimeFrameBytes)
 		if err != nil {
 			return err
 		}
@@ -1003,7 +1039,7 @@ func (s *socketSession) startDeltaSubscription(requestID, collection string, que
 		cancel()
 		live.Close()
 		s.remove(subscription)
-		s.subscriptionError(requestID, "initial_snapshot_failed")
+		s.subscriptionError(requestID, engineErrorCode(err, "initial_snapshot_failed"))
 		return nil
 	}
 	go func() {
@@ -1039,7 +1075,7 @@ func (s *socketSession) startDeltaSubscription(requestID, collection string, que
 					if err != nil {
 						return err
 					}
-					operations, err := encodeVisibleDelta(visible)
+					operations, err := encodeVisibleDelta(visible, s.handler.config.MaxRealtimeFrameBytes)
 					if err != nil {
 						return err
 					}
@@ -1057,7 +1093,7 @@ func (s *socketSession) startDeltaSubscription(requestID, collection string, que
 					return
 				}
 				if err != nil {
-					s.subscriptionError(requestID, "delta_failed")
+					s.subscriptionError(requestID, engineErrorCode(err, "delta_failed"))
 					return
 				}
 			}
@@ -1200,11 +1236,48 @@ func (overlay *visibilityOverlay) insertBefore(node, anchor *visibilityNode) {
 	overlay.byID[node.id] = node
 }
 
-func encodeVisibleDocuments(documents []meldbase.Document) ([]json.RawMessage, error) {
+const (
+	// The outer realtime envelope contains request/subscription IDs and opaque
+	// resume tokens. Reserve bounded room before accumulating document bytes so
+	// oversized snapshots and deltas fail before the final WebSocket marshal.
+	realtimeEnvelopeBytes  = 512
+	httpQueryEnvelopeBytes = 64
+)
+
+type wirePayloadBudget struct {
+	limit int
+	used  int
+}
+
+func newWirePayloadBudget(limit, reserved int) (*wirePayloadBudget, error) {
+	if limit <= reserved {
+		return nil, fmt.Errorf("%w: result budget %d cannot hold envelope", meldbase.ErrResourceLimit, limit)
+	}
+	return &wirePayloadBudget{limit: limit - reserved}, nil
+}
+
+func (budget *wirePayloadBudget) add(raw []byte) error {
+	// One byte covers either the surrounding array delimiter or the comma before
+	// this item. The check is overflow-safe because lengths are non-negative.
+	if len(raw) > budget.limit-budget.used-1 {
+		return fmt.Errorf("%w: encoded result exceeds %d bytes", meldbase.ErrResourceLimit, budget.limit)
+	}
+	budget.used += len(raw) + 1
+	return nil
+}
+
+func encodeProjectedDocuments(documents []meldbase.Document, policy QueryPolicy, limit, reserved int) ([]json.RawMessage, error) {
+	budget, err := newWirePayloadBudget(limit, reserved)
+	if err != nil {
+		return nil, err
+	}
 	encoded := make([]json.RawMessage, len(documents))
 	for index, document := range documents {
-		raw, err := meldbase.MarshalWireDocument(document)
+		raw, err := meldbase.MarshalWireDocument(project(document, policy))
 		if err != nil {
+			return nil, err
+		}
+		if err := budget.add(raw); err != nil {
 			return nil, err
 		}
 		encoded[index] = raw
@@ -1212,8 +1285,31 @@ func encodeVisibleDocuments(documents []meldbase.Document) ([]json.RawMessage, e
 	return encoded, nil
 }
 
-func encodeVisibleDelta(delta meldbase.QueryDelta) ([]map[string]any, error) {
-	operations := make([]map[string]any, len(delta.Operations))
+func encodeVisibleDocuments(documents []meldbase.Document, limit int) ([]json.RawMessage, error) {
+	budget, err := newWirePayloadBudget(limit, realtimeEnvelopeBytes)
+	if err != nil {
+		return nil, err
+	}
+	encoded := make([]json.RawMessage, len(documents))
+	for index, document := range documents {
+		raw, err := meldbase.MarshalWireDocument(document)
+		if err != nil {
+			return nil, err
+		}
+		if err := budget.add(raw); err != nil {
+			return nil, err
+		}
+		encoded[index] = raw
+	}
+	return encoded, nil
+}
+
+func encodeVisibleDelta(delta meldbase.QueryDelta, limit int) ([]json.RawMessage, error) {
+	budget, err := newWirePayloadBudget(limit, realtimeEnvelopeBytes)
+	if err != nil {
+		return nil, err
+	}
+	operations := make([]json.RawMessage, len(delta.Operations))
 	for index, operation := range delta.Operations {
 		wire := map[string]any{"op": string(operation.Kind), "id": operation.DocumentID.String()}
 		if !operation.BeforeID.IsZero() {
@@ -1226,7 +1322,14 @@ func encodeVisibleDelta(delta meldbase.QueryDelta) ([]map[string]any, error) {
 			}
 			wire["document"] = json.RawMessage(raw)
 		}
-		operations[index] = wire
+		raw, err := json.Marshal(wire)
+		if err != nil {
+			return nil, err
+		}
+		if err := budget.add(raw); err != nil {
+			return nil, err
+		}
+		operations[index] = raw
 	}
 	return operations, nil
 }
@@ -1239,8 +1342,9 @@ func (s *socketSession) writeLoop(done chan<- error) {
 			return
 		case message := <-s.outgoing:
 			ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
-			err := writeSocketJSON(ctx, s.connection, message)
+			err := s.connection.Write(ctx, websocket.MessageText, message.data)
 			cancel()
+			s.releaseOutgoing(uint64(len(message.data)))
 			if err != nil {
 				done <- err
 				s.cancel()
@@ -1250,13 +1354,46 @@ func (s *socketSession) writeLoop(done chan<- error) {
 	}
 }
 func (s *socketSession) enqueue(message any) bool {
-	select {
-	case s.outgoing <- message:
-		return true
-	default:
+	if s == nil || s.handler == nil {
+		return false
+	}
+	data, err := json.Marshal(message)
+	if err != nil || len(data) == 0 || len(data) > s.handler.config.MaxRealtimeFrameBytes {
+		s.handler.metrics.realtimeOutboundOverflows.Add(1)
 		s.cancel()
 		return false
 	}
+	bytes := uint64(len(data))
+	s.outgoingMu.Lock()
+	defer s.outgoingMu.Unlock()
+	if s.ctx.Err() != nil || bytes > uint64(s.handler.config.MaxRealtimeOutboundBytes) ||
+		s.outgoingBytes > uint64(s.handler.config.MaxRealtimeOutboundBytes)-bytes {
+		s.handler.metrics.realtimeOutboundOverflows.Add(1)
+		s.cancel()
+		return false
+	}
+	select {
+	case s.outgoing <- socketOutbound{data: data}:
+		s.outgoingBytes += bytes
+		return true
+	default:
+		s.handler.metrics.realtimeOutboundOverflows.Add(1)
+		s.cancel()
+		return false
+	}
+}
+
+func (s *socketSession) releaseOutgoing(bytes uint64) {
+	if s == nil || bytes == 0 {
+		return
+	}
+	s.outgoingMu.Lock()
+	if bytes > s.outgoingBytes {
+		s.outgoingBytes = 0
+	} else {
+		s.outgoingBytes -= bytes
+	}
+	s.outgoingMu.Unlock()
 }
 func (s *socketSession) subscriptionError(requestID, code string) {
 	s.enqueue(rpcErrorMessage(requestID, code))
@@ -1398,6 +1535,15 @@ func writeEngineError(w http.ResponseWriter, err error) {
 
 func engineErrorStatusCode(err error) (int, string) {
 	status, code := http.StatusInternalServerError, "internal"
+	// Admission cancellation can race a durable V2 final-Meta acknowledgement.
+	// It must win over the wrapped Context error below so a client never treats
+	// an acknowledged mutation as safely canceled and retries it blindly.
+	if errors.Is(err, meldbase.ErrCommitOutcomeUnknown) {
+		// Protocol v1 deliberately has one fixed outcome-unknown code shared by
+		// RPC and mutations. Adding a generic synonym would be a wire-contract
+		// revision, not an implementation detail.
+		return http.StatusConflict, "rpc_outcome_unknown"
+	}
 	// ErrDurability is a fail-stop state: reads can continue, but the result of
 	// the write that entered the state must not be exposed as an ordinary 500.
 	// ErrClosed makes both reads and writes unavailable. The public transport

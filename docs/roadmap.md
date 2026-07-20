@@ -150,7 +150,8 @@
   rejection, V2 required-feature negotiation, resumable shadow construction,
   backup/compaction/verification coverage and an additive golden fixture.
 - [x] Safe no-overwrite `CompactToV2` logical compaction with verification,
-  new identity/resume-token boundary and bounded observability.
+  snapshot-at-admission concurrent-write semantics, Close coordination, new
+  identity/resume-token boundary and bounded observability.
 - [x] Explicit epoch-safe page reuse protected by both valid meta roots and all
   active reader/replay roots, with cache-safe post-publication reuse.
 - [x] Add disk-full publication/reuse fault matrices and a configurable large-DB
@@ -220,11 +221,65 @@
   and archived per-phase evidence.
 - [x] Add a strict cross-receipt qualification verifier that binds the clean
   capability probe and race-enabled release soak to one revision and exact
-  target volume, hashes both inputs, distinguishes Level 3 from Level 4, and
-  requires a separately secured destructive-test record before emitting a
-  production-qualified packet.
+  target volume, hashes every input, distinguishes Level 3 storage soak, Level 4
+  destructive storage and Level 5 rollback-protection evidence, and requires a
+  separately secured destructive record plus complete signed phase/history
+  trust-plane evidence before emitting a production-qualified result, then
+  wraps it in an independently signed release envelope whose offline verifier
+  recomputes every original input.
+- [x] Replace the operator-entered destructive artifact-set digest with a
+  deterministic exact-tree index over canonical relative paths, sizes and
+  SHA-256 digests; require every manifest input and referenced artifact to be
+  indexed, reject links/path escape/tree mutation, and rehash it again during
+  Level 4 and final Level 5 offline verification.
+- [x] Replace arbitrary infrastructure text records with a Linux-only strict
+  environment capture that binds the clean revision, eligible target/control
+  volume, exact mountinfo, kernel, sysfs block-device/slave and cache policy,
+  controller method, private host fingerprint and indexed operator
+  authorization; re-parse and cross-check it during manifest assembly and every
+  Level 4/5 verification.
+- [x] Make Level 4/5 verification locate the original process, ENOSPC,
+  corruption and complete power-matrix receipts by unique artifact-index
+  digest, rerun their retained crash-image/oracle/controller/corruption checks,
+  reconstruct the schema-6 manifest and reject plausible hand-edited summaries.
+- [x] Add immutable-receipt artifact-root relocation: rebase old absolute
+  process/ENOSPC/corruption/power references through indexed content digests and
+  unique longest canonical relative-path suffixes, preserving canonical
+  aggregate hashes while rejecting renamed, escaped or ambiguous layouts.
+- [x] Add a strict Linux qualification session: freeze revision/environment,
+  volume and controller identity before trials; enforce the fixed destructive
+  sequence and power matrix through an append-only hash-chain journal; replay
+  every receipt semantically before sealing the exact-tree artifact index.
+- [x] Bind a strict session to the exact retained executable bytes, runtime and
+  non-root operator UID, and connect its fixed power segment to the resumable
+  QEMU reset/process-loss matrix without silently deleting partial evidence.
+- [x] Make the session non-bypassable at release time: schema-6 destructive
+  manifests bind the indexed plan, final journal event and retained executable;
+  Level 4/5 recomputation replays the relocatable 20-event chain, exact receipt
+  order, fixed power IDs/boundaries and non-overlapping chronology.
 - [ ] Add multi-hour release soak evidence under concurrent writes, readers,
   reclamation conflicts and repeated reopen.
+
+## M9 — production operation and fenced HA
+
+- [x] Provide a signed local V2 primary write fence, controller-side exact-CAS
+  lease primitives, authenticated quorum-member storage, private mTLS
+  grant/renew/revoke transport, certificate rotation pins and a fail-closed
+  primary renewal supervisor.
+- [x] Provide authenticated bootstrap/tail replication transports, a read-only
+  follower state machine, durable source acknowledgements and a conservative
+  connected-source promotion-readiness policy.
+- [ ] Define and operate an independent controller membership/election and
+  client-routing service, including controller outage, node replacement,
+  certificate/key rotation and old-primary isolation procedures. This is a
+  deployment control plane, not a hidden database-local election feature.
+- [ ] Produce retained real-volume Level-4/5 filesystem and multi-hour release
+  soak evidence for each supported production matrix before claiming a
+  production-qualified persistence or HA deployment.
+- [ ] Exercise a complete failure matrix on independent nodes: source loss,
+  controller loss, stale old primary, quorum minority, follower lag, restore,
+  and operator-led promotion. Automatic partitioned promotion remains out of
+  scope without a synchronous/quorum-commit RPO design.
 
 Explicitly deferred: MongoDB wire/BSON compatibility, clustering, sharding,
 distributed transactions, offline conflict resolution, geospatial/full-text/vector

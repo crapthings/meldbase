@@ -90,6 +90,120 @@ Sanitized 30-second stderr heartbeats expose phase progress and aggregate work
 without changing the canonical receipt or revealing database paths and values.
 `meld qualification-check` binds it to the schema-2 capability receipt. This is
 Level 3 evidence; real ENOSPC and power-cut qualification remains separate.
+The first Level 4 runner, `meld destructive-process-check`, now sends a real
+`SIGKILL` to a separate writer and produces an append-only-oracle receipt with
+old/new logical-state hashes, lock reacquisition and full offline verification.
+The Linux-only `destructive-volume-check` and `destructive-enospc-check` pair
+adds a token-gated, non-root, independently mounted disposable-volume runner
+that reaches every V2 publication boundary, fills the real filesystem through
+kernel `fallocate` until `ENOSPC`, kills the blocked writer and verifies recovery.
+`destructive-qemu-reset` captures the QMP block inventory, exact hard-reset
+command/response and host-originated RESET event. `destructive-power-prepare`
+and `destructive-power-recover` bind that proof to the exact boundary marker,
+Linux boot-ID change and untouched crash image. `destructive-manifest-build`
+re-verifies all retained artifacts and
+assembles the strict Level 4 record. The reference
+[`meld-power-redfish-adapter`](docs/redfish-power-adapter.md) performs a
+target-bound `ForceOff`/observed-Off/On/observed-On cycle and embeds its
+redacted hardware log in the signed physical-controller proof. Level 4 storage qualification still
+requires actually executing the complete external power-cut boundary matrix
+described in [filesystem qualification](docs/filesystem-qualification.md), and
+sets only `storageQualified=true`. A production claim requires the
+Level 5 gate, which additionally verifies the complete signed rollback-anchor
+phase chain and a separate multi-agent concurrent history, including clean
+release provenance for every controller and execution agent.
+Production Level 5 output is an independently signed, no-overwrite release
+envelope. `qualification-packet-verify` requires all original evidence and
+recomputes the qualification instead of trusting the archived boolean or its
+signature alone. Destructive evidence is rooted in a machine-generated
+content index for the exact secured artifact tree; added, removed, substituted
+or symlinked files fail Level 4 and Level 5 verification. A strict Linux
+environment capture additionally binds the target mount, kernel, block-device
+and cache-policy chain, external controller method and indexed operator
+authorization to the same campaign. Final verification uniquely locates every
+original destructive receipt from that index, reruns its retained-artifact
+checks and reconstructs the manifest rather than trusting its summary. The
+complete secured tree can be relocated without changing receipt bytes; indexed
+digests plus unique longest relative-path suffixes safely rebase old absolute
+artifact references.
+For the stronger VM-process loss case, `destructive-qemu-process-kill` verifies
+direct-I/O target binding, terminates QEMU with a real host `SIGKILL`, captures
+its wait status, and boots a new paused QEMU process before publishing evidence
+and continuing recovery.
+Power-matrix aggregation rejects repeated boot transitions and mixed controller
+methods, so reset and whole-process-loss evidence cannot be combined to satisfy
+coverage.
+`destructive-corruption-check` complements the crash matrices with a
+deterministic silent-bit-flip campaign over Meta, page header, payload, checksum
+and page-tail offsets. Every successful verification must still be a complete
+published generation with a full index semantic audit; the retained receipt can
+be independently replayed against the exact source database.
+The QEMU `blkdebug` EIO runner adds a distinct kernel-visible media-error case:
+it maps the seeded database's real ext4 sectors, injects write-only `EIO`, binds
+QMP `BLOCK_IO_ERROR` events to the exact config/image pair, and proves that the
+first write fails, subsequent writes remain poisoned, reads remain available
+and offline recovery preserves the previously published generation.
+The separate flush-state runner uses a durable guest `ready` → host QMP `arm`
+→ guest transaction handshake, then injects one `flush_to_disk`/flush `EIO` on
+an ext4-backed virtio device. Its retained proof records both the exact injected
+rule and QMP's actual operation classification, and binds old-generation
+recovery to the seed and handshake receipts. This verifies handling of a
+reported persistence-barrier failure; it does not claim that successful flushes
+are truthful or cover stale reads.
+An explicit volatile-overlay negative control covers that distinction: it
+acknowledges a commit in a QEMU temporary layer, kills QEMU with `SIGKILL`,
+proves the durable base image never changed, and reboots without the layer. The
+harness must classify the resulting sequence rollback as unsafe. Public V2
+opening supports a synchronous external rollback anchor; a stale but
+checksum-valid generation is rejected before the database file is modified:
+
+```go
+anchor, err := meldbase.NewFileRollbackAnchorStore("/trusted/app.anchor")
+if err != nil {
+	return err
+}
+db, err := meldbase.OpenV2WithOptions("/data/app.meld", meldbase.V2Options{
+	RollbackProtection: meldbase.V2RollbackProtection{
+		AnchorStore:      anchor,
+		InitializeAnchor: true, // audited first provisioning only
+	},
+})
+```
+
+Subsequent opens omit `InitializeAnchor`. Each logical commit or acknowledged
+maintenance generation first makes the database durable, then atomically
+advances and reads back the independent identity/sequence/generation anchor,
+and only then reports success. An anchor failure or the default 10-second
+anchor-operation timeout disables further writes. Failure is an ambiguous
+outcome—the anchor may already have advanced before its response was lost—so
+callers must not retry business logic as though the commit were absent. Custom authenticated remote
+quorum or TPM-backed monotonic stores implement the context-aware
+`RollbackAnchorStore` contract.
+The anchor must be on independently trusted storage; placing it beside the
+database cannot detect whole-device rollback.
+
+[`integrations/anchorhttp`](integrations/anchorhttp) provides a reference
+HTTPS/HMAC majority-read/majority-write store for one or an odd `2f+1` static
+set of independent nodes. Its fault tests cover stale minority state, one-node
+partition, duplicate advance, loss of quorum, authentication tampering, timeout,
+rejoin and rejection of a rolled-back database. It is crash-fault tolerant, not
+Byzantine-fault tolerant; safe dynamic membership remains separate work.
+Protocol v2 signs an automatically derived full-membership configuration and
+expected member identity, while every node directory is durably bound before
+serving. [`meld anchor-serve`](docs/rollback-anchor-service.md) runs a standalone
+TLS 1.3 + mTLS member with private-file enforcement and graceful shutdown.
+The same guide documents the five-phase `meld anchor-qualification` workflow,
+whose Ed25519-signed receipt chain binds full-member probes, offline database
+verification and external network-controller evidence.
+It also documents `history-agent`/`history-run`, which execute a concurrent plan
+through independently signed, mTLS-authenticated and durably journaled agents,
+plus `history-sign`/`history-verify`, which bind the resulting controller
+ordinals, stable final member state and recomputed linearizability result into a
+separate signed receipt.
+The [static safety model](docs/rollback-anchor-formal-model.md) separately
+enumerates quorum publication/recovery behavior and documents the bounded TLA+
+specification, concurrent scheduler, multi-process history checker and their
+fault-model boundaries.
 
 Upgrade automation can inspect the newest checksum-valid Meta envelope without
 opening or locking the database:
@@ -172,12 +286,18 @@ unique-key conflict. Uniqueness applies only to complete tuples. Legacy V1
 deliberately rejects compound and descending definitions.
 
 `RunWriteTransaction` reads one immutable V2 snapshot, supports `GetOne`,
-`InsertOne`, `ReplaceOne`, `UpdateOne` and `DeleteOne`, and publishes all
-effective changes under one commit token. It provides read-your-writes inside
-the callback. A callback error or `ErrWriteConflict` publishes nothing; a no-op
-does not advance the sequence. Keep callbacks short: do not retain the
-transaction, call normal database methods, perform network I/O or create
-external side effects. Legacy V1 and the in-memory engine return
+`Find`, `InsertOne`, `ReplaceOne`, `UpdateOne` and `DeleteOne`, and publishes
+all effective changes under one commit token. `Find` uses the same compiled
+query syntax and sees earlier writes from its callback. It installs a durable
+collection snapshot fence, so any concurrent document or published-index change
+to that collection returns `ErrWriteConflict` rather than admitting a phantom.
+The first implementation intentionally uses a collection-wide conflict domain;
+it is serializable but may conflict for unrelated writes in the same
+collection. Candidate count and bytes are bounded by the transaction resource
+limits. A callback error or `ErrWriteConflict` publishes nothing; a no-op does
+not advance the sequence. Keep callbacks short: do not retain the transaction,
+call normal database methods, perform network I/O or create external side
+effects. Legacy V1 and the in-memory engine return
 `ErrWriteTransactionUnsupported`.
 
 The TypeScript remote client also provides typed request/response RPC. HTTP is
@@ -264,7 +384,9 @@ definitions, but intentionally assigns a new database identity. Existing V1
 realtime resume tokens therefore resynchronize instead of crossing formats.
 
 V2 can compact live state into a separately verified file without overwriting
-the source:
+the source. It pins one source snapshot briefly, then copies and verifies it
+without blocking later commits; writes that finish after that snapshot are not
+included in the compacted file:
 
 ```go
 if err := db.CompactToV2(ctx, "app-compacted.meld2"); err != nil {
@@ -356,6 +478,17 @@ if errors.Is(err, meldbase.ErrRecoveryRequired) {
 
 There is no online API for clearing durability fail-stop.
 
+For a production process that prefers a slower startup to serving from a
+structurally corrupt deep V2 page, opt into the protected-graph audit. It runs
+before automatic crash-tail removal and does not replace the offline semantic
+index verifier:
+
+```go
+db, err := meldbase.OpenV2WithOptions("app.meld2", meldbase.V2Options{
+  RequireGraphAudit: true,
+})
+```
+
 Write admission and V2 replay history are configured at open and remain
 immutable for that handle. Zero fields select the production defaults:
 
@@ -365,6 +498,9 @@ db, err := meldbase.OpenWithOptions("app.meld2", meldbase.OpenOptions{
     MaxCommits: 25_000,
     MaxBytes:   512 << 20,
   },
+  // A full replay-consumer buffer is terminated after this interval so it
+  // cannot indefinitely pin retained history. Zero selects five seconds.
+  V2ReplayDeliveryTimeout: 5 * time.Second,
   V2StorageLimits: meldbase.V2StorageLimits{MaxFileBytes: 16 << 30},
   ResourceLimits: meldbase.ResourceLimits{
     MaxDocumentBytes:      8 << 20,
@@ -372,6 +508,8 @@ db, err := meldbase.OpenWithOptions("app.meld2", meldbase.OpenOptions{
     MaxTransactionChanges: 5_000,
     MaxIndexBuildEntries:  500_000,
     MaxIndexBuildBytes:    128 << 20,
+    MaxReactiveViewDocuments: 10_000,
+    MaxReactiveViewBytes:     64 << 20,
   },
 })
 ```
@@ -538,6 +676,28 @@ go run ./cmd/meld serve \
 it is not a production authentication mode. A production embedding supplies the
 server `Authenticator` and `Authorizer` implementations itself.
 
+The development server can exercise the same fail-closed V2 anchor lifecycle.
+On the first audited provisioning only, use `--rollback-anchor-init`; omit it on
+every subsequent start:
+
+```sh
+go run ./cmd/meld serve \
+  --db /data/app.meld \
+  --rollback-anchor /trusted/app.anchor \
+  --rollback-anchor-init \
+  --rollback-anchor-timeout 10s \
+  --dev-no-auth
+```
+
+`/trusted` must already exist and, for actual rollback protection, must not be
+on the same failure/rollback domain as `/data`.
+
+The CLI can also connect to the independently deployed TLS 1.3/mTLS quorum with
+the complete `--rollback-anchor-cluster`, repeated
+`--rollback-anchor-replica member=https://endpoint`, name, HMAC key-file, CA and
+client-certificate flags. See the
+[rollback-anchor service deployment guide](docs/rollback-anchor-service.md).
+
 To experience the separately secured embedded observability panel:
 
 ```sh
@@ -560,6 +720,9 @@ events without exposing business data. It also shows Commit Log retention
 pressure and configured/rejected write resource budgets. Use
 `--admin-diagnostics-all` only for short sessions that need every query/commit;
 the default diagnostic mode retains bounded slow and failed operations.
+The storage panel also exposes physical generation, rollback protection,
+anchor sequence/generation lag, failures, maximum latency and configured
+timeout.
 Prometheus can scrape the separately authenticated `GET /metrics` endpoint when
 `--admin-metrics` is enabled.
 

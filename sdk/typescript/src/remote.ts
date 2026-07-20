@@ -3,7 +3,7 @@ import type { QueryOptions } from "./query.js";
 import type { SnapshotListener, Unsubscribe } from "./local.js";
 import { compileQuery } from "./query.js";
 import { compileUpdate, encodeMutationSpec } from "./mutation.js";
-import { cloneDocument } from "./safe-value.js";
+import { cloneDocument, newDocumentID } from "./safe-value.js";
 import { decodeDocument, decodeValue, encodeInputDocument, encodeQuerySpec, encodeValue, type WireQuerySpec, type WireValue } from "./wire.js";
 import { decodeProtocolDescriptor, MELDBASE_PROTOCOL_VERSION, supportsProtocol, type ProtocolDescriptor } from "./protocol.js";
 
@@ -194,13 +194,20 @@ export class MeldbaseClient {
   }
 
   async insertOne<T extends Document>(collection: string, document: InputDocument, signal?: AbortSignal): Promise<T> {
+		// The client owns the document identity before network admission. This is
+		// essential for reconciling a post-admission cancellation: the server may
+		// have committed even though this call cannot receive its success body.
+		const id = document._id ?? newDocumentID();
+		const input: InputDocument = document._id === undefined ? { ...document, _id: id } : document;
     const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/documents`, {
-      method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, document: encodeInputDocument(document) }), ...(signal ? { signal } : {}),
+      method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, document: encodeInputDocument(input) }), ...(signal ? { signal } : {}),
     });
     if (!response.ok) await throwRemoteError(response, this.#maxInboundBytes, "insert");
     const body = await boundedJSON(response, this.#maxInboundBytes);
     if (!record(body) || !exactKeys(body, ["version", "document"]) || body.version !== 1 || body.document === undefined) throw new Error("Malformed insert response");
-    return decodeDocument(body.document) as T;
+		const inserted = decodeDocument(body.document) as T;
+		if (inserted._id !== id) throw new Error("Insert response changed document ID");
+		return inserted;
   }
 
   async executeMutation(collection: string, action: "updateOne" | "updateMany" | "deleteOne" | "deleteMany", query: QuerySpec, update?: MutationSpec, signal?: AbortSignal): Promise<MutationResult | DeleteResult> {

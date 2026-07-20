@@ -47,7 +47,38 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		`meldbase_write_transaction_outcomes_total{outcome="noop"} 2`,
 		`meldbase_write_transaction_outcomes_total{outcome="conflict"} 3`,
 		`meldbase_write_transaction_outcomes_total{outcome="aborted"} 1`,
+		`meldbase_commit_coordinator_enabled 1`,
+		`meldbase_commit_coordinator_pending 3`,
+		`meldbase_commit_coordinator_pending_capacity 8`,
+		`meldbase_commit_coordinator_admitted_total 21`,
+		`meldbase_commit_coordinator_admission_rejected_total 2`,
+		`meldbase_commit_coordinator_batches_total 10`,
+		`meldbase_commit_coordinator_grouped_transactions_total 20`,
+		`meldbase_commit_coordinator_outcome_unknown_total 1`,
+		`meldbase_primary_write_fence_configured 1`,
+		`meldbase_primary_write_fence_enforced 1`,
+		`meldbase_primary_write_fence_checks_total 9`,
+		`meldbase_primary_write_fence_rejections_total 2`,
 		`meldbase_storage_transactions_total{outcome="committed"} 13`,
+		`meldbase_storage_generation 5`,
+		`meldbase_storage_rollback_protected 1`,
+		`meldbase_storage_rollback_anchor_sequence 1`,
+		`meldbase_storage_rollback_anchor_generation 4`,
+		`meldbase_storage_rollback_anchor_lag 1`,
+		`meldbase_storage_rollback_anchor_generation_lag 1`,
+		`meldbase_storage_rollback_anchor_failures_total 2`,
+		`meldbase_storage_rollback_anchor_replicas 3`,
+		`meldbase_storage_rollback_anchor_quorum 2`,
+		`meldbase_storage_rollback_anchor_store_loads_total 7`,
+		`meldbase_storage_rollback_anchor_store_advances_total 6`,
+		`meldbase_storage_rollback_anchor_endpoint_failures_total 5`,
+		`meldbase_storage_rollback_anchor_quorum_failures_total 4`,
+		`meldbase_storage_rollback_anchor_conflicts_total 3`,
+		`meldbase_storage_rollback_anchor_authentication_failures_total 2`,
+		`meldbase_storage_rollback_anchor_protocol_failures_total 1`,
+		`meldbase_storage_rollback_anchor_configuration_failures_total 8`,
+		`meldbase_storage_rollback_anchor_timeout_seconds 10`,
+		`meldbase_storage_rollback_anchor_duration_seconds_total 0.004`,
 		`meldbase_storage_tree_splits_total 11`,
 		`meldbase_storage_tree_merges_total 6`,
 		`meldbase_storage_persistent_free_space 1`,
@@ -69,6 +100,16 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		`meldbase_backup_last_duration_seconds 1.5`,
 		`meldbase_realtime_pending_batch_capacity 1024`,
 		`meldbase_realtime_pending_change_capacity 65536`,
+		`meldbase_realtime_pending_bytes 6`,
+		`meldbase_realtime_pending_byte_capacity 67108864`,
+		`meldbase_realtime_watcher_pending_bytes 7`,
+		`meldbase_realtime_watcher_byte_capacity 134217728`,
+		`meldbase_realtime_dispatch_pending_batches 2`,
+		`meldbase_realtime_dispatch_pending_changes 3`,
+		`meldbase_realtime_dispatch_pending_bytes 4`,
+		`meldbase_realtime_dispatch_batch_capacity 1024`,
+		`meldbase_realtime_dispatch_change_capacity 8192`,
+		`meldbase_realtime_dispatch_byte_capacity 67108864`,
 		`meldbase_wal_current_bytes 8192`,
 		`meldbase_wal_current_commits 2`,
 		`meldbase_checkpoints_completed_total 5`,
@@ -87,6 +128,7 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		`meldbase_worker_policy_denied_total 2`,
 		`meldbase_worker_policy_invalidations_total 4`,
 		`meldbase_worker_transaction_operations_total 17`,
+		`meldbase_realtime_outbound_queue_overflows_total 8`,
 		`meldbase_admin_dropped_deliveries_total 29`,
 	} {
 		if !strings.Contains(text, expected+"\n") {
@@ -97,6 +139,13 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		t.Fatal("uint64 nanosecond counter overflowed through time.Duration")
 	}
 	validatePrometheusText(t, text)
+}
+
+func TestMarshalPrometheusDoesNotReportRollbackLagWhenProtectionIsDisabled(t *testing.T) {
+	payload := string(MarshalPrometheus(Sample{Stats: meldbase.DBStats{CommitSequence: 9}}))
+	if !strings.Contains(payload, "meldbase_storage_rollback_anchor_lag 0\n") {
+		t.Fatalf("unexpected rollback lag metric:\n%s", payload)
+	}
 }
 
 func representativePrometheusSample() Sample {
@@ -110,15 +159,23 @@ func representativePrometheusSample() Sample {
 				ChecksumValidMetaSlots: 2, RootValidMetaSlots: 1, MainTailBytesRemoved: 17,
 				WALRecordsReplayed: 3, WALTailBytesRemoved: 11,
 			},
-			Commits:      meldbase.CommitStats{Total: 7, Changes: 8},
-			Transactions: meldbase.WriteTransactionStats{Active: 1, Started: 10, Committed: 4, Noops: 2, Conflicts: 3, Aborted: 1},
+			Commits: meldbase.CommitStats{Total: 7, Changes: 8},
+			CommitCoordinator: meldbase.V2CommitCoordinatorStats{
+				Enabled: true, Pending: 3, PendingCapacity: 8, Admitted: 21, AdmissionRejected: 2,
+				Batches: 10, GroupedTransactions: 20, OutcomeUnknown: 1,
+			},
+			PrimaryWriteFence: meldbase.V2PrimaryWriteFenceStats{Configured: true, Enforced: true, Checks: 9, Rejected: 2},
+			Transactions:      meldbase.WriteTransactionStats{Active: 1, Started: 10, Committed: 4, Noops: 2, Conflicts: 3, Aborted: 1},
 			Queries: meldbase.QueryStats{
 				ActiveCursors: 2, Total: 17, Failed: 2, CollectionScans: 3, IndexScans: 4,
 				IDLookups: 5, DocumentsExamined: 21, DocumentsReturned: 13,
 			},
 			Realtime: meldbase.RealtimeStats{
-				SharedViews: 2, QuerySubscribers: 3, PendingBatches: 4, PendingChanges: 5,
-				PendingBatchCapacity: 1024, PendingChangeCapacity: 65536,
+				SharedViews: 2, QuerySubscribers: 3, PendingBatches: 4, PendingChanges: 5, PendingBytes: 6,
+				PendingBatchCapacity: 1024, PendingChangeCapacity: 65536, PendingByteCapacity: 67108864,
+				WatcherPendingBytes: 7, WatcherByteCapacity: 134217728,
+				DispatchPendingBatches: 2, DispatchPendingChanges: 3, DispatchPendingBytes: 4,
+				DispatchBatchCapacity: 1024, DispatchChangeCapacity: 8192, DispatchByteCapacity: 67108864,
 				QueueOverflows: 6, SlowConsumers: 7, IncrementalBatches: 8,
 				FullViewRecomputes: 9, DeltaDeliveries: 10,
 			},
@@ -130,6 +187,9 @@ func representativePrometheusSample() Sample {
 			},
 			Storage: meldbase.StorageStats{
 				Engine: "secret_engine", PageSize: 16_384, PhysicalPages: 101,
+				Generation: 5, CommitSequence: 2, RollbackProtected: true, RollbackAnchorSequence: 1, RollbackAnchorGeneration: 4, RollbackAnchorFailures: 2,
+				RollbackAnchorStore:   meldbase.RollbackAnchorStoreStatus{Replicas: 3, Quorum: 2, Loads: 7, Advances: 6, EndpointFailures: 5, QuorumFailures: 4, Conflicts: 3, AuthenticationFailures: 2, ProtocolFailures: 1, ConfigurationFailures: 8},
+				RollbackAnchorTimeout: 10 * time.Second, RollbackAnchorNanos: 4_000_000, RollbackAnchorMaxLatency: 2 * time.Millisecond,
 				OldestRetainedSequence: 12, ActiveReaders: 2, ActiveReplayLeases: 1, ReusablePages: 7,
 				PageCache: meldbase.PageCacheStats{CapacityPages: 100, ResidentPages: 80, Hits: 50, Misses: 5, Evictions: 2},
 				DocumentCache: meldbase.DocumentCacheStats{
@@ -171,7 +231,7 @@ func representativePrometheusSample() Sample {
 			Storage: HealthHealthy, Realtime: HealthDegraded, Telemetry: HealthHealthy, Transport: HealthUnavailable,
 		},
 		Server: &meldserver.ServerStats{
-			ActiveConnections: 2, ConnectionsAccepted: 11,
+			ActiveConnections: 2, ConnectionsAccepted: 11, RealtimeOutboundOverflows: 8,
 			RPCRequests: 41, RPCActive: 2, RPCSucceeded: 31, RPCFailed: 3, RPCCanceled: 2, RPCRejected: 4, RPCBusy: 1,
 			RPCArguments: 50, RPCRequestBytes: 4096, RPCResultBytes: 2048,
 			RPCTotalNanos: 7_000_000, RPCMaxLatency: 2 * time.Millisecond,
@@ -249,11 +309,12 @@ func TestMarshalPrometheusAllocationAndCapacityBudget(t *testing.T) {
 	if len(output) == 0 || len(output) > prometheusInitialCapacity {
 		t.Fatalf("rendered bytes=%d initial capacity=%d", len(output), prometheusInitialCapacity)
 	}
-	// Go 1.23 materializes more strconv temporaries than the current toolchain
-	// (44 versus 30 in this fixture). Keep one cross-version budget that still
-	// catches the former 53-allocation renderer.
-	if allocations := testing.AllocsPerRun(1_000, func() { _ = MarshalPrometheus(sample) }); allocations > 48 {
-		t.Fatalf("Prometheus render allocations=%v, budget=48", allocations)
+	// Go 1.23 materializes more strconv temporaries than the current toolchain,
+	// and race instrumentation adds one more (51 versus 33 in this fixture).
+	// Keep one cross-mode budget that still catches a regression above the
+	// observed fixed-schema renderer.
+	if allocations := testing.AllocsPerRun(1_000, func() { _ = MarshalPrometheus(sample) }); allocations > 51 {
+		t.Fatalf("Prometheus render allocations=%v, budget=51", allocations)
 	}
 }
 

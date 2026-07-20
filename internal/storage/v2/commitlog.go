@@ -163,6 +163,18 @@ func (tx *WriteTxn) pruneCommitTree(tree *MutableTree, oldest, latest uint64) (u
 			}
 		}
 	}
+	// Durable consumers persist their acknowledgement directory in the private
+	// System tree. Unlike a process-local replay pin, it survives close/reopen;
+	// its smallest acknowledged+1 position caps pruning until an operator
+	// explicitly removes that consumer. Reading one bounded directory here keeps
+	// ordinary write publication O(number of durable consumers), never O(history).
+	durableFloor, err := tx.durableConsumerRetentionFloor(tx.baseRoot.CatalogRoot, oldest, latest)
+	if err != nil {
+		return 0, err
+	}
+	if durableFloor != 0 && pinnedLimit > durableFloor {
+		pinnedLimit = durableFloor
+	}
 	if pinnedLimit < oldest {
 		pinnedLimit = oldest
 	}

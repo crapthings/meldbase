@@ -189,6 +189,83 @@ func TestDocumentReadSetPreconditionsAreAtomicAndRejectOnlyPointConflicts(t *tes
 	}
 }
 
+func TestCollectionPreconditionsRejectPhantomsAndRemainAtomic(t *testing.T) {
+	file, _, err := Open(filepath.Join(t.TempDir(), "collection-preconditions.meld2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	first, second := [16]byte{1}, [16]byte{2}
+	if _, err := file.ApplyDocumentTransaction(DocumentTransaction{
+		TransactionID: randomTransactionID(t),
+		Mutations: []DocumentMutation{
+			{Collection: "items", DocumentID: first, Operation: DocumentInsert, Document: []byte("one")},
+			{Collection: "items", DocumentID: second, Operation: DocumentInsert, Document: []byte("two")},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := file.OpenSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, exists, err := snapshot.CollectionMeta("items")
+	if closeErr := snapshot.Close(); err != nil {
+		t.Fatal(err)
+	} else if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if !exists || meta.ID == 0 || meta.UpdatedSequence != 1 {
+		t.Fatalf("snapshot meta=%+v exists=%t", meta, exists)
+	}
+	items := CollectionPrecondition{Collection: "items", ExpectedExists: true, ExpectedID: meta.ID, ExpectedUpdatedSequence: meta.UpdatedSequence}
+	if err := file.ValidateCollectionPreconditions([]CollectionPrecondition{items}); err != nil {
+		t.Fatalf("current collection fence: %v", err)
+	}
+	missing := CollectionPrecondition{Collection: "future", ExpectedExists: false}
+	if err := file.ValidateCollectionPreconditions([]CollectionPrecondition{missing}); err != nil {
+		t.Fatalf("missing collection fence: %v", err)
+	}
+
+	// This independent write is a phantom relative to any predicate read of
+	// items. The broad collection fence must reject a later, otherwise disjoint
+	// point mutation atomically.
+	if _, err := file.ApplyDocumentTransaction(DocumentTransaction{
+		TransactionID: randomTransactionID(t),
+		Mutations:     []DocumentMutation{{Collection: "items", DocumentID: second, Operation: DocumentUpdate, Document: []byte("two-updated")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sequence, err := file.ApplyDocumentTransaction(DocumentTransaction{
+		TransactionID:           randomTransactionID(t),
+		CollectionPreconditions: []CollectionPrecondition{items},
+		Mutations:               []DocumentMutation{{Collection: "items", DocumentID: first, Operation: DocumentUpdate, Document: []byte("must-not-publish")}},
+	})
+	if !errors.Is(err, ErrDocumentConflict) || sequence != 0 || file.Meta().CommitSequence != 2 {
+		t.Fatalf("stale collection transaction sequence=%d meta=%d err=%v", sequence, file.Meta().CommitSequence, err)
+	}
+	value, exists, err := file.GetDocument("items", first)
+	if err != nil || !exists || !bytes.Equal(value, []byte("one")) {
+		t.Fatalf("atomic rejection value=%q exists=%t err=%v", value, exists, err)
+	}
+	if err := file.ValidateCollectionPreconditions([]CollectionPrecondition{items}); !errors.Is(err, ErrDocumentConflict) {
+		t.Fatalf("stale collection validation err=%v", err)
+	}
+
+	if _, err := file.ApplyDocumentTransaction(DocumentTransaction{
+		TransactionID: randomTransactionID(t),
+		Mutations:     []DocumentMutation{{Collection: "future", DocumentID: [16]byte{3}, Operation: DocumentInsert, Document: []byte("created")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.ValidateCollectionPreconditions([]CollectionPrecondition{missing}); !errors.Is(err, ErrDocumentConflict) {
+		t.Fatalf("created collection validation err=%v", err)
+	}
+	if err := file.ValidateCollectionPreconditions([]CollectionPrecondition{{Collection: "items", ExpectedExists: true}, {Collection: "items", ExpectedExists: true}}); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("malformed/duplicate collection fences err=%v", err)
+	}
+}
+
 func TestDocumentInsertionPositionsSurviveUpdateSnapshotAndReinsert(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "document-order.meld2")
 	file, _, err := Open(path)

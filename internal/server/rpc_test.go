@@ -154,6 +154,15 @@ func TestRPCMapsDatabaseAvailabilityWithoutLeakingEngineErrors(t *testing.T) {
 	assertRPCError(t, response, http.StatusServiceUnavailable, "database_unavailable")
 }
 
+func TestRPCMapsCommitOutcomeUnknownWithoutInvitingRetry(t *testing.T) {
+	method := func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+		return meldbase.Value{}, errors.Join(meldbase.ErrCommitOutcomeUnknown, context.Canceled)
+	}
+	_, _, server := newRPCServer(t, map[string]RPCMethod{"uncertain": method}, rpcTestAuthorizer{allow: true}, Config{})
+	response := postRPC(t, server.URL, "uncertain", `{"version":1,"arguments":[]}`, true)
+	assertRPCError(t, response, http.StatusConflict, "rpc_outcome_unknown")
+}
+
 func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	original := map[string]RPCMethod{

@@ -4,6 +4,15 @@ import { QueryValidationError } from "./types.js";
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
 const encoder = new TextEncoder();
 
+// newDocumentID creates the portable 128-bit lowercase-hex identity used by
+// both local and remote inserts. Remote writes assign it before transport so a
+// timeout or post-admission cancellation still leaves the caller with a key to
+// reconcile rather than an unaddressable server-generated document.
+export function newDocumentID(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function assertSafeKey(key: string, label = "field"): void {
   if (!key || key.includes("\0") || key.includes(".") || key.startsWith("$") || forbiddenKeys.has(key)) {
     throw new QueryValidationError(`Unsafe ${label}: ${JSON.stringify(key)}`);

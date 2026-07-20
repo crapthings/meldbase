@@ -24,9 +24,25 @@ log.Printf("sequence=%d ixscan=%d collscan=%d slow=%d",
 The snapshot contains process-lifetime counters for commits, query plans and
 work, reactive views/deltas/queues, slow consumers and durability. It also
 reports whether a fail-stop durability error has disabled writes and the fixed
-reactive pending-batch/change capacities. Counters reset
+reactive pending-batch/change/canonical-image-byte capacities. Counters reset
 when the database is reopened. Persistent gauges such as commit sequence come
 from the selected database state.
+
+When the opt-in V2 CommitCoordinator is enabled, the same snapshot includes its
+enabled state, pending/capacity gauges and admitted, queue-rejected, batch,
+grouped-request and caller-outcome-unknown counters. Admin schema version 14,
+Prometheus and OpenTelemetry expose these fixed-cardinality fields; at 50% queue
+pressure database health becomes degraded and at 90% critical. A new queue-full
+rejection is also degraded. Sampling observes this scheduler outside commit
+publication, so exporters never execute on a write's hot path.
+
+The optional V2 primary-write fence also has a fixed aggregate: configured and
+currently-enforced state plus check/rejection counters. A read-only follower
+reports a configured but not enforced fence because validated source history
+must not be rechecked as local primary work. A new local rejection degrades the
+database health for the sample window. The counters expose no lease, epoch,
+controller endpoint, database identity, or tenant value. Admin schema version
+16, Prometheus and OpenTelemetry expose the same four fixed-cardinality fields.
 
 Public optimistic write transactions add a fixed aggregate with current active
 callbacks plus started, committed, no-op, point-conflict and other-abort
@@ -69,6 +85,10 @@ The V2 backend used for new default databases additionally exposes:
 - persistent index-build phase/entry/byte gauges plus scheduler run/yield/failure
   counters and a retention-lease gauge, read from an immutable aggregate
   snapshot rather than scanning the BuildCatalog on each sample.
+- rollback-anchor sequence/generation lag and, when the store provides it,
+  fixed-cardinality replica/quorum gauges plus load, advance, endpoint,
+  quorum, conflict, authentication, protocol and static-configuration failure
+  counters.
 
 These values contain no path, collection name, document ID, query literal,
 principal, tenant, authorization value, or document content. `Stats()` is for a
@@ -114,6 +134,9 @@ transport busy, outcome-unknown and worker-protocol signals use counter increase
 between adjacent samples; they clear after a quiet window and are ignored across
 database/server session resets. Application RPC failures, collection scans and
 cache hit ratios are intentionally not classified as engine health failures.
+An observed rollback-anchor endpoint failure degrades Durability for the latest
+sample window even when a majority completed the operation, making latent loss
+of fault tolerance visible before the next replica failure stops writes.
 
 A durable index build in its terminal `failed` state keeps Storage and Overall
 `degraded` until it is inspected and aborted. An active build lease is not itself
@@ -254,7 +277,7 @@ and never accepts credentials in a URL. Cross-origin access is denied unless its
 exact HTTP(S) origin was configured; wildcard origins are rejected. Browser
 preflight permits only `GET` and `Authorization`.
 
-The admin snapshot schema is version 10 and uses camel-case JSON fields. Version 2
+The admin snapshot schema is version 14 and uses camel-case JSON fields. Version 2
 added the fixed health assessment, fail-stop write state and reactive capacities;
 version 3 adds the immutable startup recovery receipt; version 4 adds resource
 admission, Commit Log byte retention and physical storage quota fields/signals;
@@ -262,15 +285,28 @@ version 5 adds index-build entry/byte budgets; version 6 adds fixed index-build
 activity, outcome, size and latency signals; versions 7 and 8 add durable
 index-build phase/size and scheduler signals; version 9 adds the aggregate
 index-build retention lease and its fixed degraded-health explanations; version
-10 adds public optimistic write-transaction lifecycle aggregates.
-The checked-in `admin/testdata/admin-schema-v10.json` fixture pins every reachable
-`Sample` object and scalar path, JSON wire type, optionality and nullability in
-deterministic order. A test also compares that reflected contract with Go's
-actual JSON encoder. Adding, removing, renaming or changing a field requires an
-explicit `SchemaVersion` increment and a new fixture; historical fixtures are
-never rewritten, including version 9. Additive readers should continue ignoring fields introduced by
-newer versions, while a producer must never emit a changed contract under an old
-version number.
+10 adds public optimistic write-transaction lifecycle aggregates; version 11
+adds fixed-cardinality physical generation, rollback-protection state, anchor
+sequence/generation, failure and synchronous update-latency fields; version 12
+adds the V2 CommitCoordinator scheduler state and its pressure/rejection health
+signals; version 13 adds the central change-dispatch queue's batch/change
+capacity and pressure to the realtime contract; version 14 adds independent
+canonical document-image byte capacities and pending-byte pressure for the
+central dispatcher, downstream shared reactive hub, and aggregate direct Go
+change-watcher queue. It also adds the server-side realtime outbound frame/byte
+queue overflow counter, so transport backpressure is visible without exposing
+subscription, principal, collection, or document labels.
+It also includes optional fixed-cardinality rollback-anchor backend topology and
+failure-class counters plus a degraded-health signal for partial endpoint loss.
+The checked-in `admin/testdata/admin-schema-v11.json` and additive v12/v13/v14
+fixture chain pin every reachable `Sample` object and
+scalar path, JSON wire type, optionality and nullability in deterministic order.
+A test also compares that reflected contract with Go's actual JSON encoder.
+Adding, removing, renaming or changing a field requires an explicit
+`SchemaVersion` increment and a new full or reviewed delta fixture; historical
+fixtures are never rewritten, including version 9. Additive readers should
+continue ignoring fields introduced by newer versions, while a producer must
+never emit a changed contract under an old version number.
 
 Durations whose names end in `Nanos` are integer nanoseconds; timestamps are RFC 3339 JSON
 timestamps. Counters are operational telemetry, not a source for database resume

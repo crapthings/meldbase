@@ -11,6 +11,7 @@ import (
 func TestServerStatsSnapshotIsAllocationFreeAndContainsNoDynamicDimensions(t *testing.T) {
 	handler := &Handler{startedAt: time.Now()}
 	handler.metrics.connectionsAccepted.Store(3)
+	handler.metrics.realtimeOutboundOverflows.Store(4)
 	handler.metrics.rpcRequests.Store(7)
 	handler.metrics.rpcSucceeded.Store(5)
 	handler.metrics.rpcIdempotencyUnknown.Store(2)
@@ -19,7 +20,7 @@ func TestServerStatsSnapshotIsAllocationFreeAndContainsNoDynamicDimensions(t *te
 		t.Fatalf("Stats allocations=%f", allocations)
 	}
 	stats := handler.Stats()
-	if stats.ConnectionsAccepted != 3 || stats.RPCRequests != 7 || stats.RPCSucceeded != 5 || stats.RPCIdempotencyUnknown != 2 || stats.RPCAtomicCommits != 4 {
+	if stats.ConnectionsAccepted != 3 || stats.RealtimeOutboundOverflows != 4 || stats.RPCRequests != 7 || stats.RPCSucceeded != 5 || stats.RPCIdempotencyUnknown != 2 || stats.RPCAtomicCommits != 4 {
 		t.Fatalf("stats=%+v", stats)
 	}
 }

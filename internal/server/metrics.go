@@ -8,36 +8,38 @@ import (
 // ServerStats is a fixed-cardinality process-session snapshot. It deliberately
 // contains no method, principal, tenant, argument, result or error text.
 type ServerStats struct {
-	CapturedAt               time.Time      `json:"capturedAt"`
-	StartedAt                time.Time      `json:"startedAt"`
-	ActiveConnections        uint64         `json:"activeConnections"`
-	ConnectionsAccepted      uint64         `json:"connectionsAccepted"`
-	RPCRequests              uint64         `json:"rpcRequests"`
-	RPCActive                uint64         `json:"rpcActive"`
-	RPCSucceeded             uint64         `json:"rpcSucceeded"`
-	RPCFailed                uint64         `json:"rpcFailed"`
-	RPCCanceled              uint64         `json:"rpcCanceled"`
-	RPCRejected              uint64         `json:"rpcRejected"`
-	RPCBusy                  uint64         `json:"rpcBusy"`
-	RPCArguments             uint64         `json:"rpcArguments"`
-	RPCRequestBytes          uint64         `json:"rpcRequestBytes"`
-	RPCResultBytes           uint64         `json:"rpcResultBytes"`
-	RPCTotalNanos            uint64         `json:"rpcTotalNanos"`
-	RPCMaxLatency            time.Duration  `json:"rpcMaxLatencyNanos"`
-	RPCIdempotencyClaims     uint64         `json:"rpcIdempotencyClaims"`
-	RPCIdempotencyReplays    uint64         `json:"rpcIdempotencyReplays"`
-	RPCIdempotencyConflicts  uint64         `json:"rpcIdempotencyConflicts"`
-	RPCIdempotencyInProgress uint64         `json:"rpcIdempotencyInProgress"`
-	RPCIdempotencyUnknown    uint64         `json:"rpcIdempotencyUnknown"`
-	RPCIdempotencyFailures   uint64         `json:"rpcIdempotencyFailures"`
-	RPCAtomicCommits         uint64         `json:"rpcAtomicCommits"`
-	RPCAtomicRollbacks       uint64         `json:"rpcAtomicRollbacks"`
-	RPCAtomicNoopCompletions uint64         `json:"rpcAtomicNoopCompletions"`
-	Worker                   WorkerHubStats `json:"worker"`
+	CapturedAt                time.Time      `json:"capturedAt"`
+	StartedAt                 time.Time      `json:"startedAt"`
+	ActiveConnections         uint64         `json:"activeConnections"`
+	ConnectionsAccepted       uint64         `json:"connectionsAccepted"`
+	RealtimeOutboundOverflows uint64         `json:"realtimeOutboundOverflows"`
+	RPCRequests               uint64         `json:"rpcRequests"`
+	RPCActive                 uint64         `json:"rpcActive"`
+	RPCSucceeded              uint64         `json:"rpcSucceeded"`
+	RPCFailed                 uint64         `json:"rpcFailed"`
+	RPCCanceled               uint64         `json:"rpcCanceled"`
+	RPCRejected               uint64         `json:"rpcRejected"`
+	RPCBusy                   uint64         `json:"rpcBusy"`
+	RPCArguments              uint64         `json:"rpcArguments"`
+	RPCRequestBytes           uint64         `json:"rpcRequestBytes"`
+	RPCResultBytes            uint64         `json:"rpcResultBytes"`
+	RPCTotalNanos             uint64         `json:"rpcTotalNanos"`
+	RPCMaxLatency             time.Duration  `json:"rpcMaxLatencyNanos"`
+	RPCIdempotencyClaims      uint64         `json:"rpcIdempotencyClaims"`
+	RPCIdempotencyReplays     uint64         `json:"rpcIdempotencyReplays"`
+	RPCIdempotencyConflicts   uint64         `json:"rpcIdempotencyConflicts"`
+	RPCIdempotencyInProgress  uint64         `json:"rpcIdempotencyInProgress"`
+	RPCIdempotencyUnknown     uint64         `json:"rpcIdempotencyUnknown"`
+	RPCIdempotencyFailures    uint64         `json:"rpcIdempotencyFailures"`
+	RPCAtomicCommits          uint64         `json:"rpcAtomicCommits"`
+	RPCAtomicRollbacks        uint64         `json:"rpcAtomicRollbacks"`
+	RPCAtomicNoopCompletions  uint64         `json:"rpcAtomicNoopCompletions"`
+	Worker                    WorkerHubStats `json:"worker"`
 }
 
 type serverMetrics struct {
 	activeConnections, connectionsAccepted            atomic.Uint64
+	realtimeOutboundOverflows                         atomic.Uint64
 	rpcRequests, rpcActive                            atomic.Uint64
 	rpcSucceeded, rpcFailed, rpcCanceled              atomic.Uint64
 	rpcRejected, rpcBusy                              atomic.Uint64
@@ -69,7 +71,8 @@ func (h *Handler) Stats() ServerStats {
 	return ServerStats{
 		CapturedAt: now, StartedAt: h.startedAt,
 		ActiveConnections: h.metrics.activeConnections.Load(), ConnectionsAccepted: h.metrics.connectionsAccepted.Load(),
-		RPCRequests: h.metrics.rpcRequests.Load(), RPCActive: h.metrics.rpcActive.Load(),
+		RealtimeOutboundOverflows: h.metrics.realtimeOutboundOverflows.Load(),
+		RPCRequests:               h.metrics.rpcRequests.Load(), RPCActive: h.metrics.rpcActive.Load(),
 		RPCSucceeded: h.metrics.rpcSucceeded.Load(), RPCFailed: h.metrics.rpcFailed.Load(),
 		RPCCanceled: h.metrics.rpcCanceled.Load(), RPCRejected: h.metrics.rpcRejected.Load(), RPCBusy: h.metrics.rpcBusy.Load(),
 		RPCArguments: h.metrics.rpcArguments.Load(), RPCRequestBytes: h.metrics.rpcRequestBytes.Load(),

@@ -377,6 +377,14 @@ func decodeIndexMeta(name string, encoded []byte) (IndexMeta, error) {
 	return meta, nil
 }
 
+// DecodeIndexMeta decodes an immutable index catalog value carried in a
+// Commit Log catalog event. It is intentionally a narrow export: callers get
+// semantic index metadata, never an invitation to depend on the physical
+// catalog layout.
+func DecodeIndexMeta(name string, encoded []byte) (IndexMeta, error) {
+	return decodeIndexMeta(name, encoded)
+}
+
 func secondaryKey(key []byte, position uint64, documentID [16]byte) ([]byte, error) {
 	if len(key) > MaxSecondaryScalarKeyBytes {
 		return nil, ErrIndexKeyTooLarge

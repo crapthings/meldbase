@@ -416,6 +416,13 @@ func TestEngineAvailabilityErrorsUseStableServiceUnavailableCode(t *testing.T) {
 	}
 }
 
+func TestEngineCommitOutcomeUnknownUsesStableReconciliationCode(t *testing.T) {
+	status, code := engineErrorStatusCode(errors.Join(meldbase.ErrCommitOutcomeUnknown, context.Canceled))
+	if status != http.StatusConflict || code != "rpc_outcome_unknown" {
+		t.Fatalf("commit outcome classification=%d %q", status, code)
+	}
+}
+
 func TestResourceLimitErrorsUseStableTerminalCode(t *testing.T) {
 	status, code := engineErrorStatusCode(errors.Join(errors.New("oversized"), meldbase.ErrResourceLimit))
 	if status != http.StatusRequestEntityTooLarge || code != "resource_limit_exceeded" {
@@ -481,6 +488,106 @@ func TestRealtimeTicketSubscriptionAndAtomicSnapshot(t *testing.T) {
 	}
 	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "unsubscribe", "subscriptionId": next.SubscriptionID}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRealtimeOutboundFrameLimitClosesOnlySlowConnection(t *testing.T) {
+	db, handler, server := newTestServer(t)
+	handler.config.MaxRealtimeFrameBytes = 256
+	handler.config.MaxRealtimeOutboundBytes = 512
+	insertServerDocument(t, db.Collection("items"), "mine", 1, strings.Repeat("x", 1024))
+	ticket := obtainTicket(t, server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	connection, _, err := websocket.Dial(ctx, ticket.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "authenticate", "ticket": ticket.Ticket}); err != nil {
+		t.Fatal(err)
+	}
+	if message := readMap(t, ctx, connection); message["type"] != "authenticated" {
+		t.Fatalf("auth=%+v", message)
+	}
+	query := map[string]any{"version": 1, "where": map[string]any{"op": "true"}}
+	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "subscribe", "requestId": "too-large", "collection": "items", "query": query}); err != nil {
+		t.Fatal(err)
+	}
+	message := readMap(t, ctx, connection)
+	errorBody, _ := message["error"].(map[string]any)
+	if message["type"] != "error" || errorBody["code"] != "resource_limit_exceeded" {
+		t.Fatalf("oversized snapshot result=%+v", message)
+	}
+	if stats := handler.Stats(); stats.RealtimeOutboundOverflows != 0 {
+		t.Fatalf("result budget should reject before outbound queue: %+v", stats)
+	}
+}
+
+func TestRealtimeDeltaResultBudgetRejectsBeforeOutboundQueue(t *testing.T) {
+	db, handler, server := newTestServer(t)
+	handler.config.MaxRealtimeFrameBytes = 1024
+	handler.config.MaxRealtimeOutboundBytes = 2048
+	id := insertServerDocument(t, db.Collection("items"), "mine", 1, "small")
+	ticket := obtainTicket(t, server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	connection, _, err := websocket.Dial(ctx, ticket.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "authenticate", "ticket": ticket.Ticket}); err != nil {
+		t.Fatal(err)
+	}
+	_ = readMap(t, ctx, connection)
+	query := map[string]any{"version": 1, "where": map[string]any{"op": "true"}}
+	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "subscribe", "mode": "delta", "requestId": "delta-too-large", "collection": "items", "query": query}); err != nil {
+		t.Fatal(err)
+	}
+	_ = readSnapshot(t, ctx, connection)
+	if _, err := db.Collection("items").UpdateOne(context.Background(), meldbase.Filter{"_id": id}, meldbase.Update{"$set": map[string]any{"title": strings.Repeat("x", 2048)}}); err != nil {
+		t.Fatal(err)
+	}
+	message := readMap(t, ctx, connection)
+	errorBody, _ := message["error"].(map[string]any)
+	if message["type"] != "error" || errorBody["code"] != "resource_limit_exceeded" || message["requestId"] != "delta-too-large" {
+		t.Fatalf("oversized delta result=%+v", message)
+	}
+	if stats := handler.Stats(); stats.RealtimeOutboundOverflows != 0 {
+		t.Fatalf("delta budget should reject before outbound queue: %+v", stats)
+	}
+}
+
+func TestHTTPQueryResultBudgetRejectsBeforeResponseMarshal(t *testing.T) {
+	db, handler, server := newTestServer(t)
+	handler.config.MaxQueryResultBytes = 128
+	insertServerDocument(t, db.Collection("items"), "other", 0, "hidden")
+	insertServerDocument(t, db.Collection("items"), "mine", 1, strings.Repeat("x", 1024))
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/collections/items/query", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"},"sort":[{"path":"rank","direction":1}],"limit":1}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("authorization", "Bearer valid")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusRequestEntityTooLarge {
+		responseBody, _ := io.ReadAll(response.Body)
+		t.Fatalf("status=%d body=%s", response.StatusCode, responseBody)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != "resource_limit_exceeded" {
+		t.Fatalf("code=%q", body.Error.Code)
 	}
 }
 
@@ -980,6 +1087,18 @@ func TestStrictMessagesAndTicketTTLConfiguration(t *testing.T) {
 	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", TicketTTL: 6 * time.Minute}); err == nil {
 		t.Fatal("expected excessive ticket TTL error")
 	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", MaxRealtimeFrameBytes: 16<<20 + 1}); err == nil {
+		t.Fatal("expected excessive realtime frame limit error")
+	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", MaxRealtimeFrameBytes: 1023}); err == nil {
+		t.Fatal("expected too-small realtime frame limit error")
+	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", MaxRealtimeFrameBytes: 1024, MaxRealtimeOutboundBytes: 1023}); err == nil {
+		t.Fatal("expected invalid realtime outbound limit error")
+	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", MaxQueryResultBytes: 16<<20 + 1}); err == nil {
+		t.Fatal("expected excessive query result limit error")
+	}
 	if err := meldbase.ValidateStrictJSON([]byte(`{"v":1,"v":1}`), 100); err == nil {
 		t.Fatal("duplicate JSON key accepted")
 	}
@@ -988,6 +1107,52 @@ func TestStrictMessagesAndTicketTTLConfiguration(t *testing.T) {
 	}
 	if err := decodeStrict([]byte(`{"v":1,"extra":true}`), &target); err == nil {
 		t.Fatal("unknown message field accepted")
+	}
+}
+
+func TestSocketSessionOutboundByteBudgetBoundsQueuedFrames(t *testing.T) {
+	message := map[string]any{"v": protocolVersion, "type": "snapshot", "payload": strings.Repeat("x", 128)}
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler := &Handler{config: Config{
+		MaxRealtimeFrameBytes:    len(encoded),
+		MaxRealtimeOutboundBytes: len(encoded)*2 - 1,
+	}}
+	session := &socketSession{
+		handler: handler, ctx: ctx, cancel: cancel,
+		outgoing: make(chan socketOutbound, 64),
+	}
+	if !session.enqueue(message) {
+		t.Fatal("first frame was rejected")
+	}
+	if session.enqueue(message) {
+		t.Fatal("second frame exceeded aggregate byte budget but was accepted")
+	}
+	if got := handler.metrics.realtimeOutboundOverflows.Load(); got != 1 {
+		t.Fatalf("outbound overflows=%d", got)
+	}
+	if session.outgoingBytes != uint64(len(encoded)) {
+		t.Fatalf("queued bytes=%d want=%d", session.outgoingBytes, len(encoded))
+	}
+	queued := <-session.outgoing
+	session.releaseOutgoing(uint64(len(queued.data)))
+	if session.outgoingBytes != 0 {
+		t.Fatalf("written frame retained bytes=%d", session.outgoingBytes)
+	}
+
+	frameContext, frameCancel := context.WithCancel(context.Background())
+	defer frameCancel()
+	frameHandler := &Handler{config: Config{MaxRealtimeFrameBytes: len(encoded) - 1, MaxRealtimeOutboundBytes: len(encoded)}}
+	frameSession := &socketSession{handler: frameHandler, ctx: frameContext, cancel: frameCancel, outgoing: make(chan socketOutbound, 1)}
+	if frameSession.enqueue(message) {
+		t.Fatal("oversized frame was accepted")
+	}
+	if got := frameHandler.metrics.realtimeOutboundOverflows.Load(); got != 1 {
+		t.Fatalf("frame overflow=%d", got)
 	}
 }
 

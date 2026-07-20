@@ -1,0 +1,50 @@
+{
+  "formatVersion": 2,
+  "adminSchemaVersion": 14,
+  "root": "admin.Sample",
+  "extends": 13,
+  "additions": [
+    {
+      "path": "server.realtimeOutboundOverflows",
+      "type": "integer:uint64",
+      "optional": true,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.pendingByteCapacity",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.pendingBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.watcherByteCapacity",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.watcherPendingBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.dispatchByteCapacity",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    },
+    {
+      "path": "stats.realtime.dispatchPendingBytes",
+      "type": "integer:uint64",
+      "optional": false,
+      "nullable": false
+    }
+  ]
+}

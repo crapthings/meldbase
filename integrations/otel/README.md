@@ -39,6 +39,11 @@ attributes; the latter is set only when the build watermark is the binding
 Commit Log retention boundary, distinguishing normal online-build lag from a
 budget that needs operator attention.
 
+Contract version 8 adds physical-generation and external rollback-anchor
+sequence/generation, lag, failure, timeout and synchronous-latency instruments.
+These remain fixed-cardinality engine aggregates and expose no database or
+anchor-service identity.
+
 These are embedded-engine aggregates, so the adapter deliberately does not emit
 `db.client.*`. The OpenTelemetry database semantic conventions describe calls as
 observed by a database client, while this adapter observes the engine itself.

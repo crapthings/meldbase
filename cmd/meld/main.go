@@ -29,19 +29,123 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: meld <demo|serve|inspect|verify|backup|durability-check|storage-soak|qualification-check|index-build>")
+		return errors.New("usage: meld <demo|serve|anchor-serve|anchor-qualification|inspect|verify|backup|durability-check|destructive-volume-check|destructive-process-check|destructive-enospc-check|destructive-power-prepare|destructive-power-controller-keygen|destructive-power-controller-run|destructive-qemu-reset|destructive-qemu-process-kill|destructive-power-recover|destructive-power-receipt-check|destructive-power-matrix-check|destructive-corruption-check|destructive-qemu-eio|destructive-qemu-flush-eio|destructive-qemu-volatile-loss|destructive-manifest-build|storage-soak|qualification-environment-capture|qualification-session-init|qualification-session-record|qualification-session-status|qualification-session-power-status|qualification-session-power-prepare|qualification-session-power-recover|qualification-session-seal|qualification-artifacts-index-build|qualification-artifacts-index-verify|qualification-check|qualification-packet-keygen|qualification-packet-verify|index-build>")
 	}
 	switch args[0] {
 	case "demo":
 		return runDemo(args[1:], stdout, stderr)
 	case "serve":
 		return runServe(args[1:], stdout, stderr)
+	case "anchor-serve":
+		return runAnchorServe(args[1:], stdout, stderr)
+	case "anchor-qualification":
+		return runAnchorQualification(args[1:], stdout, stderr)
 	case "durability-check":
 		return runDurabilityCheck(args[1:], stdout, stderr)
+	case "destructive-process-check":
+		return runDestructiveProcessCheck(args[1:], stdout, stderr)
+	case "destructive-volume-check":
+		return runDestructiveVolumeCheck(args[1:], stdout, stderr)
+	case "destructive-enospc-check":
+		return runDestructiveENOSPCCheck(args[1:], stdout, stderr)
+	case "destructive-enospc-worker":
+		return runDestructiveENOSPCWorker(args[1:], stderr)
+	case "destructive-power-prepare":
+		return runDestructivePowerPrepare(args[1:], stderr)
+	case "destructive-power-controller-keygen":
+		return runDestructivePowerControllerKeygen(args[1:], stdout, stderr)
+	case "destructive-power-controller-run":
+		return runDestructivePowerControllerRun(args[1:], stdout, stderr)
+	case "destructive-qemu-reset":
+		return runDestructiveQEMUReset(args[1:], stdout, stderr)
+	case "destructive-qemu-process-kill":
+		return runDestructiveQEMUProcessKill(args[1:], stdout, stderr)
+	case "destructive-power-recover":
+		return runDestructivePowerRecover(args[1:], stdout, stderr)
+	case "destructive-power-receipt-check":
+		return runDestructivePowerReceiptCheck(args[1:], stdout, stderr)
+	case "destructive-power-matrix-check":
+		return runDestructivePowerMatrixCheck(args[1:], stdout, stderr)
+	case "destructive-manifest-build":
+		return runDestructiveManifestBuild(args[1:], stdout, stderr)
+	case "destructive-corruption-check":
+		return runDestructiveCorruptionCheck(args[1:], stdout, stderr)
+	case "destructive-corruption-receipt-check":
+		return runDestructiveCorruptionReceiptCheck(args[1:], stdout, stderr)
+	case "destructive-eio-seed":
+		return runDestructiveEIOSeed(args[1:], stdout, stderr)
+	case "destructive-eio-worker":
+		return runDestructiveEIOWorker(args[1:], stdout, stderr)
+	case "destructive-eio-result-check":
+		return runDestructiveEIOResultCheck(args[1:], stdout, stderr)
+	case "destructive-flush-eio-worker":
+		return runDestructiveFlushEIOWorker(args[1:], stdout, stderr)
+	case "destructive-flush-eio-recovery":
+		return runDestructiveFlushEIORecovery(args[1:], stdout, stderr)
+	case "destructive-flush-eio-recovery-plan":
+		return runDestructiveFlushEIORecoveryPlan(args[1:], stdout, stderr)
+	case "destructive-flush-eio-recovery-preflight":
+		return runDestructiveFlushEIORecoveryPreflight(args[1:], stdout, stderr)
+	case "destructive-flush-eio-result-check":
+		return runDestructiveFlushEIOResultCheck(args[1:], stdout, stderr)
+	case "destructive-qemu-eio":
+		return runDestructiveQEMUEIO(args[1:], stdout, stderr)
+	case "destructive-qemu-eio-proof-check":
+		return runDestructiveQMPEIOProofCheck(args[1:], stdout, stderr)
+	case "destructive-eio-bundle-check":
+		return runDestructiveEIOBundleCheck(args[1:], stdout, stderr)
+	case "destructive-qemu-flush-arm-probe":
+		return runDestructiveQEMUFlushArmProbe(args[1:], stdout, stderr)
+	case "destructive-qemu-flush-eio":
+		return runDestructiveQEMUFlushEIO(args[1:], stdout, stderr)
+	case "destructive-qemu-flush-eio-proof-check":
+		return runDestructiveQMPFlushEIOProofCheck(args[1:], stdout, stderr)
+	case "destructive-flush-eio-bundle-check":
+		return runDestructiveFlushEIOBundleCheck(args[1:], stdout, stderr)
+	case "destructive-volatile-loss-seed":
+		return runDestructiveVolatileLossSeed(args[1:], stdout, stderr)
+	case "destructive-volatile-loss-update":
+		return runDestructiveVolatileLossUpdate(args[1:], stdout, stderr)
+	case "destructive-volatile-loss-recover":
+		return runDestructiveVolatileLossRecover(args[1:], stdout, stderr)
+	case "destructive-volatile-loss-recovery-ready":
+		return runDestructiveVolatileLossRecoveryReady(args[1:], stdout, stderr)
+	case "destructive-qemu-volatile-loss":
+		return runDestructiveQEMUVolatileLoss(args[1:], stdout, stderr)
+	case "destructive-qemu-volatile-loss-proof-check":
+		return runDestructiveQMPVolatileLossProofCheck(args[1:], stdout, stderr)
+	case "destructive-volatile-loss-bundle-check":
+		return runDestructiveVolatileLossBundleCheck(args[1:], stdout, stderr)
+	case "destructive-process-worker":
+		return runDestructiveProcessWorker(args[1:], stderr)
 	case "storage-soak":
 		return runStorageSoak(args[1:], stdout, stderr)
 	case "qualification-check":
 		return runQualificationCheck(args[1:], stdout, stderr)
+	case "qualification-environment-capture":
+		return runQualificationEnvironmentCapture(args[1:], stdout, stderr)
+	case "qualification-session-init":
+		return runQualificationSessionInit(args[1:], stdout, stderr)
+	case "qualification-session-record":
+		return runQualificationSessionRecord(args[1:], stdout, stderr)
+	case "qualification-session-status":
+		return runQualificationSessionStatus(args[1:], stdout, stderr)
+	case "qualification-session-power-status":
+		return runQualificationSessionPowerStatus(args[1:], stdout, stderr)
+	case "qualification-session-power-prepare":
+		return runQualificationSessionPowerPrepare(args[1:], stderr)
+	case "qualification-session-power-recover":
+		return runQualificationSessionPowerRecover(args[1:], stdout, stderr)
+	case "qualification-session-seal":
+		return runQualificationSessionSeal(args[1:], stdout, stderr)
+	case "qualification-artifacts-index-build":
+		return runQualificationArtifactsIndexBuild(args[1:], stdout, stderr)
+	case "qualification-artifacts-index-verify":
+		return runQualificationArtifactsIndexVerify(args[1:], stdout, stderr)
+	case "qualification-packet-keygen":
+		return runQualificationPacketKeygen(args[1:], stdout, stderr)
+	case "qualification-packet-verify":
+		return runQualificationPacketVerify(args[1:], stdout, stderr)
 	case "inspect":
 		return runInspect(args[1:], stdout, stderr)
 	case "backup":
@@ -202,11 +306,37 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	adminMetrics := flags.Bool("admin-metrics", false, "serve authenticated Prometheus metrics on the admin listener")
 	workerAddress := flags.String("worker-addr", "", "optional loopback control address for server JavaScript workers")
 	workerPublications := flags.String("worker-publications", "", "comma-separated collections whose query visibility is owned by the worker")
+	rollbackAnchorPath := flags.String("rollback-anchor", "", "independently trusted V2 rollback-anchor file")
+	rollbackAnchorInit := flags.Bool("rollback-anchor-init", false, "explicitly initialize an empty anchor from the current database")
+	rollbackAnchorTimeout := flags.Duration("rollback-anchor-timeout", meldbase.DefaultRollbackAnchorOperationTimeout, "deadline for each rollback-anchor operation")
+	rollbackAnchorCluster := flags.String("rollback-anchor-cluster", "", "remote anchor static cluster ID")
+	rollbackAnchorName := flags.String("rollback-anchor-name", "", "remote anchor resource name")
+	rollbackAnchorKeyID := flags.String("rollback-anchor-key-id", "", "remote anchor HMAC key ID")
+	rollbackAnchorKeyFile := flags.String("rollback-anchor-key-file", "", "private base64 remote anchor HMAC key file")
+	rollbackAnchorCA := flags.String("rollback-anchor-ca", "", "remote anchor server CA PEM")
+	rollbackAnchorClientCert := flags.String("rollback-anchor-client-cert", "", "remote anchor mTLS client certificate PEM")
+	rollbackAnchorClientKey := flags.String("rollback-anchor-client-key", "", "private remote anchor mTLS client key PEM")
+	var rollbackAnchorReplicas anchorReplicaFlags
+	flags.Var(&rollbackAnchorReplicas, "rollback-anchor-replica", "repeatable remote member-id=https://endpoint")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if *path == "" {
 		return errors.New("serve requires --db")
+	}
+	remoteAnchor := remoteAnchorConfig{
+		clusterID: *rollbackAnchorCluster, replicaSpecs: rollbackAnchorReplicas, anchorName: *rollbackAnchorName,
+		keyID: *rollbackAnchorKeyID, keyFile: *rollbackAnchorKeyFile, serverCAFile: *rollbackAnchorCA,
+		clientCertFile: *rollbackAnchorClientCert, clientKeyFile: *rollbackAnchorClientKey, operationTimeout: *rollbackAnchorTimeout,
+	}
+	if *rollbackAnchorPath != "" && remoteAnchor.enabled() {
+		return errors.New("local --rollback-anchor and remote rollback-anchor flags are mutually exclusive")
+	}
+	if *rollbackAnchorInit && *rollbackAnchorPath == "" && !remoteAnchor.enabled() {
+		return errors.New("--rollback-anchor-init requires --rollback-anchor or a complete remote rollback anchor")
+	}
+	if (*rollbackAnchorPath != "" || remoteAnchor.enabled()) && *rollbackAnchorTimeout <= 0 {
+		return errors.New("--rollback-anchor-timeout must be positive")
 	}
 	if !*devNoAuth {
 		return errors.New("no production auth provider is configured; pass --dev-no-auth only for local development")
@@ -244,7 +374,28 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if *realtimeURL == "" {
 		*realtimeURL = defaultRealtimeURL(*address)
 	}
-	db, err := meldbase.Open(*path)
+	openOptions := meldbase.OpenOptions{}
+	var anchorTransport *http.Transport
+	if *rollbackAnchorPath != "" {
+		anchor, err := meldbase.NewFileRollbackAnchorStore(*rollbackAnchorPath)
+		if err != nil {
+			return err
+		}
+		openOptions.V2RollbackProtection = meldbase.V2RollbackProtection{
+			AnchorStore: anchor, InitializeAnchor: *rollbackAnchorInit, OperationTimeout: *rollbackAnchorTimeout,
+		}
+	} else if remoteAnchor.enabled() {
+		anchor, transport, err := newRemoteAnchorStore(remoteAnchor)
+		if err != nil {
+			return err
+		}
+		anchorTransport = transport
+		defer anchorTransport.CloseIdleConnections()
+		openOptions.V2RollbackProtection = meldbase.V2RollbackProtection{
+			AnchorStore: anchor, InitializeAnchor: *rollbackAnchorInit, OperationTimeout: *rollbackAnchorTimeout,
+		}
+	}
+	db, err := meldbase.OpenWithOptions(*path, openOptions)
 	if err != nil {
 		return err
 	}

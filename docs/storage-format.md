@@ -81,9 +81,28 @@ Successful `Open`, `OpenV1` and `OpenV2` calls expose an immutable
 V1 checkpoint/WAL replay and partial-tail removal; V2 Meta/root selection,
 older-root fallback, partial-page tail removal and optional FreeSpace
 degradation. It is a receipt, not a repair command. Checksum ambiguity,
-unsupported revisions/features, graph corruption, identity disagreement and
-non-tail WAL corruption still reject Open. There is intentionally no API that
-clears an in-process durability fail-stop or promotes an unverified root.
+unsupported revisions/features, an invalid selected root, identity disagreement
+and non-tail WAL corruption still reject Open. There is intentionally no API
+that clears an in-process durability fail-stop or promotes an unverified root.
+
+Normal V2 open deliberately validates only the Meta/root and catalog metadata
+needed for bounded startup; it does not walk every protected tree page. A
+deployment that wants startup to fail before serving from a structurally corrupt
+deep page can set `V2Options.RequireGraphAudit` (or
+`OpenOptions.V2RequireGraphAudit`). The option walks every page protected by
+both valid Meta roots before `Open` succeeds. It runs before automatic removal
+of an unaligned crash tail, so a failed requested audit is byte-preserving. Its
+cost grows with the protected graph and it proves structure only; `meld verify`
+remains the offline semantic Secondary↔Primary audit and complete-file hash.
+
+New V2 files, physical backups and verified imports are created owner-private
+(`0600` before the process umask). Deployments that keep documents on a shared
+host can select `V2Options.RequirePrivateFileMode` (or
+`OpenOptions.V2RequirePrivateFileMode`) to fail closed when an existing V2 file
+has group or other Unix permission bits. The option never changes an
+operator-owned file mode; deployments deliberately using a group-managed volume
+must either keep the compatible default or make that policy decision outside
+Meldbase.
 
 `OpenWithOptions`, `OpenV1WithOptions` and `OpenV2WithOptions` accept
 `RecoveryRequireClean`. For an existing database this mode returns
@@ -235,6 +254,25 @@ check timings instead of relying only on a green job summary. The evidence
 levels and still-pending destructive matrix are defined in
 [`filesystem-qualification.md`](filesystem-qualification.md).
 
+### Receiving a physical V2 artifact
+
+`ImportV2PhysicalBackup` is the receiving half of a trusted-server bootstrap.
+It accepts an `io.Reader`, an exact `BackupV2Result` receipt and a new
+destination. The receiver chooses the maximum accepted bytes; it copies exactly
+that many bytes into a private temporary file while hashing, rejects truncation,
+trailing bytes and non-canonical receipts, then runs `VerifyV2File` before the
+same no-overwrite link/directory-sync publication used by backup and migration.
+The destination remains absent on any failed stream or verification. A caller
+can then open it with `OpenV2Follower` and drain the retained archive tail.
+
+The import operation is transport-neutral. Its generic reader cannot interrupt
+a transport that ignores cancellation, and it neither authenticates the peer
+nor moves bytes between hosts. `integrations/replicationhttp.Fetch` is the
+provided HTTPS/mTLS bootstrap adapter: it enforces a non-redirected TLS response
+and a fixed receipt header contract before calling this function. Other future
+WebSocket, HTTP or QUIC adapters must preserve the receiver-owned byte,
+identity, hash and semantic-verification checks rather than bypassing them.
+
 ## V1 main file
 
 Pages 0 and 1 are alternating meta pages. Each contains the database identity,
@@ -307,10 +345,17 @@ encoding; `V2CommitRetentionPolicy` can select either bound. Both are required:
 a count alone cannot constrain a history made of unusually large commits.
 Pruning old headers and change entries is staged in the same COW transaction as
 the triggering business commit, so the inactive Meta page can expose only both
-changes or neither. An active replay lease takes precedence over both watermarks
-and can temporarily retain an overage rather than silently losing a reader's
-history. On open, retained logical bytes are reconstructed by a bounded streaming
-walk of the retained Commit Log without changing the revision-3 disk layout.
+changes or neither. An active replay lease or the least checkpoint of a named
+private `DurableCommitConsumer` takes precedence over both watermarks and can
+temporarily retain an overage rather than silently losing a reader's history.
+Durable checkpoint acknowledgement changes only a physical generation, not the
+logical commit sequence, so it cannot recursively create history that it must
+then consume. A replay source whose caller buffer stays full is terminated with
+`ErrSlowConsumer` after `V2ReplayDeliveryTimeout` (five seconds by default),
+which releases its lease and lets retention recover; reconnecting clients then
+take the normal resync path. On open, retained logical bytes are reconstructed
+by a bounded streaming walk of the retained Commit Log without changing the
+revision-3 disk layout.
 Current count/byte overage, pressure state/events and pruned commits are
 observable. Logical pruning makes pages reclaimable; online reclamation or
 compaction controls when physical file space is reused/reduced.
@@ -376,8 +421,12 @@ identity, invalidating old V1 resume tokens.
 from a fixed V2 snapshot, copying only live documents in Order-tree sequence and
 rebuilding indexes. It never mutates or overwrites the source. The compacted
 file has a new database identity and commit history, explicitly invalidating old
-resume tokens; operators may validate and swap it during their own maintenance
-window.
+resume tokens. Snapshot admission takes the database read lock only briefly;
+the long copy/verification phase uses pinned immutable pages, so later commits
+continue in the source and are intentionally absent from the destination.
+Compaction serializes with `Close` so those pinned pages cannot outlive the
+source file. Operators may validate and swap the resulting historical snapshot
+during their own maintenance window.
 
 `DB.BackupV2(ctx, destination)` has deliberately different semantics. It holds a
 source read lock for the full copy, which leaves query readers available but
