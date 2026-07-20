@@ -415,7 +415,8 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 			return errors.New("MELDBASE_WORKER_TOKEN must contain at least 32 bytes when --worker-addr is set")
 		}
 	}
-	if *realtimeURL == "" {
+	deriveRealtimeURLFromListener := *realtimeURL == "" && usesEphemeralPort(*address)
+	if *realtimeURL == "" && !deriveRealtimeURLFromListener {
 		*realtimeURL = defaultRealtimeURL(*address)
 	}
 	configuredHTTPOrigins := configuredOriginList(*httpOrigins, defaultHTTPOrigins())
@@ -512,6 +513,14 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if len(publicationCollections) > 0 {
 		queryPolicyResolver = workerHub
 	}
+	listener, err := net.Listen("tcp", *address)
+	if err != nil {
+		_ = db.Close()
+		return err
+	}
+	if deriveRealtimeURLFromListener {
+		*realtimeURL = defaultRealtimeURL(listener.Addr().String())
+	}
 	handler, err := meldserver.New(meldserver.Config{
 		DB: db, Authenticator: authenticator, Authorizer: authorizer, PublicRealtimeURL: *realtimeURL,
 		OriginPatterns:     configuredRealtimeOriginPatterns,
@@ -520,11 +529,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		RPCIdempotencyStore: idempotency, RPCAuthorizer: rpcAuthorizer,
 	})
 	if err != nil {
-		_ = db.Close()
-		return err
-	}
-	listener, err := net.Listen("tcp", *address)
-	if err != nil {
+		_ = listener.Close()
 		_ = db.Close()
 		return err
 	}
@@ -702,7 +707,15 @@ func defaultRealtimeURL(address string) string {
 	if strings.HasPrefix(host, "0.0.0.0:") {
 		host = "localhost:" + strings.TrimPrefix(host, "0.0.0.0:")
 	}
+	if strings.HasPrefix(host, "[::]:") {
+		host = "localhost:" + strings.TrimPrefix(host, "[::]:")
+	}
 	return "ws://" + host + "/v1/realtime"
+}
+
+func usesEphemeralPort(address string) bool {
+	_, port, err := net.SplitHostPort(address)
+	return err == nil && port == "0"
 }
 
 type devAccess struct{}

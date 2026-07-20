@@ -994,6 +994,12 @@ func TestDefaultRealtimeURL(t *testing.T) {
 	if got := defaultRealtimeURL(":8080"); got != "ws://localhost:8080/v1/realtime" {
 		t.Fatalf("url = %q", got)
 	}
+	if got := defaultRealtimeURL("[::]:8080"); got != "ws://localhost:8080/v1/realtime" {
+		t.Fatalf("IPv6 wildcard url = %q", got)
+	}
+	if !usesEphemeralPort("127.0.0.1:0") || !usesEphemeralPort(":0") || usesEphemeralPort("127.0.0.1:8080") || usesEphemeralPort("invalid") {
+		t.Fatal("ephemeral port detection is incorrect")
+	}
 }
 
 func TestDefaultBrowserOriginsIncludeEscapedIPv6RealtimePattern(t *testing.T) {
