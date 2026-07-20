@@ -528,6 +528,19 @@ func TestServeRequiresExplicitUnsafeDevelopmentMode(t *testing.T) {
 	}
 }
 
+func TestCollectionAccessConfigurationHasNoLegacyShorthand(t *testing.T) {
+	var output bytes.Buffer
+	err := run([]string{"serve", "--db", filepath.Join(t.TempDir(), "data.meld"), "--workspace-collections", "tasks"}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("legacy serve shorthand error=%v output=%s", err, output.String())
+	}
+	output.Reset()
+	err = run([]string{"init", "--dir", filepath.Join(t.TempDir(), "bundle"), "--workspace-collections", "tasks"}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("legacy init shorthand error=%v output=%s", err, output.String())
+	}
+}
+
 func TestServeRejectsInvalidCollectionAccessManifestBeforeOpeningDatabase(t *testing.T) {
 	directory := t.TempDir()
 	secretPath := filepath.Join(directory, "jwt.secret")
@@ -624,7 +637,7 @@ func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "meldbase-local")
 	var output bytes.Buffer
-	if err := run([]string{"init", "--dir", root, "--jwt-issuer", "https://identity.example/", "--jwt-audience", "app-api", "--workspace-collections", "projects,tasks"}, &output, &output); err != nil {
+	if err := run([]string{"init", "--dir", root, "--jwt-issuer", "https://identity.example/", "--jwt-audience", "app-api", "--collections", "projects,tasks"}, &output, &output); err != nil {
 		t.Fatalf("init error=%v output=%s", err, output.String())
 	}
 	for _, path := range []string{

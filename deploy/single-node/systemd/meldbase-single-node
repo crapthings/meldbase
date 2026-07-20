@@ -12,8 +12,6 @@ set -eu
 : "${MELDBASE_JWT_ISSUER:=}"
 : "${MELDBASE_JWT_AUDIENCE:=}"
 : "${MELDBASE_ACCESS_POLICY_FILE:=}"
-: "${MELDBASE_WORKSPACE_COLLECTIONS:=}"
-: "${MELDBASE_WORKSPACE_FIELD:=workspaceId}"
 
 case "$MELDBASE_ADDR" in
   127.*:*|'[::1]':*) ;;
@@ -41,22 +39,11 @@ if [ -z "$MELDBASE_JWT_ISSUER" ] || [ -z "$MELDBASE_JWT_AUDIENCE" ]; then
   printf '%s\n' 'MELDBASE_JWT_ISSUER and MELDBASE_JWT_AUDIENCE are required' >&2
   exit 2
 fi
-if [ -n "$MELDBASE_ACCESS_POLICY_FILE" ] && [ -n "$MELDBASE_WORKSPACE_COLLECTIONS" ]; then
-  printf '%s\n' 'MELDBASE_ACCESS_POLICY_FILE and MELDBASE_WORKSPACE_COLLECTIONS are mutually exclusive' >&2
+if [ -z "$MELDBASE_ACCESS_POLICY_FILE" ] || [ ! -r "$MELDBASE_ACCESS_POLICY_FILE" ]; then
+  printf '%s\n' 'MELDBASE_ACCESS_POLICY_FILE must name a readable manifest' >&2
   exit 2
 fi
-if [ -n "$MELDBASE_ACCESS_POLICY_FILE" ]; then
-  if [ ! -r "$MELDBASE_ACCESS_POLICY_FILE" ]; then
-    printf '%s\n' 'MELDBASE_ACCESS_POLICY_FILE must name a readable manifest' >&2
-    exit 2
-  fi
-  set -- --access-policy-file "$MELDBASE_ACCESS_POLICY_FILE"
-elif [ -n "$MELDBASE_WORKSPACE_COLLECTIONS" ]; then
-  set -- --workspace-collections "$MELDBASE_WORKSPACE_COLLECTIONS" --workspace-field "$MELDBASE_WORKSPACE_FIELD"
-else
-  printf '%s\n' 'MELDBASE_ACCESS_POLICY_FILE or MELDBASE_WORKSPACE_COLLECTIONS is required' >&2
-  exit 2
-fi
+set -- --access-policy-file "$MELDBASE_ACCESS_POLICY_FILE"
 
 exec "$MELDBASE_BIN" serve \
   --db "$MELDBASE_DB" \

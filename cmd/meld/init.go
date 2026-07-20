@@ -15,7 +15,7 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
-const defaultWorkspaceCollections = "projects,tasks,comments"
+const defaultCollectionNames = "projects,tasks,comments"
 
 // runInit creates one self-contained, local single-node bundle. It creates a
 // new directory only: a previously created bundle is never modified or reused.
@@ -25,7 +25,7 @@ func runInit(args []string, stdout, stderr io.Writer) error {
 	directory := flags.String("dir", "", "new directory for the local single-node bundle")
 	issuer := flags.String("jwt-issuer", "meldbase-local", "JWT issuer expected by the database")
 	audience := flags.String("jwt-audience", "meldbase-api", "JWT audience expected by the database")
-	workspaceCollections := flags.String("workspace-collections", defaultWorkspaceCollections, "comma-separated collections isolated by the active workspace")
+	collections := flags.String("collections", defaultCollectionNames, "comma-separated collaborative collections to seed into the generated access policy")
 	workspaceField := flags.String("workspace-field", "workspaceId", "server-owned document field containing the workspace ID")
 	address := flags.String("addr", "127.0.0.1:8080", "loopback HTTP listen address")
 	adminAddress := flags.String("admin-addr", "127.0.0.1:9091", "loopback embedded admin dashboard address")
@@ -41,14 +41,14 @@ func runInit(args []string, stdout, stderr io.Writer) error {
 	if err := validateInitValue("jwt-audience", *audience); err != nil {
 		return err
 	}
-	if err := validateInitValue("workspace-collections", *workspaceCollections); err != nil {
+	if err := validateInitValue("collections", *collections); err != nil {
 		return err
 	}
 	if err := validateInitValue("workspace-field", *workspaceField); err != nil {
 		return err
 	}
-	collectionAccess := make([]meldserver.CollectionAccess, 0, len(splitCommaList(*workspaceCollections)))
-	for _, collection := range splitCommaList(*workspaceCollections) {
+	collectionAccess := make([]meldserver.CollectionAccess, 0, len(splitCommaList(*collections)))
+	for _, collection := range splitCommaList(*collections) {
 		collectionAccess = append(collectionAccess, meldserver.CollectionAccess{Collection: collection, Mode: meldserver.CollectionAccessCollaborative})
 	}
 	if _, err := meldserver.NewWorkspaceAuthorizer(meldserver.WorkspaceAuthorizerConfig{

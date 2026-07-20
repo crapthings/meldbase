@@ -137,7 +137,7 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 			"MELDBASE_JWT_HS256_SECRET_FILE="+secretPath,
 			"MELDBASE_JWT_ISSUER=https://identity.example.test/",
 			"MELDBASE_JWT_AUDIENCE=meldbase-api",
-			"MELDBASE_WORKSPACE_COLLECTIONS=projects,tasks,comments",
+			"MELDBASE_ACCESS_POLICY_FILE="+policyPath,
 			"MELDBASE_ARGUMENTS_FILE="+argumentsPath,
 		)
 		command.Env = append(command.Env, extra...)
@@ -154,30 +154,14 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 	want := []string{
 		"serve", "--db", "/var/lib/meldbase/data/test.meld", "--addr", "127.0.0.1:8080",
 		"--jwt-hs256-secret-file", secretPath, "--jwt-issuer", "https://identity.example.test/", "--jwt-audience", "meldbase-api",
-		"--workspace-collections", "projects,tasks,comments", "--workspace-field", "workspaceId",
+		"--access-policy-file", policyPath,
 		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
 	}
 	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("arguments=%q want=%q", got, want)
 	}
-	if output, err := run("MELDBASE_WORKSPACE_COLLECTIONS=", "MELDBASE_ACCESS_POLICY_FILE="+policyPath); err != nil {
-		t.Fatalf("manifest launcher: %v\n%s", err, output)
-	}
-	raw, err = os.ReadFile(argumentsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want = []string{
-		"serve", "--db", "/var/lib/meldbase/data/test.meld", "--addr", "127.0.0.1:8080",
-		"--jwt-hs256-secret-file", secretPath, "--jwt-issuer", "https://identity.example.test/", "--jwt-audience", "meldbase-api",
-		"--access-policy-file", policyPath,
-		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
-	}
-	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {
-		t.Fatalf("manifest arguments=%q want=%q", got, want)
-	}
-	if output, err := run("MELDBASE_ACCESS_POLICY_FILE=" + policyPath); err == nil || !strings.Contains(output, "mutually exclusive") {
-		t.Fatalf("mixed policy settings should fail: err=%v output=%q", err, output)
+	if output, err := run("MELDBASE_ACCESS_POLICY_FILE="); err == nil || !strings.Contains(output, "must name a readable manifest") {
+		t.Fatalf("missing policy should fail: err=%v output=%q", err, output)
 	}
 	if output, err := run("MELDBASE_ADDR=0.0.0.0:8080"); err == nil || !strings.Contains(output, "loopback") {
 		t.Fatalf("public listener should fail: err=%v output=%q", err, output)

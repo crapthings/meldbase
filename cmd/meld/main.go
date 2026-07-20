@@ -311,9 +311,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	jwtIssuer := flags.String("jwt-issuer", "", "required JWT issuer value")
 	jwtAudience := flags.String("jwt-audience", "", "required JWT audience value")
 	jwtWorkspaceClaim := flags.String("jwt-workspace-claim", "workspace_id", "JWT claim containing the active workspace ID")
-	workspaceCollections := flags.String("workspace-collections", "", "comma-separated collections isolated by the active workspace")
-	workspaceField := flags.String("workspace-field", "workspaceId", "server-owned document field containing the workspace ID")
-	accessPolicyFile := flags.String("access-policy-file", "", "strict JSON collection access manifest; replaces --workspace-collections")
+	accessPolicyFile := flags.String("access-policy-file", "", "strict JSON collection access manifest")
 	adminAddress := flags.String("admin-addr", "", "optional loopback address for the secured embedded admin dashboard")
 	adminDiagnostics := flags.Bool("admin-diagnostics", false, "record bounded slow/failure diagnostics for the admin dashboard")
 	adminDiagnosticsAll := flags.Bool("admin-diagnostics-all", false, "record every query/commit; short development sessions only")
@@ -367,31 +365,22 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if *devNoAuth && *accessPolicyFile != "" {
 		return errors.New("--access-policy-file requires production JWT authentication")
 	}
-	if !*devNoAuth && *workspaceCollections == "" && *accessPolicyFile == "" {
-		return errors.New("--workspace-collections or --access-policy-file is required with production JWT auth")
-	}
-	if *accessPolicyFile != "" && *workspaceCollections != "" {
-		return errors.New("--access-policy-file and --workspace-collections are mutually exclusive")
+	if !*devNoAuth && *accessPolicyFile == "" {
+		return errors.New("--access-policy-file is required with production JWT auth")
 	}
 	var workspaceAccessConfig meldserver.WorkspaceAuthorizerConfig
 	if !*devNoAuth {
-		if *accessPolicyFile != "" {
-			manifestBytes, readErr := os.ReadFile(*accessPolicyFile)
-			if readErr != nil {
-				return fmt.Errorf("read collection access manifest: %w", readErr)
-			}
-			manifest, parseErr := meldserver.ParseCollectionAccessManifestJSON(manifestBytes)
-			if parseErr != nil {
-				return fmt.Errorf("parse collection access manifest: %w", parseErr)
-			}
-			workspaceAccessConfig, parseErr = manifest.WorkspaceAuthorizerConfig()
-			if parseErr != nil {
-				return fmt.Errorf("validate collection access manifest: %w", parseErr)
-			}
-		} else {
-			workspaceAccessConfig = meldserver.WorkspaceAuthorizerConfig{
-				Collections: splitCommaList(*workspaceCollections), WorkspaceField: *workspaceField,
-			}
+		manifestBytes, readErr := os.ReadFile(*accessPolicyFile)
+		if readErr != nil {
+			return fmt.Errorf("read collection access manifest: %w", readErr)
+		}
+		manifest, parseErr := meldserver.ParseCollectionAccessManifestJSON(manifestBytes)
+		if parseErr != nil {
+			return fmt.Errorf("parse collection access manifest: %w", parseErr)
+		}
+		workspaceAccessConfig, parseErr = manifest.WorkspaceAuthorizerConfig()
+		if parseErr != nil {
+			return fmt.Errorf("validate collection access manifest: %w", parseErr)
 		}
 	}
 	adminToken := ""

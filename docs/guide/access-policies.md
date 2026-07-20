@@ -48,8 +48,7 @@ meld serve \
 The manifest rejects unknown fields, trailing JSON, duplicate collections,
 unknown modes, invalid field names, and unsupported versions before the server
 starts. `meld init` generates this file with `collaborative` entries for its
-default local collections. The older `--workspace-collections` form remains a
-compatible shorthand for an all-`collaborative` manifest.
+default local collections.
 
 Validate or inspect a manifest without opening a database or starting a server:
 

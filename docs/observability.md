@@ -272,7 +272,7 @@ go run ./cmd/meld serve \
   --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
   --jwt-issuer https://identity.example/ \
   --jwt-audience meldbase-api \
-  --workspace-collections projects,tasks,comments \
+  --access-policy-file ./config/access-policy.json \
   --admin-addr 127.0.0.1:9091 \
   --admin-diagnostics \
   --admin-metrics

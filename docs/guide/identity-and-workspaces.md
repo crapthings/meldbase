@@ -49,11 +49,11 @@ meld serve \
   --jwt-jwks-url https://identity.example/.well-known/jwks.json \
   --jwt-issuer https://identity.example/ \
   --jwt-audience meldbase-api \
-  --workspace-collections projects,tasks,comments,memberships \
-  --workspace-field workspaceId
+  --access-policy-file /etc/meldbase/access-policy.json
 ```
 
-For every listed collection, the authorizer:
+For every `collaborative` or `owner` collection declared in the manifest, the
+authorizer:
 
 1. adds `workspaceId = <verified workspace_id>` before a query, update, delete,
    or subscription reaches the database;
@@ -63,12 +63,9 @@ For every listed collection, the authorizer:
 
 The client can use ordinary queries. It should not send a tenant selector, and
 it cannot escape the injected constraint by adding a conflicting filter. The
-same rule applies to realtime snapshots and deltas.
-
-For a developer- and tool-readable declaration that can also express
-owner-only and RPC-only collections, use the versioned
-[collection access manifest](./access-policies). The older flag form above is
-the compatible shorthand for collaborative workspace collections.
+same rule applies to realtime snapshots and deltas. The versioned
+[collection access manifest](./access-policies) is the single developer- and
+tool-readable declaration for this boundary.
 
 A workspace is a logical security boundary in one database file; it is not a
 SQLite file, MongoDB database, or independently backed-up physical partition.
@@ -84,8 +81,9 @@ collection special.
 
 It is fine to store application-facing, workspace-scoped member profiles in
 Meldbase, for example a `memberships` collection containing display name,
-workspace role, and product preferences. Include that collection in
-`--workspace-collections`; the server will scope it just like `projects`.
+workspace role, and product preferences. Declare that collection as
+`collaborative` or `owner` in the manifest; the server will scope it just like
+`projects`.
 Your trusted application code must still decide whether a role permits an
 operation. The built-in workspace authorizer deliberately rejects RPC methods
 until the application provides an explicit method-level authorizer.
@@ -100,11 +98,10 @@ Use one verifier mode per server:
   receives only public signing keys from an HTTPS JWKS endpoint, while the
   identity service retains its private key.
 
-Both modes require `--jwt-issuer`, `--jwt-audience`, and either
-`--workspace-collections` or `--access-policy-file`. Do not pass `--dev-no-auth`
-outside disposable local development, and never serve the API or operator
-dashboard directly on a public interface without an application-owned TLS
-boundary.
+Both modes require `--jwt-issuer`, `--jwt-audience`, and
+`--access-policy-file`. Do not pass `--dev-no-auth` outside disposable local
+development, and never serve the API or operator dashboard directly on a public
+interface without an application-owned TLS boundary.
 
 ## Verify the boundary
 

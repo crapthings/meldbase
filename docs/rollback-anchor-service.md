@@ -51,7 +51,7 @@ meld serve \
   --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
   --jwt-issuer https://identity.example/ \
   --jwt-audience meldbase-api \
-  --workspace-collections orders \
+  --access-policy-file /etc/meldbase/access-policy.json \
   --rollback-anchor-cluster orders-production \
   --rollback-anchor-replica anchor-a=https://anchor-a.example.com:8443 \
   --rollback-anchor-replica anchor-b=https://anchor-b.example.com:8443 \

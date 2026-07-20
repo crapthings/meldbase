@@ -33,8 +33,8 @@ the server:
 meld access-policy validate --file ./meldbase-local/config/access-policy.json
 ```
 
-Use `--jwt-issuer`, `--jwt-audience` and `--workspace-collections` to change
-the compatible all-collaborative shorthand at creation time. See
+Use `--jwt-issuer`, `--jwt-audience`, `--collections` and `--workspace-field`
+to shape the initial manifest at creation time. See
 [collection access policies](./guide/access-policies) for owner-only,
 RPC-only, and field-limited declarations.
 
@@ -108,12 +108,10 @@ sudo systemctl enable --now meldbase
 Before enabling the service, replace `MELDBASE_ADMIN_TOKEN`, write at least 32
 random bytes to `/etc/meldbase/jwt-hs256.secret`, and edit/validate
 `/etc/meldbase/access-policy.json`. The launcher passes that strict manifest to
-`meld serve`; it also accepts the older `MELDBASE_WORKSPACE_COLLECTIONS`
-shorthand, but the two settings are mutually exclusive. Keep the primary
-listener at `127.0.0.1:8080` and access it through an application-owned TLS
-boundary. The JWT must contain `sub`, `exp`, the configured `iss` and `aud`,
-plus `workspace_id`. Check startup with `systemctl status meldbase` and
-`journalctl -u meldbase`.
+`meld serve`. Keep the primary listener at `127.0.0.1:8080` and access it
+through an application-owned TLS boundary. The JWT must contain `sub`, `exp`,
+the configured `iss` and `aud`, plus `workspace_id`. Check startup with
+`systemctl status meldbase` and `journalctl -u meldbase`.
 
 For a local process with the embedded dashboard, provide the same JWT settings
 and bind the dashboard only to loopback:

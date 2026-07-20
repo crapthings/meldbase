@@ -21,7 +21,7 @@ func TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{Collections: []string{"tasks"}, WorkspaceField: "workspaceId"})
+	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{CollectionAccess: []CollectionAccess{{Collection: "tasks", Mode: CollectionAccessCollaborative}}, WorkspaceField: "workspaceId"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{Collections: []string{"tasks"}, WorkspaceField: "workspaceId"})
+	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{CollectionAccess: []CollectionAccess{{Collection: "tasks", Mode: CollectionAccessCollaborative}}, WorkspaceField: "workspaceId"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestJWTWorkspacePrincipalIsForwardedToTrustedWorkerRPC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{Collections: []string{"tasks"}, WorkspaceField: "workspaceId"})
+	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{CollectionAccess: []CollectionAccess{{Collection: "tasks", Mode: CollectionAccessCollaborative}}, WorkspaceField: "workspaceId"})
 	if err != nil {
 		t.Fatal(err)
 	}

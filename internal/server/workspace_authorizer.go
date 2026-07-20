@@ -55,13 +55,10 @@ type CollectionAccessFields struct {
 	UpdatePaths  []string `json:"updatePaths,omitempty"`
 }
 
-// WorkspaceAuthorizerConfig declares which collections are scoped to the
-// authenticated principal's current workspace. CollectionAccess is the
-// explicit form. Collections remains for compatibility and makes every listed
-// collection CollectionAccessCollaborative. The workspace field is owned by
-// the server: inserts set it and updates may never modify it.
+// WorkspaceAuthorizerConfig declares the manifest-provided collections scoped
+// to the authenticated principal's current workspace. The workspace field is
+// owned by the server: inserts set it and updates may never modify it.
 type WorkspaceAuthorizerConfig struct {
-	Collections      []string
 	CollectionAccess []CollectionAccess
 	WorkspaceField   string
 	MaxResults       int
@@ -87,16 +84,7 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 	if !workspaceIdentifier.MatchString(config.WorkspaceField) {
 		return nil, errors.New("workspace field must be a simple document field name")
 	}
-	if len(config.Collections) > 0 && len(config.CollectionAccess) > 0 {
-		return nil, errors.New("workspace authorizer accepts collections or collection access, not both")
-	}
 	access := config.CollectionAccess
-	if len(access) == 0 {
-		access = make([]CollectionAccess, 0, len(config.Collections))
-		for _, collection := range config.Collections {
-			access = append(access, CollectionAccess{Collection: collection, Mode: CollectionAccessCollaborative})
-		}
-	}
 	if len(access) == 0 || len(access) > 4096 {
 		return nil, errors.New("workspace authorizer requires between one and 4096 collection access declarations")
 	}
