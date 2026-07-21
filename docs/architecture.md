@@ -361,9 +361,9 @@ These rules preserve a small core surface as the product evolves:
   convenience API must not create a second authorization, retry or consistency
   rule.
 - **One current storage contract during alpha.** A format or policy change may
-  replace an internal alpha design directly, with migration/export guidance and
-  new evidence. Do not retain dormant runtime fallbacks solely to preserve an
-  unshipped implementation.
+  replace an internal alpha design directly, with new release guidance and
+  evidence when needed. Do not retain dormant runtime fallbacks solely to
+  preserve an unshipped implementation.
 
 These rules are also the review bar for generated or agent-authored changes:
 prefer extending an existing typed contract and its tests over adding a parallel

@@ -14,7 +14,7 @@ import (
 	"github.com/crapthings/meldbase/core"
 )
 
-const logicalArchiveArtifact = "logical-migration"
+const logicalArchiveArtifact = "logical-archive"
 
 type logicalArchiveCommandResult struct {
 	SchemaVersion int    `json:"schemaVersion"`
@@ -26,7 +26,7 @@ func runLogicalExport(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("export", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	source := flags.String("db", "", "existing current-format database path")
-	destination := flags.String("out", "", "new logical migration archive path (must not exist)")
+	destination := flags.String("out", "", "new logical archive path (must not exist)")
 	timeout := flags.Duration("timeout", 0, "optional export deadline, for example 10m")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -61,7 +61,7 @@ func runLogicalExport(args []string, stdout, stderr io.Writer) error {
 func runLogicalImport(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("import", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	source := flags.String("in", "", "existing logical migration archive path")
+	source := flags.String("in", "", "existing logical archive path")
 	destination := flags.String("out", "", "new database path (must not exist)")
 	timeout := flags.Duration("timeout", 0, "optional import deadline, for example 10m")
 	maxBytes := flags.Uint64("max-bytes", 0, "maximum accepted archive bytes; 0 uses the normal storage limit")

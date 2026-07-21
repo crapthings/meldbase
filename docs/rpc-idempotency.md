@@ -191,7 +191,7 @@ created through the public collection API. The tree participates in:
 - the database's single-writer sequence so normal commits and realtime resume
   positions remain contiguous;
 - bounded overflow storage for canonical terminal results;
-- explicit format feature/version handling and migration tooling.
+- explicit format feature/version handling and operational tooling.
 
 It is not represented as a user collection. Doing so would leak internal
 counts, create observable reactive changes, allow name collisions, and mix

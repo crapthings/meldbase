@@ -60,15 +60,14 @@ boundary.
    meld verify --db ./rehearsals/app-restored.meld
    ```
 
-6. Before upgrading an alpha build, use the matching old executable to export
-   valuable test data, then use the newer one to import it to a new path and
-   verify the result. Do not assume an older alpha file will open in a newer
-   format:
+6. Exercise the optional logical archive path with the current build. It is a
+   data-portability and import-rehearsal check, not a cross-version migration
+   guarantee:
 
    ```sh
-   old-meld export --db ./data/app.meld --out ./migrations/app.jsonl
-   new-meld import --in ./migrations/app.jsonl --out ./rehearsals/app-upgraded.meld
-   new-meld verify --db ./rehearsals/app-upgraded.meld
+   meld export --db ./data/app.meld --out ./archives/app.jsonl
+   meld import --in ./archives/app.jsonl --out ./rehearsals/app-imported.meld
+   meld verify --db ./rehearsals/app-imported.meld
    ```
 
 The [single-node guide](./single-node-deployment) is the authority for secret
@@ -81,7 +80,7 @@ permissions, probes, reverse proxies, dashboards, backups, and upgrades.
 | Data API | Query, insert, update, delete, index creation, and validation errors match the documented typed contract. |
 | Realtime | Initial snapshot, ordered delta, reconnect, and resync behavior keep the UI correct. |
 | Isolation | Two JWT workspaces cannot query, subscribe to, update, or delete each other's scoped records. |
-| Recovery | A physical backup restores to a new file and `meld verify` succeeds; an alpha upgrade can export/import to a new file. |
+| Recovery | A physical backup restores to a new file and `meld verify` succeeds; optional logical archive import also succeeds at a new path. |
 | Operations | `/livez`, `/readyz`, the authenticated operator dashboard, and metrics behave as expected behind your chosen proxy. |
 
 For a quick local concurrency signal, `meld storage-soak --profile custom` can

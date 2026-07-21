@@ -182,17 +182,18 @@ meld restore --in /srv/meldbase/backups/app.meld \
 meld verify --db /srv/meldbase/rehearsals/app-restored.meld
 ```
 
-For an alpha-format upgrade, use the matching old build to make a **logical**
-archive, then import it into a new database with the newer build. This carries
-collections, typed documents, and index definitions—not pages, database
-identity, commit history, or credentials. Both paths must be new.
+`export` and `import` provide a **logical archive** for portable data snapshots
+and import rehearsals. It carries collections, typed documents, and index
+definitions—not pages, database identity, commit history, or credentials. It is
+not a replacement for the physical recovery backup above; both paths must be
+new.
 
 ```sh
-old-meld export --db /srv/meldbase/data/app.meld \
-  --out /srv/meldbase/migrations/app.jsonl
-new-meld import --in /srv/meldbase/migrations/app.jsonl \
-  --out /srv/meldbase/data/app-upgraded.meld
-new-meld verify --db /srv/meldbase/data/app-upgraded.meld
+meld export --db /srv/meldbase/data/app.meld \
+  --out /srv/meldbase/archives/app.jsonl
+meld import --in /srv/meldbase/archives/app.jsonl \
+  --out /srv/meldbase/rehearsals/app-imported.meld
+meld verify --db /srv/meldbase/rehearsals/app-imported.meld
 ```
 
 Read the [single-node deployment and recovery guide](docs/single-node-deployment.md)
@@ -210,9 +211,10 @@ documented separately so the getting-started path stays readable:
 
 Meldbase is early-stage and should not yet hold production data. The current
 format is revision 3 and intentionally evolves during alpha; older alpha files
-are unsupported, so use the matching older build to export personal test data
-before an incompatible upgrade. The project has one current storage path—there
-is no legacy runtime or fallback engine.
+are unsupported. There is no cross-version compatibility promise yet: a future
+breaking change will receive release-specific guidance when it is actually
+planned. The project has one current storage path—there is no legacy runtime or
+fallback engine.
 
 The core, server, SDKs, and single-node tooling are implemented and tested, but
 the project does **not** claim blanket power-loss qualification for every

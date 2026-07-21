@@ -13,7 +13,7 @@ import (
 func TestLogicalArchiveCommandsExportAndImport(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld")
-	archive := filepath.Join(directory, "migration.jsonl")
+	archive := filepath.Join(directory, "archive.jsonl")
 	destination := filepath.Join(directory, "destination.meld")
 	db, err := meldbase.Open(source)
 	if err != nil {

@@ -18,10 +18,11 @@ root. `RecoveryRequireClean` rejects either action before it changes bytes.
 
 ## Alpha compatibility
 
-This is an intentional alpha-format boundary. A file from an earlier alpha is
-not opened or migrated in place. Export it with its matching build and import it
-into a newly created database. Production deployments should always verify a
-backup/restore exercise before upgrading.
+This is an intentional alpha-format boundary. A file from an earlier alpha may
+not open, and Meldbase makes no cross-version migration commitment yet. A future
+breaking change will have release-specific guidance when it is planned.
+Production deployments should always verify a backup/restore exercise before
+upgrading.
 
 `meld export` produces a versioned JSON Lines logical archive containing
 collection names, typed documents, and index definitions. Its final record
@@ -30,12 +31,13 @@ builds and offline-verifies a private temporary database, then publishes it only
 if every check succeeds. It does not preserve database identity, commit history,
 rollback anchors, or credentials; configure those again for the new database.
 
-Use the old executable for export and the new executable for import:
+Use it as a portable data snapshot or an import rehearsal with the current
+build:
 
 ```sh
-old-meld export --db /data/app.meld --out /migration/app.jsonl
-new-meld import --in /migration/app.jsonl --out /data/app-upgraded.meld
-new-meld verify --db /data/app-upgraded.meld
+meld export --db /data/app.meld --out /archive/app.jsonl
+meld import --in /archive/app.jsonl --out /data/app-imported.meld
+meld verify --db /data/app-imported.meld
 ```
 
 ## Operational commands
@@ -45,8 +47,8 @@ meld inspect --db /data/app.meld --require-compatible
 meld verify --db /data/app.meld --timeout 10m
 meld backup --db /data/app.meld --out /backup/app.meld
 meld restore --in /backup/app.meld --receipt /backup/app.receipt.json --out /data/restored.meld
-meld export --db /data/app.meld --out /migration/app.jsonl
-meld import --in /migration/app.jsonl --out /data/app-upgraded.meld
+meld export --db /data/app.meld --out /archive/app.jsonl
+meld import --in /archive/app.jsonl --out /data/app-imported.meld
 ```
 
 `verify` is read-only and performs the complete protected-page and index audit.
@@ -54,5 +56,6 @@ meld import --in /migration/app.jsonl --out /data/app-upgraded.meld
 identity; a restored copy should be treated as the same database for rollback
 protection and replication purposes.
 
-`export` and `import` are the format-upgrade path, not a substitute for physical
-backup. They use new paths and their archive is intentionally data-only.
+`export` and `import` are a portable, data-only archive path—not a substitute
+for physical recovery backup or a cross-version compatibility promise. They use
+new paths.

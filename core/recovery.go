@@ -181,7 +181,7 @@ const (
 	DefaultMaxFileBytes uint64 = 8 << 30
 )
 
-// CompactionOptions configures newly written migration or compaction files.
+// CompactionOptions configures newly written replacement or compaction files.
 // ResourceLimits govern transient index construction as well as the reopened
 // destination handle; zero fields select production defaults.
 type CompactionOptions struct {
