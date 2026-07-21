@@ -232,7 +232,8 @@ are the authoritative boundary.
 - [Query and index contract](docs/query.md)
 - [Reactive queries and durable changes](docs/reactive.md)
 - [Client protocol](docs/client-protocol.md)
-- [Server worker SDK](docs/server-js-sdk.md)
+- [Server worker SDK guide and examples](docs/guide/server-worker-sdk.md)
+- [Server worker protocol](docs/server-js-sdk.md)
 - [Replication and primary write fence](docs/replication-protocol.md)
 
 ## Contributing and verification

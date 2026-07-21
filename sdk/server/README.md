@@ -37,8 +37,8 @@ The application supplies its WebSocket implementation; no transport package is
 bundled. Mount the Go worker hub on a private TLS listener and use a dedicated
 worker credential, never a browser or admin token.
 
-See `docs/server-js-sdk.md` in the repository for protocol and transaction
-semantics.
+See `docs/guide/server-worker-sdk.md` for task-oriented methods, usage, and
+examples. See `docs/server-js-sdk.md` for protocol and transaction semantics.
 
 ## Internal layout
 

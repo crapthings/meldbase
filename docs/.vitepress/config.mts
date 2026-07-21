@@ -26,6 +26,7 @@ export default defineConfig({
             { text: "Build a live todo app", link: "/guide/realtime-todos" },
             { text: "Identity and workspaces", link: "/guide/identity-and-workspaces" },
             { text: "Collection access policies", link: "/guide/access-policies" },
+            { text: "Server worker SDK", link: "/guide/server-worker-sdk" },
           ],
         },
       ],
@@ -77,7 +78,8 @@ export default defineConfig({
           text: "Advanced",
           items: [
             { text: "RPC idempotency", link: "/rpc-idempotency" },
-            { text: "Server worker SDK", link: "/server-js-sdk" },
+            { text: "Server worker SDK guide", link: "/guide/server-worker-sdk" },
+            { text: "Server worker protocol", link: "/server-js-sdk" },
             { text: "Replication protocol", link: "/replication-protocol" },
             { text: "Primary write fence", link: "/primary-lease" },
           ],

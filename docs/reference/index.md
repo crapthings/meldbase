@@ -29,8 +29,9 @@ The workspace packages are currently a preview and are not published to npm:
 
 The generated [TypeScript API reference](/api/typescript/) is published with
 this site from the exact SDK source in each release. Use the
-[server worker guide](../server-js-sdk) for integration patterns and lifecycle
-guidance.
+[server worker SDK guide](../guide/server-worker-sdk) for integration patterns,
+examples, and lifecycle guidance; use the
+[worker protocol](../server-js-sdk) for its control-plane contract.
 
 ## Transport and CLI
 

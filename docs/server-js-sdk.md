@@ -6,6 +6,10 @@ process. Go remains authoritative for authentication, authorization, resource
 limits, typed-value validation, idempotency, transaction commit and reactive
 publication.
 
+This page specifies the control-plane and security contract. For a
+method-by-method introduction with copy-adaptable TypeScript examples, start
+with the [server worker SDK guide](guide/server-worker-sdk).
+
 The control protocol is language-neutral so future runtimes can implement the
 same contract. The Node package is the first implementation, not a privileged
 wire fork.

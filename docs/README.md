@@ -21,7 +21,8 @@
 - [Reactive queries and durable changes](reactive.md)
 - [Client HTTP/WebSocket protocol](client-protocol.md)
 - [RPC idempotency](rpc-idempotency.md)
-- [Server JavaScript worker SDK](server-js-sdk.md)
+- [Server worker SDK guide and examples](guide/server-worker-sdk.md)
+- [Server worker protocol](server-js-sdk.md)
 
 ## Operations
 
