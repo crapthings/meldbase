@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { loadDiagnostics, loadHistory, streamStats } from "./api";
-import type { AdminSample, ConnectionState, DiagnosticEvent } from "./types";
+import { loadDiagnostics, loadHistory, loadIndexCatalog, streamStats } from "./api";
+import type { AdminSample, ConnectionState, DiagnosticEvent, IndexCatalogEntry } from "./types";
 import { number, object } from "./utils";
 
 type DashboardState = {
@@ -15,6 +15,8 @@ type DashboardState = {
   diagnostics: DiagnosticEvent[];
   diagnosticsEnabled: boolean;
   diagnosticsStatus: string;
+  indexes: IndexCatalogEntry[];
+  indexesStatus: string;
   connect: (token: string, rememberSession?: boolean) => Promise<void>;
   disconnect: () => void;
   setHasHydrated: (hasHydrated: boolean) => void;
@@ -62,11 +64,16 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
   diagnostics: [],
   diagnosticsEnabled: false,
   diagnosticsStatus: "disabled",
+  indexes: [],
+  indexesStatus: "unavailable",
   async connect(token, rememberSession = get().rememberSession) {
     streamController?.abort();
     set({ connection: "connecting", connectionLabel: "Authenticating", error: "", token, rememberSession });
     try {
-      const history = await loadHistory(token);
+      const [history, catalog] = await Promise.all([
+        loadHistory(token),
+        loadIndexCatalog(token).catch(() => null),
+      ]);
       const samples = history.samples.slice(-120);
       const latest = samples.at(-1);
       diagnosticAfter = 0;
@@ -76,6 +83,8 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
         diagnostics: [],
         diagnosticsEnabled: diagnosticsEnabled(latest),
         diagnosticsStatus: diagnosticStatus(latest),
+        indexes: catalog?.indexes ?? [],
+        indexesStatus: catalog ? `${catalog.indexes.length.toLocaleString()} published` : "unavailable",
         connection: "live",
         connectionLabel: "Live",
       });
@@ -110,7 +119,7 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
     diagnosticsPending = false;
     set({
       token: "", rememberSession: false, connection: "idle", connectionLabel: "Disconnected", error: "", samples: [], diagnostics: [],
-      diagnosticsEnabled: false, diagnosticsStatus: "disabled",
+      diagnosticsEnabled: false, diagnosticsStatus: "disabled", indexes: [], indexesStatus: "unavailable",
     });
     clearStoredSession();
   },

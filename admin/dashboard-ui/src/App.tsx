@@ -1,13 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createHashRouter, RouterProvider } from "react-router-dom";
 import { AppShell, StatusDot } from "./components";
-import { DiagnosticsPage, EmptyRoute, OverviewPage, RealtimePage, StoragePage, TransportPage } from "./pages";
+import { DiagnosticsPage, EmptyRoute, IndexesPage, OverviewPage, RealtimePage, StoragePage, TransportPage } from "./pages";
 import { useDashboardStore } from "./store";
 
 const router = createHashRouter([
   { element: <AppShell />, children: [
     { path: "/", element: <OverviewPage /> },
     { path: "/storage", element: <StoragePage /> },
+    { path: "/indexes", element: <IndexesPage /> },
     { path: "/realtime", element: <RealtimePage /> },
     { path: "/transport", element: <TransportPage /> },
     { path: "/diagnostics", element: <DiagnosticsPage /> },

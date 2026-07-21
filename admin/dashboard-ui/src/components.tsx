@@ -1,15 +1,16 @@
 import type { ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import type { AdminSample, DiagnosticEvent } from "./types";
+import type { AdminSample, DiagnosticEvent, IndexCatalogEntry } from "./types";
 import { bytes, count, duration, number, object, percent, rate, ratio, time, uptime, valueAt } from "./utils";
 import { useDashboardStore } from "./store";
 
-type IconName = "overview" | "storage" | "realtime" | "transport" | "diagnostics" | "logout";
+type IconName = "overview" | "storage" | "indexes" | "realtime" | "transport" | "diagnostics" | "logout";
 
 function Icon({ name }: { name: IconName }): ReactNode {
   const paths: Record<IconName, ReactNode> = {
     overview: <><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z" /></>,
    storage: <><ellipse cx="12" cy="5" rx="7" ry="3" /><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7" /></>,
+    indexes: <><circle cx="7" cy="7" r="2" /><circle cx="17" cy="7" r="2" /><circle cx="12" cy="17" r="2" /><path d="m8.7 8.1 2.1 7M15.3 8.1l-2.1 7M9 7h6" /></>,
     realtime: <><path d="M4 18a11 11 0 0 1 16 0M7 15a7 7 0 0 1 10 0M10 12a3 3 0 0 1 4 0" /><circle cx="12" cy="19" r="1" /></>,
     transport: <><path d="M7 7h10v10H7zM4 12H2m20 0h-2M12 4V2m0 20v-2" /><path d="M10 10h4v4h-4z" /></>,
     diagnostics: <><path d="M9 3h6l1 2h3v16H5V5h3l1-2Z" /><path d="M9 12h6M9 16h4" /></>,
@@ -21,6 +22,7 @@ function Icon({ name }: { name: IconName }): ReactNode {
 const navigation: { to: string; label: string; icon: IconName }[] = [
   { to: "/", label: "Overview", icon: "overview" },
   { to: "/storage", label: "Storage & durability", icon: "storage" },
+  { to: "/indexes", label: "Indexes & planner", icon: "indexes" },
   { to: "/realtime", label: "Realtime & queries", icon: "realtime" },
   { to: "/transport", label: "Transport & workers", icon: "transport" },
   { to: "/diagnostics", label: "Diagnostics", icon: "diagnostics" },
@@ -116,6 +118,12 @@ export function DiagnosticsTable({ events, enabled, status }: { events: Diagnost
   return <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm"><table className="w-full min-w-[720px] border-collapse text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-[.14em] text-slate-500"><tr>{["Time", "Kind", "Stage", "Outcome", "Duration", "Work"].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{[...events].reverse().map((event) => <tr key={event.sequence} className="text-slate-700"><td className="px-4 py-3 text-slate-500">{time(event.capturedAt)}</td><td className="px-4 py-3 font-medium">{event.kind}</td><td className="px-4 py-3">{event.stage ?? "durability"}</td><td className={`px-4 py-3 font-semibold ${event.outcome === "success" ? "text-emerald-700" : "text-rose-700"}`}>{event.errorClass ?? event.outcome}</td><td className="px-4 py-3">{duration(event.durationNanos)}</td><td className="px-4 py-3 text-right">{event.kind === "query" ? `${count(event.documentsExamined)} examined / ${count(event.documentsReturned)} returned` : `${count(event.changes)} changes`}</td></tr>)}</tbody></table></div>;
 }
 
+export function IndexCatalog({ indexes, status }: { indexes: readonly IndexCatalogEntry[]; status: string }) {
+  if (status === "unavailable") return <EmptyState title="Index catalog unavailable" detail="This server does not expose the protected index catalog. Query-plan totals remain available from telemetry." />;
+  if (!indexes.length) return <EmptyState title="No published indexes" detail="Use the deployment CLI to create an index after checking its expected plan with Explain." />;
+  return <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm"><table className="w-full min-w-[720px] border-collapse text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-[.14em] text-slate-500"><tr>{["Collection", "Index", "Fields", "Constraint"].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{indexes.map((index) => <tr key={`${index.collection}/${index.name}`} className="text-slate-700"><td className="px-4 py-3 font-medium">{index.collection}</td><td className="px-4 py-3">{index.name}</td><td className="px-4 py-3 font-mono text-[11px]">{index.fields.map((field) => `${field.path} ${field.order === 1 ? "↑" : "↓"}`).join(" · ")}</td><td className="px-4 py-3">{index.unique ? "unique" : "non-unique"}</td></tr>)}</tbody></table></div>;
+}
+
 export function EmptyState({ title, detail }: { title: string; detail: string }) { return <div className="rounded-xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center shadow-sm"><p className="font-semibold text-slate-700">{title}</p><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">{detail}</p></div>; }
 
 export function rows(sample: AdminSample | undefined, definitions: { label: string; path?: string; value?: () => string }[]): { label: string; value: string }[] { return definitions.map((definition) => ({ label: definition.label, value: definition.value ? definition.value() : String(valueAt(sample, definition.path ?? "") ?? "—") })); }
@@ -161,7 +169,7 @@ function healthText(level: string): string { return level === "healthy" ? "text-
 
 export function queryRows(sample: AdminSample | undefined) {
   const queries = object(valueAt(sample, "stats.queries"));
-  return [{ label: "Index scans", value: count(queries.indexScans) }, { label: "Collection scans", value: count(queries.collectionScans) }, { label: "ID lookups", value: count(queries.idLookups) }, { label: "Examined / returned", value: ratio(queries.documentsExamined, queries.documentsReturned) }];
+  return [{ label: "Index scans", value: count(queries.indexScans) }, { label: "Collection scans", value: count(queries.collectionScans) }, { label: "ID lookups", value: count(queries.idLookups) }, { label: "Examined / returned", value: ratio(queries.documentsExamined, queries.documentsReturned) }, { label: "Planner total", value: count(queries.total) }];
 }
 
 export function realtimeRows(sample: AdminSample | undefined) {

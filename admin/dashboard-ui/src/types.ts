@@ -45,4 +45,16 @@ export type DiagnosticResponse = {
   stats?: RecordValue;
 };
 
+export type IndexCatalogEntry = {
+  collection: string;
+  name: string;
+  fields: Array<{ path: string; order: 1 | -1 }>;
+  unique: boolean;
+};
+
+export type IndexCatalogResponse = {
+  version: 1;
+  indexes: IndexCatalogEntry[];
+};
+
 export type ConnectionState = "idle" | "connecting" | "live" | "retrying" | "error";

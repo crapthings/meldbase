@@ -572,7 +572,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		}
 		adminHandler, err := admin.NewHandler(admin.HandlerOptions{
 			Sampler: adminSampler, Authorize: authorize, ServeDashboard: true,
-			ServeMetrics: *adminMetrics, Diagnostics: db,
+			ServeMetrics: *adminMetrics, Diagnostics: db, IndexCatalog: db,
 		})
 		if err != nil {
 			_ = adminSampler.Close()

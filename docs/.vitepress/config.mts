@@ -26,6 +26,7 @@ export default defineConfig({
             { text: "Build a live todo app", link: "/guide/realtime-todos" },
             { text: "Identity and workspaces", link: "/guide/identity-and-workspaces" },
             { text: "Collection access policies", link: "/guide/access-policies" },
+            { text: "Indexing and query plans", link: "/guide/indexing-and-query-plans" },
             { text: "Server worker SDK", link: "/guide/server-worker-sdk" },
           ],
         },

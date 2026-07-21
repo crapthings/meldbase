@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
@@ -21,6 +22,12 @@ type DiagnosticSource interface {
 	DiagnosticSnapshotAfter(after uint64, limit int) meldbase.DiagnosticSnapshot
 }
 
+// IndexCatalogSource supplies only published index definitions. Its output is
+// exposed exclusively from the authenticated operator API.
+type IndexCatalogSource interface {
+	IndexCatalog(context.Context) ([]meldbase.IndexCatalogEntry, error)
+}
+
 type HandlerOptions struct {
 	Sampler        *Sampler
 	Authorize      Authorizer
@@ -29,6 +36,7 @@ type HandlerOptions struct {
 	ServeDashboard bool
 	ServeMetrics   bool
 	Diagnostics    DiagnosticSource
+	IndexCatalog   IndexCatalogSource
 }
 
 type Handler struct {
@@ -38,6 +46,7 @@ type Handler struct {
 	writeTimeout   time.Duration
 	serveDashboard bool
 	diagnostics    DiagnosticSource
+	indexCatalog   IndexCatalogSource
 	mux            *http.ServeMux
 }
 
@@ -82,7 +91,7 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 		sampler: options.Sampler, authorize: options.Authorize,
 		allowedOrigins: make(map[string]struct{}, len(options.AllowedOrigins)),
 		writeTimeout:   options.WriteTimeout, serveDashboard: options.ServeDashboard,
-		diagnostics: options.Diagnostics, mux: http.NewServeMux(),
+		diagnostics: options.Diagnostics, indexCatalog: options.IndexCatalog, mux: http.NewServeMux(),
 	}
 	for _, origin := range options.AllowedOrigins {
 		parsed, err := url.Parse(origin)
@@ -99,6 +108,9 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 	}
 	if options.Diagnostics != nil {
 		handler.mux.HandleFunc("GET /v1/diagnostics", handler.diagnosticEvents)
+	}
+	if options.IndexCatalog != nil {
+		handler.mux.HandleFunc("GET /v1/indexes", handler.indexes)
 	}
 	if options.ServeDashboard {
 		handler.mux.HandleFunc("GET /", handler.dashboard)
@@ -217,6 +229,42 @@ func (h *Handler) diagnosticEvents(writer http.ResponseWriter, request *http.Req
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(writer).Encode(h.diagnostics.DiagnosticSnapshotAfter(after, limit))
+}
+
+func (h *Handler) indexes(writer http.ResponseWriter, request *http.Request) {
+	entries, err := h.indexCatalog.IndexCatalog(request.Context())
+	if err != nil {
+		writeAdminError(writer, http.StatusServiceUnavailable, "index_catalog_unavailable")
+		return
+	}
+	type field struct {
+		Path  string `json:"path"`
+		Order int    `json:"order"`
+	}
+	type entry struct {
+		Collection string  `json:"collection"`
+		Name       string  `json:"name"`
+		Fields     []field `json:"fields"`
+		Unique     bool    `json:"unique"`
+	}
+	result := make([]entry, 0, len(entries))
+	for _, index := range entries {
+		fields := index.Definition.Fields
+		if len(fields) == 0 && index.Definition.Field != "" {
+			fields = []meldbase.IndexField{{Field: index.Definition.Field, Order: index.Definition.Order}}
+		}
+		item := entry{Collection: index.Collection, Name: index.Definition.Name, Unique: index.Definition.Unique, Fields: make([]field, len(fields))}
+		for position, definition := range fields {
+			item.Fields[position] = field{Path: definition.Field, Order: definition.Order}
+		}
+		result = append(result, item)
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(writer).Encode(struct {
+		Version uint32  `json:"version"`
+		Indexes []entry `json:"indexes"`
+	}{Version: 1, Indexes: result})
 }
 
 func (h *Handler) prometheusMetrics(writer http.ResponseWriter, _ *http.Request) {

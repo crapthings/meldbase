@@ -1,4 +1,4 @@
-import type { AdminSample, DiagnosticResponse, HistoryResponse } from "./types";
+import type { AdminSample, DiagnosticResponse, HistoryResponse, IndexCatalogResponse } from "./types";
 
 export const adminSchemaVersion = 16;
 
@@ -25,6 +25,18 @@ export async function loadDiagnostics(token: string, after: number, signal?: Abo
   const snapshot = await response.json() as DiagnosticResponse;
   if (snapshot.version !== 1 || !Array.isArray(snapshot.events)) throw new Error("Unsupported diagnostics protocol");
   return snapshot;
+}
+
+export async function loadIndexCatalog(token: string, signal?: AbortSignal): Promise<IndexCatalogResponse | null> {
+  const response = await authorized("/v1/indexes", token, signal);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Index catalog returned ${response.status}`);
+  const catalog = await response.json() as IndexCatalogResponse;
+  if (catalog.version !== 1 || !Array.isArray(catalog.indexes) || catalog.indexes.some((index) =>
+    typeof index.collection !== "string" || typeof index.name !== "string" || typeof index.unique !== "boolean" || !Array.isArray(index.fields) ||
+    index.fields.some((field) => typeof field.path !== "string" || (field.order !== 1 && field.order !== -1)),
+  )) throw new Error("Unsupported index catalog protocol");
+  return catalog;
 }
 
 function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {

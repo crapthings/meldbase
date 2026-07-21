@@ -1,7 +1,7 @@
 import { Navigate } from "react-router-dom";
-import { coordinatorRows, DetailPanel, DiagnosticsTable, EmptyState, HealthBanner, MetricCard, PageTitle, queryRows, realtimeRows, sampleMetrics, storageRows, TrendChart, transportRows, durabilityRows } from "./components";
+import { coordinatorRows, DetailPanel, DiagnosticsTable, EmptyState, HealthBanner, IndexCatalog, MetricCard, PageTitle, queryRows, realtimeRows, sampleMetrics, storageRows, TrendChart, transportRows, durabilityRows } from "./components";
 import { useDashboardStore } from "./store";
-import { bytes, count, rate, valueAt } from "./utils";
+import { bytes, count, object, rate, valueAt } from "./utils";
 
 function useLatest() {
   return useDashboardStore((state) => state.samples.at(-1));
@@ -18,6 +18,15 @@ export function StoragePage() {
   const latest = useLatest();
   const stats = sampleMetrics(latest).stats;
   return <><PageTitle eyebrow="Durability posture" title="Storage & durability" detail="Physical file health, rollback protection, retention, maintenance and backup signals. These are process-level aggregates and never expose business data." /><section className="grid gap-4 xl:grid-cols-2"><DetailPanel eyebrow="Pager" title="Storage health" badge={`${count(valueAt(latest, "stats.storage.readers"))} readers`} rows={storageRows(latest)} /><DetailPanel eyebrow="Maintenance" title="Durability" badge={sampleMetrics(latest).uptime} rows={durabilityRows(latest)} /></section><section className="mt-4 grid gap-3 sm:grid-cols-3"><MetricCard label="Physical bytes" value={count(valueAt(latest, "stats.storage.physicalBytes"))} detail="Current on-disk allocation" /><MetricCard label="Backup attempts" value={count(stats.backupAttempts)} detail={`${count(stats.backupFailures)} failed`} tone="emerald" /><MetricCard label="Reclamation conflicts" value={count(valueAt(latest, "stats.maintenance.conflicts"))} detail="Optimistic maintenance conflicts" tone="amber" /></section></>;
+}
+
+export function IndexesPage() {
+  const latest = useLatest();
+  const indexes = useDashboardStore((state) => state.indexes);
+  const status = useDashboardStore((state) => state.indexesStatus);
+  const queries = sampleMetrics(latest).queries;
+  const builds = object(valueAt(latest, "stats.indexBuilds"));
+  return <><PageTitle eyebrow="Deployment-managed access paths" title="Indexes & planner" detail="Published index definitions are read-only here. Build or resume indexes with the deployment CLI; this view exposes no document values, query filters, principals or tenant data." /><section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,.55fr)]"><div><div className="mb-3 flex items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-600">Published catalog</p><span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">{status}</span></div><IndexCatalog indexes={indexes} status={status} /></div><div className="space-y-4"><DetailPanel eyebrow="Process session" title="Planner summary" badge={`${count(queries.activeCursors)} active`} rows={queryRows(latest)} /><DetailPanel eyebrow="Resumable lifecycle" title="Index builds" badge={`${count(builds.active)} active`} rows={[{ label: "Scanning", value: count(builds.scanning) }, { label: "Catching up", value: count(builds.catchingUp) }, { label: "Ready to publish", value: count(builds.ready) }, { label: "Persistent failed", value: count(builds.persistentFailed) }, { label: "Retention pressure", value: builds.retentionPressure ? "active" : "clear" }]} /></div></section><section className="mt-4 grid gap-3 sm:grid-cols-3"><MetricCard label="Published indexes" value={count(indexes.length)} detail="Catalog entries visible to this operator" tone="violet" /><MetricCard label="Index scans" value={count(queries.indexScans)} detail="Queries planned through a secondary index" tone="emerald" /><MetricCard label="Collection scans" value={count(queries.collectionScans)} detail="Use Explain before adding an index" tone="amber" /></section></>;
 }
 
 export function RealtimePage() {

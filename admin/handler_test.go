@@ -121,6 +121,52 @@ func TestHandlerPreflightAndHistory(t *testing.T) {
 	}
 }
 
+func TestIndexCatalogEndpointIsAuthenticatedAndReturnsDefinitionsOnly(t *testing.T) {
+	now := time.Now()
+	sampler := newTestSampler(t, &fakeSource{stats: meldbase.DBStats{StartedAt: now, CapturedAt: now}}, 1, 1)
+	db := meldbase.New()
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.Collection("tasks").CreateIndex(context.Background(), "by_state_created", []meldbase.IndexField{{Field: "state", Order: 1}, {Field: "createdAt", Order: -1}}, meldbase.IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	authorizer, err := NewBearerTokenAuthorizer(testAdminToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(HandlerOptions{Sampler: sampler, Authorize: authorizer, IndexCatalog: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/indexes", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated catalog status=%d", response.Code)
+	}
+
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("catalog status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	var catalog struct {
+		Version uint32 `json:"version"`
+		Indexes []struct {
+			Collection string `json:"collection"`
+			Name       string `json:"name"`
+			Fields     []struct {
+				Path  string `json:"path"`
+				Order int    `json:"order"`
+			} `json:"fields"`
+			Unique bool `json:"unique"`
+		} `json:"indexes"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &catalog); err != nil || catalog.Version != 1 || len(catalog.Indexes) != 1 || catalog.Indexes[0].Collection != "tasks" || catalog.Indexes[0].Name != "by_state_created" || len(catalog.Indexes[0].Fields) != 2 || catalog.Indexes[0].Fields[1].Order != -1 || catalog.Indexes[0].Unique {
+		t.Fatalf("catalog=%+v err=%v", catalog, err)
+	}
+}
+
 func TestHandlerStreamsInitialSample(t *testing.T) {
 	_, handler := newTestHandler(t)
 	server := httptest.NewServer(handler)
