@@ -78,7 +78,7 @@ jobs:
       - name: Validate versioned soak receipt
         run: >-
           jq -e '
-            .schemaVersion == 4 and .formatRevision == 3 and .engine == "v2" and
+            .schemaVersion == 4 and .formatRevision == 3 and .engine == "current" and
             .profile == env.MELDBASE_STORAGE_SOAK_PROFILE and
             .sourceRevision == env.GITHUB_SHA and .buildRevision == env.GITHUB_SHA and
             .buildModified == false and
