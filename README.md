@@ -224,39 +224,28 @@ are the authoritative boundary.
 
 ## Documentation
 
-### Choose a starting depth
+### Start with your goal
 
-These are suggested first paths, not a replacement for the topic-based
-documentation below. A guide may be useful at more than one depth.
-
-- **Low — first contact.** Run the [two-minute Go example](#start-in-two-minutes),
+- **Try Meldbase.** Run the [two-minute Go example](#start-in-two-minutes),
   then use the [getting-started guide](docs/guide/getting-started.md) or the
   [live todo example](docs/guide/realtime-todos.md). Read [safe alpha
   evaluation](docs/alpha-evaluation.md) before putting important data in it.
-- **Medium — build an application.** Start with [identity and workspace
+- **Build an application.** Start with [identity and workspace
   isolation](docs/guide/identity-and-workspaces.md), [collection access
   policies](docs/guide/access-policies.md), [realtime UI](docs/guide/realtime-todos.md),
   and the [query contract](docs/query.md).
-- **High — run a secured service.** Follow [single-node deployment and
+- **Run a production service.** Follow [single-node deployment and
   recovery](docs/single-node-deployment.md), then the [backup and upgrade
   runbook](docs/operations/backup-and-upgrade.md), [observability
   guide](docs/observability.md), and [current capability audit](docs/mvp-audit.md).
-- **Development — extend or contribute.** Read the [architecture](docs/architecture.md),
-  [client protocol](docs/client-protocol.md), [server worker SDK
+- **Extend Meldbase.** Read the [architecture](docs/architecture.md), [client
+  protocol](docs/client-protocol.md), [server worker SDK
   guide](docs/guide/server-worker-sdk.md), and [CONTRIBUTING.md](CONTRIBUTING.md)
   before changing storage, protocols, or SDKs.
 
-- **[Documentation site](https://crapthings.github.io/meldbase/)** — guides,
-  operations runbooks, HTTP reference, and generated TypeScript API reference.
-- [Documentation index in this repository](docs/README.md)
-- [Safe alpha evaluation](docs/alpha-evaluation.md)
-- [Architecture](docs/architecture.md)
-- [Query and index contract](docs/query.md)
-- [Reactive queries and durable changes](docs/reactive.md)
-- [Client protocol](docs/client-protocol.md)
-- [Server worker SDK guide and examples](docs/guide/server-worker-sdk.md)
-- [Server worker protocol](docs/server-js-sdk.md)
-- [Replication and primary write fence](docs/replication-protocol.md)
+Need a specific guide or API reference? Browse the **[documentation
+site](https://crapthings.github.io/meldbase/)** or the [documentation index in
+this repository](docs/README.md).
 
 ## Contributing and verification
 
