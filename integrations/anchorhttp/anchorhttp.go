@@ -33,18 +33,21 @@ const (
 	anchorPathPrefix            = "/store/anchors/"
 	defaultMaxClockSkew         = 30 * time.Second
 	maximumBodyBytes     int64  = 4096
+	endpointAttempts            = 2
+	endpointRetryDelay          = 5 * time.Millisecond
 	nodeManifestName            = ".meldbase-anchor-node.json"
 	nodeManifestLockName        = ".meldbase-anchor-node.lock"
 	nodeManifestVersion  uint32 = 1
 )
 
 var (
-	ErrAuthentication    = errors.New("meldbase anchor HTTP: authentication failed")
-	ErrConfiguration     = errors.New("meldbase anchor HTTP: configuration or member mismatch")
-	ErrConflict          = errors.New("meldbase anchor HTTP: monotonic anchor conflict")
-	ErrInsecureTransport = errors.New("meldbase anchor HTTP: HTTPS is required")
-	ErrProtocol          = errors.New("meldbase anchor HTTP: invalid protocol response")
-	ErrQuorum            = errors.New("meldbase anchor HTTP: quorum unavailable")
+	ErrAuthentication      = errors.New("meldbase anchor HTTP: authentication failed")
+	ErrConfiguration       = errors.New("meldbase anchor HTTP: configuration or member mismatch")
+	ErrConflict            = errors.New("meldbase anchor HTTP: monotonic anchor conflict")
+	ErrInsecureTransport   = errors.New("meldbase anchor HTTP: HTTPS is required")
+	ErrProtocol            = errors.New("meldbase anchor HTTP: invalid protocol response")
+	ErrQuorum              = errors.New("meldbase anchor HTTP: quorum unavailable")
+	errEndpointUnavailable = errors.New("meldbase anchor HTTP: endpoint unavailable")
 )
 
 type wireAnchor struct {
@@ -551,13 +554,24 @@ type loadResult struct {
 }
 
 func (store *QuorumStore) loadOne(ctx context.Context, replica Replica) loadResult {
+	result, err := retryEndpoint(ctx, func() (loadResult, error) {
+		result := store.loadOneAttempt(ctx, replica)
+		return result, result.err
+	})
+	if err != nil {
+		return loadResult{err: err}
+	}
+	return result
+}
+
+func (store *QuorumStore) loadOneAttempt(ctx context.Context, replica Replica) loadResult {
 	request, err := store.request(ctx, http.MethodGet, replica, nil)
 	if err != nil {
 		return loadResult{err: err}
 	}
 	response, err := store.client.Do(request)
 	if err != nil {
-		return loadResult{err: err}
+		return loadResult{err: errors.Join(errEndpointUnavailable, err)}
 	}
 	defer response.Body.Close()
 	defer io.Copy(io.Discard, io.LimitReader(response.Body, maximumBodyBytes+1))
@@ -571,7 +585,7 @@ func (store *QuorumStore) loadOne(ctx context.Context, replica Replica) loadResu
 		return loadResult{err: ErrConfiguration}
 	}
 	if response.StatusCode == http.StatusServiceUnavailable || response.StatusCode == http.StatusGatewayTimeout || response.StatusCode == http.StatusBadGateway {
-		return loadResult{err: errors.New("meldbase anchor HTTP: endpoint unavailable")}
+		return loadResult{err: errEndpointUnavailable}
 	}
 	if response.StatusCode != http.StatusOK {
 		return loadResult{err: ErrProtocol}
@@ -585,12 +599,22 @@ func (store *QuorumStore) loadOne(ctx context.Context, replica Replica) loadResu
 }
 
 func (store *QuorumStore) advanceOne(ctx context.Context, replica Replica, body []byte) error {
+	_, err := retryEndpoint(ctx, func() (struct{}, error) {
+		return struct{}{}, store.advanceOneAttempt(ctx, replica, body)
+	})
+	return err
+}
+
+func (store *QuorumStore) advanceOneAttempt(ctx context.Context, replica Replica, body []byte) error {
 	request, err := store.request(ctx, http.MethodPut, replica, body)
 	if err != nil {
 		return err
 	}
 	response, err := store.client.Do(request)
 	if err != nil {
+		// A lost write response is ambiguous: the peer may have durably
+		// advanced before the transport failed. Preserve the fail-closed
+		// outcome instead of retrying it as though it were a refusal.
 		return err
 	}
 	defer response.Body.Close()
@@ -607,10 +631,44 @@ func (store *QuorumStore) advanceOne(ctx context.Context, replica Replica, body 
 	case http.StatusBadRequest:
 		return ErrProtocol
 	case http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusBadGateway:
-		return errors.New("meldbase anchor HTTP: endpoint unavailable")
+		return errEndpointUnavailable
 	default:
 		return fmt.Errorf("meldbase anchor HTTP: unexpected status %d", response.StatusCode)
 	}
+}
+
+// retryEndpoint gives each member one bounded recovery attempt after an
+// eligible transient failure. The write path deliberately leaves ambiguous
+// transport failures ineligible, because that peer may have advanced durably
+// before losing its response. The caller context remains the complete
+// operation budget, so a timeout or cancellation can never be extended by
+// retrying a member.
+func retryEndpoint[T any](ctx context.Context, attempt func() (T, error)) (T, error) {
+	var zero T
+	var last error
+	for index := 0; index < endpointAttempts; index++ {
+		if err := ctx.Err(); err != nil {
+			return zero, err
+		}
+		result, err := attempt()
+		if err == nil || !errors.Is(err, errEndpointUnavailable) {
+			return result, err
+		}
+		last = err
+		if index+1 == endpointAttempts {
+			break
+		}
+		timer := time.NewTimer(endpointRetryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return zero, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return zero, last
 }
 
 func (store *QuorumStore) request(ctx context.Context, method string, replica Replica, body []byte) (*http.Request, error) {

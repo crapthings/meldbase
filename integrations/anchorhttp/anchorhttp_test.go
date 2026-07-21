@@ -36,6 +36,7 @@ const (
 	faultUnavailable
 	faultDelay
 	faultDropAdvance
+	faultFailFirstAdvance
 	faultSlow
 	faultPersistThenDropAdvance
 )
@@ -43,6 +44,7 @@ const (
 type faultHandler struct {
 	handler                       http.Handler
 	mode                          atomic.Int32
+	advanceAttempts               atomic.Uint64
 	persistedDroppedAdvance       chan<- struct{}
 	releaseDroppedAdvanceResponse <-chan struct{}
 }
@@ -56,6 +58,12 @@ func (handler *faultHandler) ServeHTTP(response http.ResponseWriter, request *ht
 	case faultDropAdvance:
 		if request.Method == http.MethodPut {
 			http.Error(response, "partitioned", http.StatusServiceUnavailable)
+			return
+		}
+		handler.handler.ServeHTTP(response, request)
+	case faultFailFirstAdvance:
+		if request.Method == http.MethodPut && handler.advanceAttempts.Add(1) == 1 {
+			http.Error(response, "transient", http.StatusServiceUnavailable)
 			return
 		}
 		handler.handler.ServeHTTP(response, request)
@@ -779,8 +787,12 @@ func TestQuorumToleratesStaleNodePartitionAndAllowsLaterRejoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodes[2].fault.mode.Store(faultDropAdvance)
+	nodes[1].fault.mode.Store(faultFailFirstAdvance)
 	if err := store.Advance(context.Background(), second); err != nil {
-		t.Fatalf("one stale node broke write quorum: %v", err)
+		t.Fatalf("stale node and transient peer failure broke write quorum: %v", err)
+	}
+	if attempts := nodes[1].fault.advanceAttempts.Load(); attempts != 2 {
+		t.Fatalf("transient peer attempts=%d, want 2", attempts)
 	}
 	if err := store.Advance(context.Background(), second); err != nil {
 		t.Fatalf("duplicate quorum advance failed: %v", err)
