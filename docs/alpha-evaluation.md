@@ -83,6 +83,16 @@ exploratory only: it is not the retained four-hour release soak or a production
 qualification. See [filesystem qualification](./filesystem-qualification) for
 the evidence hierarchy.
 
+For a one-minute exploratory run, use the same bounded values as the manual
+workflow default:
+
+```sh
+meld storage-soak \
+  --dir ./qualification-smoke/target \
+  --out ./qualification-smoke/evidence/storage-soak-receipt.json \
+  --profile custom --seconds 60 --documents 1000 --reopens 3
+```
+
 ### Optional crash-recovery smoke test
 
 To exercise recovery from an abruptly terminated database process, use a
