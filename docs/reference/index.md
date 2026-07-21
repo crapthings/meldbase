@@ -27,6 +27,11 @@ The workspace packages are currently a preview and are not published to npm:
 - `@meldbase/react` — `useLiveQuery` adapter for the client query object.
 - `@meldbase/server` — authenticated Node.js worker control boundary.
 
+`LocalCollection` and `RemoteCollection` share a query grammar, not a promise
+of identical authority or method sets. Read the [local/remote collection
+boundary](../client-protocol#local-and-remote-collection-boundary) before
+switching an application flow between them.
+
 The generated [TypeScript API reference](/api/typescript/) is published with
 this site from the exact SDK source in each release. Use the
 [server worker SDK guide](../guide/server-worker-sdk) for integration patterns,

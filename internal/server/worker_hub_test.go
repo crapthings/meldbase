@@ -141,6 +141,20 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 	if stats := db.Stats(); stats.Documents != 1 || stats.Collections != 1 {
 		t.Fatalf("transaction did not commit through Go: %+v", stats)
 	}
+	exercise := postIdempotentRPC(t, public.URL, "sdk.exercise", "worker_sdk_e2e_key_0002", []any{})
+	if exercise.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(exercise.Body)
+		exercise.Body.Close()
+		t.Fatalf("exercise status=%d body=%s", exercise.StatusCode, body)
+	}
+	exerciseBody, err := io.ReadAll(exercise.Body)
+	exercise.Body.Close()
+	if err != nil || !strings.Contains(string(exerciseBody), `"updated"`) {
+		t.Fatalf("exercise response=%s error=%v", exerciseBody, err)
+	}
+	if stats := db.Stats(); stats.Documents != 2 || stats.Collections != 1 {
+		t.Fatalf("transactional point-operation exercise did not delete its temporary document and commit its final write: %+v", stats)
+	}
 	request, err := http.NewRequest(http.MethodPost, public.URL+"/v1/collections/items/query", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +175,11 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 	if err := json.NewDecoder(query.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Documents) != 1 || !strings.Contains(string(result.Documents[0]), `"created"`) || strings.Contains(string(result.Documents[0]), `"tenant"`) {
+	if len(result.Documents) != 2 {
+		t.Fatalf("publication response=%s", result.Documents)
+	}
+	documents := string(result.Documents[0]) + string(result.Documents[1])
+	if !strings.Contains(documents, `"created"`) || !strings.Contains(documents, `"committed"`) || strings.Contains(documents, `"tenant"`) {
 		t.Fatalf("publication response=%s", result.Documents)
 	}
 	if !strings.Contains(output.String(), "ready") {

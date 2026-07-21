@@ -21,6 +21,23 @@ const stop = todos.find({ done: false }).subscribe((documents) => {
 });
 ```
 
+## Local and remote are not interchangeable stores
+
+Both collection types use the same bounded filter, sort, pagination, and update
+grammar, but they have different authority. `LocalCollection` is in-memory
+state: its synchronous `replace(document)` is a local upsert with no network or
+policy check. `RemoteCollection` is an authenticated server boundary and
+intentionally offers only `insertOne`, bounded updates, and bounded deletes.
+It has no generic remote `replace` method.
+
+`count` and `groupCount` are remote-only because their `capped` result conveys
+server policy and visibility limits. Do not substitute an exact local count for
+a remote dashboard or permission decision. Use a named transactional RPC when a
+server-owned full replacement must be atomic.
+
+See the [client protocol](https://crapthings.github.io/meldbase/client-protocol#local-and-remote-collection-boundary)
+for the complete authority and API-boundary contract.
+
 ## Seek pagination
 
 For growing collections, prefer `first` and `after` to offset pagination.

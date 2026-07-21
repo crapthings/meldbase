@@ -20,6 +20,8 @@ not expose database paths or internal error text.
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /v1/collections/{collection}/query` | Query documents with the versioned query AST. |
+| `POST /v1/collections/{collection}/count` | Return a policy-capped count for a query. |
+| `POST /v1/collections/{collection}/group-count` | Return policy-constrained counts for one top-level field. |
 | `POST /v1/collections/{collection}/documents` | Insert a document. |
 | `POST /v1/collections/{collection}/mutations` | Apply a safe data-only mutation. |
 | `POST /v1/realtime/tickets` | Exchange an authenticated HTTP request for a single-use realtime ticket. |
@@ -99,6 +101,21 @@ A successful response is exactly `{"version":1,"documents":[...]}`. Each
 entry in `documents` is a typed object value. When workspace isolation is
 enabled, the server adds its own workspace constraint before this query runs;
 do not add a trusted workspace selector to the request.
+
+### Count and group documents
+
+`POST /v1/collections/{collection}/count` accepts the same query envelope and
+returns exactly `{"version":1,"count":N,"capped":BOOLEAN}`. It is for
+badges and summaries: `capped: true` means `N` is a policy-bounded lower bound,
+not a complete cardinality.
+
+`POST /v1/collections/{collection}/group-count` additionally accepts a
+top-level `groupBy` field and returns
+`{"version":1,"groups":[{"key":VALUE,"count":N}],"capped":BOOLEAN}`.
+The field must be permitted by both aggregate and result-field policy because
+each returned key is data. There is no arbitrary aggregation pipeline; at most
+100 groups are returned. For TypeScript usage, see `RemoteCollection.count()`
+and `RemoteCollection.groupCount()` in `@meldbase/client`.
 
 ### Insert a document
 

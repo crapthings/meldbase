@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 
-import { compileQuery } from "@meldbase/client";
+import { compileQuery, compileUpdate } from "@meldbase/client";
 import { MeldbaseWorker, publish, rpc, transactional } from "../dist/index.js";
 
 const url = process.env.MELDBASE_WORKER_URL;
@@ -17,6 +17,16 @@ const worker = new MeldbaseWorker({
     "sdk.create": transactional(async ({ actor }, _arguments, transaction) => {
       const id = await transaction.insert("items", { rank: 7n, tenant: actor.tenantId, title: "created" });
       return transaction.get("items", id);
+    }),
+    "sdk.exercise": transactional(async ({ actor }, _arguments, transaction) => {
+      const id = await transaction.insert("items", { rank: 1n, tenant: actor.tenantId, title: "temporary" });
+      await transaction.replace("items", id, { rank: 2n, tenant: actor.tenantId, title: "replaced" });
+      await transaction.update("items", id, compileUpdate({ $set: { title: "updated" } }));
+      const updated = await transaction.get("items", id);
+      await transaction.delete("items", id);
+      await transaction.insert("items", { rank: 3n, tenant: actor.tenantId, title: "committed" });
+      await transaction.invalidatePublication("items");
+      return updated;
     }),
   },
   publications: {

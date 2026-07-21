@@ -17,6 +17,24 @@ This resembles Minimongo's useful capability—client-side collections and share
 query vocabulary—but Meldbase owns the AST, behavior, synchronization model, and
 security boundary.
 
+## Local and remote collection boundary
+
+`LocalCollection` and `RemoteCollection` deliberately share the data-only
+filter, sort, pagination, and mutation grammar. They are not interchangeable
+database handles and do not promise method-for-method parity.
+
+| Surface | Purpose | Deliberate boundary |
+| --- | --- | --- |
+| `LocalCollection` | In-memory application state, tests, and local reactive views. | Its synchronous `replace(document)` is a local upsert. It makes no network request and applies no server policy. |
+| `RemoteCollection` | Authenticated HTTP/realtime access to a Go server. | It exposes `insertOne`, bounded `updateOne`/`updateMany`, and bounded `deleteOne`/`deleteMany`; every request is re-authorized and server-limited. It intentionally has no generic public `replace` operation. |
+| `RemoteCollection.count` / `groupCount` | Policy-aware dashboard summaries. | They exist only remotely because `capped` describes server visibility and result budgets. A local exact count would have different authority and must not be mistaken for it. |
+
+For a server-owned full replacement inside an atomic business operation, use a
+named `transactional` RPC and its worker `tx.replace(...)` capability. Do not
+emulate it in a browser by reading, changing, and writing a whole document:
+that loses the server's record-level authorization and optimistic transaction
+boundary.
+
 ## Trust boundary
 
 The client is always untrusted. Compiling locally improves feedback but grants no
