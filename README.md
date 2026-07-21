@@ -224,6 +224,28 @@ are the authoritative boundary.
 
 ## Documentation
 
+### Choose a starting depth
+
+These are suggested first paths, not a replacement for the topic-based
+documentation below. A guide may be useful at more than one depth.
+
+- **Low — first contact.** Run the [two-minute Go example](#start-in-two-minutes),
+  then use the [getting-started guide](docs/guide/getting-started.md) or the
+  [live todo example](docs/guide/realtime-todos.md). Read [safe alpha
+  evaluation](docs/alpha-evaluation.md) before putting important data in it.
+- **Medium — build an application.** Start with [identity and workspace
+  isolation](docs/guide/identity-and-workspaces.md), [collection access
+  policies](docs/guide/access-policies.md), [realtime UI](docs/guide/realtime-todos.md),
+  and the [query contract](docs/query.md).
+- **High — run a secured service.** Follow [single-node deployment and
+  recovery](docs/single-node-deployment.md), then the [backup and upgrade
+  runbook](docs/operations/backup-and-upgrade.md), [observability
+  guide](docs/observability.md), and [current capability audit](docs/mvp-audit.md).
+- **Development — extend or contribute.** Read the [architecture](docs/architecture.md),
+  [client protocol](docs/client-protocol.md), [server worker SDK
+  guide](docs/guide/server-worker-sdk.md), and [CONTRIBUTING.md](CONTRIBUTING.md)
+  before changing storage, protocols, or SDKs.
+
 - **[Documentation site](https://crapthings.github.io/meldbase/)** — guides,
   operations runbooks, HTTP reference, and generated TypeScript API reference.
 - [Documentation index in this repository](docs/README.md)
