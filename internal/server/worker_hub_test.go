@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,8 +9,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +23,151 @@ import (
 )
 
 const testWorkerToken = "worker-control-token-0123456789abcdef"
+
+type synchronizedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (buffer *synchronizedBuffer) Write(value []byte) (int, error) {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.b.Write(value)
+}
+
+func (buffer *synchronizedBuffer) String() string {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.b.String()
+}
+
+func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is required for the server SDK end-to-end test")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "sdk", "server", "test", "worker-hub-e2e.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(script); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(script), "..", "dist", "index.js")); err != nil {
+		t.Skip("server SDK is not built; run pnpm --filter @meldbase/server build first")
+	}
+
+	db, err := meldbase.Open(filepath.Join(t.TempDir(), "worker-sdk-e2e.meld2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	policyStore, err := NewDurablePolicyGenerationStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := NewWorkerTokenAuthenticator(testWorkerToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, err := NewWorkerHub(WorkerHubConfig{
+		Authenticator: authenticator, PublicationCollections: []string{"items"}, PolicyGenerationStore: policyStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := httptest.NewServer(hub)
+	defer control.Close()
+	idempotency, err := NewDurableRPCIdempotencyStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(Config{
+		DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{},
+		PublicRealtimeURL: "ws://placeholder.invalid/v1/realtime", ResumeTokenKey: []byte("0123456789abcdef0123456789abcdef"),
+		RPCMethodResolver: hub, RPCTransactionalMethodResolver: hub, QueryPolicyResolver: hub,
+		RPCAuthorizer: rpcTestAuthorizer{allow: true}, RPCIdempotencyStore: idempotency,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	public := httptest.NewServer(api)
+	defer public.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	var output synchronizedBuffer
+	command := exec.CommandContext(ctx, node, script)
+	command.Env = append(os.Environ(),
+		"MELDBASE_WORKER_URL=ws"+strings.TrimPrefix(control.URL, "http"),
+		"MELDBASE_WORKER_TOKEN="+testWorkerToken,
+	)
+	command.Stdout = &output
+	command.Stderr = &output
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	defer func() {
+		if err := command.Process.Signal(os.Interrupt); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			t.Errorf("stop server SDK worker: %v", err)
+		}
+		if err := command.Wait(); err != nil {
+			t.Errorf("server SDK worker exited: %v\n%s", err, output.String())
+		}
+		if err := ctx.Err(); err != nil {
+			t.Errorf("server SDK worker shutdown exceeded deadline: %v\n%s", err, output.String())
+		}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, registered := hub.ResolveRPCMethod("sdk.echo"); registered {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server SDK worker did not register\n%s", output.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	response := postRPC(t, public.URL, "sdk.echo", `{"version":1,"arguments":[{"t":"int64","v":"42"}]}`, true)
+	assertRPCResultInt(t, response, 42)
+	transaction := postIdempotentRPC(t, public.URL, "sdk.create", "worker_sdk_e2e_key_0001", []any{})
+	if transaction.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(transaction.Body)
+		transaction.Body.Close()
+		t.Fatalf("transaction status=%d body=%s", transaction.StatusCode, body)
+	}
+	transaction.Body.Close()
+	if stats := db.Stats(); stats.Documents != 1 || stats.Collections != 1 {
+		t.Fatalf("transaction did not commit through Go: %+v", stats)
+	}
+	request, err := http.NewRequest(http.MethodPost, public.URL+"/v1/collections/items/query", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("authorization", "Bearer valid")
+	query, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer query.Body.Close()
+	if query.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(query.Body)
+		t.Fatalf("publication query status=%d body=%s", query.StatusCode, body)
+	}
+	var result struct {
+		Documents []json.RawMessage `json:"documents"`
+	}
+	if err := json.NewDecoder(query.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Documents) != 1 || !strings.Contains(string(result.Documents[0]), `"created"`) || strings.Contains(string(result.Documents[0]), `"tenant"`) {
+		t.Fatalf("publication response=%s", result.Documents)
+	}
+	if !strings.Contains(output.String(), "ready") {
+		t.Fatalf("server SDK worker did not complete startup\n%s", output.String())
+	}
+}
 
 func TestWorkerHubRoutesTypedRPCAndUnregistersOnDisconnect(t *testing.T) {
 	hub := newTestWorkerHub(t)

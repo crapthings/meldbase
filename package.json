@@ -11,7 +11,7 @@
     "check": "pnpm run docs:build && pnpm run check:dashboard && pnpm --filter @meldbase/client check && pnpm --filter @meldbase/client build && pnpm --filter @meldbase/server check && pnpm --filter @meldbase/server build && pnpm --filter @meldbase/react check && pnpm --filter @meldbase/react build && pnpm --filter @meldbase/example-realtime-todos check",
     "build:dashboard": "pnpm --filter @meldbase/admin-dashboard build",
     "check:dashboard": "pnpm --filter @meldbase/admin-dashboard check && pnpm run build:dashboard",
-    "test": "pnpm --filter './sdk/*' test",
+    "test": "pnpm --filter './sdk/*' test && go test ./internal/server -run '^TestWorkerHubServerSDKEndToEnd$' -count=1",
     "pack:check": "pnpm --filter './sdk/*' build && node scripts/verify-sdk-packages.mjs",
     "build:example": "pnpm --filter @meldbase/example-realtime-todos build",
     "build:docs-sdk": "pnpm --filter @meldbase/client build && pnpm --filter @meldbase/server build && pnpm --filter @meldbase/react build",

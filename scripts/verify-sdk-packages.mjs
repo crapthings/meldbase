@@ -14,7 +14,7 @@ const packages = [
     name: "@meldbase/client",
     expected: [
       "LICENSE", "README.md", "package.json",
-      ...["index", "local", "mutation", "protocol", "query", "remote", "safe-value", "types", "wire"]
+      ...["cursor", "index", "local", "mutation", "protocol", "query", "remote", "safe-value", "types", "wire"]
         .flatMap((name) => [`dist/${name}.d.ts`, `dist/${name}.js`]),
     ],
   },
