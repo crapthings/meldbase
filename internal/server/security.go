@@ -16,13 +16,16 @@ var (
 	ErrForbidden       = errors.New("meldbase server: forbidden")
 )
 
-type Principal struct {
-	Subject string
-	Tenant  string
+// Actor is the authenticated application identity for one request. ID is the
+// stable user or service identifier; TenantID is the active tenant/workspace
+// selected by the verified credential.
+type Actor struct {
+	ID       string
+	TenantID string
 }
 
 type Authenticator interface {
-	AuthenticateHTTP(*http.Request) (Principal, error)
+	AuthenticateHTTP(*http.Request) (Actor, error)
 }
 
 type QueryPolicy struct {
@@ -45,14 +48,14 @@ type QueryPolicy struct {
 // resolution fails closed. Implementations may never return documents; they
 // only narrow row membership, query paths, result fields and result count.
 type QueryPolicyResolver interface {
-	ResolveQueryPolicy(context.Context, Principal, string, meldbase.QuerySpec) (QueryPolicy, bool, error)
+	ResolveQueryPolicy(context.Context, Actor, string, meldbase.QuerySpec) (QueryPolicy, bool, error)
 }
 
 type Authorizer interface {
-	AuthorizeQuery(context.Context, Principal, string, meldbase.QuerySpec) (QueryPolicy, error)
-	AuthorizeInsert(context.Context, Principal, string, meldbase.Document) (InsertPolicy, error)
-	AuthorizeUpdate(context.Context, Principal, string, meldbase.QuerySpec, meldbase.MutationSpec) (UpdatePolicy, error)
-	AuthorizeDelete(context.Context, Principal, string, meldbase.QuerySpec) (DeletePolicy, error)
+	AuthorizeQuery(context.Context, Actor, string, meldbase.QuerySpec) (QueryPolicy, error)
+	AuthorizeInsert(context.Context, Actor, string, meldbase.Document) (InsertPolicy, error)
+	AuthorizeUpdate(context.Context, Actor, string, meldbase.QuerySpec, meldbase.MutationSpec) (UpdatePolicy, error)
+	AuthorizeDelete(context.Context, Actor, string, meldbase.QuerySpec) (DeletePolicy, error)
 }
 
 type UpdatePolicy struct {

@@ -27,7 +27,7 @@ func TestDurableRPCIdempotencyReplaysAfterDatabaseReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	var firstCalls atomic.Uint64
-	firstHandler := newDurableRPCHandler(t, db, store, map[string]RPCMethod{"receipt": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	firstHandler := newDurableRPCHandler(t, db, store, map[string]RPCMethod{"receipt": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		firstCalls.Add(1)
 		return meldbase.String("first-process"), nil
 	}})
@@ -59,7 +59,7 @@ func TestDurableRPCIdempotencyReplaysAfterDatabaseReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reopenedCalls atomic.Uint64
-	reopenedHandler := newDurableRPCHandler(t, reopened, reopenedStore, map[string]RPCMethod{"receipt": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	reopenedHandler := newDurableRPCHandler(t, reopened, reopenedStore, map[string]RPCMethod{"receipt": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		reopenedCalls.Add(1)
 		return meldbase.String("must-not-run"), nil
 	}})
@@ -82,7 +82,7 @@ func TestDurableRPCIdempotencySequencesBusinessWriteAndTerminalRecord(t *testing
 		t.Fatal(err)
 	}
 	var calls atomic.Uint64
-	handler := newDurableRPCHandler(t, db, store, map[string]RPCMethod{"createOrder": func(ctx context.Context, _ Principal, _ []meldbase.Value) (meldbase.Value, error) {
+	handler := newDurableRPCHandler(t, db, store, map[string]RPCMethod{"createOrder": func(ctx context.Context, _ Actor, _ []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		if _, err := db.Collection("orders").InsertOne(ctx, meldbase.Document{"status": meldbase.String("created")}); err != nil {
 			return meldbase.Value{}, err
@@ -118,7 +118,7 @@ func TestDurableRPCIdempotencySequencesBusinessWriteAndTerminalRecord(t *testing
 		t.Fatal(err)
 	}
 	var reopenedCalls atomic.Uint64
-	reopenedHandler := newDurableRPCHandler(t, reopened, reopenedStore, map[string]RPCMethod{"createOrder": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	reopenedHandler := newDurableRPCHandler(t, reopened, reopenedStore, map[string]RPCMethod{"createOrder": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		reopenedCalls.Add(1)
 		return meldbase.String("must-not-run"), nil
 	}})
@@ -143,7 +143,7 @@ func TestTransactionalRPCPublishesBusinessWriteAndResultInOneCommit(t *testing.T
 		t.Fatal(err)
 	}
 	var calls atomic.Uint64
-	methods := map[string]RPCTransactionalMethod{"orders.create": func(_ context.Context, _ Principal, _ []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
+	methods := map[string]RPCTransactionalMethod{"orders.create": func(_ context.Context, _ Actor, _ []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
 		calls.Add(1)
 		if _, err := tx.InsertOne("orders", meldbase.Document{"status": meldbase.String("created")}); err != nil {
 			return meldbase.Value{}, err
@@ -185,7 +185,7 @@ func TestTransactionalRPCPublishesBusinessWriteAndResultInOneCommit(t *testing.T
 	}
 	var reopenedCalls atomic.Uint64
 	reopenedHandler := newDurableTransactionalRPCHandler(t, reopened, reopenedStore, map[string]RPCTransactionalMethod{
-		"orders.create": func(context.Context, Principal, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
+		"orders.create": func(context.Context, Actor, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
 			reopenedCalls.Add(1)
 			return meldbase.String("must-not-run"), nil
 		},
@@ -212,7 +212,7 @@ func TestTransactionalRPCRollsBackWritesBeforePersistingApplicationError(t *test
 	}
 	var calls atomic.Uint64
 	handler := newDurableTransactionalRPCHandler(t, db, store, map[string]RPCTransactionalMethod{
-		"orders.reject": func(_ context.Context, _ Principal, _ []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
+		"orders.reject": func(_ context.Context, _ Actor, _ []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
 			calls.Add(1)
 			if _, err := tx.InsertOne("orders", meldbase.Document{"status": meldbase.String("must-rollback")}); err != nil {
 				return meldbase.Value{}, err
@@ -244,7 +244,7 @@ func TestTransactionalRPCNoopUsesTerminalOnlyCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := newDurableTransactionalRPCHandler(t, db, store, map[string]RPCTransactionalMethod{
-		"status.read": func(context.Context, Principal, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
+		"status.read": func(context.Context, Actor, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
 			return meldbase.String("ok"), nil
 		},
 	})
@@ -273,7 +273,7 @@ func TestTransactionalRPCUsesSameAtomicPathOverWebSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := newDurableTransactionalRPCHandler(t, db, store, map[string]RPCTransactionalMethod{
-		"orders.socket": func(_ context.Context, _ Principal, _ []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
+		"orders.socket": func(_ context.Context, _ Actor, _ []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
 			if _, err := tx.InsertOne("orders", meldbase.Document{"transport": meldbase.String("websocket")}); err != nil {
 				return meldbase.Value{}, err
 			}
@@ -313,7 +313,7 @@ func TestTransactionalRPCPersistsOptimisticConflictWithoutPartialWrites(t *testi
 	var calls atomic.Uint64
 	conflictedID := meldbase.DocumentID{15: 1}
 	handler := newDurableTransactionalRPCHandler(t, db, store, map[string]RPCTransactionalMethod{
-		"orders.conflict": func(_ context.Context, _ Principal, _ []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
+		"orders.conflict": func(_ context.Context, _ Actor, _ []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
 			calls.Add(1)
 			if _, err := tx.InsertOne("orders", meldbase.Document{"_id": meldbase.ID(conflictedID), "kind": meldbase.String("stale")}); err != nil {
 				return meldbase.Value{}, err
@@ -634,7 +634,7 @@ func TestTransactionalRPCRegistrationRequiresMatchingBuiltInStore(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	method := RPCTransactionalMethod(func(context.Context, Principal, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
+	method := RPCTransactionalMethod(func(context.Context, Actor, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
 		return meldbase.Null(), nil
 	})
 	base := Config{
@@ -652,7 +652,7 @@ func TestTransactionalRPCRegistrationRequiresMatchingBuiltInStore(t *testing.T) 
 		t.Fatal("transactional RPC accepted a custom non-atomic store")
 	}
 	base.RPCIdempotencyStore = store
-	base.RPCMethods = map[string]RPCMethod{"atomic": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	base.RPCMethods = map[string]RPCMethod{"atomic": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Null(), nil
 	}}
 	if _, err := New(base); err == nil {

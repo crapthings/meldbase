@@ -27,7 +27,7 @@ const (
 	// read and mutate documents in the collection. The server owns the workspace
 	// field, so this mode is suitable only for genuinely collaborative data.
 	CollectionAccessCollaborative CollectionAccessMode = "collaborative"
-	// CollectionAccessOwner allows a principal to access only documents it owns
+	// CollectionAccessOwner allows an actor to access only documents it owns
 	// inside its verified workspace. The server owns both the workspace and owner
 	// fields for inserts and makes them immutable afterwards.
 	CollectionAccessOwner CollectionAccessMode = "owner"
@@ -62,7 +62,7 @@ type CollectionAccessFields struct {
 }
 
 // WorkspaceAuthorizerConfig declares the manifest-provided collections scoped
-// to the authenticated principal's current workspace. The workspace field is
+// to the authenticated actor's current workspace. The workspace field is
 // owned by the server: inserts set it and updates may never modify it.
 type WorkspaceAuthorizerConfig struct {
 	CollectionAccess []CollectionAccess
@@ -74,7 +74,7 @@ type WorkspaceAuthorizerConfig struct {
 
 // WorkspaceAuthorizer is a data-only Authorizer for ordinary application
 // collections. It is intentionally not a user or membership store; an external
-// identity provider supplies Principal.Tenant from the active workspace claim.
+// identity provider supplies Actor.TenantID from the active workspace claim.
 type WorkspaceAuthorizer struct {
 	collections    map[string]workspaceCollectionAccess
 	rpcMethods     map[string]struct{}
@@ -166,12 +166,12 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 	}, nil
 }
 
-func (a *WorkspaceAuthorizer) AuthorizeQuery(_ context.Context, principal Principal, collection string, _ meldbase.QuerySpec) (QueryPolicy, error) {
-	rule, err := a.allow(principal, collection)
+func (a *WorkspaceAuthorizer) AuthorizeQuery(_ context.Context, actor Actor, collection string, _ meldbase.QuerySpec) (QueryPolicy, error) {
+	rule, err := a.allow(actor, collection)
 	if err != nil {
 		return QueryPolicy{}, err
 	}
-	constraint, err := a.constraint(principal, rule)
+	constraint, err := a.constraint(actor, rule)
 	if err != nil {
 		return QueryPolicy{}, err
 	}
@@ -186,17 +186,17 @@ func (a *WorkspaceAuthorizer) AuthorizeQuery(_ context.Context, principal Princi
 	}, nil
 }
 
-func (a *WorkspaceAuthorizer) AuthorizeInsert(_ context.Context, principal Principal, collection string, _ meldbase.Document) (InsertPolicy, error) {
-	rule, err := a.allow(principal, collection)
+func (a *WorkspaceAuthorizer) AuthorizeInsert(_ context.Context, actor Actor, collection string, _ meldbase.Document) (InsertPolicy, error) {
+	rule, err := a.allow(actor, collection)
 	if err != nil {
 		return InsertPolicy{}, err
 	}
 	if rule.Mode == CollectionAccessReadOnly {
 		return InsertPolicy{}, ErrForbidden
 	}
-	setFields := meldbase.Document{a.workspaceField: meldbase.String(principal.Tenant)}
+	setFields := meldbase.Document{a.workspaceField: meldbase.String(actor.TenantID)}
 	if rule.Mode == CollectionAccessOwner {
-		setFields[rule.OwnerField] = meldbase.String(principal.Subject)
+		setFields[rule.OwnerField] = meldbase.String(actor.ID)
 	}
 	allowAllInputFields, allowedInputFields := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.InputFields })
 	allowAllResultFields, resultFields := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.ResultFields })
@@ -212,15 +212,15 @@ func (a *WorkspaceAuthorizer) AuthorizeInsert(_ context.Context, principal Princ
 	}, nil
 }
 
-func (a *WorkspaceAuthorizer) AuthorizeUpdate(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec, _ meldbase.MutationSpec) (UpdatePolicy, error) {
-	rule, err := a.allow(principal, collection)
+func (a *WorkspaceAuthorizer) AuthorizeUpdate(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec, _ meldbase.MutationSpec) (UpdatePolicy, error) {
+	rule, err := a.allow(actor, collection)
 	if err != nil {
 		return UpdatePolicy{}, err
 	}
 	if rule.Mode == CollectionAccessReadOnly {
 		return UpdatePolicy{}, ErrForbidden
 	}
-	base, err := a.AuthorizeQuery(ctx, principal, collection, query)
+	base, err := a.AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
 		return UpdatePolicy{}, err
 	}
@@ -235,15 +235,15 @@ func (a *WorkspaceAuthorizer) AuthorizeUpdate(ctx context.Context, principal Pri
 	}, nil
 }
 
-func (a *WorkspaceAuthorizer) AuthorizeDelete(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (DeletePolicy, error) {
-	rule, err := a.allow(principal, collection)
+func (a *WorkspaceAuthorizer) AuthorizeDelete(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (DeletePolicy, error) {
+	rule, err := a.allow(actor, collection)
 	if err != nil {
 		return DeletePolicy{}, err
 	}
 	if rule.Mode == CollectionAccessReadOnly {
 		return DeletePolicy{}, ErrForbidden
 	}
-	base, err := a.AuthorizeQuery(ctx, principal, collection, query)
+	base, err := a.AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
 		return DeletePolicy{}, err
 	}
@@ -251,10 +251,10 @@ func (a *WorkspaceAuthorizer) AuthorizeDelete(ctx context.Context, principal Pri
 }
 
 // AuthorizeRPC accepts only exact method names declared by the manifest, for a
-// verified workspace principal. The allowlist deliberately grants no role or
+// verified workspace actor. The allowlist deliberately grants no role or
 // record-level authority; those decisions remain in the named RPC handler.
-func (a *WorkspaceAuthorizer) AuthorizeRPC(_ context.Context, principal Principal, method string) error {
-	if principal.Subject == "" || principal.Tenant == "" {
+func (a *WorkspaceAuthorizer) AuthorizeRPC(_ context.Context, actor Actor, method string) error {
+	if actor.ID == "" || actor.TenantID == "" {
 		return ErrForbidden
 	}
 	if _, allowed := a.rpcMethods[method]; !allowed {
@@ -263,16 +263,16 @@ func (a *WorkspaceAuthorizer) AuthorizeRPC(_ context.Context, principal Principa
 	return nil
 }
 
-func (a *WorkspaceAuthorizer) constraint(principal Principal, rule workspaceCollectionAccess) (meldbase.QuerySpec, error) {
-	filter := meldbase.Filter{a.workspaceField: principal.Tenant}
+func (a *WorkspaceAuthorizer) constraint(actor Actor, rule workspaceCollectionAccess) (meldbase.QuerySpec, error) {
+	filter := meldbase.Filter{a.workspaceField: actor.TenantID}
 	if rule.Mode == CollectionAccessOwner {
-		filter[rule.OwnerField] = principal.Subject
+		filter[rule.OwnerField] = actor.ID
 	}
 	return meldbase.CompileQuery(filter, meldbase.QueryOptions{})
 }
 
-func (a *WorkspaceAuthorizer) allow(principal Principal, collection string) (workspaceCollectionAccess, error) {
-	if principal.Subject == "" || principal.Tenant == "" {
+func (a *WorkspaceAuthorizer) allow(actor Actor, collection string) (workspaceCollectionAccess, error) {
+	if actor.ID == "" || actor.TenantID == "" {
 		return workspaceCollectionAccess{}, ErrForbidden
 	}
 	rule, ok := a.collections[collection]

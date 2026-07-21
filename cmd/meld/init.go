@@ -151,7 +151,7 @@ func runInit(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "Start it with: %s\n", startPath)
 	fmt.Fprintf(stdout, "Admin dashboard: http://%s/\n", *adminAddress)
 	fmt.Fprintf(stdout, "Admin token: %s (kept private; it is not printed)\n", configPath)
-	fmt.Fprintln(stdout, "The bundle expects JWTs signed with secrets/jwt-hs256.secret and containing sub, exp, iss, aud and workspace_id.")
+	fmt.Fprintln(stdout, "The bundle expects JWTs signed with secrets/jwt-hs256.secret and containing sub (actor ID), workspace_id (actor tenant ID), exp, iss, and aud.")
 	return nil
 }
 

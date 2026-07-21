@@ -19,8 +19,8 @@ import (
 
 type rpcTestAuthorizer struct{ allow bool }
 
-func (authorizer rpcTestAuthorizer) AuthorizeRPC(_ context.Context, principal Principal, method string) error {
-	if !authorizer.allow || principal.Subject != "user-1" || method == "forbidden" {
+func (authorizer rpcTestAuthorizer) AuthorizeRPC(_ context.Context, actor Actor, method string) error {
+	if !authorizer.allow || actor.ID != "user-1" || method == "forbidden" {
 		return ErrForbidden
 	}
 	return nil
@@ -29,9 +29,9 @@ func (authorizer rpcTestAuthorizer) AuthorizeRPC(_ context.Context, principal Pr
 func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 	var calls atomic.Uint64
 	methods := map[string]RPCMethod{
-		"math.add": func(_ context.Context, principal Principal, arguments []meldbase.Value) (meldbase.Value, error) {
+		"math.add": func(_ context.Context, actor Actor, arguments []meldbase.Value) (meldbase.Value, error) {
 			calls.Add(1)
-			if principal.Tenant != "mine" || len(arguments) != 2 {
+			if actor.TenantID != "mine" || len(arguments) != 2 {
 				return meldbase.Value{}, errors.New("bad invocation")
 			}
 			left, leftOK := arguments[0].Int64()
@@ -41,13 +41,13 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 			}
 			return meldbase.Int(left + right), nil
 		},
-		"fails": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+		"fails": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Value{}, errors.New("secret database detail")
 		},
-		"panics": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+		"panics": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 			panic("secret panic detail")
 		},
-		"forbidden": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+		"forbidden": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 			calls.Add(1)
 			return meldbase.Null(), nil
 		},
@@ -112,7 +112,7 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 
 func TestHTTPRPCIngressRejectsDuplicateJSONKeysBeforeMethodExecution(t *testing.T) {
 	var calls atomic.Uint64
-	method := func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return meldbase.Null(), nil
 	}
@@ -146,7 +146,7 @@ func TestHTTPRPCIngressRejectsDuplicateJSONKeysBeforeMethodExecution(t *testing.
 }
 
 func TestRPCMapsDatabaseAvailabilityWithoutLeakingEngineErrors(t *testing.T) {
-	method := func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Value{}, errors.Join(errors.New("private disk detail"), meldbase.ErrDurability)
 	}
 	_, _, server := newRPCServer(t, map[string]RPCMethod{"failstop": method}, rpcTestAuthorizer{allow: true}, Config{})
@@ -155,7 +155,7 @@ func TestRPCMapsDatabaseAvailabilityWithoutLeakingEngineErrors(t *testing.T) {
 }
 
 func TestRPCMapsCommitOutcomeUnknownWithoutInvitingRetry(t *testing.T) {
-	method := func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Value{}, errors.Join(meldbase.ErrCommitOutcomeUnknown, context.Canceled)
 	}
 	_, _, server := newRPCServer(t, map[string]RPCMethod{"uncertain": method}, rpcTestAuthorizer{allow: true}, Config{})
@@ -166,7 +166,7 @@ func TestRPCMapsCommitOutcomeUnknownWithoutInvitingRetry(t *testing.T) {
 func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	original := map[string]RPCMethod{
-		"wait": func(ctx context.Context, _ Principal, _ []meldbase.Value) (meldbase.Value, error) {
+		"wait": func(ctx context.Context, _ Actor, _ []meldbase.Value) (meldbase.Value, error) {
 			close(started)
 			select {
 			case <-release:
@@ -178,7 +178,7 @@ func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 	}
 	_, _, server := newRPCServer(t, original, rpcTestAuthorizer{allow: true}, Config{MaxConcurrentRPC: 1})
 	delete(original, "wait")
-	original["injected"] = func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	original["injected"] = func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Null(), nil
 	}
 
@@ -211,7 +211,7 @@ func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 func TestRPCClientCancellationPropagatesToMethodContext(t *testing.T) {
 	started, canceled := make(chan struct{}), make(chan struct{})
 	methods := map[string]RPCMethod{
-		"cancel": func(ctx context.Context, _ Principal, _ []meldbase.Value) (meldbase.Value, error) {
+		"cancel": func(ctx context.Context, _ Actor, _ []meldbase.Value) (meldbase.Value, error) {
 			close(started)
 			<-ctx.Done()
 			close(canceled)
@@ -253,7 +253,7 @@ func TestRPCConfigurationRequiresExplicitSafeBounds(t *testing.T) {
 	base := Config{
 		DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{},
 		PublicRealtimeURL: "ws://example.invalid/v1/realtime",
-		RPCMethods: map[string]RPCMethod{"ok": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+		RPCMethods: map[string]RPCMethod{"ok": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Null(), nil
 		}},
 	}
@@ -273,10 +273,10 @@ func TestRPCConfigurationRequiresExplicitSafeBounds(t *testing.T) {
 
 func TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors(t *testing.T) {
 	methods := map[string]RPCMethod{
-		"echo": func(_ context.Context, _ Principal, arguments []meldbase.Value) (meldbase.Value, error) {
+		"echo": func(_ context.Context, _ Actor, arguments []meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Array(arguments...), nil
 		},
-		"reject": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+		"reject": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Value{}, &RPCError{Code: "not_ready"}
 		},
 	}
@@ -330,7 +330,7 @@ func TestWebSocketRPCCancelDuplicateLimitAndDisconnect(t *testing.T) {
 	started := make(chan string, 4)
 	canceled := make(chan string, 4)
 	methods := map[string]RPCMethod{
-		"wait": func(ctx context.Context, _ Principal, arguments []meldbase.Value) (meldbase.Value, error) {
+		"wait": func(ctx context.Context, _ Actor, arguments []meldbase.Value) (meldbase.Value, error) {
 			name, _ := arguments[0].StringValue()
 			started <- name
 			<-ctx.Done()

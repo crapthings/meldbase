@@ -194,14 +194,14 @@ func TestWorkerHubRoutesTypedRPCAndUnregistersOnDisconnect(t *testing.T) {
 			workerDone <- io.ErrUnexpectedEOF
 			return
 		}
-		principal, _ := message["principal"].(map[string]any)
-		if principal["subject"] != "user-1" {
+		actor, _ := message["actor"].(map[string]any)
+		if actor["id"] != "user-1" {
 			workerDone <- io.ErrUnexpectedEOF
 			return
 		}
 		arguments, _ := message["arguments"].([]any)
 		workerDone <- writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "result", "callId": message["callId"], "result": arguments[0],
+			"v": protocolVersion, "type": "result", "callId": message["callId"], "result": arguments[0],
 		})
 	}()
 	response := postRPC(t, api.URL, "math.echo", `{"version":1,"arguments":[{"t":"int64","v":"42"}]}`, true)
@@ -233,7 +233,7 @@ func TestWorkerHubCountsMalformedFrameAndUnregistersWorker(t *testing.T) {
 	control := httptest.NewServer(hub)
 	defer control.Close()
 	worker, workerContext := openTestWorker(t, control.URL, []map[string]any{{"name": "bad.frames", "mode": "rpc"}})
-	if err := writeSocketJSON(workerContext, worker, map[string]any{"v": 1, "type": "unknown"}); err != nil {
+	if err := writeSocketJSON(workerContext, worker, map[string]any{"v": protocolVersion, "type": "unknown"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := worker.Read(workerContext); err == nil {
@@ -255,7 +255,7 @@ func TestWorkerHubRejectsDuplicateJSONKeysBeforeRegistration(t *testing.T) {
 	defer control.Close()
 	worker, ctx := dialTestWorker(t, control.URL)
 	defer worker.CloseNow()
-	frame := []byte(`{"v":1,"type":"register","workerId":"first","workerId":"second","methods":[]}`)
+	frame := []byte(`{"v":2,"type":"register","workerId":"first","workerId":"second","methods":[]}`)
 	if err := worker.Write(ctx, websocket.MessageText, frame); err != nil {
 		t.Fatal(err)
 	}
@@ -271,23 +271,34 @@ func TestWorkerHubRejectsDuplicateJSONKeysBeforeRegistration(t *testing.T) {
 	}
 }
 
-func TestWorkerHubCapabilityDiscoveryIsOptInAndFixed(t *testing.T) {
+func TestWorkerHubRequiresCapabilityDiscoveryAndUsesFixedV1Descriptor(t *testing.T) {
 	hub := newTestWorkerHub(t)
 	control := httptest.NewServer(hub)
 	defer control.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	header := http.Header{
-		"authorization":     []string{"Bearer " + testWorkerToken},
-		"Meldbase-Protocol": []string{"capabilities-v1"},
+	for _, offered := range []string{"", "capabilities-v0"} {
+		header := http.Header{"authorization": []string{"Bearer " + testWorkerToken}}
+		if offered != "" {
+			header.Set("Meldbase-Protocol", offered)
+		}
+		connection, response, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(control.URL, "http"), &websocket.DialOptions{HTTPHeader: header})
+		if err == nil {
+			_ = connection.CloseNow()
+			t.Fatalf("worker protocol %q unexpectedly connected", offered)
+		}
+		if response == nil || response.StatusCode != http.StatusUpgradeRequired {
+			t.Fatalf("worker protocol %q status=%v error=%v", offered, response, err)
+		}
 	}
+	header := http.Header{"authorization": []string{"Bearer " + testWorkerToken}, "Meldbase-Protocol": []string{"capabilities-v1"}}
 	connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(control.URL, "http"), &websocket.DialOptions{HTTPHeader: header})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer connection.CloseNow()
 	if err := writeSocketJSON(ctx, connection, map[string]any{
-		"v": 1, "type": "register", "workerId": "capability-worker",
+		"v": protocolVersion, "type": "register", "workerId": "capability-worker",
 		"methods": []map[string]any{{"name": "echo", "mode": "rpc"}},
 	}); err != nil {
 		t.Fatal(err)
@@ -299,7 +310,7 @@ func TestWorkerHubCapabilityDiscoveryIsOptInAndFixed(t *testing.T) {
 	}
 	versions, _ := protocol["versions"].([]any)
 	capabilities, _ := protocol["capabilities"].([]any)
-	if len(versions) != 1 || versions[0] != float64(1) || len(capabilities) != 7 || capabilities[0] != "cancel" || capabilities[4] != "transaction.compiled_update" || capabilities[6] != "transaction.point_operations" {
+	if len(versions) != 1 || versions[0] != float64(protocolVersion) || len(capabilities) != 7 || capabilities[0] != "cancel" || capabilities[4] != "transaction.compiled_update" || capabilities[6] != "transaction.point_operations" {
 		t.Fatalf("worker protocol=%+v", protocol)
 	}
 }
@@ -325,7 +336,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 	defer control.Close()
 	worker, workerContext := dialTestWorker(t, control.URL)
 	if err := writeSocketJSON(workerContext, worker, map[string]any{
-		"v": 1, "type": "register", "workerId": "transaction-policy-worker",
+		"v": protocolVersion, "type": "register", "workerId": "transaction-policy-worker",
 		"methods": []map[string]any{
 			{"name": "orders.create", "mode": "transactional"},
 			{"name": "orders.invalidate", "mode": "transactional"},
@@ -368,7 +379,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 			[]any{"status", map[string]any{"t": "string", "v": "created"}},
 		}}
 		if err := writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "tx_op", "callId": callID, "opId": "insert-1", "operation": "insert", "collection": "orders", "document": document,
+			"v": protocolVersion, "type": "tx_op", "callId": callID, "opId": "insert-1", "operation": "insert", "collection": "orders", "document": document,
 		}); err != nil {
 			workerDone <- err
 			return
@@ -381,7 +392,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 			return
 		}
 		if err := writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "tx_op", "callId": callID, "opId": "get-1", "operation": "get", "collection": "orders", "id": id,
+			"v": protocolVersion, "type": "tx_op", "callId": callID, "opId": "get-1", "operation": "get", "collection": "orders", "id": id,
 		}); err != nil {
 			workerDone <- err
 			return
@@ -392,7 +403,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 			return
 		}
 		if err := writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "tx_op", "callId": callID, "opId": "update-1", "operation": "update", "collection": "orders", "id": id,
+			"v": protocolVersion, "type": "tx_op", "callId": callID, "opId": "update-1", "operation": "update", "collection": "orders", "id": id,
 			"mutation": map[string]any{"version": 1, "operations": []map[string]any{
 				{"op": "set", "path": "status", "value": map[string]any{"t": "string", "v": "confirmed"}},
 			}},
@@ -406,7 +417,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 			return
 		}
 		if err := writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "tx_op", "callId": callID, "opId": "invalidate-1",
+			"v": protocolVersion, "type": "tx_op", "callId": callID, "opId": "invalidate-1",
 			"operation": "invalidate_publication", "collection": "orders",
 		}); err != nil {
 			workerDone <- err
@@ -418,7 +429,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 			return
 		}
 		workerDone <- writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "result", "callId": callID, "result": map[string]any{"t": "string", "v": "worker-created"},
+			"v": protocolVersion, "type": "result", "callId": callID, "result": map[string]any{"t": "string", "v": "worker-created"},
 		})
 	}()
 	key := "workertransaction00001"
@@ -467,7 +478,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 			return
 		}
 		if err := writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "tx_op", "callId": callID, "opId": "invalidate-only-1",
+			"v": protocolVersion, "type": "tx_op", "callId": callID, "opId": "invalidate-only-1",
 			"operation": "invalidate_publication", "collection": "orders",
 		}); err != nil {
 			invalidOnlyDone <- err
@@ -478,7 +489,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 			return
 		}
 		invalidOnlyDone <- writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "result", "callId": callID, "result": map[string]any{"t": "null"},
+			"v": protocolVersion, "type": "result", "callId": callID, "result": map[string]any{"t": "null"},
 		})
 	}()
 	invalidOnlyKey := "workertransaction00002"
@@ -555,7 +566,7 @@ func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) 
 	defer control.Close()
 	worker, workerContext := dialTestWorker(t, control.URL)
 	if err := writeSocketJSON(workerContext, worker, map[string]any{
-		"v": 1, "type": "register", "workerId": "publication-worker", "methods": []any{},
+		"v": protocolVersion, "type": "register", "workerId": "publication-worker", "methods": []any{},
 		"publications": []map[string]any{{
 			"collection": "items", "version": "items-v1", "maxResults": 1,
 			"queryPaths": []string{"title"}, "resultFields": []string{"title"},
@@ -584,13 +595,13 @@ func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) 
 	workerDone := make(chan error, 1)
 	go func() {
 		message := readMap(t, workerContext, worker)
-		principal, _ := message["principal"].(map[string]any)
-		if message["type"] != "authorize_query" || message["collection"] != "items" || principal["tenant"] != "mine" {
+		actor, _ := message["actor"].(map[string]any)
+		if message["type"] != "authorize_query" || message["collection"] != "items" || actor["tenantId"] != "mine" {
 			workerDone <- io.ErrUnexpectedEOF
 			return
 		}
 		workerDone <- writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "policy", "callId": message["callId"],
+			"v": protocolVersion, "type": "policy", "callId": message["callId"],
 			"constraint": map[string]any{
 				"version": 1,
 				"where":   map[string]any{"op": "compare", "cmp": "eq", "path": "title", "value": map[string]any{"t": "string", "v": "visible"}},
@@ -641,10 +652,10 @@ func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) 
 	if deniedResponse.StatusCode != http.StatusForbidden {
 		t.Fatalf("managed query after worker disconnect status=%d", deniedResponse.StatusCode)
 	}
-	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Principal{Subject: "user-1", Tenant: "mine"}, "items", meldbase.QuerySpec{}); !found || !errors.Is(err, ErrForbidden) {
+	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", TenantID: "mine"}, "items", meldbase.QuerySpec{}); !found || !errors.Is(err, ErrForbidden) {
 		t.Fatalf("disconnected managed publication found=%v err=%v", found, err)
 	}
-	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Principal{Subject: "user-1", Tenant: "mine"}, "other", meldbase.QuerySpec{}); found || err != nil {
+	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", TenantID: "mine"}, "other", meldbase.QuerySpec{}); found || err != nil {
 		t.Fatalf("unmanaged publication found=%v err=%v", found, err)
 	}
 	stats := hub.Stats()
@@ -666,7 +677,7 @@ func TestWorkerPublicationEvaluationHasIndependentDeadline(t *testing.T) {
 	worker, workerContext := dialTestWorker(t, control.URL)
 	defer worker.CloseNow()
 	if err := writeSocketJSON(workerContext, worker, map[string]any{
-		"v": 1, "type": "register", "workerId": "slow-policy-worker", "methods": []any{},
+		"v": protocolVersion, "type": "register", "workerId": "slow-policy-worker", "methods": []any{},
 		"publications": []map[string]any{{
 			"collection": "items", "version": "items-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",
@@ -678,7 +689,7 @@ func TestWorkerPublicationEvaluationHasIndependentDeadline(t *testing.T) {
 	query, _ := meldbase.CompileQuery(meldbase.Filter{}, meldbase.QueryOptions{})
 	result := make(chan error, 1)
 	go func() {
-		_, _, err := hub.ResolveQueryPolicy(context.Background(), Principal{Subject: "user-1"}, "items", query)
+		_, _, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1"}, "items", query)
 		result <- err
 	}()
 	if frame := readMap(t, workerContext, worker); frame["type"] != "authorize_query" {
@@ -705,7 +716,7 @@ func TestWorkerPublicationDisconnectRevokesCompositeRealtimePolicy(t *testing.T)
 	defer control.Close()
 	worker, workerContext := dialTestWorker(t, control.URL)
 	if err := writeSocketJSON(workerContext, worker, map[string]any{
-		"v": 1, "type": "register", "workerId": "realtime-policy-worker", "methods": []any{},
+		"v": protocolVersion, "type": "register", "workerId": "realtime-policy-worker", "methods": []any{},
 		"publications": []map[string]any{{
 			"collection": "items", "version": "items-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",
@@ -733,7 +744,7 @@ func TestWorkerPublicationDisconnectRevokesCompositeRealtimePolicy(t *testing.T)
 	go func() {
 		message := readMap(t, workerContext, worker)
 		workerDone <- writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "policy", "callId": message["callId"],
+			"v": protocolVersion, "type": "policy", "callId": message["callId"],
 			"constraint": map[string]any{"version": 1, "where": map[string]any{"op": "true"}},
 		})
 	}()
@@ -745,12 +756,12 @@ func TestWorkerPublicationDisconnectRevokesCompositeRealtimePolicy(t *testing.T)
 		t.Fatal(err)
 	}
 	defer connection.CloseNow()
-	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "authenticate", "ticket": ticket.Ticket}); err != nil {
+	if err := writeSocketJSON(ctx, connection, map[string]any{"v": protocolVersion, "type": "authenticate", "ticket": ticket.Ticket}); err != nil {
 		t.Fatal(err)
 	}
 	readMap(t, ctx, connection)
 	if err := writeSocketJSON(ctx, connection, map[string]any{
-		"v": 1, "type": "subscribe", "mode": "delta", "requestId": "worker-policy", "collection": "items",
+		"v": protocolVersion, "type": "subscribe", "mode": "delta", "requestId": "worker-policy", "collection": "items",
 		"query": map[string]any{"version": 1, "where": map[string]any{"op": "true"}},
 	}); err != nil {
 		t.Fatal(err)
@@ -797,7 +808,7 @@ func TestWorkerHubRejectsUnauthenticatedBrowserAndConflictingRegistration(t *tes
 	conflict, conflictContext := dialTestWorker(t, control.URL)
 	defer conflict.CloseNow()
 	if err := writeSocketJSON(conflictContext, conflict, map[string]any{
-		"v": 1, "type": "register", "workerId": "conflict-worker", "methods": []map[string]any{{"name": "owned.method", "mode": "rpc"}},
+		"v": protocolVersion, "type": "register", "workerId": "conflict-worker", "methods": []map[string]any{{"name": "owned.method", "mode": "rpc"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -823,7 +834,7 @@ func TestWorkerHubRejectsUndeclaredPublicationAuthority(t *testing.T) {
 	connection, ctx := dialTestWorker(t, control.URL)
 	defer connection.CloseNow()
 	if err := writeSocketJSON(ctx, connection, map[string]any{
-		"v": 1, "type": "register", "workerId": "authority-escalation", "methods": []any{},
+		"v": protocolVersion, "type": "register", "workerId": "authority-escalation", "methods": []any{},
 		"publications": []map[string]any{{
 			"collection": "secrets", "version": "secrets-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",
@@ -843,7 +854,7 @@ func TestWorkerHubCannotShadowReservedLocalMethod(t *testing.T) {
 	_, err := New(Config{
 		DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{},
 		PublicRealtimeURL: "ws://placeholder.invalid/v1/realtime", ResumeTokenKey: []byte("0123456789abcdef0123456789abcdef"),
-		RPCMethods: map[string]RPCMethod{"local.method": func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+		RPCMethods: map[string]RPCMethod{"local.method": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Null(), nil
 		}},
 		RPCMethodResolver: hub, RPCAuthorizer: rpcTestAuthorizer{allow: true},
@@ -856,7 +867,7 @@ func TestWorkerHubCannotShadowReservedLocalMethod(t *testing.T) {
 	connection, ctx := dialTestWorker(t, control.URL)
 	defer connection.CloseNow()
 	if err := writeSocketJSON(ctx, connection, map[string]any{
-		"v": 1, "type": "register", "workerId": "shadow-worker", "methods": []map[string]any{{"name": "local.method", "mode": "rpc"}},
+		"v": protocolVersion, "type": "register", "workerId": "shadow-worker", "methods": []map[string]any{{"name": "local.method", "mode": "rpc"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -885,7 +896,7 @@ func dialTestWorker(t *testing.T, controlURL string) (*websocket.Conn, context.C
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	t.Cleanup(cancel)
-	header := http.Header{"authorization": []string{"Bearer " + testWorkerToken}}
+	header := http.Header{"authorization": []string{"Bearer " + testWorkerToken}, "Meldbase-Protocol": []string{"capabilities-v1"}}
 	connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(controlURL, "http"), &websocket.DialOptions{HTTPHeader: header})
 	if err != nil {
 		t.Fatal(err)
@@ -897,7 +908,7 @@ func openTestWorker(t *testing.T, controlURL string, methods []map[string]any) (
 	t.Helper()
 	connection, ctx := dialTestWorker(t, controlURL)
 	if err := writeSocketJSON(ctx, connection, map[string]any{
-		"v": 1, "type": "register", "workerId": "test-worker", "methods": methods,
+		"v": protocolVersion, "type": "register", "workerId": "test-worker", "methods": methods,
 	}); err != nil {
 		t.Fatal(err)
 	}

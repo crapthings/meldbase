@@ -36,7 +36,7 @@ Both modes also require `--jwt-issuer`, `--jwt-audience`, and
 `--access-policy-file`. The strict, versioned JSON manifest declares
 collaborative, owner-only, or RPC-only collections; see
 [collection access policies](../guide/access-policies).
-The server derives the principal's active workspace from `workspace_id` by
+The server derives the actor's active workspace from `workspace_id` by
 default; use `--jwt-workspace-claim` only when your issuer uses another claim
 name. The manifest's `workspaceField` remains server-owned for every configured
 collection.

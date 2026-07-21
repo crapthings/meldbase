@@ -14,7 +14,7 @@ import (
 // authorization surface is the server-owned policy types; they never accept a
 // client-selected workspace or projection.
 func (h *Handler) insert(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.config.Authenticator.AuthenticateHTTP(r)
+	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
@@ -41,7 +41,7 @@ func (h *Handler) insert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_document")
 		return
 	}
-	policy, err := h.config.Authorizer.AuthorizeInsert(r.Context(), principal, r.PathValue("collection"), document.Clone())
+	policy, err := h.config.Authorizer.AuthorizeInsert(r.Context(), actor, r.PathValue("collection"), document.Clone())
 	if err != nil {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
@@ -84,7 +84,7 @@ func (h *Handler) insert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) mutate(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.config.Authenticator.AuthenticateHTTP(r)
+	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
@@ -125,7 +125,7 @@ func (h *Handler) mutate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_update")
 			return
 		}
-		policy, err := h.config.Authorizer.AuthorizeUpdate(r.Context(), principal, collectionName, query, mutation)
+		policy, err := h.config.Authorizer.AuthorizeUpdate(r.Context(), actor, collectionName, query, mutation)
 		if err != nil {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
@@ -152,7 +152,7 @@ func (h *Handler) mutate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "unexpected_update")
 			return
 		}
-		policy, err := h.config.Authorizer.AuthorizeDelete(r.Context(), principal, collectionName, query)
+		policy, err := h.config.Authorizer.AuthorizeDelete(r.Context(), actor, collectionName, query)
 		if err != nil {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
@@ -180,7 +180,7 @@ func (h *Handler) mutate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.config.Authenticator.AuthenticateHTTP(r)
+	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
@@ -207,7 +207,7 @@ func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_query")
 		return
 	}
-	policy, err := h.authorizeQuery(r.Context(), principal, r.PathValue("collection"), query)
+	policy, err := h.authorizeQuery(r.Context(), actor, r.PathValue("collection"), query)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
@@ -262,7 +262,7 @@ func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
 // regular query authorization path: a count must never reveal rows a caller
 // could not query, nor bypass a publication's result budget.
 func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.config.Authenticator.AuthenticateHTTP(r)
+	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
@@ -285,7 +285,7 @@ func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_query")
 		return
 	}
-	policy, err := h.authorizeQuery(r.Context(), principal, r.PathValue("collection"), query)
+	policy, err := h.authorizeQuery(r.Context(), actor, r.PathValue("collection"), query)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
@@ -326,7 +326,7 @@ func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
 // budgets with document reads, so dashboard summaries cannot become a data
 // exfiltration side channel.
 func (h *Handler) groupCount(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.config.Authenticator.AuthenticateHTTP(r)
+	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
@@ -350,7 +350,7 @@ func (h *Handler) groupCount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_query")
 		return
 	}
-	policy, err := h.authorizeQuery(r.Context(), principal, r.PathValue("collection"), query)
+	policy, err := h.authorizeQuery(r.Context(), actor, r.PathValue("collection"), query)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
@@ -449,8 +449,8 @@ func (h *Handler) groupCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "groups": result, "capped": examined == policy.MaxResults})
 }
 
-func (h *Handler) authorizeQuery(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
-	base, err := h.config.Authorizer.AuthorizeQuery(ctx, principal, collection, query)
+func (h *Handler) authorizeQuery(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
+	base, err := h.config.Authorizer.AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
 		return QueryPolicy{}, err
 	}
@@ -464,7 +464,7 @@ func (h *Handler) authorizeQuery(ctx context.Context, principal Principal, colle
 	if h.config.QueryPolicyResolver == nil {
 		return base, nil
 	}
-	additional, found, err := h.config.QueryPolicyResolver.ResolveQueryPolicy(ctx, principal, collection, query)
+	additional, found, err := h.config.QueryPolicyResolver.ResolveQueryPolicy(ctx, actor, collection, query)
 	if err != nil {
 		return QueryPolicy{}, ErrForbidden
 	}
@@ -475,12 +475,12 @@ func (h *Handler) authorizeQuery(ctx context.Context, principal Principal, colle
 }
 
 func (h *Handler) issueTicket(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.config.Authenticator.AuthenticateHTTP(r)
+	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
-	ticket, err := h.tickets.issue(principal)
+	ticket, err := h.tickets.issue(actor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return

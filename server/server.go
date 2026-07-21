@@ -11,7 +11,7 @@ import (
 type (
 	Config                         = internal.Config
 	Handler                        = internal.Handler
-	Principal                      = internal.Principal
+	Actor                          = internal.Actor
 	Authenticator                  = internal.Authenticator
 	Authorizer                     = internal.Authorizer
 	QueryPolicy                    = internal.QueryPolicy
@@ -36,7 +36,7 @@ type (
 	RPCIdempotencyMaintenance      = internal.RPCIdempotencyMaintenance
 	DurableRPCIdempotencyStore     = internal.DurableRPCIdempotencyStore
 	ServerStats                    = internal.ServerStats
-	WorkerPrincipal                = internal.WorkerPrincipal
+	WorkerIdentity                 = internal.WorkerIdentity
 	WorkerAuthenticator            = internal.WorkerAuthenticator
 	WorkerHubConfig                = internal.WorkerHubConfig
 	WorkerHub                      = internal.WorkerHub

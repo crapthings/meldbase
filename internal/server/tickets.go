@@ -9,8 +9,8 @@ import (
 )
 
 type ticketRecord struct {
-	principal Principal
-	expires   time.Time
+	actor   Actor
+	expires time.Time
 }
 type ticketStore struct {
 	mu      sync.Mutex
@@ -22,7 +22,7 @@ func newTicketStore(ttl time.Duration) *ticketStore {
 	return &ticketStore{ttl: ttl, tickets: make(map[[32]byte]ticketRecord)}
 }
 
-func (s *ticketStore) issue(principal Principal) (string, error) {
+func (s *ticketStore) issue(actor Actor) (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
@@ -36,19 +36,19 @@ func (s *ticketStore) issue(principal Principal) (string, error) {
 			delete(s.tickets, existing)
 		}
 	}
-	s.tickets[key] = ticketRecord{principal: principal, expires: now.Add(s.ttl)}
+	s.tickets[key] = ticketRecord{actor: actor, expires: now.Add(s.ttl)}
 	s.mu.Unlock()
 	return ticket, nil
 }
 
-func (s *ticketStore) consume(ticket string) (Principal, bool) {
+func (s *ticketStore) consume(ticket string) (Actor, bool) {
 	key := sha256.Sum256([]byte(ticket))
 	s.mu.Lock()
 	record, ok := s.tickets[key]
 	delete(s.tickets, key)
 	s.mu.Unlock()
 	if !ok || !record.expires.After(time.Now()) {
-		return Principal{}, false
+		return Actor{}, false
 	}
-	return record.principal, true
+	return record.actor, true
 }

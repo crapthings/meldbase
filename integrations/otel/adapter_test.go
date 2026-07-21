@@ -163,7 +163,7 @@ func TestAdapterContractHasUniqueSafeNamesAndNoDynamicIdentity(t *testing.T) {
 		}
 		seen[name] = struct{}{}
 		lower := strings.ToLower(name + " " + description)
-		for _, forbidden := range []string{"collection.name", "document.id", "query.text", "principal", "tenant", "credential", "db.client"} {
+		for _, forbidden := range []string{"collection.name", "document.id", "query.text", "actor", "tenant", "credential", "db.client"} {
 			if strings.Contains(lower, forbidden) {
 				t.Fatalf("instrument %q contains forbidden identity %q", name, forbidden)
 			}

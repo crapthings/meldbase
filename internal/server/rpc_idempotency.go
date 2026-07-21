@@ -77,13 +77,13 @@ type rpcIdempotencyAction struct {
 	store RPCIdempotencyStore
 }
 
-func newRPCIdempotencyClaim(principal Principal, envelope rpcCallEnvelope, arguments []meldbase.Value, sessionID [16]byte, retention time.Duration) (RPCIdempotencyClaim, error) {
+func newRPCIdempotencyClaim(actor Actor, envelope rpcCallEnvelope, arguments []meldbase.Value, sessionID [16]byte, retention time.Duration) (RPCIdempotencyClaim, error) {
 	if envelope.IdempotencyKey == nil || !validRPCIdempotencyKey(*envelope.IdempotencyKey) || allZero16(sessionID) || retention <= 0 {
 		return RPCIdempotencyClaim{}, errors.New("invalid RPC idempotency claim")
 	}
-	if principal.Subject == "" || len(principal.Subject) > 4096 || len(principal.Tenant) > 4096 ||
-		!utf8.ValidString(principal.Subject) || !utf8.ValidString(principal.Tenant) {
-		return RPCIdempotencyClaim{}, errors.New("RPC principal identity is not a stable UTF-8 scope")
+	if actor.ID == "" || len(actor.ID) > 4096 || len(actor.TenantID) > 4096 ||
+		!utf8.ValidString(actor.ID) || !utf8.ValidString(actor.TenantID) {
+		return RPCIdempotencyClaim{}, errors.New("RPC actor identity is not a stable UTF-8 scope")
 	}
 	claimID, err := randomToken16()
 	if err != nil {
@@ -91,8 +91,8 @@ func newRPCIdempotencyClaim(principal Principal, envelope rpcCallEnvelope, argum
 	}
 	scope := sha256.New()
 	writeHashFrame(scope, []byte("meldbase-rpc-scope-v1"))
-	writeHashFrame(scope, []byte(principal.Tenant))
-	writeHashFrame(scope, []byte(principal.Subject))
+	writeHashFrame(scope, []byte(actor.TenantID))
+	writeHashFrame(scope, []byte(actor.ID))
 	fingerprint := sha256.New()
 	writeHashFrame(fingerprint, []byte("meldbase-rpc-request-v1"))
 	writeHashFrame(fingerprint, []byte(envelope.Method))

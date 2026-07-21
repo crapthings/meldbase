@@ -11,12 +11,11 @@ const worker = new MeldbaseWorker({
   url,
   token,
   workerId: "go-hub-e2e-worker",
-  requireProtocol: true,
   webSocketFactory: (workerURL, { headers }) => new WebSocket(workerURL, { headers }),
   methods: {
     "sdk.echo": rpc((_context, arguments_) => arguments_[0] ?? null),
-    "sdk.create": transactional(async ({ principal }, _arguments, transaction) => {
-      const id = await transaction.insert("items", { rank: 7n, tenant: principal.tenant, title: "created" });
+    "sdk.create": transactional(async ({ actor }, _arguments, transaction) => {
+      const id = await transaction.insert("items", { rank: 7n, tenant: actor.tenantId, title: "created" });
       return transaction.get("items", id);
     }),
   },
@@ -26,7 +25,7 @@ const worker = new MeldbaseWorker({
       maxResults: 10,
       queryPaths: ["title"],
       resultFields: ["rank", "title"],
-    }, ({ principal }) => compileQuery({ tenant: principal.tenant })),
+    }, ({ actor }) => compileQuery({ tenant: actor.tenantId })),
   },
 });
 

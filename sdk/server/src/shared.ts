@@ -19,8 +19,17 @@ export function deferred<T>(): Deferred<T> {
 
 export function parseWorkerURL(raw: string): string {
   const url = new URL(raw);
-  if ((url.protocol !== "ws:" && url.protocol !== "wss:") || !url.host || url.username || url.password || url.search || url.hash) {
-    throw new TypeError("Worker URL must be an absolute ws(s) URL without credentials or query parameters");
+  if (!url.host || url.username || url.password || url.search || url.hash) {
+    throw new TypeError("Worker URL must be an absolute ws(s) URL or a meldbase:// authority without credentials, query parameters, or a fragment");
+  }
+  if (url.protocol === "meldbase:") {
+    if (url.pathname !== "" && url.pathname !== "/") {
+      throw new TypeError("meldbase:// worker URLs cannot include a path");
+    }
+    return new URL(`/v1/workers`, `wss://${url.host}`).toString();
+  }
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+    throw new TypeError("Worker URL must use ws:, wss:, or meldbase:");
   }
   return url.toString();
 }

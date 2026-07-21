@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -44,9 +45,9 @@ func TestRS256JWKSAuthenticatorVerifiesOIDCTokenAndCachesKeySet(t *testing.T) {
 	for range 2 {
 		request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 		request.Header.Set("Authorization", "Bearer "+token)
-		principal, authenticateErr := authenticator.AuthenticateHTTP(request)
-		if authenticateErr != nil || principal != (Principal{Subject: "user-1", Tenant: "team-a"}) {
-			t.Fatalf("principal=%+v error=%v", principal, authenticateErr)
+		actor, authenticateErr := authenticator.AuthenticateHTTP(request)
+		if authenticateErr != nil || actor != (Actor{ID: "user-1", TenantID: "team-a"}) {
+			t.Fatalf("actor=%+v error=%v", actor, authenticateErr)
 		}
 	}
 	if requests.Load() != 1 {
@@ -54,12 +55,38 @@ func TestRS256JWKSAuthenticatorVerifiesOIDCTokenAndCachesKeySet(t *testing.T) {
 	}
 }
 
-func TestRS256JWKSAuthenticatorRequiresHTTPSIssuerAndAudience(t *testing.T) {
+func TestRS256JWKSAuthenticatorRequiresHTTPSJWKSURLIssuerAudienceAndNonReservedWorkspaceClaim(t *testing.T) {
 	if _, err := NewRS256JWKSAuthenticator(RS256JWKSAuthenticatorConfig{JWKSURL: "http://identity.example.test/keys", Issuer: "issuer", Audience: "audience"}); err == nil {
 		t.Fatal("HTTP JWKS URL accepted")
 	}
 	if _, err := NewRS256JWKSAuthenticator(RS256JWKSAuthenticatorConfig{JWKSURL: "https://identity.example.test/keys", Audience: "audience"}); err == nil {
 		t.Fatal("missing issuer accepted")
+	}
+	if _, err := NewRS256JWKSAuthenticator(RS256JWKSAuthenticatorConfig{JWKSURL: "https://identity.example.test/keys", Issuer: "issuer"}); err == nil {
+		t.Fatal("missing audience accepted")
+	}
+	for _, workspaceClaim := range []string{"sub", "iss", "aud", "exp", "nbf", "iat", "jti"} {
+		if _, err := NewRS256JWKSAuthenticator(RS256JWKSAuthenticatorConfig{JWKSURL: "https://identity.example.test/keys", Issuer: "issuer", Audience: "audience", WorkspaceClaim: workspaceClaim}); err == nil {
+			t.Fatalf("reserved workspace claim %q accepted", workspaceClaim)
+		}
+	}
+}
+
+func TestRS256JWKSAuthenticatorRejectsRedirectOutsideHTTPS(t *testing.T) {
+	plaintext := httptest.NewServer(http.NotFoundHandler())
+	defer plaintext.Close()
+	redirector := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		http.Redirect(w, request, plaintext.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+	authenticator, err := NewRS256JWKSAuthenticator(RS256JWKSAuthenticatorConfig{
+		JWKSURL: redirector.URL, Issuer: "https://identity.example.test", Audience: "meldbase-api", HTTPClient: redirector.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authenticator.keyFor(context.Background(), "key-1"); err == nil {
+		t.Fatal("JWKS redirect to HTTP accepted")
 	}
 }
 

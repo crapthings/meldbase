@@ -724,19 +724,19 @@ func usesEphemeralPort(address string) bool {
 
 type devAccess struct{}
 
-func (devAccess) AuthenticateHTTP(*http.Request) (meldserver.Principal, error) {
-	return meldserver.Principal{Subject: "development", Tenant: "development"}, nil
+func (devAccess) AuthenticateHTTP(*http.Request) (meldserver.Actor, error) {
+	return meldserver.Actor{ID: "development", TenantID: "development"}, nil
 }
-func (devAccess) AuthorizeQuery(context.Context, meldserver.Principal, string, meldbase.QuerySpec) (meldserver.QueryPolicy, error) {
+func (devAccess) AuthorizeQuery(context.Context, meldserver.Actor, string, meldbase.QuerySpec) (meldserver.QueryPolicy, error) {
 	return meldserver.QueryPolicy{PolicyVersion: "development-v1", MaxResults: meldbase.DefaultQueryLimits.MaxLimit, AllowAllQueryPaths: true, AllowAllResultFields: true}, nil
 }
-func (devAccess) AuthorizeInsert(context.Context, meldserver.Principal, string, meldbase.Document) (meldserver.InsertPolicy, error) {
+func (devAccess) AuthorizeInsert(context.Context, meldserver.Actor, string, meldbase.Document) (meldserver.InsertPolicy, error) {
 	return meldserver.InsertPolicy{AllowAllInputFields: true, AllowAllResultFields: true}, nil
 }
-func (devAccess) AuthorizeUpdate(context.Context, meldserver.Principal, string, meldbase.QuerySpec, meldbase.MutationSpec) (meldserver.UpdatePolicy, error) {
+func (devAccess) AuthorizeUpdate(context.Context, meldserver.Actor, string, meldbase.QuerySpec, meldbase.MutationSpec) (meldserver.UpdatePolicy, error) {
 	return meldserver.UpdatePolicy{QueryPolicy: meldserver.QueryPolicy{PolicyVersion: "development-v1", AllowAllQueryPaths: true}, AllowAllUpdatePaths: true, MaxAffected: meldbase.DefaultQueryLimits.MaxLimit}, nil
 }
-func (devAccess) AuthorizeDelete(context.Context, meldserver.Principal, string, meldbase.QuerySpec) (meldserver.DeletePolicy, error) {
+func (devAccess) AuthorizeDelete(context.Context, meldserver.Actor, string, meldbase.QuerySpec) (meldserver.DeletePolicy, error) {
 	return meldserver.DeletePolicy{QueryPolicy: meldserver.QueryPolicy{PolicyVersion: "development-v1", AllowAllQueryPaths: true}, MaxAffected: meldbase.DefaultQueryLimits.MaxLimit}, nil
 }
-func (devAccess) AuthorizeRPC(context.Context, meldserver.Principal, string) error { return nil }
+func (devAccess) AuthorizeRPC(context.Context, meldserver.Actor, string) error { return nil }

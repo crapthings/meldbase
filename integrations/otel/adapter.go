@@ -37,7 +37,7 @@ type InstrumentDescriptor struct {
 }
 
 // Instruments returns a fresh, caller-owned copy of the fixed schema. It never
-// contains application, collection, query, document, principal, or tenant data.
+// contains application, collection, query, document, actor, or tenant data.
 func Instruments() []InstrumentDescriptor {
 	result := make([]InstrumentDescriptor, 0, len(intDescriptors)+len(floatDescriptors)+1)
 	result = append(result, InstrumentDescriptor{

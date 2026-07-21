@@ -14,15 +14,167 @@
       "rpc.transactional"
     ]
   },
-  "workerCapabilities": [
-    "cancel",
-    "publication.policy",
-    "rpc",
-    "rpc.transactional",
-    "transaction.compiled_update",
-    "transaction.invalidate_publication",
-    "transaction.point_operations"
-  ],
+  "workerProtocol": {
+    "capabilityHeader": "capabilities-v1",
+    "version": 1,
+    "capabilities": [
+      "cancel",
+      "publication.policy",
+      "rpc",
+      "rpc.transactional",
+      "transaction.compiled_update",
+      "transaction.invalidate_publication",
+      "transaction.point_operations"
+    ],
+    "nestedShapes": [
+      {
+        "name": "actor",
+        "required": [
+          "id",
+          "tenantId"
+        ],
+        "optional": []
+      }
+    ],
+    "hubFrames": [
+      {
+        "type": "authorize_query",
+        "required": [
+          "actor",
+          "callId",
+          "collection",
+          "query",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "cancel",
+        "required": [
+          "callId",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "invoke",
+        "required": [
+          "actor",
+          "arguments",
+          "callId",
+          "method",
+          "mode",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "registered",
+        "required": [
+          "limits",
+          "protocol",
+          "sessionId",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "tx_error",
+        "required": [
+          "callId",
+          "error",
+          "opId",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "tx_result",
+        "required": [
+          "callId",
+          "opId",
+          "result",
+          "type",
+          "v"
+        ],
+        "optional": []
+      }
+    ],
+    "workerFrames": [
+      {
+        "type": "error",
+        "required": [
+          "callId",
+          "error",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "policy",
+        "required": [
+          "callId",
+          "constraint",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "policy_error",
+        "required": [
+          "callId",
+          "error",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "register",
+        "required": [
+          "methods",
+          "publications",
+          "type",
+          "v",
+          "workerId"
+        ],
+        "optional": []
+      },
+      {
+        "type": "result",
+        "required": [
+          "callId",
+          "result",
+          "type",
+          "v"
+        ],
+        "optional": []
+      },
+      {
+        "type": "tx_op",
+        "required": [
+          "callId",
+          "collection",
+          "opId",
+          "operation",
+          "type",
+          "v"
+        ],
+        "optional": [
+          "document",
+          "id",
+          "mutation"
+        ]
+      }
+    ]
+  },
   "fixedErrorCodes": [
     "cancelled",
     "database_unavailable",
@@ -59,86 +211,167 @@
   "clientFrames": [
     {
       "type": "authenticate",
-      "required": ["ticket", "type", "v"],
+      "required": [
+        "ticket",
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "call",
-      "required": ["arguments", "method", "requestId", "type", "v"],
-      "optional": ["idempotencyKey"]
+      "required": [
+        "arguments",
+        "method",
+        "requestId",
+        "type",
+        "v"
+      ],
+      "optional": [
+        "idempotencyKey"
+      ]
     },
     {
       "type": "cancel",
-      "required": ["requestId", "type", "v"],
+      "required": [
+        "requestId",
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "ping",
-      "required": ["type", "v"],
+      "required": [
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "subscribe",
-      "required": ["collection", "query", "requestId", "type", "v"],
-      "optional": ["mode", "resumeToken"]
+      "required": [
+        "collection",
+        "query",
+        "requestId",
+        "type",
+        "v"
+      ],
+      "optional": [
+        "mode",
+        "resumeToken"
+      ]
     },
     {
       "type": "unsubscribe",
-      "required": ["subscriptionId", "type", "v"],
+      "required": [
+        "subscriptionId",
+        "type",
+        "v"
+      ],
       "optional": []
     }
   ],
   "serverFrames": [
     {
       "type": "authenticated",
-      "required": ["type", "v"],
+      "required": [
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "delta",
-      "required": ["fromToken", "operations", "requestId", "subscriptionId", "token", "type", "v"],
+      "required": [
+        "fromToken",
+        "operations",
+        "requestId",
+        "subscriptionId",
+        "token",
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "error",
-      "required": ["error", "requestId", "type", "v"],
+      "required": [
+        "error",
+        "requestId",
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "pong",
-      "required": ["type", "v"],
+      "required": [
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "result",
-      "required": ["requestId", "result", "type", "v"],
+      "required": [
+        "requestId",
+        "result",
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "resumed",
-      "required": ["requestId", "subscriptionId", "token", "type", "v"],
+      "required": [
+        "requestId",
+        "subscriptionId",
+        "token",
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "resync_required",
-      "required": ["requestId", "type", "v"],
+      "required": [
+        "requestId",
+        "type",
+        "v"
+      ],
       "optional": []
     },
     {
       "type": "snapshot",
-      "required": ["documents", "requestId", "subscriptionId", "token", "type", "v"],
+      "required": [
+        "documents",
+        "requestId",
+        "subscriptionId",
+        "token",
+        "type",
+        "v"
+      ],
       "optional": []
     }
   ],
   "nestedShapes": [
     {
       "name": "delta.operation",
-      "required": ["id", "op"],
-      "optional": ["before", "document"]
+      "required": [
+        "id",
+        "op"
+      ],
+      "optional": [
+        "before",
+        "document"
+      ]
     },
     {
       "name": "error",
-      "required": ["code"],
+      "required": [
+        "code"
+      ],
       "optional": []
     }
   ]

@@ -6,13 +6,11 @@ import type { MethodDefinition, PublicationDefinition } from "./types.js";
 
 export function validateWorkerProtocol(
   rawDescriptor: unknown | undefined,
-  requireProtocol: boolean | undefined,
   methods: ReadonlyMap<string, MethodDefinition>,
  publications: ReadonlyMap<string, PublicationDefinition>,
-): ProtocolDescriptor | undefined {
+): ProtocolDescriptor {
   if (rawDescriptor === undefined) {
-    if (requireProtocol) throw new MeldbaseWorkerProtocolError(["protocol.discovery"]);
-    return undefined;
+    throw new MeldbaseWorkerProtocolError(["protocol.discovery"]);
   }
   let descriptor: ProtocolDescriptor;
   try { descriptor = decodeProtocolDescriptor(rawDescriptor); }

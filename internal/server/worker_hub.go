@@ -36,12 +36,14 @@ type workerProtocolError struct{ message string }
 func (err *workerProtocolError) Error() string { return err.message }
 func workerProtocol(message string) error      { return &workerProtocolError{message: message} }
 
-type WorkerPrincipal struct{ Subject string }
+// WorkerIdentity identifies a control-plane worker credential. It is separate
+// from the application Actor passed to RPC and publication handlers.
+type WorkerIdentity struct{ ID string }
 
 // WorkerAuthenticator is a separate control-plane trust boundary. Client
 // authenticators must never be reused implicitly for worker connections.
 type WorkerAuthenticator interface {
-	AuthenticateWorker(*http.Request) (WorkerPrincipal, error)
+	AuthenticateWorker(*http.Request) (WorkerIdentity, error)
 }
 
 type workerTokenAuthenticator struct{ digest [32]byte }
@@ -55,19 +57,19 @@ func NewWorkerTokenAuthenticator(token string) (WorkerAuthenticator, error) {
 	return &workerTokenAuthenticator{digest: sha256.Sum256([]byte(token))}, nil
 }
 
-func (authenticator *workerTokenAuthenticator) AuthenticateWorker(request *http.Request) (WorkerPrincipal, error) {
+func (authenticator *workerTokenAuthenticator) AuthenticateWorker(request *http.Request) (WorkerIdentity, error) {
 	if authenticator == nil || request == nil || request.URL == nil || request.URL.RawQuery != "" {
-		return WorkerPrincipal{}, ErrUnauthenticated
+		return WorkerIdentity{}, ErrUnauthenticated
 	}
 	header := request.Header.Get("authorization")
 	if len(header) < 8 || !strings.EqualFold(header[:7], "bearer ") || strings.TrimSpace(header[7:]) != header[7:] {
-		return WorkerPrincipal{}, ErrUnauthenticated
+		return WorkerIdentity{}, ErrUnauthenticated
 	}
 	digest := sha256.Sum256([]byte(header[7:]))
 	if subtle.ConstantTimeCompare(digest[:], authenticator.digest[:]) != 1 {
-		return WorkerPrincipal{}, ErrUnauthenticated
+		return WorkerIdentity{}, ErrUnauthenticated
 	}
-	return WorkerPrincipal{Subject: "static-token"}, nil
+	return WorkerIdentity{ID: "static-token"}, nil
 }
 
 type WorkerHubConfig struct {
@@ -252,8 +254,8 @@ func (hub *WorkerHub) ResolveRPCMethod(name string) (RPCMethod, bool) {
 	if !ok {
 		return nil, false
 	}
-	return func(ctx context.Context, principal Principal, arguments []meldbase.Value) (meldbase.Value, error) {
-		return owner.connection.invoke(ctx, name, "rpc", principal, arguments, nil)
+	return func(ctx context.Context, actor Actor, arguments []meldbase.Value) (meldbase.Value, error) {
+		return owner.connection.invoke(ctx, name, "rpc", actor, arguments, nil)
 	}, true
 }
 
@@ -262,12 +264,12 @@ func (hub *WorkerHub) ResolveRPCTransactionalMethod(name string) (RPCTransaction
 	if !ok {
 		return nil, false
 	}
-	return func(ctx context.Context, principal Principal, arguments []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
-		return owner.connection.invoke(ctx, name, "transactional", principal, arguments, tx)
+	return func(ctx context.Context, actor Actor, arguments []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
+		return owner.connection.invoke(ctx, name, "transactional", actor, arguments, tx)
 	}, true
 }
 
-func (hub *WorkerHub) ResolveQueryPolicy(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (QueryPolicy, bool, error) {
+func (hub *WorkerHub) ResolveQueryPolicy(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (QueryPolicy, bool, error) {
 	if hub == nil || !workerCollectionNamePattern.MatchString(collection) {
 		return QueryPolicy{}, false, nil
 	}
@@ -281,7 +283,7 @@ func (hub *WorkerHub) ResolveQueryPolicy(ctx context.Context, principal Principa
 	if !ok || owner.connection == nil {
 		return QueryPolicy{}, true, ErrForbidden
 	}
-	policy, err := owner.connection.invokePolicy(ctx, principal, query, owner.publication)
+	policy, err := owner.connection.invokePolicy(ctx, actor, query, owner.publication)
 	return policy, true, err
 }
 
@@ -423,6 +425,10 @@ func (hub *WorkerHub) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		http.Error(writer, "unauthenticated", http.StatusUnauthorized)
 		return
 	}
+	if !requestsWorkerCapabilities(request) {
+		http.Error(writer, "worker protocol v1 is required", http.StatusUpgradeRequired)
+		return
+	}
 	connection, err := websocket.Accept(writer, request, nil)
 	if err != nil {
 		return
@@ -456,9 +462,7 @@ func (hub *WorkerHub) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 			"policyEvaluationTimeoutMs": hub.config.PolicyEvaluationTimeout.Milliseconds(),
 		},
 	}
-	if requestsWorkerCapabilities(request) {
-		registered["protocol"] = workerProtocolDescriptor()
-	}
+	registered["protocol"] = workerProtocolDescriptor()
 	if err != nil || worker.send(request.Context(), registered) != nil {
 		return
 	}
@@ -679,13 +683,13 @@ type workerPolicyResult struct {
 	err        error
 }
 
-func (worker *workerConnection) invoke(ctx context.Context, method, mode string, principal Principal, arguments []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
+func (worker *workerConnection) invoke(ctx context.Context, method, mode string, actor Actor, arguments []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
 	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || (mode == "transactional") != (tx != nil) {
 		return meldbase.Value{}, errors.New("worker invocation unavailable")
 	}
-	if principal.Subject == "" || len(principal.Subject) > 4096 || len(principal.Tenant) > 4096 ||
-		!utf8.ValidString(principal.Subject) || !utf8.ValidString(principal.Tenant) {
-		return meldbase.Value{}, errors.New("worker principal identity is invalid")
+	if actor.ID == "" || len(actor.ID) > 4096 || len(actor.TenantID) > 4096 ||
+		!utf8.ValidString(actor.ID) || !utf8.ValidString(actor.TenantID) {
+		return meldbase.Value{}, errors.New("worker actor identity is invalid")
 	}
 	callToken, err := randomToken16()
 	if err != nil {
@@ -725,7 +729,7 @@ func (worker *workerConnection) invoke(ctx context.Context, method, mode string,
 	defer worker.hub.stats.callsActive.Add(^uint64(0))
 	if err := worker.send(ctx, map[string]any{
 		"v": protocolVersion, "type": "invoke", "callId": callID, "method": method, "mode": mode,
-		"principal": map[string]any{"subject": principal.Subject, "tenant": principal.Tenant}, "arguments": wireArguments,
+		"actor": map[string]any{"id": actor.ID, "tenantId": actor.TenantID}, "arguments": wireArguments,
 	}); err != nil {
 		worker.hub.stats.callsFailed.Add(1)
 		return meldbase.Value{}, err
@@ -750,10 +754,10 @@ func (worker *workerConnection) invoke(ctx context.Context, method, mode string,
 	}
 }
 
-func (worker *workerConnection) invokePolicy(ctx context.Context, principal Principal, query meldbase.QuerySpec, publication workerPublication) (QueryPolicy, error) {
+func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, query meldbase.QuerySpec, publication workerPublication) (QueryPolicy, error) {
 	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || publication.lease == nil ||
-		principal.Subject == "" || len(principal.Subject) > 4096 || len(principal.Tenant) > 4096 ||
-		!utf8.ValidString(principal.Subject) || !utf8.ValidString(principal.Tenant) {
+		actor.ID == "" || len(actor.ID) > 4096 || len(actor.TenantID) > 4096 ||
+		!utf8.ValidString(actor.ID) || !utf8.ValidString(actor.TenantID) {
 		return QueryPolicy{}, errors.New("worker policy invocation unavailable")
 	}
 	encodedQuery, err := meldbase.MarshalQuerySpecJSON(query)
@@ -792,8 +796,8 @@ func (worker *workerConnection) invokePolicy(ctx context.Context, principal Prin
 	defer worker.hub.stats.policyActive.Add(^uint64(0))
 	if err := worker.send(evaluationContext, map[string]any{
 		"v": protocolVersion, "type": "authorize_query", "callId": callID, "collection": publication.collection,
-		"principal": map[string]any{"subject": principal.Subject, "tenant": principal.Tenant},
-		"query":     json.RawMessage(encodedQuery),
+		"actor": map[string]any{"id": actor.ID, "tenantId": actor.TenantID},
+		"query": json.RawMessage(encodedQuery),
 	}); err != nil {
 		worker.hub.stats.policyFailed.Add(1)
 		return QueryPolicy{}, err
@@ -870,7 +874,7 @@ func (worker *workerConnection) readLoop(ctx context.Context) error {
 			Version int    `json:"v"`
 			Type    string `json:"type"`
 		}
-		if err := json.Unmarshal(raw, &header); err != nil || header.Version != 1 {
+		if err := json.Unmarshal(raw, &header); err != nil || header.Version != protocolVersion {
 			return workerProtocol("invalid worker frame header")
 		}
 		switch header.Type {

@@ -1,12 +1,13 @@
 import type { Document, InputDocument, MutationSpec, QuerySpec, Value } from "@meldbase/client";
 
-export interface Principal {
-  readonly subject: string;
-  readonly tenant: string;
+/** The authenticated application identity for the current call. */
+export interface Actor {
+  readonly id: string;
+  readonly tenantId: string;
 }
 
 export interface MethodContext {
-  readonly principal: Principal;
+  readonly actor: Actor;
   readonly signal: AbortSignal;
 }
 
@@ -56,6 +57,10 @@ export type WorkerSocketFactory = (url: string, options: { readonly headers: Rea
 export type WorkerState = "idle" | "connecting" | "registering" | "ready" | "stopped";
 
 export interface WorkerOptions {
+  /**
+   * A full `ws(s)://` worker control endpoint, or `meldbase://host[:port]`.
+   * The Meldbase authority form always resolves to `wss://host[:port]/v1/workers`.
+   */
   readonly url: string;
   readonly token: string;
   readonly workerId: string;
@@ -66,5 +71,4 @@ export interface WorkerOptions {
   readonly reconnectMaxMs?: number;
   readonly onStateChange?: (state: WorkerState) => void;
   readonly onError?: (error: Error) => void;
-  readonly requireProtocol?: boolean;
 }

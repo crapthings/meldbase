@@ -343,7 +343,7 @@ folders are deliberately avoided.
 Meldbase is intentionally opinionated about where a new capability belongs.
 These rules preserve a small core surface as the product evolves:
 
-- **Identity stays outside the engine.** The server verifies a principal with a
+- **Identity stays outside the engine.** The server verifies a actor with a
   subject and active workspace; account records, credentials, roles, membership
   changes and token issuance remain application concerns. A collection is not
   made special because it happens to contain users.

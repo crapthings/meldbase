@@ -10,7 +10,7 @@ export type {
   MethodContext,
   MethodDefinition,
   MethodHandler,
-  Principal,
+  Actor,
   PublicationContext,
   PublicationDefinition,
   PublicationHandler,

@@ -26,31 +26,31 @@ func TestHS256JWTAuthenticatorVerifiesSignedActiveWorkspace(t *testing.T) {
 	})
 	request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
-	principal, err := authenticator.AuthenticateHTTP(request)
+	actor, err := authenticator.AuthenticateHTTP(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if principal != (Principal{Subject: "user-1", Tenant: "team-a"}) {
-		t.Fatalf("principal=%+v", principal)
+	if actor != (Actor{ID: "user-1", TenantID: "team-a"}) {
+		t.Fatalf("actor=%+v", actor)
 	}
 }
 
 func TestHS256JWTAuthenticatorRejectsInvalidBearerClaimsAndSignature(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
-	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{Secret: secret, Audience: "meldbase-api", Clock: func() time.Time { return now }})
+	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{Secret: secret, Issuer: "https://identity.example.test", Audience: "meldbase-api", Clock: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	validClaims := map[string]any{"sub": "user-1", "workspace_id": "team-a", "aud": "meldbase-api", "exp": now.Add(time.Minute).Unix()}
+	validClaims := map[string]any{"iss": "https://identity.example.test", "sub": "user-1", "workspace_id": "team-a", "aud": "meldbase-api", "exp": now.Add(time.Minute).Unix()}
 	tests := []struct {
 		name   string
 		header string
 	}{
 		{name: "missing bearer", header: "Basic credentials"},
-		{name: "expired", header: "Bearer " + signedHS256JWT(t, secret, map[string]any{"sub": "user-1", "workspace_id": "team-a", "aud": "meldbase-api", "exp": now.Add(-time.Second).Unix()})},
-		{name: "missing workspace", header: "Bearer " + signedHS256JWT(t, secret, map[string]any{"sub": "user-1", "aud": "meldbase-api", "exp": now.Add(time.Minute).Unix()})},
-		{name: "wrong audience", header: "Bearer " + signedHS256JWT(t, secret, map[string]any{"sub": "user-1", "workspace_id": "team-a", "aud": "other", "exp": now.Add(time.Minute).Unix()})},
+		{name: "expired", header: "Bearer " + signedHS256JWT(t, secret, map[string]any{"iss": "https://identity.example.test", "sub": "user-1", "workspace_id": "team-a", "aud": "meldbase-api", "exp": now.Add(-time.Second).Unix()})},
+		{name: "missing workspace", header: "Bearer " + signedHS256JWT(t, secret, map[string]any{"iss": "https://identity.example.test", "sub": "user-1", "aud": "meldbase-api", "exp": now.Add(time.Minute).Unix()})},
+		{name: "wrong audience", header: "Bearer " + signedHS256JWT(t, secret, map[string]any{"iss": "https://identity.example.test", "sub": "user-1", "workspace_id": "team-a", "aud": "other", "exp": now.Add(time.Minute).Unix()})},
 		{name: "wrong signature", header: "Bearer " + signedHS256JWT(t, []byte("fedcba9876543210fedcba9876543210"), validClaims)},
 	}
 	for _, test := range tests {
@@ -61,6 +61,40 @@ func TestHS256JWTAuthenticatorRejectsInvalidBearerClaimsAndSignature(t *testing.
 				t.Fatalf("error=%v, want unauthenticated", err)
 			}
 		})
+	}
+}
+
+func TestHS256JWTAuthenticatorRequiresIssuerAudienceAndNonReservedWorkspaceClaim(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	for _, config := range []HS256JWTAuthenticatorConfig{
+		{Secret: secret, Audience: "meldbase-api"},
+		{Secret: secret, Issuer: "https://identity.example.test"},
+		{Secret: secret, Issuer: "https://identity.example.test", Audience: "meldbase-api", WorkspaceClaim: "sub"},
+		{Secret: secret, Issuer: "https://identity.example.test", Audience: "meldbase-api", WorkspaceClaim: "aud"},
+	} {
+		if _, err := NewHS256JWTAuthenticator(config); err == nil {
+			t.Fatalf("unsafe JWT configuration accepted: %+v", config)
+		}
+	}
+}
+
+func TestHS256JWTAuthenticatorMapsConfiguredWorkspaceClaimToActorTenantID(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{
+		Secret: secret, Issuer: "https://identity.example.test", Audience: "meldbase-api", WorkspaceClaim: "organization_id", Clock: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := signedHS256JWT(t, secret, map[string]any{
+		"iss": "https://identity.example.test", "aud": "meldbase-api", "sub": "service-1", "organization_id": "org-a", "exp": now.Add(time.Minute).Unix(),
+	})
+	request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	actor, err := authenticator.AuthenticateHTTP(request)
+	if err != nil || actor != (Actor{ID: "service-1", TenantID: "org-a"}) {
+		t.Fatalf("actor=%+v error=%v", actor, err)
 	}
 }
 

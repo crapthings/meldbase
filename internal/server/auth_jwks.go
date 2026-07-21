@@ -55,8 +55,8 @@ func NewRS256JWKSAuthenticator(config RS256JWKSAuthenticatorConfig) (*RS256JWKSA
 	if config.WorkspaceClaim == "" {
 		config.WorkspaceClaim = "workspace_id"
 	}
-	if !workspaceIdentifier.MatchString(config.WorkspaceClaim) {
-		return nil, errors.New("JWT workspace claim must be a simple claim name")
+	if !validWorkspaceClaim(config.WorkspaceClaim) {
+		return nil, errors.New("JWT workspace claim must be a non-reserved simple claim name")
 	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = http.DefaultClient
@@ -76,43 +76,43 @@ func NewRS256JWKSAuthenticator(config RS256JWKSAuthenticatorConfig) (*RS256JWKSA
 	}, nil
 }
 
-func (a *RS256JWKSAuthenticator) AuthenticateHTTP(request *http.Request) (Principal, error) {
+func (a *RS256JWKSAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, error) {
 	token, ok := bearerToken(request.Header.Get("Authorization"))
 	if !ok || len(token) > 8192 {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	parts := splitJWT(token)
 	if parts == nil {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	header, ok := decodeJWTPart(parts[0], 1024)
 	algorithm, keyID, headerOK := decodeJWTHeader(header)
 	if !ok || !headerOK || algorithm != "RS256" || keyID == "" {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	payload, ok := decodeJWTPart(parts[1], 6144)
 	signature, signatureOK := decodeJWTPart(parts[2], 1024)
 	if !ok || !signatureOK {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	key, err := a.keyFor(request.Context(), keyID)
 	if err != nil {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	if rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature) != nil {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	claims, ok := decodeJWTClaims(payload)
 	if !ok || !validJWTClaims(claims, a.issuer, a.audience, a.now) {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
-	subject, subjectOK := claimString(claims, "sub")
-	workspace, workspaceOK := claimString(claims, a.workspaceClaim)
-	if !subjectOK || !workspaceOK || !validPrincipalPart(subject) || !validPrincipalPart(workspace) {
-		return Principal{}, ErrUnauthenticated
+	actorID, actorIDOK := claimString(claims, "sub")
+	tenantID, tenantIDOK := claimString(claims, a.workspaceClaim)
+	if !actorIDOK || !tenantIDOK || !validActorPart(actorID) || !validActorPart(tenantID) {
+		return Actor{}, ErrUnauthenticated
 	}
-	return Principal{Subject: subject, Tenant: workspace}, nil
+	return Actor{ID: actorID, TenantID: tenantID}, nil
 }
 
 func splitJWT(token string) []string {
@@ -153,6 +153,9 @@ func (a *RS256JWKSAuthenticator) refreshLocked(ctx context.Context) error {
 		return err
 	}
 	defer response.Body.Close()
+	if response.Request == nil || response.Request.URL == nil || response.Request.URL.Scheme != "https" || response.Request.URL.Host == "" {
+		return errors.New("JWT JWKS endpoint redirected outside HTTPS")
+	}
 	if response.StatusCode != http.StatusOK {
 		return errors.New("JWT JWKS endpoint returned non-200 status")
 	}

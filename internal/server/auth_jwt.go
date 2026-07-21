@@ -15,7 +15,7 @@ import (
 
 // HS256JWTAuthenticatorConfig configures a locally verified JWT issuer. It is
 // useful when an identity service signs short-lived access tokens with a shared
-// secret. OIDC/JWKS verification can use the same Principal contract later;
+// secret. OIDC/JWKS verification can use the same Actor contract later;
 // callers never supply a tenant separately from the signed token.
 type HS256JWTAuthenticatorConfig struct {
 	Secret         []byte
@@ -25,8 +25,8 @@ type HS256JWTAuthenticatorConfig struct {
 	Clock          func() time.Time
 }
 
-// HS256JWTAuthenticator verifies a bounded Bearer JWT and maps its subject and
-// active workspace claim to the server Principal.
+// HS256JWTAuthenticator verifies a bounded Bearer JWT and maps its `sub` and
+// active workspace claim to the server Actor.
 type HS256JWTAuthenticator struct {
 	secret         []byte
 	issuer         string
@@ -39,11 +39,14 @@ func NewHS256JWTAuthenticator(config HS256JWTAuthenticatorConfig) (*HS256JWTAuth
 	if len(config.Secret) < 32 {
 		return nil, errors.New("JWT HS256 secret must contain at least 32 bytes")
 	}
+	if config.Issuer == "" || config.Audience == "" {
+		return nil, errors.New("JWT HS256 authentication requires issuer and audience")
+	}
 	if config.WorkspaceClaim == "" {
 		config.WorkspaceClaim = "workspace_id"
 	}
-	if !workspaceIdentifier.MatchString(config.WorkspaceClaim) {
-		return nil, errors.New("JWT workspace claim must be a simple claim name")
+	if !validWorkspaceClaim(config.WorkspaceClaim) {
+		return nil, errors.New("JWT workspace claim must be a non-reserved simple claim name")
 	}
 	if config.Clock == nil {
 		config.Clock = time.Now
@@ -54,45 +57,45 @@ func NewHS256JWTAuthenticator(config HS256JWTAuthenticatorConfig) (*HS256JWTAuth
 	}, nil
 }
 
-func (a *HS256JWTAuthenticator) AuthenticateHTTP(request *http.Request) (Principal, error) {
+func (a *HS256JWTAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, error) {
 	token, ok := bearerToken(request.Header.Get("Authorization"))
 	if !ok {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || len(token) > 8192 {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	header, ok := decodeJWTPart(parts[0], 1024)
 	algorithm, _, headerOK := decodeJWTHeader(header)
 	if !ok || !headerOK || algorithm != "HS256" {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	signature, ok := decodeJWTPart(parts[2], sha256.Size)
 	if !ok || len(signature) != sha256.Size {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	mac := hmac.New(sha256.New, a.secret)
 	_, _ = mac.Write([]byte(parts[0]))
 	_, _ = mac.Write([]byte("."))
 	_, _ = mac.Write([]byte(parts[1]))
 	if !hmac.Equal(signature, mac.Sum(nil)) {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	payload, ok := decodeJWTPart(parts[1], 6144)
 	if !ok {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
 	claims, ok := decodeJWTClaims(payload)
 	if !ok || !validJWTClaims(claims, a.issuer, a.audience, a.now) {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
-	subject, subjectOK := claimString(claims, "sub")
-	workspace, workspaceOK := claimString(claims, a.workspaceClaim)
-	if !subjectOK || !workspaceOK || !validPrincipalPart(subject) || !validPrincipalPart(workspace) {
-		return Principal{}, ErrUnauthenticated
+	actorID, actorIDOK := claimString(claims, "sub")
+	tenantID, tenantIDOK := claimString(claims, a.workspaceClaim)
+	if !actorIDOK || !tenantIDOK || !validActorPart(actorID) || !validActorPart(tenantID) {
+		return Actor{}, ErrUnauthenticated
 	}
-	return Principal{Subject: subject, Tenant: workspace}, nil
+	return Actor{ID: actorID, TenantID: tenantID}, nil
 }
 
 func bearerToken(header string) (string, bool) {
@@ -200,6 +203,18 @@ func claimAudienceContains(claims map[string]json.RawMessage, expected string) b
 	return false
 }
 
-func validPrincipalPart(value string) bool {
+func validActorPart(value string) bool {
 	return value != "" && len(value) <= 512 && utf8.ValidString(value)
+}
+
+func validWorkspaceClaim(value string) bool {
+	if !workspaceIdentifier.MatchString(value) {
+		return false
+	}
+	switch value {
+	case "sub", "iss", "aud", "exp", "nbf", "iat", "jti":
+		return false
+	default:
+		return true
+	}
 }

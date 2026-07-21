@@ -8,7 +8,7 @@ commit arbitrary external side effects together with a Meldbase record.
 ## Guarantees
 
 Within the configured retention window, a correctly implemented durable store
-provides these guarantees for one `(principal scope, idempotency key)` pair:
+provides these guarantees for one `(actor scope, idempotency key)` pair:
 
 - the first accepted call durably claims execution before its method starts;
 - a different method or canonical argument list using the same key conflicts;
@@ -77,10 +77,10 @@ transport is allowed to silently retry a call. The stable protocol errors are:
 ## Identity and fingerprint
 
 The server derives, rather than accepts, the storage scope. It hashes a
-length-framed encoding of the authenticated `Tenant` and `Subject`; raw identity
-strings are not stored in the idempotency keyspace. Authentication adapters must
-provide a non-empty stable UTF-8 subject; the server bounds both subject and
-tenant before hashing them.
+length-framed encoding of the authenticated actor's `tenantId` and `id`; raw
+identity strings are not stored in the idempotency keyspace. Authentication
+adapters must provide non-empty, stable UTF-8 actor values; the server bounds
+both values before hashing them.
 
 The request fingerprint is SHA-256 over a versioned, length-framed encoding of:
 
@@ -130,7 +130,7 @@ durable store created from the exact same `DB`, and every call requires an
 RPCTransactionalMethods: map[string]server.RPCTransactionalMethod{
     "orders.create": func(
         ctx context.Context,
-        principal server.Principal,
+        actor server.Actor,
         arguments []meldbase.Value,
         tx *meldbase.WriteTransaction,
     ) (meldbase.Value, error) {

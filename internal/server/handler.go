@@ -336,7 +336,7 @@ func (h *Handler) readiness(w http.ResponseWriter, _ *http.Request) {
 
 type socketSession struct {
 	handler       *Handler
-	principal     Principal
+	actor         Actor
 	ctx           context.Context
 	cancel        context.CancelFunc
 	connection    *websocket.Conn
@@ -388,12 +388,12 @@ func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
 		connection.Close(websocket.StatusPolicyViolation, "invalid authentication")
 		return
 	}
-	principal, ok := h.tickets.consume(auth.Ticket)
+	actor, ok := h.tickets.consume(auth.Ticket)
 	if !ok {
 		connection.Close(websocket.StatusPolicyViolation, "invalid ticket")
 		return
 	}
-	session.principal = principal
+	session.actor = actor
 	h.metrics.connectionsAccepted.Add(1)
 	h.metrics.activeConnections.Add(1)
 	defer h.metrics.activeConnections.Add(^uint64(0))
@@ -536,7 +536,7 @@ func (s *socketSession) subscribe(requestID, collection string, rawQuery []byte,
 		s.subscriptionError(requestID, "invalid_query")
 		return nil
 	}
-	policy, err := s.handler.authorizeQuery(s.ctx, s.principal, collection, query)
+	policy, err := s.handler.authorizeQuery(s.ctx, s.actor, collection, query)
 	if err != nil {
 		s.subscriptionError(requestID, "forbidden")
 		return nil
@@ -548,7 +548,7 @@ func (s *socketSession) subscribe(requestID, collection string, rawQuery []byte,
 	}
 	var resumePosition *uint64
 	if resumeToken != "" {
-		position, err := s.handler.resume.validate(resumeToken, s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion)
+		position, err := s.handler.resume.validate(resumeToken, s.handler.config.DB.DatabaseIdentity(), s.actor, collection, query, policy.PolicyVersion)
 		if err != nil || mode != "delta" || s.handler.config.ReplaySource == nil {
 			return enqueueError(s.enqueue(map[string]any{"v": protocolVersion, "type": "resync_required", "requestId": requestID}))
 		}
@@ -653,7 +653,7 @@ func (s *socketSession) startResumedDeltaSubscription(requestID, collection stri
 					if err != nil || !changed {
 						return err
 					}
-					nextToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, delta.Token)
+					nextToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.actor, collection, query, policy.PolicyVersion, delta.Token)
 					if err != nil {
 						return err
 					}
@@ -735,7 +735,7 @@ func (s *socketSession) startSnapshotSubscription(requestID, collection string, 
 					if err != nil {
 						return err
 					}
-					resumeToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, snapshot.Token)
+					resumeToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.actor, collection, query, policy.PolicyVersion, snapshot.Token)
 					if err != nil {
 						return err
 					}
@@ -783,7 +783,7 @@ func (s *socketSession) startDeltaSubscription(requestID, collection string, que
 		if err != nil {
 			return err
 		}
-		initialToken, err = s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, initial.visibleToken)
+		initialToken, err = s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.actor, collection, query, policy.PolicyVersion, initial.visibleToken)
 		if err != nil {
 			return err
 		}
@@ -839,7 +839,7 @@ func (s *socketSession) startDeltaSubscription(requestID, collection string, que
 					if err != nil || !changed {
 						return err
 					}
-					nextToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.principal, collection, query, policy.PolicyVersion, delta.Token)
+					nextToken, err := s.handler.resume.issue(s.handler.config.DB.DatabaseIdentity(), s.actor, collection, query, policy.PolicyVersion, delta.Token)
 					if err != nil {
 						return err
 					}

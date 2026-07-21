@@ -48,7 +48,7 @@ Public optimistic write transactions add a fixed aggregate with current active
 callbacks plus started, committed, no-op, point-conflict and other-abort
 totals. Every started callback reaches exactly one terminal counter. The same
 fields appear in the developer panel, Prometheus and OpenTelemetry without
-method, collection, document, principal or error labels. Callback timing and
+method, collection, document, actor or error labels. Callback timing and
 business values are not recorded unless the separate bounded diagnostics
 session is explicitly enabled.
 
@@ -84,7 +84,7 @@ The current storage backend exposes:
   counters.
 
 These values contain no path, collection name, document ID, query literal,
-principal, tenant, authorization value, or document content. `Stats()` is for a
+actor, tenant, authorization value, or document content. `Stats()` is for a
 sampler, not for invocation on every database operation.
 
 The dashboard, Prometheus schema and OpenTelemetry aggregate adapter expose
@@ -173,7 +173,7 @@ counters, bytes, arguments and latency. Optional RPC idempotency adds fixed
 claim, replay, conflict, in-progress, outcome-unknown and store-failure counters;
 transactional RPC adds atomic commit, rollback and successful no-op counters.
 It never exports keys or fingerprints. The sample omits the `server` field when
-no source is configured. It never includes method, principal, tenant, argument,
+no source is configured. It never includes method, actor, tenant, argument,
 result or error strings. The CLI connects this source automatically when its
 admin listener is enabled.
 
@@ -182,7 +182,7 @@ worker gauges/totals: connected workers, registered methods/publications,
 active/started/successful/failed/canceled/busy calls, policy evaluation
 outcomes, protocol failures, control bytes, transaction operations and committed
 policy invalidations. This exposes unexpected authorization-driven resync
-pressure without collection, worker or principal labels.
+pressure without collection, worker or actor labels.
 Prometheus and the embedded dashboard consume these
 fields without worker-ID or method-name labels. Worker handlers never run on the
 sampler goroutine.
@@ -311,7 +311,7 @@ canonical document-image byte capacities and pending-byte pressure for the
 central dispatcher, downstream shared reactive hub, and aggregate direct Go
 change-watcher queue. It also adds the server-side realtime outbound frame/byte
 queue overflow counter, so transport backpressure is visible without exposing
-subscription, principal, collection, or document labels.
+subscription, actor, collection, or document labels.
 It also includes optional fixed-cardinality rollback-anchor backend topology and
 failure-class counters plus a degraded-health signal for partial endpoint loss.
 The checked-in `admin/testdata/admin-schema-v11.json` and additive v12/v13/v14
@@ -355,7 +355,7 @@ restarts event sequence numbers.
 Events contain only fixed enums and aggregate work: kind, outcome, sanitized
 error class, planner stage, duration, documents examined/returned and mutation
 count. They never contain collection or field names, query AST/literals,
-document IDs/content, original error strings, principals, tenants or credentials.
+document IDs/content, original error strings, actors, tenants or credentials.
  lazy COLLSCAN events span actual cursor execution through exhaustion, error or
 explicit close; they are not mislabeled as planner-only latency.
 
@@ -430,7 +430,7 @@ instruments are omitted from a collection when the sampler has no server source.
 OpenTelemetry's stable `db.client.*` convention describes calls as observed by a
 database client; using it for an embedded engine aggregate would describe the
 wrong side. Meldbase therefore uses its own namespace and does not emit query
-text, collection, path, document, principal, tenant or error attributes. The
+text, collection, path, document, actor, tenant or error attributes. The
 core database package and default admin package import neither the OTel API nor
 SDK; only the integration package imports the stable Metrics API.
 

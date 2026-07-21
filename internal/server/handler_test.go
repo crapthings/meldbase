@@ -21,11 +21,11 @@ import (
 
 type testAuthenticator struct{}
 
-func (testAuthenticator) AuthenticateHTTP(request *http.Request) (Principal, error) {
+func (testAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, error) {
 	if request.Header.Get("authorization") != "Bearer valid" {
-		return Principal{}, ErrUnauthenticated
+		return Actor{}, ErrUnauthenticated
 	}
-	return Principal{Subject: "user-1", Tenant: "mine"}, nil
+	return Actor{ID: "user-1", TenantID: "mine"}, nil
 }
 
 type testAuthorizer struct{}
@@ -35,8 +35,8 @@ type testAuthorizer struct{}
 // enumeration.
 type aggregateOnlyFieldAuthorizer struct{ testAuthorizer }
 
-func (aggregateOnlyFieldAuthorizer) AuthorizeQuery(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
-	policy, err := (testAuthorizer{}).AuthorizeQuery(ctx, principal, collection, query)
+func (aggregateOnlyFieldAuthorizer) AuthorizeQuery(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
+	policy, err := (testAuthorizer{}).AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
 		return QueryPolicy{}, err
 	}
@@ -51,8 +51,8 @@ type leaseAuthorizer struct {
 	lease   *QueryPolicyLease
 }
 
-func (authorizer *leaseAuthorizer) AuthorizeQuery(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
-	policy, err := authorizer.testAuthorizer.AuthorizeQuery(ctx, principal, collection, query)
+func (authorizer *leaseAuthorizer) AuthorizeQuery(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
+	policy, err := authorizer.testAuthorizer.AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
 		return QueryPolicy{}, err
 	}
@@ -69,11 +69,11 @@ func (authorizer *leaseAuthorizer) set(version string, lease *QueryPolicyLease) 
 	authorizer.mu.Unlock()
 }
 
-func (testAuthorizer) AuthorizeQuery(_ context.Context, principal Principal, collection string, _ meldbase.QuerySpec) (QueryPolicy, error) {
-	if collection != "items" || principal.Subject != "user-1" {
+func (testAuthorizer) AuthorizeQuery(_ context.Context, actor Actor, collection string, _ meldbase.QuerySpec) (QueryPolicy, error) {
+	if collection != "items" || actor.ID != "user-1" {
 		return QueryPolicy{}, ErrForbidden
 	}
-	constraint, err := meldbase.CompileQuery(meldbase.Filter{"tenant": principal.Tenant}, meldbase.QueryOptions{})
+	constraint, err := meldbase.CompileQuery(meldbase.Filter{"tenant": actor.TenantID}, meldbase.QueryOptions{})
 	if err != nil {
 		return QueryPolicy{}, err
 	}
@@ -85,23 +85,23 @@ func (testAuthorizer) AuthorizeQuery(_ context.Context, principal Principal, col
 	}, nil
 }
 
-func (testAuthorizer) AuthorizeInsert(_ context.Context, principal Principal, collection string, _ meldbase.Document) (InsertPolicy, error) {
-	if collection != "items" || principal.Subject != "user-1" {
+func (testAuthorizer) AuthorizeInsert(_ context.Context, actor Actor, collection string, _ meldbase.Document) (InsertPolicy, error) {
+	if collection != "items" || actor.ID != "user-1" {
 		return InsertPolicy{}, ErrForbidden
 	}
-	return InsertPolicy{AllowedInputFields: map[string]struct{}{"rank": {}, "title": {}}, SetFields: meldbase.Document{"tenant": meldbase.String(principal.Tenant)}, AllowedResultFields: map[string]struct{}{"rank": {}, "title": {}}}, nil
+	return InsertPolicy{AllowedInputFields: map[string]struct{}{"rank": {}, "title": {}}, SetFields: meldbase.Document{"tenant": meldbase.String(actor.TenantID)}, AllowedResultFields: map[string]struct{}{"rank": {}, "title": {}}}, nil
 }
 
-func (testAuthorizer) AuthorizeUpdate(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec, _ meldbase.MutationSpec) (UpdatePolicy, error) {
-	base, err := (testAuthorizer{}).AuthorizeQuery(ctx, principal, collection, query)
+func (testAuthorizer) AuthorizeUpdate(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec, _ meldbase.MutationSpec) (UpdatePolicy, error) {
+	base, err := (testAuthorizer{}).AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
 		return UpdatePolicy{}, err
 	}
 	return UpdatePolicy{QueryPolicy: base, AllowedUpdatePaths: map[string]struct{}{"rank": {}, "title": {}}, MaxAffected: 10}, nil
 }
 
-func (testAuthorizer) AuthorizeDelete(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (DeletePolicy, error) {
-	base, err := (testAuthorizer{}).AuthorizeQuery(ctx, principal, collection, query)
+func (testAuthorizer) AuthorizeDelete(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (DeletePolicy, error) {
+	base, err := (testAuthorizer{}).AuthorizeQuery(ctx, actor, collection, query)
 	return DeletePolicy{QueryPolicy: base, MaxAffected: 10}, err
 }
 

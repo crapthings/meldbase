@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { compileQuery, compileUpdate } from "@meldbase/client";
+import { compileQuery, compileUpdate, MELDBASE_PROTOCOL_VERSION } from "@meldbase/client";
 import { MeldbaseMethodError, MeldbaseWorker, MeldbaseWorkerProtocolError, publish, rpc, transactional } from "./worker.js";
 import type { WorkerSocket, WorkerSocketFactory } from "./worker.js";
+
+const WORKER_PROTOCOL = Object.freeze({
+  versions: [1],
+  capabilities: [
+    "cancel", "publication.policy", "rpc", "rpc.transactional",
+    "transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
+  ],
+});
 
 class FakeSocket implements WorkerSocket {
   readyState = 0;
@@ -45,7 +54,51 @@ class FakeSocket implements WorkerSocket {
   }
 }
 
-function harness(methods: NonNullable<ConstructorParameters<typeof MeldbaseWorker>[0]["methods"]>, requireProtocol = false) {
+test("TypeScript and Go share the immutable worker protocol v1 contract", async () => {
+  const url = new URL("../../../testdata/protocol-v1-contract.json", import.meta.url);
+  const contract = JSON.parse(await readFile(url, "utf8")) as {
+    readonly formatVersion: number;
+    readonly protocolVersion: number;
+    readonly workerProtocol: {
+      readonly version: number;
+      readonly capabilityHeader: string;
+      readonly capabilities: readonly string[];
+      readonly nestedShapes: readonly { readonly name: string; readonly required: readonly string[]; readonly optional: readonly string[] }[];
+      readonly hubFrames: readonly { readonly type: string; readonly required: readonly string[]; readonly optional: readonly string[] }[];
+      readonly workerFrames: readonly { readonly type: string; readonly required: readonly string[]; readonly optional: readonly string[] }[];
+    };
+  };
+  assert.equal(contract.formatVersion, 1);
+  assert.equal(contract.protocolVersion, MELDBASE_PROTOCOL_VERSION);
+  assert.equal(contract.workerProtocol.version, MELDBASE_PROTOCOL_VERSION);
+  assert.equal(contract.workerProtocol.capabilityHeader, "capabilities-v1");
+  assert.deepEqual(contract.workerProtocol.capabilities, [
+    "cancel", "publication.policy", "rpc", "rpc.transactional",
+    "transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
+  ]);
+  assert.deepEqual(contract.workerProtocol.nestedShapes, [{ name: "actor", required: ["id", "tenantId"], optional: [] }]);
+  assert.deepEqual(contract.workerProtocol.hubFrames, [
+    { type: "authorize_query", required: ["actor", "callId", "collection", "query", "type", "v"], optional: [] },
+    { type: "cancel", required: ["callId", "type", "v"], optional: [] },
+    { type: "invoke", required: ["actor", "arguments", "callId", "method", "mode", "type", "v"], optional: [] },
+    { type: "registered", required: ["limits", "protocol", "sessionId", "type", "v"], optional: [] },
+    { type: "tx_error", required: ["callId", "error", "opId", "type", "v"], optional: [] },
+    { type: "tx_result", required: ["callId", "opId", "result", "type", "v"], optional: [] },
+  ]);
+  assert.deepEqual(contract.workerProtocol.workerFrames, [
+    { type: "error", required: ["callId", "error", "type", "v"], optional: [] },
+    { type: "policy", required: ["callId", "constraint", "type", "v"], optional: [] },
+    { type: "policy_error", required: ["callId", "error", "type", "v"], optional: [] },
+    { type: "register", required: ["methods", "publications", "type", "v", "workerId"], optional: [] },
+    { type: "result", required: ["callId", "result", "type", "v"], optional: [] },
+    { type: "tx_op", required: ["callId", "collection", "opId", "operation", "type", "v"], optional: ["document", "id", "mutation"] },
+  ]);
+});
+
+function harness(
+  methods: NonNullable<ConstructorParameters<typeof MeldbaseWorker>[0]["methods"]>,
+  url = "wss://control.example.test/v1/workers",
+) {
   const sockets: FakeSocket[] = [];
   const factoryCalls: Array<{ url: string; headers: Readonly<Record<string, string>> }> = [];
   const factory: WorkerSocketFactory = (url, options) => {
@@ -56,11 +109,10 @@ function harness(methods: NonNullable<ConstructorParameters<typeof MeldbaseWorke
   };
   const states: string[] = [];
   const worker = new MeldbaseWorker({
-    url: "wss://control.example.test/v1/workers",
+    url,
     token: "worker-control-token-0123456789abcdef",
     workerId: "orders-worker",
     methods,
-		requireProtocol,
     webSocketFactory: factory,
     reconnectMinMs: 10,
     reconnectMaxMs: 20,
@@ -68,6 +120,13 @@ function harness(methods: NonNullable<ConstructorParameters<typeof MeldbaseWorke
   });
   return { worker, sockets, factoryCalls, states };
 }
+
+test("server worker resolves the secure Meldbase authority URL", async () => {
+  const value = harness({ echo: rpc(() => "ok") }, "meldbase://control.example.test:9443");
+  await startHarness(value);
+  assert.equal(value.factoryCalls[0]!.url, "wss://control.example.test:9443/v1/workers");
+  await value.worker.stop();
+});
 
 async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSocket> {
   const started = value.worker.start();
@@ -80,7 +139,7 @@ async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSock
   assert.equal(registration.type, "register");
   assert.equal(registration.workerId, "orders-worker");
   assert.equal(Array.isArray(registration.methods) && registration.methods.length > 0, true);
-  socket.message({ v: 1, type: "registered", sessionId: "session-1", limits: { maxPendingCalls: 64, maxOperationsPerCall: 256 } });
+  socket.message({ v: 1, type: "registered", sessionId: "session-1", limits: { maxPendingCalls: 64, maxOperationsPerCall: 256 }, protocol: WORKER_PROTOCOL });
   await started;
   return socket;
 }
@@ -88,7 +147,7 @@ async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSock
 test("server worker registers without URL credentials and handles typed RPC", async () => {
   const value = harness({
     "math.echo": rpc((context, arguments_) => {
-      assert.deepEqual(context.principal, { subject: "user-1", tenant: "tenant-a" });
+      assert.deepEqual(context.actor, { id: "user-1", tenantId: "tenant-a" });
       return arguments_[0]!;
     }),
     "orders.reject": rpc(() => { throw new MeldbaseMethodError("not_ready"); }),
@@ -101,7 +160,7 @@ test("server worker registers without URL credentials and handles typed RPC", as
 
   socket.message({
     v: 1, type: "invoke", callId: "call-1", method: "math.echo", mode: "rpc",
-    principal: { subject: "user-1", tenant: "tenant-a" }, arguments: [{ t: "int64", v: "42" }],
+    actor: { id: "user-1", tenantId: "tenant-a" }, arguments: [{ t: "int64", v: "42" }],
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -110,7 +169,7 @@ test("server worker registers without URL credentials and handles typed RPC", as
 
   socket.message({
     v: 1, type: "invoke", callId: "call-2", method: "orders.reject", mode: "rpc",
-    principal: { subject: "user-1", tenant: "" }, arguments: [],
+    actor: { id: "user-1", tenantId: "" }, arguments: [],
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -174,7 +233,7 @@ test("worker capability discovery accepts additive features and rejects missing 
 	);
 	await waitFor(() => oldTransactions.worker.state === "stopped");
 
-	const downgrade = harness({ echo: rpc(() => "ok") }, true);
+	const downgrade = harness({ echo: rpc(() => "ok") });
 	const downgradeStart = downgrade.worker.start();
 	await waitFor(() => downgrade.sockets.length === 1);
 	const legacy = downgrade.sockets[0]!;
@@ -204,7 +263,7 @@ test("transactional worker serializes point operations and returns one result", 
   const socket = await startHarness(value);
   socket.message({
     v: 1, type: "invoke", callId: "call-tx", method: "orders.create", mode: "transactional",
-    principal: { subject: "user-1", tenant: "" }, arguments: [],
+    actor: { id: "user-1", tenantId: "" }, arguments: [],
   });
 
   await waitFor(() => socket.sent.length === 1);
@@ -266,7 +325,7 @@ test("worker cancellation aborts handler and reconnect re-registers", async () =
   const first = await startHarness(value);
   first.message({
     v: 1, type: "invoke", callId: "slow-call", method: "slow", mode: "rpc",
-    principal: { subject: "user-1", tenant: "" }, arguments: [],
+    actor: { id: "user-1", tenantId: "" }, arguments: [],
   });
   first.message({ v: 1, type: "cancel", callId: "slow-call" });
   await waitFor(() => aborted);
@@ -278,7 +337,7 @@ test("worker cancellation aborts handler and reconnect re-registers", async () =
   await waitFor(() => second.sent.length === 1);
   const registration = JSON.parse(second.sent.shift()!);
   assert.equal(registration.type, "register");
-  second.message({ v: 1, type: "registered", sessionId: "session-2", limits: { maxPendingCalls: 64, maxOperationsPerCall: 256 } });
+  second.message({ v: 1, type: "registered", sessionId: "session-2", limits: { maxPendingCalls: 64, maxOperationsPerCall: 256 }, protocol: WORKER_PROTOCOL });
   await waitFor(() => value.worker.state === "ready");
   await value.worker.stop();
 });
@@ -291,11 +350,11 @@ test("publication returns only a data constraint and static visibility declarati
     token: "worker-control-token-0123456789abcdef",
     workerId: "publication-worker",
    publications: {
-      orders: publish({ version: "orders-v1", maxResults: 50, queryPaths, resultFields: ["status", "description"] }, ({ principal, query }) => {
+      orders: publish({ version: "orders-v1", maxResults: 50, queryPaths, resultFields: ["status", "description"] }, ({ actor, query }) => {
         assert.equal(query.where.op, "true");
-        if (principal.tenant === "blocked") return null;
-        assert.equal(principal.tenant, "tenant-a");
-        return compileQuery({ tenant: principal.tenant });
+        if (actor.tenantId === "blocked") return null;
+        assert.equal(actor.tenantId, "tenant-a");
+        return compileQuery({ tenant: actor.tenantId });
       }),
     },
     webSocketFactory: () => {
@@ -318,11 +377,11 @@ test("publication returns only a data constraint and static visibility declarati
     collection: "orders", version: "orders-v1", maxResults: 50,
     queryPaths: ["status"], resultFields: ["status", "description"],
   }]);
-  socket.message({ v: 1, type: "registered", sessionId: "publication-session", limits: {} });
+  socket.message({ v: 1, type: "registered", sessionId: "publication-session", limits: {}, protocol: WORKER_PROTOCOL });
   await started;
   socket.message({
     v: 1, type: "authorize_query", callId: "policy-1", collection: "orders",
-    principal: { subject: "user-1", tenant: "tenant-a" }, query: { version: 1, where: { op: "true" } },
+    actor: { id: "user-1", tenantId: "tenant-a" }, query: { version: 1, where: { op: "true" } },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -331,7 +390,7 @@ test("publication returns only a data constraint and static visibility declarati
   });
   socket.message({
     v: 1, type: "authorize_query", callId: "policy-2", collection: "orders",
-    principal: { subject: "user-2", tenant: "blocked" }, query: { version: 1, where: { op: "true" } },
+    actor: { id: "user-2", tenantId: "blocked" }, query: { version: 1, where: { op: "true" } },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -342,6 +401,8 @@ test("publication returns only a data constraint and static visibility declarati
 
 test("worker rejects unsafe configuration and protocol frames", async () => {
   assert.throws(() => harness({ "bad/name": rpc(() => null) }), /Invalid worker method/);
+  assert.throws(() => harness({ ok: rpc(() => null) }, "meldbase://control.example.test/v1/workers"), /cannot include a path/);
+  assert.throws(() => harness({ ok: rpc(() => null) }, "meldbase://control.example.test?token=unsafe"), /without credentials/);
   assert.throws(() => new MeldbaseMethodError("Bad-Code"), /Invalid/);
   assert.throws(() => publish({ version: "bad", maxResults: 0, queryPaths: "*", resultFields: "*" }, () => compileQuery({})), /maxResults/);
   assert.throws(() => publish({ version: "bad", maxResults: 1, queryPaths: ["bad\0path"], resultFields: "*" }, () => compileQuery({})), /NUL/);
@@ -367,10 +428,14 @@ test("worker rejects unsafe configuration and protocol frames", async () => {
   socket.open();
   await waitFor(() => socket.sent.length === 1);
   socket.sent.shift();
-  socket.message({ v: 1, type: "registered", sessionId: "session", limits: {} });
+  socket.message({ v: 1, type: "registered", sessionId: "session", limits: {}, protocol: WORKER_PROTOCOL });
   await started;
-  socket.message({ v: 1, type: "unknown" });
+  socket.message({
+    v: 1, type: "invoke", callId: "legacy-identity", method: "ok", mode: "rpc",
+    principal: { subject: "user-1", tenant: "team-a" }, arguments: [],
+  });
   await waitFor(() => errors.length > 0);
+  assert.match(errors[0]!.message, /unknown or missing fields|Invalid invoke frame/);
   await configured.stop();
 });
 

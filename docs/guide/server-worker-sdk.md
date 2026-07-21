@@ -14,9 +14,9 @@ Use the worker when you need one of these three things:
 
 | Need | Helper | Handler receives | Typical use |
 | --- | --- | --- | --- |
-| A named server operation without an atomic database write | `rpc` | principal, arguments, cancellation signal | calculate a quote; call an idempotent internal service |
-| A named operation with atomic Meldbase point writes | `transactional` | principal, arguments, `WriteTransaction` | create an order; change an owned record's state |
-| Per-user visibility for HTTP queries and realtime subscriptions | `publish` | principal, requested query | show only documents owned by the current user |
+| A named server operation without an atomic database write | `rpc` | actor, arguments, cancellation signal | calculate a quote; call an idempotent internal service |
+| A named operation with atomic Meldbase point writes | `transactional` | actor, arguments, `WriteTransaction` | create an order; change an owned record's state |
+| Per-user visibility for HTTP queries and realtime subscriptions | `publish` | actor, requested query | show only documents owned by the current user |
 
 The worker connects to Meldbase's **private** worker control endpoint. Do not
 put its URL or token in a browser bundle. For the corresponding Go hub setup,
@@ -52,17 +52,17 @@ const token = process.env.MELDBASE_WORKER_TOKEN;
 if (!token) throw new Error("MELDBASE_WORKER_TOKEN is required");
 
 const worker = new MeldbaseWorker({
-  url: "wss://meldbase-control.internal/v1/workers",
+  url: "meldbase://meldbase-control.internal",
   token,
   workerId: "orders-worker-1",
   webSocketFactory: (url, { headers }) => new WebSocket(url, { headers }),
   methods: {
-    "orders.echo": rpc(({ principal }, arguments_) => {
+    "orders.echo": rpc(({ actor }, arguments_) => {
       const message = requiredString(arguments_, 0);
       return {
         message,
-        subject: principal.subject,
-        tenant: principal.tenant,
+        id: actor.id,
+        tenantId: actor.tenantId,
       };
     }),
   },
@@ -81,6 +81,12 @@ process should exit after the first registration. `stop()` stops that loop and
 aborts active handlers. The supplied WebSocket factory sends the worker token in
 an authorization header, never in the URL.
 
+The short `meldbase://host[:port]` form is a secure worker authority: the SDK
+resolves it to `wss://host[:port]/v1/workers`. It accepts no path, credentials,
+query parameters, or fragment. Use a full `wss://` URL when the private control
+endpoint has a nonstandard path; reserve `ws://` for local development and
+tests.
+
 Arguments have the shared `Value` type rather than an application-specific
 schema. Validate their number, type, range, and ownership before performing any
 business action. A small validation function such as `requiredString` makes the
@@ -92,8 +98,8 @@ typed data.
 `rpc(handler)` is for a named operation that does not need Meldbase's atomic
 write transaction. It receives:
 
-- `context.principal.subject` — the authenticated application identity;
-- `context.principal.tenant` — the authenticated tenant/workspace identifier;
+- `context.actor.id` — the authenticated application identity;
+- `context.actor.tenantId` — the authenticated tenant/workspace identifier;
 - `context.signal` — aborted when the client call is canceled or the worker
   connection ends;
 - `arguments_` — the typed values sent to the method.
@@ -104,11 +110,11 @@ the signal to cancellable work, but do not assume a canceled request proves that
 an external side effect did not happen.
 
 ```ts
-"orders.quote": rpc(async ({ principal, signal }, arguments_) => {
+"orders.quote": rpc(async ({ actor, signal }, arguments_) => {
   const sku = requiredString(arguments_, 0);
   const quote = await pricingService.quote({
-    accountID: principal.subject,
-    tenantID: principal.tenant,
+    accountID: actor.id,
+    tenantID: actor.tenantId,
     sku,
     signal,
   });
@@ -153,12 +159,12 @@ import { compileUpdate } from "@meldbase/client";
 import { MeldbaseMethodError, transactional } from "@meldbase/server";
 
 const methods = {
-  "orders.create": transactional(async ({ principal }, arguments_, tx) => {
+  "orders.create": transactional(async ({ actor }, arguments_, tx) => {
     const description = requiredString(arguments_, 0);
 
     const id = await tx.insert("orders", {
-      tenant: principal.tenant,
-      owner: principal.subject,
+      tenant: actor.tenantId,
+      owner: actor.id,
       description,
       status: "draft",
       attempts: 0n,
@@ -172,11 +178,11 @@ const methods = {
     return { id, status: "submitted" };
   }),
 
-  "orders.cancel": transactional(async ({ principal }, arguments_, tx) => {
+  "orders.cancel": transactional(async ({ actor }, arguments_, tx) => {
     const id = requiredString(arguments_, 0);
     const order = await tx.get("orders", id);
 
-    if (order.owner !== principal.subject || order.tenant !== principal.tenant) {
+    if (order.owner !== actor.id || order.tenant !== actor.tenantId) {
       throw new MeldbaseMethodError("forbidden");
     }
     if (order.status !== "submitted") {
@@ -221,11 +227,11 @@ const publications = {
     queryPaths: ["status", "createdAt"],
     // Fields it may receive from this publication.
     resultFields: ["tenant", "owner", "description", "status", "createdAt"],
-  }, ({ principal }) => {
-    if (!principal.subject) return null;
+  }, ({ actor }) => {
+    if (!actor.id) return null;
     return compileQuery({
-      tenant: principal.tenant,
-      owner: principal.subject,
+      tenant: actor.tenantId,
+      owner: actor.id,
     });
   }),
 };
@@ -253,14 +259,13 @@ paired with a business write.
 | `await worker.start()` | Connect and wait for the first successful registration. |
 | `await worker.stop()` | Stop reconnecting, close the socket, and abort active handlers. |
 | `worker.state` | `idle`, `connecting`, `registering`, `ready`, or `stopped`. |
-| `worker.protocol` | The server capability descriptor, when the server provided one. |
+| `worker.protocol` | The required server capability descriptor. |
 | `onStateChange` / `onError` | Integrate state and connection failures into application logs or health checks. |
 
-By default, the SDK accepts a server that does not provide a capability
-descriptor, which helps a controlled server rollout. Set `requireProtocol: true`
-when you want a missing descriptor to stop the worker instead of accepting that
-downgrade. A required capability that is absent always stops the worker with
-`MeldbaseWorkerProtocolError`.
+The SDK requires the worker capability descriptor. A missing descriptor, an
+unsupported worker protocol version, or a missing required capability stops the
+worker with `MeldbaseWorkerProtocolError`; it never falls back to an ambiguous
+legacy control frame.
 
 ## Before deploying
 
@@ -268,7 +273,7 @@ downgrade. A required capability that is absent always stops the worker with
 - Store a dedicated worker token as a server secret; it must be at least 32
   bytes and must never be a browser or admin credential.
 - Keep business user authentication and roles in the application; use
-  `principal` as already-authenticated input, not as a substitute for an
+  `actor` as already-authenticated input, not as a substitute for an
   accounts system.
 - When using the built-in collection access manifest, list every browser-callable
   method under `rpcMethods`; omitted means no RPC method is reachable. A custom

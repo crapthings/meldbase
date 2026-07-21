@@ -13,26 +13,26 @@ import (
 
 type authenticator struct{}
 
-func (authenticator) AuthenticateHTTP(*http.Request) (server.Principal, error) {
-	return server.Principal{Subject: "user"}, nil
+func (authenticator) AuthenticateHTTP(*http.Request) (server.Actor, error) {
+	return server.Actor{ID: "user"}, nil
 }
 
 type authorizer struct{}
 
-func (authorizer) AuthorizeQuery(context.Context, server.Principal, string, meldbase.QuerySpec) (server.QueryPolicy, error) {
+func (authorizer) AuthorizeQuery(context.Context, server.Actor, string, meldbase.QuerySpec) (server.QueryPolicy, error) {
 	return server.QueryPolicy{}, server.ErrForbidden
 }
-func (authorizer) AuthorizeInsert(context.Context, server.Principal, string, meldbase.Document) (server.InsertPolicy, error) {
+func (authorizer) AuthorizeInsert(context.Context, server.Actor, string, meldbase.Document) (server.InsertPolicy, error) {
 	return server.InsertPolicy{}, server.ErrForbidden
 }
-func (authorizer) AuthorizeUpdate(context.Context, server.Principal, string, meldbase.QuerySpec, meldbase.MutationSpec) (server.UpdatePolicy, error) {
+func (authorizer) AuthorizeUpdate(context.Context, server.Actor, string, meldbase.QuerySpec, meldbase.MutationSpec) (server.UpdatePolicy, error) {
 	return server.UpdatePolicy{}, server.ErrForbidden
 }
-func (authorizer) AuthorizeDelete(context.Context, server.Principal, string, meldbase.QuerySpec) (server.DeletePolicy, error) {
+func (authorizer) AuthorizeDelete(context.Context, server.Actor, string, meldbase.QuerySpec) (server.DeletePolicy, error) {
 	return server.DeletePolicy{}, server.ErrForbidden
 }
-func (authorizer) AuthorizeRPC(_ context.Context, principal server.Principal, method string) error {
-	if principal.Subject != "user" || method != "echo" {
+func (authorizer) AuthorizeRPC(_ context.Context, actor server.Actor, method string) error {
+	if actor.ID != "user" || method != "echo" {
 		return server.ErrForbidden
 	}
 	return nil
@@ -48,7 +48,7 @@ func TestPublicServerFacadeCanRegisterAndCallRPC(t *testing.T) {
 		DB: db, Authenticator: authenticator{}, Authorizer: authorizer{}, RPCAuthorizer: authorizer{},
 		PublicRealtimeURL: "ws://example.invalid/v1/realtime",
 		RPCMethods: map[string]server.RPCMethod{
-			"echo": func(_ context.Context, _ server.Principal, arguments []meldbase.Value) (meldbase.Value, error) {
+			"echo": func(_ context.Context, _ server.Actor, arguments []meldbase.Value) (meldbase.Value, error) {
 				return meldbase.Array(arguments...), nil
 			},
 		},

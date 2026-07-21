@@ -53,7 +53,7 @@ func runAccessPolicy(args []string, stdout, stderr io.Writer) error {
 		}
 		for _, rule := range manifest.Collections {
 			if rule.Collection == *collection {
-				return explainCollectionAccess(stdout, manifest, rule, meldserver.Principal{Subject: *subject, Tenant: *workspace})
+				return explainCollectionAccess(stdout, manifest, rule, meldserver.Actor{ID: *subject, TenantID: *workspace})
 			}
 		}
 		return fmt.Errorf("collection %q is not declared by the manifest", *collection)
@@ -87,19 +87,19 @@ func writeCollectionAccessJSON(stdout io.Writer, value any) error {
 }
 
 type collectionAccessExplanation struct {
-	Version    int                                  `json:"version"`
-	Collection string                               `json:"collection"`
-	Mode       meldserver.CollectionAccessMode      `json:"mode"`
-	Principal  collectionAccessExplanationPrincipal `json:"principal"`
-	Query      collectionAccessQueryExplanation     `json:"query"`
-	Insert     collectionAccessInsertExplanation    `json:"insert"`
-	Update     collectionAccessMutationExplanation  `json:"update"`
-	Delete     collectionAccessMutationExplanation  `json:"delete"`
+	Version    int                                 `json:"version"`
+	Collection string                              `json:"collection"`
+	Mode       meldserver.CollectionAccessMode     `json:"mode"`
+	Actor      collectionAccessExplanationActor    `json:"actor"`
+	Query      collectionAccessQueryExplanation    `json:"query"`
+	Insert     collectionAccessInsertExplanation   `json:"insert"`
+	Update     collectionAccessMutationExplanation `json:"update"`
+	Delete     collectionAccessMutationExplanation `json:"delete"`
 }
 
-type collectionAccessExplanationPrincipal struct {
-	Subject   string `json:"subject"`
-	Workspace string `json:"workspace"`
+type collectionAccessExplanationActor struct {
+	ID       string `json:"id"`
+	TenantID string `json:"tenantId"`
 }
 
 type collectionAccessQueryExplanation struct {
@@ -125,7 +125,7 @@ type collectionAccessMutationExplanation struct {
 	MaxAffected       int      `json:"maxAffected,omitempty"`
 }
 
-func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAccessManifest, rule meldserver.CollectionAccess, principal meldserver.Principal) error {
+func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAccessManifest, rule meldserver.CollectionAccess, actor meldserver.Actor) error {
 	config, err := manifest.WorkspaceAuthorizerConfig()
 	if err != nil {
 		return err
@@ -140,9 +140,9 @@ func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAcc
 	}
 	explanation := collectionAccessExplanation{
 		Version: 1, Collection: rule.Collection, Mode: rule.Mode,
-		Principal: collectionAccessExplanationPrincipal{Subject: principal.Subject, Workspace: principal.Tenant},
+		Actor: collectionAccessExplanationActor{ID: actor.ID, TenantID: actor.TenantID},
 	}
-	if policy, policyErr := authorizer.AuthorizeQuery(context.Background(), principal, rule.Collection, query); policyErr == nil {
+	if policy, policyErr := authorizer.AuthorizeQuery(context.Background(), actor, rule.Collection, query); policyErr == nil {
 		constraint, marshalErr := meldbase.MarshalQuerySpecJSON(*policy.Constraint)
 		if marshalErr != nil {
 			return marshalErr
@@ -155,7 +155,7 @@ func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAcc
 	} else if !errors.Is(policyErr, meldserver.ErrForbidden) {
 		return policyErr
 	}
-	if policy, policyErr := authorizer.AuthorizeInsert(context.Background(), principal, rule.Collection, meldbase.Document{}); policyErr == nil {
+	if policy, policyErr := authorizer.AuthorizeInsert(context.Background(), actor, rule.Collection, meldbase.Document{}); policyErr == nil {
 		explanation.Insert.Allowed = true
 		explanation.Insert.InputFields = describePolicyFields(policy.AllowAllInputFields, policy.AllowedInputFields)
 		explanation.Insert.ResultFields = describePolicyFields(policy.AllowAllResultFields, policy.AllowedResultFields)
@@ -163,7 +163,7 @@ func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAcc
 	} else if !errors.Is(policyErr, meldserver.ErrForbidden) {
 		return policyErr
 	}
-	if policy, policyErr := authorizer.AuthorizeUpdate(context.Background(), principal, rule.Collection, query, meldbase.MutationSpec{}); policyErr == nil {
+	if policy, policyErr := authorizer.AuthorizeUpdate(context.Background(), actor, rule.Collection, query, meldbase.MutationSpec{}); policyErr == nil {
 		explanation.Update.Allowed = true
 		explanation.Update.QueryPaths = describePolicyFields(policy.AllowAllQueryPaths, policy.AllowedQueryPaths)
 		explanation.Update.UpdatePaths = describePolicyFields(policy.AllowAllUpdatePaths, policy.AllowedUpdatePaths)
@@ -172,7 +172,7 @@ func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAcc
 	} else if !errors.Is(policyErr, meldserver.ErrForbidden) {
 		return policyErr
 	}
-	if policy, policyErr := authorizer.AuthorizeDelete(context.Background(), principal, rule.Collection, query); policyErr == nil {
+	if policy, policyErr := authorizer.AuthorizeDelete(context.Background(), actor, rule.Collection, query); policyErr == nil {
 		explanation.Delete.Allowed = true
 		explanation.Delete.MaxAffected = policy.MaxAffected
 	} else if !errors.Is(policyErr, meldserver.ErrForbidden) {

@@ -40,7 +40,7 @@ export type {
   MethodContext,
   MethodDefinition,
   MethodHandler,
-  Principal,
+  Actor,
   PublicationContext,
   PublicationDefinition,
   PublicationHandler,
@@ -74,7 +74,6 @@ export class MeldbaseWorker {
 
   constructor(options: WorkerOptions) {
     if (!options || typeof options.webSocketFactory !== "function") throw new TypeError("Worker WebSocket factory is required");
-    if (options.requireProtocol !== undefined && typeof options.requireProtocol !== "boolean") throw new TypeError("requireProtocol must be boolean");
     const url = parseWorkerURL(options.url);
     if (options.token.length < 32 || options.token.length > 4096) throw new TypeError("Worker token must contain between 32 and 4096 bytes");
     if (!WORKER_PATTERN.test(options.workerId)) throw new TypeError("Invalid worker ID");
@@ -215,8 +214,8 @@ export class MeldbaseWorker {
       case "registered": {
         exactKeys(frame, frame.protocol === undefined ? ["v", "type", "sessionId", "limits"] : ["v", "type", "sessionId", "limits", "protocol"]);
         if (typeof frame.sessionId !== "string" || !record(frame.limits)) throw new Error("Invalid registered frame");
-        const descriptor = validateWorkerProtocol(frame.protocol, this.#options.requireProtocol, this.#methods, this.#publications);
-        if (descriptor) this.#protocol = descriptor;
+        const descriptor = validateWorkerProtocol(frame.protocol, this.#methods, this.#publications);
+        this.#protocol = descriptor;
         this.#setState("ready");
         this.#ready?.resolve();
         return;
@@ -247,9 +246,9 @@ export class MeldbaseWorker {
   }
 
   async #invoke(frame: Record<string, unknown>): Promise<void> {
-    exactKeys(frame, ["v", "type", "callId", "method", "mode", "principal", "arguments"]);
+    exactKeys(frame, ["v", "type", "callId", "method", "mode", "actor", "arguments"]);
     if (typeof frame.callId !== "string" || typeof frame.method !== "string" || (frame.mode !== "rpc" && frame.mode !== "transactional") ||
-        !record(frame.principal) || typeof frame.principal.subject !== "string" || typeof frame.principal.tenant !== "string" || !Array.isArray(frame.arguments)) {
+        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.tenantId !== "string" || !Array.isArray(frame.arguments)) {
       throw new Error("Invalid invoke frame");
     }
     const definition = this.#methods.get(frame.method);
@@ -257,7 +256,7 @@ export class MeldbaseWorker {
     const arguments_ = frame.arguments.map((argument) => decodeValue(argument));
     const controller = new AbortController();
     const context: MethodContext = {
-      principal: Object.freeze({ subject: frame.principal.subject, tenant: frame.principal.tenant }),
+      actor: Object.freeze({ id: frame.actor.id, tenantId: frame.actor.tenantId }),
       signal: controller.signal,
     };
     const active: ActiveCall = definition.mode === "transactional"
@@ -281,9 +280,9 @@ export class MeldbaseWorker {
   }
 
   async #authorizeQuery(frame: Record<string, unknown>): Promise<void> {
-    exactKeys(frame, ["v", "type", "callId", "collection", "principal", "query"]);
+    exactKeys(frame, ["v", "type", "callId", "collection", "actor", "query"]);
     if (typeof frame.callId !== "string" || typeof frame.collection !== "string" ||
-        !record(frame.principal) || typeof frame.principal.subject !== "string" || typeof frame.principal.tenant !== "string") {
+        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.tenantId !== "string") {
       throw new Error("Invalid query authorization frame");
     }
     const definition = this.#publications.get(frame.collection);
@@ -293,7 +292,7 @@ export class MeldbaseWorker {
     const active: ActiveCall = { controller };
     const context: PublicationContext = {
       collection: frame.collection,
-      principal: Object.freeze({ subject: frame.principal.subject, tenant: frame.principal.tenant }),
+      actor: Object.freeze({ id: frame.actor.id, tenantId: frame.actor.tenantId }),
       query,
       signal: controller.signal,
     };

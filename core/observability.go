@@ -132,7 +132,7 @@ type PrimaryWriteFenceStats struct {
 
 // WriteTransactionStats describes public optimistic point transactions. Every
 // started callback reaches exactly one terminal counter. These aggregates do
-// not contain collection, document, principal, or callback identifiers.
+// not contain collection, document, actor, or callback identifiers.
 type WriteTransactionStats struct {
 	Active    uint64 `json:"active"`
 	Started   uint64 `json:"started"`

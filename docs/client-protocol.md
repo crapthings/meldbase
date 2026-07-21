@@ -26,7 +26,7 @@ text, JavaScript, regex with unbounded execution, or user callbacks.
 
 For every implemented fetch and subscription, the server applies:
 
-1. authenticated principal and tenant scoping;
+1. authenticated actor and tenant scoping;
 2. collection/action policy;
 3. row predicate injected into the plan (not post-filtered after pagination);
 4. field projection/redaction before serialization;
@@ -64,7 +64,7 @@ separate `MaxAffected` bound. That bound is checked while the engine holds its
 write lock; exceeding it rejects the entire mutation without a partial write.
 
 Resume tokens are opaque, expiring HMAC-authenticated values bound to database
-identity, authenticated subject and tenant, collection, the canonical authorized
+identity, authenticated actor ID and tenant ID, collection, the canonical authorized
 query, policy version, and durable commit position. A token whose history is no
 longer available, whose security context changed, or whose signature is invalid
 yields `resync_required`. A configured replay source reconstructs the exact
@@ -236,12 +236,14 @@ Implemented socket client messages: `authenticate`, `subscribe`, `unsubscribe`,
 All envelopes include protocol version `v: 1`. Subscriptions use
 `mode: "delta"` for an initial snapshot followed by ordered transformations.
 The checked-in `testdata/protocol-v1-contract.json` artifact freezes the ticket
-media type, base and conditional capabilities, worker capabilities, all client
-and server frame names, their required/optional top-level fields, and the nested
-delta/error shapes. It also freezes the sorted engine/transport-owned error-code
-registry; bounded application-defined `RPCError` codes remain explicit
-extensions rather than masquerading as engine codes. Both the Go server and TypeScript SDK read this same file in
-their compatibility suites. The public Go `server.ProtocolVersion` and
+media type, base and conditional capabilities, all client and server frame
+names, their required/optional top-level fields, and the nested delta/error
+shapes. Its `workerProtocol` section freezes the private control descriptor,
+capabilities, frames, and `actor` shape. The artifact also freezes the sorted
+engine/transport-owned error-code registry; bounded application-defined
+`RPCError` codes remain explicit extensions rather than masquerading as engine
+codes. Both the Go server and TypeScript SDK read it in their compatibility
+suites. The public Go `server.ProtocolVersion` and
 TypeScript `MELDBASE_PROTOCOL_VERSION` constants must match it, and production
 encoders use those constants rather than independent numeric literals.
 
@@ -286,7 +288,7 @@ is absent the TypeScript SDK deliberately reconnects with a clean snapshot.
 The current SDK requires the protocol descriptor. A malformed descriptor,
 unsupported version, or missing required capability is terminal and does not
 enter reconnect backoff. Capability discovery is authenticated and contains no method,
-collection, principal, tenant or database identity.
+collection, actor, tenant or database identity.
 
 Delta mode always begins with:
 
@@ -389,7 +391,7 @@ callbacks, prototypes or arbitrary class instances. Method names match
 
 The public Go `server` package registers a fixed method map and a separate
 `RPCAuthorizer`. Registration does not grant permission: every call is first
-authenticated, then authorized by principal and method. The server copies the
+authenticated, then authorized by actor and method. The server copies the
 registry at construction, bounds body bytes, argument count, result bytes and
 concurrent handler executions, propagates HTTP cancellation through `context`,
 and converts handler panics or arbitrary errors to the non-sensitive `internal`

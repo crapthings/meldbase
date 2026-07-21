@@ -2,7 +2,8 @@
 
 Meldbase gives a browser or mobile client access to a **data API**, not to a
 database file or an administrator credential. Every request first verifies a
-JWT, then the server derives the principal's `sub` and active workspace claim.
+JWT, then maps `sub` to `actor.id` and its active workspace claim to
+`actor.tenantId`.
 The client may request a query, but it never chooses a trusted workspace,
 owner, result projection, or generic write permission.
 
@@ -66,7 +67,7 @@ meld access-policy explain \
 
 `validate` prints the canonical manifest. `explain` prints the effective
 generic query constraint, server-owned insert fields, immutable update paths,
-and operation allowance for that simulated principal. It is a static review
+and operation allowance for that simulated actor. It is a static review
 tool: it does not validate a JWT, open a database, or evaluate a custom role or
 membership resolver.
 
@@ -113,7 +114,7 @@ implementation or a client-side callback.
 
 `rpcMethods` is an optional exact allowlist for named RPC methods. When omitted,
 the manifest allows no RPC methods. It answers only whether an authenticated
-workspace principal may reach a method at all; it does not grant role-,
+workspace actor may reach a method at all; it does not grant role-,
 record-, or workflow-level permission. Put those business checks in the RPC
 handler.
 

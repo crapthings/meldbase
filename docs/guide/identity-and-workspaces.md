@@ -28,11 +28,21 @@ For the built-in workspace authorizer, a token must contain these claims:
 }
 ```
 
-`sub` identifies the signed-in principal; `workspace_id` identifies the
-workspace that principal is currently using. The server verifies `exp`, `iss`,
-and `aud`, then derives its internal principal from `sub` and `workspace_id`.
+`sub` identifies the signed-in actor; `workspace_id` identifies the
+workspace that actor is currently using. The server verifies `exp`, `iss`,
+and `aud`, then derives its internal actor from `sub` and `workspace_id`.
 It never trusts a workspace passed as a query parameter, request field, or
 WebSocket URL.
+
+| Verified JWT claim | Meldbase handler identity |
+| --- | --- |
+| `sub` | Go `Actor.ID`; TypeScript `context.actor.id` |
+| `workspace_id` (or the configured `--jwt-workspace-claim`) | Go `Actor.TenantID`; TypeScript `context.actor.tenantId` |
+
+`sub` is a standard JWT claim and remains the identity-provider-facing name.
+The Go and TypeScript contracts use their native field naming above. The
+workspace claim must be an application claim; it cannot replace a registered
+JWT claim such as `sub`, `iss`, or `aud`.
 
 Changing workspace means your identity service first checks membership, then
 issues a new token with the new `workspace_id`. Do not let the browser edit this

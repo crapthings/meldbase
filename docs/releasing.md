@@ -31,10 +31,11 @@ them beyond that status.
    generate a new `admin-schema-vN.json` fixture and retain every older fixture.
    Never change field names, wire types, optionality or nullability under an
    existing schema version.
-6. If realtime/RPC frame grammar changed incompatibly, increment the Go and
-   TypeScript protocol constants together, add a new shared protocol contract
-   artifact and retain `protocol-v1-contract.json`. Capability-only additions
-   must remain sorted, bounded and safe for older peers to ignore.
+6. If any realtime, RPC, or private worker-control frame grammar changes
+   incompatibly after publication, increment the shared Go and TypeScript
+   protocol constants together and add a new shared protocol contract artifact;
+   retain `protocol-v1-contract.json`. Capability-only additions must remain
+   sorted, bounded and safe for older peers to ignore.
 7. Run `govulncheck ./...` with the current official scanner and
    `pnpm audit --prod --audit-level high`. Archive or record the tool versions
    and date; a clean result is a point-in-time database lookup, not a permanent

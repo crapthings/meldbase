@@ -14,13 +14,13 @@ const worker = new MeldbaseWorker({
   onStateChange: (state) => console.log(`[meldbase worker] ${state}`),
   onError: (error) => console.error("[meldbase worker]", error.message),
   methods: {
-    "system.ping": rpc(({ principal }) => ({ ok: true, subject: principal.subject })),
-    "orders.create": transactional(async ({ principal }, [description], tx) => {
+    "system.ping": rpc(({ actor }) => ({ ok: true, id: actor.id })),
+    "orders.create": transactional(async ({ actor }, [description], tx) => {
       if (typeof description !== "string" || description.length === 0 || description.length > 500) {
         throw new MeldbaseMethodError("invalid_description");
       }
       const id = await tx.insert("orders", {
-        owner: principal.subject,
+        owner: actor.id,
         description,
         status: "created",
       });
@@ -33,7 +33,7 @@ const worker = new MeldbaseWorker({
       maxResults: 100,
       queryPaths: ["status", "description"],
       resultFields: ["owner", "description", "status"],
-    }, ({ principal }) => compileQuery({ owner: principal.subject })),
+    }, ({ actor }) => compileQuery({ owner: actor.id })),
   },
 });
 

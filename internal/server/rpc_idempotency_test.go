@@ -106,7 +106,7 @@ func (store *memoryIdempotencyStore) MarkUnknown(_ context.Context, claim RPCIde
 func TestRPCIdempotencyReplaysCanonicalResultAndRejectsKeyReuse(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
-	methods := map[string]RPCMethod{"echo": func(_ context.Context, _ Principal, arguments []meldbase.Value) (meldbase.Value, error) {
+	methods := map[string]RPCMethod{"echo": func(_ context.Context, _ Actor, arguments []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return arguments[0], nil
 	}}
@@ -131,7 +131,7 @@ func TestRPCIdempotencyReplaysCanonicalResultAndRejectsKeyReuse(t *testing.T) {
 func TestRPCIdempotencyReplaysApplicationErrorsAndFailsClosedWithoutStore(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
-	method := func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return meldbase.Value{}, &RPCError{Code: "quota_exceeded"}
 	}
@@ -154,7 +154,7 @@ func TestRPCIdempotencyConcurrentDuplicateIsInProgress(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	started, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Uint64
-	method := func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		close(started)
 		<-release
@@ -182,7 +182,7 @@ func TestRPCIdempotencyCompletionFailureBecomesOutcomeUnknown(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	store.failComplete = true
 	var calls atomic.Uint64
-	method := func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return meldbase.String("charged"), nil
 	}
@@ -200,7 +200,7 @@ func TestRPCIdempotencyCompletionFailureBecomesOutcomeUnknown(t *testing.T) {
 func TestRPCIdempotencyReplaysAcrossHTTPAndWebSocketTransports(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
-	method := func(context.Context, Principal, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return meldbase.Binary([]byte{0, 255}), nil
 	}
@@ -239,7 +239,7 @@ func TestRPCIdempotencyCancellationIsPersistedAsOutcomeUnknown(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	started := make(chan struct{})
 	var calls atomic.Uint64
-	method := func(ctx context.Context, _ Principal, _ []meldbase.Value) (meldbase.Value, error) {
+	method := func(ctx context.Context, _ Actor, _ []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		close(started)
 		<-ctx.Done()
@@ -276,13 +276,13 @@ func TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed(t *testing.T) {
 	key := "abcdefghijklmnopqrstuv"
 	session := [16]byte{1}
 	envelope := rpcCallEnvelope{Method: "echo", IdempotencyKey: &key}
-	left, err := newRPCIdempotencyClaim(Principal{Tenant: "ab", Subject: "c"}, envelope, []meldbase.Value{
+	left, err := newRPCIdempotencyClaim(Actor{TenantID: "ab", ID: "c"}, envelope, []meldbase.Value{
 		meldbase.Object(meldbase.Document{"b": meldbase.Int(2), "a": meldbase.Int(1)}),
 	}, session, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	right, err := newRPCIdempotencyClaim(Principal{Tenant: "ab", Subject: "c"}, envelope, []meldbase.Value{
+	right, err := newRPCIdempotencyClaim(Actor{TenantID: "ab", ID: "c"}, envelope, []meldbase.Value{
 		meldbase.Object(meldbase.Document{"a": meldbase.Int(1), "b": meldbase.Int(2)}),
 	}, session, time.Hour)
 	if err != nil {
@@ -291,7 +291,7 @@ func TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed(t *testing.T) {
 	if left.Fingerprint != right.Fingerprint || left.ScopeHash != right.ScopeHash || left.KeyHash != right.KeyHash {
 		t.Fatal("canonical equivalent claims produced different hashes")
 	}
-	otherScope, err := newRPCIdempotencyClaim(Principal{Tenant: "a", Subject: "bc"}, envelope, []meldbase.Value{
+	otherScope, err := newRPCIdempotencyClaim(Actor{TenantID: "a", ID: "bc"}, envelope, []meldbase.Value{
 		meldbase.Object(meldbase.Document{"a": meldbase.Int(1), "b": meldbase.Int(2)}),
 	}, session, time.Hour)
 	if err != nil {

@@ -21,7 +21,7 @@ the public client API. A worker connects outbound over `wss`, authenticates with
 a dedicated worker credential and registers a bounded set of method names and
 modes. Browser-originated control connections are rejected. Client bearer
 tokens, idempotency keys and transport request IDs are never forwarded to a
-worker; it receives only the authenticated `subject`, optional `tenant`, method
+worker; it receives only the authenticated actor (`id`, `tenantId`), method
 arguments or canonical requested query, and a hub-generated call ID.
 
 One live worker owns a method name or managed publication collection. Registration conflicts fail closed instead
@@ -30,15 +30,14 @@ worker's registrations and fails its in-flight calls. A later worker may then
 register the names. Routing always occurs after the normal client
 `RPCAuthorizer` check.
 
-## Version-one frames
+## Version-one worker frames
 
 All frames are strict bounded JSON objects and use Meldbase's existing typed
 wire values.
 
-The Node SDK requests the optional v1 compatibility descriptor with the private
-upgrade header `Meldbase-Protocol: capabilities-v1`. A new Hub adds `protocol`
-to `registered`; an old Hub ignores the request header and retains the original
-frame shape:
+The Node SDK requires the v1 capability descriptor with the private upgrade
+header `Meldbase-Protocol: capabilities-v1`. The Hub includes `protocol` in
+every `registered` frame; an older Hub or an omitted descriptor is rejected:
 
 ```json
 {
@@ -62,13 +61,12 @@ frame shape:
 ```
 
 The descriptor uses the same canonical bounded decoder as the browser SDK.
-Unknown sorted capabilities are forward-additive. If a descriptor is present,
-the SDK verifies every capability required by its registered method/publication
-modes before becoming ready. Missing required support is terminal rather than a
-reconnect loop. Legacy omission is accepted during rolling upgrades;
-`requireProtocol: true` turns omission into a terminal anti-downgrade failure.
-The request header is confined to the separately authenticated, non-browser
-control listener and contains no worker token or application identity.
+Unknown sorted capabilities are forward-additive. The SDK verifies every
+capability required by its registered method/publication modes before becoming
+ready. A missing descriptor, wrong worker protocol version, or missing required
+support is terminal rather than a reconnect loop. The request header is confined
+to the separately authenticated, non-browser control listener and contains no
+worker token or application identity.
 
 Worker registration:
 
@@ -94,9 +92,26 @@ Worker registration:
 ```
 
 The hub replies with `registered` and an opaque process-session ID. The hub then
-sends `invoke` frames containing `callId`, method, mode, principal and typed
-arguments. A worker answers with exactly one `result` or stable coded `error`.
+sends `invoke` frames containing `callId`, method, mode, the authenticated
+identity and typed arguments. The SDK exposes that identity to handlers as
+`context.actor` (`id`, `tenantId`). A worker answers with exactly one `result`
+or stable coded `error`.
 Arbitrary exception text and stack traces never cross back to clients.
+
+`invoke` and `authorize_query` use an exact `actor` object. There is no
+`principal`, `subject`, or `tenant` fallback field in worker protocol v1:
+
+```json
+{
+  "v": 1,
+  "type": "invoke",
+  "callId": "hub-generated-id",
+  "method": "orders.quote",
+  "mode": "rpc",
+  "actor": {"id": "user_42", "tenantId": "team_a"},
+  "arguments": []
+}
+```
 
 Cancellation is best-effort. The hub sends `cancel` when the client context is
 done. An ordinary remote method has the same external-side-effect uncertainty as
@@ -160,7 +175,7 @@ connection.
 The hub exports fixed-cardinality totals and gauges only: connected workers,
 registered methods/publications, active calls/policy evaluations, their bounded
 outcomes, protocol failures, bytes and transactional operations. It never labels metrics
-with worker IDs, method names, principals, tenants or application error codes.
+with worker IDs, method names, actors, tenants or application error codes.
 Committed policy invalidations have their own total, making unexpected resync
 pressure visible without putting collection names into metrics.
 
@@ -180,7 +195,7 @@ authorized RPC method.
 The registration contains the static maximum result count, client-query paths
 and projected result fields. Those declarations are hashed into the policy
 version. Per query or subscription, Go sends one `authorize_query` containing
-the authenticated principal and canonical requested query. The handler returns
+the authenticated actor and canonical requested query. The handler returns
 only a predicate-only query AST in `policy`, or `policy_error/forbidden`. Sort,
 skip and limit are forbidden in constraints. The worker never reads storage and
 never returns documents.
@@ -254,11 +269,11 @@ const worker = new MeldbaseWorker({
   workerId: "orders-worker-1",
   webSocketFactory: (url, { headers }) => new WebSocket(url, { headers }),
   methods: {
-    "orders.quote": rpc(async ({ principal, signal }, [orderId]) => {
-      return calculateQuote(principal, orderId, signal);
+    "orders.quote": rpc(async ({ actor, signal }, [orderId]) => {
+      return calculateQuote(actor, orderId, signal);
     }),
-    "orders.create": transactional(async ({ principal }, [description], tx) => {
-      const id = await tx.insert("orders", { owner: principal.subject, description });
+    "orders.create": transactional(async ({ actor }, [description], tx) => {
+      const id = await tx.insert("orders", { owner: actor.id, description });
       const order = await tx.get("orders", id);
       return order;
     }),
@@ -269,7 +284,7 @@ const worker = new MeldbaseWorker({
       maxResults: 100,
       queryPaths: ["status", "description"],
       resultFields: ["owner", "description", "status"],
-    }, ({ principal }) => compileQuery({ owner: principal.subject })),
+    }, ({ actor }) => compileQuery({ owner: actor.id })),
   },
 });
 

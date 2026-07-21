@@ -15,7 +15,12 @@ interface ProtocolV1Contract {
   readonly protocolVersion: number;
   readonly realtimeTicketAccept: string;
   readonly realtimeCapabilities: { readonly base: readonly string[]; readonly conditional: readonly string[] };
-  readonly workerCapabilities: readonly string[];
+  readonly workerProtocol: {
+    readonly capabilityHeader: string;
+    readonly version: number;
+    readonly capabilities: readonly string[];
+    readonly nestedShapes: readonly { readonly name: string; readonly required: readonly string[]; readonly optional: readonly string[] }[];
+  };
   readonly fixedErrorCodes: readonly string[];
   readonly clientFrames: readonly FrameContract[];
   readonly serverFrames: readonly FrameContract[];
@@ -36,10 +41,13 @@ test("TypeScript and Go share the immutable realtime protocol v1 contract", asyn
     capabilities: ["query.delta", "query.resume", "rpc", "rpc.cancel"],
   });
   assert.deepEqual(contract.realtimeCapabilities.conditional, ["rpc.idempotency", "rpc.transactional"]);
-  assert.deepEqual(contract.workerCapabilities, [
+  assert.equal(contract.workerProtocol.version, MELDBASE_PROTOCOL_VERSION);
+  assert.equal(contract.workerProtocol.capabilityHeader, "capabilities-v1");
+  assert.deepEqual(contract.workerProtocol.capabilities, [
     "cancel", "publication.policy", "rpc", "rpc.transactional",
     "transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
   ]);
+  assert.deepEqual(contract.workerProtocol.nestedShapes, [{ name: "actor", required: ["id", "tenantId"], optional: [] }]);
   assert.deepEqual(contract.fixedErrorCodes, [
     "cancelled", "database_unavailable", "delta_failed", "duplicate_key", "forbidden",
     "initial_snapshot_failed", "internal", "invalid_query", "invalid_request", "invalid_rpc_argument",

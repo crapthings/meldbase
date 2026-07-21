@@ -21,11 +21,18 @@ type protocolV1Contract struct {
 		Base        []string `json:"base"`
 		Conditional []string `json:"conditional"`
 	} `json:"realtimeCapabilities"`
-	WorkerCapabilities []string                `json:"workerCapabilities"`
-	FixedErrorCodes    []string                `json:"fixedErrorCodes"`
-	ClientFrames       []protocolFrameContract `json:"clientFrames"`
-	ServerFrames       []protocolFrameContract `json:"serverFrames"`
-	NestedShapes       []protocolShapeContract `json:"nestedShapes"`
+	WorkerProtocol struct {
+		CapabilityHeader string                  `json:"capabilityHeader"`
+		Version          int                     `json:"version"`
+		Capabilities     []string                `json:"capabilities"`
+		NestedShapes     []protocolShapeContract `json:"nestedShapes"`
+		HubFrames        []protocolFrameContract `json:"hubFrames"`
+		WorkerFrames     []protocolFrameContract `json:"workerFrames"`
+	} `json:"workerProtocol"`
+	FixedErrorCodes []string                `json:"fixedErrorCodes"`
+	ClientFrames    []protocolFrameContract `json:"clientFrames"`
+	ServerFrames    []protocolFrameContract `json:"serverFrames"`
+	NestedShapes    []protocolShapeContract `json:"nestedShapes"`
 }
 
 type protocolFrameContract struct {
@@ -49,7 +56,7 @@ func TestProtocolDescriptorsAreCanonicalAndConfigurationHonest(t *testing.T) {
 	configured := realtimeProtocolDescriptor(Config{
 		RPCIdempotencyStore: newMemoryIdempotencyStore(),
 		RPCTransactionalMethods: map[string]RPCTransactionalMethod{
-			"orders.create": func(context.Context, Principal, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
+			"orders.create": func(context.Context, Actor, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
 				return meldbase.Null(), nil
 			},
 		},
@@ -58,11 +65,7 @@ func TestProtocolDescriptorsAreCanonicalAndConfigurationHonest(t *testing.T) {
 	if !reflect.DeepEqual(configured.Capabilities, wantConfigured) {
 		t.Fatalf("configured realtime descriptor=%+v", configured)
 	}
-	worker := workerProtocolDescriptor()
-	if !reflect.DeepEqual(worker.Versions, []int{contract.ProtocolVersion}) || !reflect.DeepEqual(worker.Capabilities, contract.WorkerCapabilities) {
-		t.Fatalf("worker descriptor=%+v", worker)
-	}
-	for name, descriptor := range map[string]protocolDescriptor{"base": base, "configured": configured, "worker": worker} {
+	for name, descriptor := range map[string]protocolDescriptor{"base": base, "configured": configured} {
 		for index := 1; index < len(descriptor.Capabilities); index++ {
 			if descriptor.Capabilities[index-1] >= descriptor.Capabilities[index] {
 				t.Fatalf("%s descriptor is not canonical: %+v", name, descriptor)
@@ -71,7 +74,7 @@ func TestProtocolDescriptorsAreCanonicalAndConfigurationHonest(t *testing.T) {
 	}
 }
 
-func TestProtocolV1FrameVocabularyMatchesSharedContract(t *testing.T) {
+func TestRealtimeProtocolV1FrameVocabularyMatchesSharedContract(t *testing.T) {
 	contract := loadProtocolV1Contract(t)
 	wantClient := []protocolFrameContract{
 		{Type: "authenticate", Required: []string{"ticket", "type", "v"}},
@@ -96,7 +99,46 @@ func TestProtocolV1FrameVocabularyMatchesSharedContract(t *testing.T) {
 		{Name: "error", Required: []string{"code"}},
 	}
 	if !equalProtocolFrames(contract.ClientFrames, wantClient) || !equalProtocolFrames(contract.ServerFrames, wantServer) || !equalProtocolShapes(contract.NestedShapes, wantNested) {
-		t.Fatalf("protocol v1 frame contract drifted: client=%+v server=%+v nested=%+v", contract.ClientFrames, contract.ServerFrames, contract.NestedShapes)
+		t.Fatalf("realtime protocol v1 frame contract drifted: client=%+v server=%+v nested=%+v", contract.ClientFrames, contract.ServerFrames, contract.NestedShapes)
+	}
+}
+
+func TestWorkerProtocolV1ContractIsCanonical(t *testing.T) {
+	contract := loadProtocolV1Contract(t)
+	workerContract := contract.WorkerProtocol
+	if workerContract.Version != ProtocolVersion || workerContract.CapabilityHeader != workerCapabilityRequestValue {
+		t.Fatalf("invalid worker protocol v1 contract metadata: %+v", contract)
+	}
+	worker := workerProtocolDescriptor()
+	if !reflect.DeepEqual(worker.Versions, []int{ProtocolVersion}) || !reflect.DeepEqual(worker.Capabilities, workerContract.Capabilities) {
+		t.Fatalf("worker descriptor=%+v", worker)
+	}
+	wantHub := []protocolFrameContract{
+		{Type: "authorize_query", Required: []string{"actor", "callId", "collection", "query", "type", "v"}},
+		{Type: "cancel", Required: []string{"callId", "type", "v"}},
+		{Type: "invoke", Required: []string{"actor", "arguments", "callId", "method", "mode", "type", "v"}},
+		{Type: "registered", Required: []string{"limits", "protocol", "sessionId", "type", "v"}},
+		{Type: "tx_error", Required: []string{"callId", "error", "opId", "type", "v"}},
+		{Type: "tx_result", Required: []string{"callId", "opId", "result", "type", "v"}},
+	}
+	wantWorker := []protocolFrameContract{
+		{Type: "error", Required: []string{"callId", "error", "type", "v"}},
+		{Type: "policy", Required: []string{"callId", "constraint", "type", "v"}},
+		{Type: "policy_error", Required: []string{"callId", "error", "type", "v"}},
+		{Type: "register", Required: []string{"methods", "publications", "type", "v", "workerId"}},
+		{Type: "result", Required: []string{"callId", "result", "type", "v"}},
+		{Type: "tx_op", Required: []string{"callId", "collection", "opId", "operation", "type", "v"}, Optional: []string{"document", "id", "mutation"}},
+	}
+	wantNested := []protocolShapeContract{{Name: "actor", Required: []string{"id", "tenantId"}}}
+	if !equalProtocolFrames(workerContract.HubFrames, wantHub) || !equalProtocolFrames(workerContract.WorkerFrames, wantWorker) || !equalProtocolShapes(workerContract.NestedShapes, wantNested) {
+		t.Fatalf("worker protocol v1 frame contract drifted: hub=%+v worker=%+v", workerContract.HubFrames, workerContract.WorkerFrames)
+	}
+	assertCanonicalStrings(t, "worker capabilities", workerContract.Capabilities)
+	assertCanonicalFrames(t, "worker hub", workerContract.HubFrames)
+	assertCanonicalFrames(t, "worker client", workerContract.WorkerFrames)
+	for _, shape := range workerContract.NestedShapes {
+		assertCanonicalStrings(t, "worker "+shape.Name+" required fields", shape.Required)
+		assertCanonicalStrings(t, "worker "+shape.Name+" optional fields", shape.Optional)
 	}
 }
 
@@ -140,7 +182,6 @@ func loadProtocolV1Contract(t *testing.T) protocolV1Contract {
 	}
 	assertCanonicalStrings(t, "realtime base capabilities", contract.RealtimeCapabilities.Base)
 	assertCanonicalStrings(t, "realtime conditional capabilities", contract.RealtimeCapabilities.Conditional)
-	assertCanonicalStrings(t, "worker capabilities", contract.WorkerCapabilities)
 	assertCanonicalStrings(t, "fixed error codes", contract.FixedErrorCodes)
 	if !reflect.DeepEqual(contract.FixedErrorCodes, fixedProtocolErrorCodes) {
 		t.Fatalf("fixed error code registry drifted: contract=%v implementation=%v", contract.FixedErrorCodes, fixedProtocolErrorCodes)

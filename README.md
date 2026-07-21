@@ -148,8 +148,8 @@ your Go process                    your application boundary
 
 The embedded core is useful on its own. Add the server only when another
 process, browser, or service needs access. The server does not become your user
-directory: it trusts a verified identity provider, derives a principal and
-workspace from the token, and constrains configured business collections. The
+directory: it trusts a verified identity provider, derives an actor and active
+tenant from the token, and constrains configured business collections. The
 [collection access guide](docs/guide/access-policies.md) describes the small,
 declarative policy surface and where application business authorization begins.
 

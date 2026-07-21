@@ -88,7 +88,7 @@ is safe because removal happens before that control frame is published. The
 fresh subscription is authorized from scratch; an old opaque token cannot cross
 a changed policy version.
 
-The server signs each resume position and binds it to the database, principal,
+The server signs each resume position and binds it to the database, actor,
 tenant, collection, canonical policy-constrained query, policy version, and an
 expiry. A replay source must atomically reconstruct the query at N and stream
 N+1 onward. Successful resume sends a `resumed` control frame to bind a new

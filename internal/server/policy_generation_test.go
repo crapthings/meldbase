@@ -56,7 +56,7 @@ func TestDurablePolicyGenerationStoreSurvivesReopen(t *testing.T) {
 	worker, ctx := dialTestWorker(t, control.URL)
 	defer worker.CloseNow()
 	if err := writeSocketJSON(ctx, worker, map[string]any{
-		"v": 1, "type": "register", "workerId": "reopened-policy-worker", "methods": []any{},
+		"v": protocolVersion, "type": "register", "workerId": "reopened-policy-worker", "methods": []any{},
 		"publications": []map[string]any{{
 			"collection": "orders", "version": "orders-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",

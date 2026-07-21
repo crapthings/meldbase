@@ -15,16 +15,16 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	service.now = func() time.Time { return now }
 	database := [16]byte{1, 2, 3}
-	principal := Principal{Subject: "user-1", Tenant: "tenant-1"}
+	actor := Actor{ID: "user-1", TenantID: "tenant-1"}
 	query, err := meldbase.CompileQuery(meldbase.Filter{"rank": map[string]any{"$gte": int64(2)}}, meldbase.QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := service.issue(database, principal, "items", query, "policy-v1", 7)
+	token, err := service.issue(database, actor, "items", query, "policy-v1", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	position, err := service.validate(token, database, principal, "items", query, "policy-v1")
+	position, err := service.validate(token, database, actor, "items", query, "policy-v1")
 	if err != nil || position != 7 {
 		t.Fatalf("position=%d err=%v", position, err)
 	}
@@ -32,27 +32,27 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 	cases := []struct {
 		name       string
 		database   [16]byte
-		principal  Principal
+		actor      Actor
 		collection string
 		query      meldbase.QuerySpec
 		policy     string
 	}{
-		{"database", [16]byte{9}, principal, "items", query, "policy-v1"},
-		{"subject", database, Principal{Subject: "user-2", Tenant: "tenant-1"}, "items", query, "policy-v1"},
-		{"tenant", database, Principal{Subject: "user-1", Tenant: "tenant-2"}, "items", query, "policy-v1"},
-		{"collection", database, principal, "other", query, "policy-v1"},
-		{"query", database, principal, "items", otherQuery, "policy-v1"},
-		{"policy", database, principal, "items", query, "policy-store"},
+		{"database", [16]byte{9}, actor, "items", query, "policy-v1"},
+		{"subject", database, Actor{ID: "user-2", TenantID: "tenant-1"}, "items", query, "policy-v1"},
+		{"tenant", database, Actor{ID: "user-1", TenantID: "tenant-2"}, "items", query, "policy-v1"},
+		{"collection", database, actor, "other", query, "policy-v1"},
+		{"query", database, actor, "items", otherQuery, "policy-v1"},
+		{"policy", database, actor, "items", query, "policy-store"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := service.validate(token, test.database, test.principal, test.collection, test.query, test.policy); err == nil {
+			if _, err := service.validate(token, test.database, test.actor, test.collection, test.query, test.policy); err == nil {
 				t.Fatal("context-bound token was accepted")
 			}
 		})
 	}
 	service.now = func() time.Time { return now.Add(time.Minute) }
-	if _, err := service.validate(token, database, principal, "items", query, "policy-v1"); err == nil {
+	if _, err := service.validate(token, database, actor, "items", query, "policy-v1"); err == nil {
 		t.Fatal("expired token was accepted")
 	}
 }
@@ -60,12 +60,12 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 func TestResumeTokenRejectsNonCanonicalBase64URLAliases(t *testing.T) {
 	service := newResumeTokenService([]byte("0123456789abcdef0123456789abcdef"), time.Minute)
 	database := [16]byte{1, 2, 3}
-	principal := Principal{Subject: "user-1", Tenant: "tenant-1"}
+	actor := Actor{ID: "user-1", TenantID: "tenant-1"}
 	query, err := meldbase.CompileQuery(meldbase.Filter{}, meldbase.QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := service.issue(database, principal, "items", query, "policy-v1", 7)
+	token, err := service.issue(database, actor, "items", query, "policy-v1", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestResumeTokenRejectsNonCanonicalBase64URLAliases(t *testing.T) {
 	if canonicalErr != nil || aliasErr != nil || !bytes.Equal(canonicalBytes, aliasBytes) {
 		t.Fatal("test did not construct an equivalent Base64URL alias")
 	}
-	if _, err := service.validate(parts[0]+"."+aliasSignature, database, principal, "items", query, "policy-v1"); err == nil {
+	if _, err := service.validate(parts[0]+"."+aliasSignature, database, actor, "items", query, "policy-v1"); err == nil {
 		t.Fatal("non-canonical token encoding was accepted")
 	}
 }

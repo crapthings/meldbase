@@ -34,7 +34,7 @@
       "type": "array",
       "maxItems": 4096,
       "uniqueItems": true,
-      "description": "Exact named RPC methods callable by a verified workspace principal. Omitted means no RPC methods are allowed.",
+      "description": "Exact named RPC methods callable by a verified workspace actor. Omitted means no RPC methods are allowed.",
       "items": {
         "$ref": "#/$defs/rpcMethod"
       }

@@ -14,13 +14,31 @@ import (
 	"github.com/crapthings/meldbase/core"
 )
 
-func TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites(t *testing.T) {
-	secret := []byte("0123456789abcdef0123456789abcdef")
-	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
-	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{Secret: secret, Clock: func() time.Time { return now }})
+const workspaceTestJWTIssuer = "https://identity.example.test"
+const workspaceTestJWTAudience = "meldbase-api"
+
+func newWorkspaceTestAuthenticator(t *testing.T, secret []byte, now time.Time) *HS256JWTAuthenticator {
+	t.Helper()
+	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{
+		Secret: secret, Issuer: workspaceTestJWTIssuer, Audience: workspaceTestJWTAudience, Clock: func() time.Time { return now },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return authenticator
+}
+
+func signedWorkspaceJWT(t *testing.T, secret []byte, actorID, tenantID string, now time.Time) string {
+	t.Helper()
+	return signedHS256JWT(t, secret, map[string]any{
+		"iss": workspaceTestJWTIssuer, "aud": workspaceTestJWTAudience, "sub": actorID, "workspace_id": tenantID, "exp": now.Add(time.Minute).Unix(),
+	})
+}
+
+func TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	authenticator := newWorkspaceTestAuthenticator(t, secret, now)
 	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{CollectionAccess: []CollectionAccess{{Collection: "tasks", Mode: CollectionAccessCollaborative}}, WorkspaceField: "workspaceId"})
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +57,7 @@ func TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites(t *testing
 	collection := db.Collection("tasks")
 	insertWorkspaceDocument(t, collection, "team-a", "private-a")
 	insertWorkspaceDocument(t, collection, "team-b", "private-b")
-	tokenA := signedHS256JWT(t, secret, map[string]any{"sub": "user-a", "workspace_id": "team-a", "exp": now.Add(time.Minute).Unix()})
+	tokenA := signedWorkspaceJWT(t, secret, "user-a", "team-a", now)
 
 	query := postWorkspaceRequest(t, api.URL+"/v1/collections/tasks/query", tokenA, `{"version":1,"query":{"version":1,"where":{"op":"true"}}}`)
 	defer query.Body.Close()
@@ -100,10 +118,7 @@ func TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites(t *testing
 func TestCollectionAccessModesEnforceOwnerReadOnlyAndRPCOnlyBoundaries(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
-	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{Secret: secret, Clock: func() time.Time { return now }})
-	if err != nil {
-		t.Fatal(err)
-	}
+	authenticator := newWorkspaceTestAuthenticator(t, secret, now)
 	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{
 		WorkspaceField: "workspaceId",
 		CollectionAccess: []CollectionAccess{
@@ -135,7 +150,7 @@ func TestCollectionAccessModesEnforceOwnerReadOnlyAndRPCOnlyBoundaries(t *testin
 	insertWorkspaceOwnedDocument(t, privateNotes, "team-a", "user-b", "other-owner")
 	insertWorkspaceOwnedDocument(t, privateNotes, "team-b", "user-a", "other-workspace")
 	insertWorkspaceDocument(t, incidents, "team-a", "visible-incident")
-	tokenA := signedHS256JWT(t, secret, map[string]any{"sub": "user-a", "workspace_id": "team-a", "exp": now.Add(time.Minute).Unix()})
+	tokenA := signedWorkspaceJWT(t, secret, "user-a", "team-a", now)
 
 	query := postWorkspaceRequest(t, api.URL+"/v1/collections/private_notes/query", tokenA, `{"version":1,"query":{"version":1,"where":{"op":"true"}}}`)
 	defer query.Body.Close()
@@ -263,7 +278,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 		t.Fatalf("manifest config=%+v err=%v", config, err)
 	}
 	authorizer, err := NewWorkspaceAuthorizer(config)
-	if err != nil || authorizer.AuthorizeRPC(context.Background(), Principal{Subject: "user", Tenant: "team"}, "incidents.declare") != nil || authorizer.AuthorizeRPC(context.Background(), Principal{Subject: "user", Tenant: "team"}, "incidents.resolve") == nil {
+	if err != nil || authorizer.AuthorizeRPC(context.Background(), Actor{ID: "user", TenantID: "team"}, "incidents.declare") != nil || authorizer.AuthorizeRPC(context.Background(), Actor{ID: "user", TenantID: "team"}, "incidents.resolve") == nil {
 		t.Fatalf("RPC allowlist authorizer=%v", err)
 	}
 	for _, input := range []string{
@@ -293,7 +308,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err := emptyFields.AuthorizeQuery(context.Background(), Principal{Subject: "user", Tenant: "team"}, "empty", meldbase.QuerySpec{})
+	policy, err := emptyFields.AuthorizeQuery(context.Background(), Actor{ID: "user", TenantID: "team"}, "empty", meldbase.QuerySpec{})
 	if err != nil || policy.AllowAllResultFields || len(policy.AllowedResultFields) != 0 || policy.AllowAllAggregateFields || len(policy.AllowedAggregateFields) != 0 {
 		t.Fatalf("explicit empty result fields policy=%+v err=%v", policy, err)
 	}
@@ -307,7 +322,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err = aggregateFields.AuthorizeQuery(context.Background(), Principal{Subject: "user", Tenant: "team"}, "aggregate", meldbase.QuerySpec{})
+	policy, err = aggregateFields.AuthorizeQuery(context.Background(), Actor{ID: "user", TenantID: "team"}, "aggregate", meldbase.QuerySpec{})
 	if err != nil || policy.AllowAllAggregateFields || len(policy.AllowedAggregateFields) != 1 {
 		t.Fatalf("explicit aggregate fields policy=%+v err=%v", policy, err)
 	}
@@ -316,10 +331,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
-	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{Secret: secret, Clock: func() time.Time { return now }})
-	if err != nil {
-		t.Fatal(err)
-	}
+	authenticator := newWorkspaceTestAuthenticator(t, secret, now)
 	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{CollectionAccess: []CollectionAccess{{Collection: "tasks", Mode: CollectionAccessCollaborative}}, WorkspaceField: "workspaceId"})
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +349,7 @@ func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T
 	t.Cleanup(func() { api.Close(); _ = db.Close() })
 	insertWorkspaceDocument(t, db.Collection("tasks"), "team-a", "private-a")
 	insertWorkspaceDocument(t, db.Collection("tasks"), "team-b", "private-b")
-	tokenA := signedHS256JWT(t, secret, map[string]any{"sub": "user-a", "workspace_id": "team-a", "exp": now.Add(time.Minute).Unix()})
+	tokenA := signedWorkspaceJWT(t, secret, "user-a", "team-a", now)
 
 	ticketRequest, _ := http.NewRequest(http.MethodPost, api.URL+"/v1/realtime/tickets", nil)
 	ticketRequest.Header.Set("Authorization", "Bearer "+tokenA)
@@ -385,7 +397,7 @@ func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T
 	if err := connection.Close(websocket.StatusNormalClosure, "switch workspace"); err != nil {
 		t.Fatal(err)
 	}
-	tokenB := signedHS256JWT(t, secret, map[string]any{"sub": "user-a", "workspace_id": "team-b", "exp": now.Add(time.Minute).Unix()})
+	tokenB := signedWorkspaceJWT(t, secret, "user-a", "team-b", now)
 	ticketRequest, _ = http.NewRequest(http.MethodPost, api.URL+"/v1/realtime/tickets", nil)
 	ticketRequest.Header.Set("Authorization", "Bearer "+tokenB)
 	ticketResponse, err = http.DefaultClient.Do(ticketRequest)
@@ -420,20 +432,17 @@ func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T
 
 type workspaceRPCAllowlist struct{}
 
-func (workspaceRPCAllowlist) AuthorizeRPC(_ context.Context, principal Principal, method string) error {
-	if principal.Subject != "user-a" || principal.Tenant != "team-a" || method != "workspace.echo" {
+func (workspaceRPCAllowlist) AuthorizeRPC(_ context.Context, actor Actor, method string) error {
+	if actor.ID != "user-a" || actor.TenantID != "team-a" || method != "workspace.echo" {
 		return ErrForbidden
 	}
 	return nil
 }
 
-func TestJWTWorkspacePrincipalIsForwardedToTrustedWorkerRPC(t *testing.T) {
+func TestJWTWorkspaceActorIsForwardedToTrustedWorkerRPC(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
-	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{Secret: secret, Clock: func() time.Time { return now }})
-	if err != nil {
-		t.Fatal(err)
-	}
+	authenticator := newWorkspaceTestAuthenticator(t, secret, now)
 	authorizer, err := NewWorkspaceAuthorizer(WorkspaceAuthorizerConfig{CollectionAccess: []CollectionAccess{{Collection: "tasks", Mode: CollectionAccessCollaborative}}, WorkspaceField: "workspaceId"})
 	if err != nil {
 		t.Fatal(err)
@@ -457,17 +466,17 @@ func TestJWTWorkspacePrincipalIsForwardedToTrustedWorkerRPC(t *testing.T) {
 	workerDone := make(chan error, 1)
 	go func() {
 		invoke := readMap(t, workerContext, worker)
-		principal, _ := invoke["principal"].(map[string]any)
-		if invoke["type"] != "invoke" || principal["subject"] != "user-a" || principal["tenant"] != "team-a" {
+		actor, _ := invoke["actor"].(map[string]any)
+		if invoke["type"] != "invoke" || actor["id"] != "user-a" || actor["tenantId"] != "team-a" {
 			workerDone <- context.Canceled
 			return
 		}
 		arguments, _ := invoke["arguments"].([]any)
 		workerDone <- writeSocketJSON(workerContext, worker, map[string]any{
-			"v": 1, "type": "result", "callId": invoke["callId"], "result": arguments[0],
+			"v": protocolVersion, "type": "result", "callId": invoke["callId"], "result": arguments[0],
 		})
 	}()
-	tokenA := signedHS256JWT(t, secret, map[string]any{"sub": "user-a", "workspace_id": "team-a", "exp": now.Add(time.Minute).Unix()})
+	tokenA := signedWorkspaceJWT(t, secret, "user-a", "team-a", now)
 	request, _ := http.NewRequest(http.MethodPost, api.URL+"/v1/rpc", strings.NewReader(`{"v":1,"type":"call","requestId":"workspace-call","method":"workspace.echo","arguments":[{"t":"string","v":"ok"}]}`))
 	request.Header.Set("Authorization", "Bearer "+tokenA)
 	response, err := http.DefaultClient.Do(request)
@@ -482,7 +491,7 @@ func TestJWTWorkspacePrincipalIsForwardedToTrustedWorkerRPC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tokenB := signedHS256JWT(t, secret, map[string]any{"sub": "user-a", "workspace_id": "team-b", "exp": now.Add(time.Minute).Unix()})
+	tokenB := signedWorkspaceJWT(t, secret, "user-a", "team-b", now)
 	request, _ = http.NewRequest(http.MethodPost, api.URL+"/v1/rpc", strings.NewReader(`{"v":1,"type":"call","requestId":"workspace-denied","method":"workspace.echo","arguments":[]}`))
 	request.Header.Set("Authorization", "Bearer "+tokenB)
 	response, err = http.DefaultClient.Do(request)
