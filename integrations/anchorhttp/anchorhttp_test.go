@@ -447,8 +447,9 @@ func TestFailedWriteForkFailsClosedAndLaterConverges(t *testing.T) {
 		t.Fatalf("no-safe-quorum crossed load error=%v", err)
 	}
 
-	// A clean branch quorum remains readable, and a coordinate that advances
-	// both dimensions durably converges all three members.
+	// A clean branch quorum remains readable. A later coordinate that advances
+	// both dimensions repairs a quorum; Advance returns when that quorum is
+	// durable and may cancel a trailing minority request.
 	nodes[0].fault.mode.Store(faultUnavailable)
 	nodes[2].fault.mode.Store(faultNormal)
 	if retained, exists, err := store.Load(context.Background()); err != nil || !exists || retained != branch {
@@ -463,10 +464,17 @@ func TestFailedWriteForkFailsClosedAndLaterConverges(t *testing.T) {
 	if err != nil || len(checks) != 3 {
 		t.Fatalf("converged checks=%+v err=%v", checks, err)
 	}
+	repaired := 0
 	for _, check := range checks {
-		if check.State != ReplicaAvailable || !check.Exists || check.Anchor != repair {
-			t.Fatalf("member did not converge: %+v", check)
+		if check.State != ReplicaAvailable || !check.Exists || !anchorBeforeOrEqual(check.Anchor, repair) {
+			t.Fatalf("member did not retain a compatible repair history: %+v", check)
 		}
+		if check.Anchor == repair {
+			repaired++
+		}
+	}
+	if repaired < 2 {
+		t.Fatalf("repair did not reach a quorum: checks=%+v", checks)
 	}
 }
 
