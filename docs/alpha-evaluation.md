@@ -83,6 +83,28 @@ exploratory only: it is not the retained four-hour release soak or a production
 qualification. See [filesystem qualification](./filesystem-qualification) for
 the evidence hierarchy.
 
+### Optional crash-recovery smoke test
+
+To exercise recovery from an abruptly terminated database process, use a
+dedicated empty directory and keep the receipt outside that target directory.
+The command creates its own private trial directories, kills only its child
+writer process, and retains crash images under `evidence/` for inspection:
+
+```sh
+mkdir -p ./qualification-smoke/target ./qualification-smoke/evidence
+go build -o ./qualification-smoke/meld ./cmd/meld
+
+./qualification-smoke/meld destructive-process-check \
+  --dir ./qualification-smoke/target \
+  --out ./qualification-smoke/evidence/process-kill-receipt.json
+```
+
+It runs 20 independent `SIGKILL` trials by default and checks that recovery is
+one complete adjacent state, that the database lock is reacquired, and that the
+offline verifier succeeds. This is a process-crash check, not a substitute for
+real capacity-exhaustion or power-cut qualification; never point it at an
+active or valuable database directory.
+
 ## Useful feedback
 
 Include the following in a bug report or evaluation note, after removing
