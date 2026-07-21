@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compileQuery, encodeQuerySpec, executeQuery, QueryValidationError } from "./index.js";
+import { compileQuery, encodeQuerySpec, executeQuery, pageCursorFor, QueryValidationError } from "./index.js";
 import type { Document } from "./index.js";
 
 const documents: Document[] = [
@@ -34,6 +34,27 @@ test("encodes persisted _id query values with their distinct wire type", () => {
   const id = "00000000000000000000000000000001";
   const wire = encodeQuerySpec(compileQuery({ _id: id }));
   assert.deepEqual(wire.where, { op: "compare", cmp: "eq", path: "_id", value: { t: "id", v: id } });
+});
+
+test("seek pagination uses a stable _id tie-breaker without skip", () => {
+  const values: Document[] = [
+    { _id: "00000000000000000000000000000002", rank: 1 },
+    { _id: "00000000000000000000000000000001", rank: 1 },
+    { _id: "00000000000000000000000000000003", rank: 2 },
+    { _id: "00000000000000000000000000000004", rank: 3 },
+  ];
+  const sort = [{ path: "rank", direction: 1 }] as const;
+  const first = executeQuery(values, compileQuery({}, { sort, first: 2 }));
+  const cursor = pageCursorFor(first.at(-1)!, sort);
+  const second = executeQuery(values, compileQuery({}, { sort, first: 2, after: cursor }));
+  assert.deepEqual(first.map((item) => item._id), ["00000000000000000000000000000001", "00000000000000000000000000000002"]);
+  assert.deepEqual(second.map((item) => item._id), ["00000000000000000000000000000003", "00000000000000000000000000000004"]);
+});
+
+test("seek pagination rejects a cursor used with a different sort", () => {
+  const document: Document = { _id: "00000000000000000000000000000001", rank: 1 };
+  const cursor = pageCursorFor(document, [{ path: "rank", direction: 1 }]);
+  assert.throws(() => compileQuery({}, { sort: [{ path: "rank", direction: -1 }], first: 10, after: cursor }), QueryValidationError);
 });
 
 test("rejects executable, dangerous, unknown, and expensive filters", () => {

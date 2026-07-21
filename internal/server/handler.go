@@ -254,6 +254,8 @@ func New(config Config) (*Handler, error) {
 	h.mux.HandleFunc("GET /livez", h.liveness)
 	h.mux.HandleFunc("GET /readyz", h.readiness)
 	h.mux.HandleFunc("POST /v1/collections/{collection}/query", h.query)
+	h.mux.HandleFunc("POST /v1/collections/{collection}/count", h.count)
+	h.mux.HandleFunc("POST /v1/collections/{collection}/group-count", h.groupCount)
 	h.mux.HandleFunc("POST /v1/collections/{collection}/documents", h.insert)
 	h.mux.HandleFunc("POST /v1/collections/{collection}/mutations", h.mutate)
 	h.mux.HandleFunc("POST /v1/realtime/tickets", h.issueTicket)

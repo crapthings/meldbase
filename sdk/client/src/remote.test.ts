@@ -90,6 +90,35 @@ test("remote query uses HTTP AST and realtime ticket keeps credentials out of We
   client.close();
 });
 
+test("remote group count uses a bounded, typed aggregate envelope", async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    accessToken: () => "access-secret",
+    fetch: async (input, init) => {
+      requests.push({ url: String(input), ...(init ? { init } : {}) });
+      return Response.json({
+        version: 1,
+        groups: [
+          { key: encodeValue("open"), count: 3 },
+          { key: encodeValue(7n), count: 1 },
+        ],
+        capped: false,
+      });
+    },
+  });
+  const result = await client.collection("todos").groupCount({ done: false }, "status");
+  assert.deepEqual(result, { groups: [{ key: "open", count: 3 }, { key: 7n, count: 1 }], capped: false });
+  assert.equal(requests[0]?.url, "https://db.example/v1/collections/todos/group-count");
+  assert.deepEqual(JSON.parse(requests[0]?.init?.body as string), {
+    version: 1,
+    query: { version: 1, where: { op: "compare", cmp: "eq", path: "done", value: { t: "bool", v: false } } },
+    groupBy: "status",
+  });
+  await assert.rejects(client.collection("todos").groupCount({}, "nested.field"), /Unsafe group field/);
+  client.close();
+});
+
 test("realtime capability discovery fails closed without reconnect churn", async () => {
 	const sockets: FakeSocket[] = [];
 	const states: Array<{ state: SyncState; error?: Error }> = [];

@@ -3,6 +3,7 @@ import type { QueryOptions } from "./query.js";
 import { cloneDocument, cloneValue, newDocumentID, valueEquals } from "./safe-value.js";
 import { compileQuery, executeQuery, matches } from "./query.js";
 import { applyMutation, compileUpdate } from "./mutation.js";
+import { pageCursorFor, type PageResult } from './cursor.js';
 
 export type Unsubscribe = () => void;
 export type SnapshotListener<T extends Document> = (documents: readonly T[]) => void;
@@ -19,6 +20,11 @@ export class LiveQuery<T extends Document> {
 
   fetch(): T[] {
     return this.#source.execute(this.spec);
+  }
+
+  fetchPage(): PageResult<T> {
+    const documents = this.fetch(); const last = documents.at(-1);
+    return { documents, ...(last && this.spec.sort ? { nextCursor: pageCursorFor(last, this.spec.sort) } : {}) };
   }
 
   subscribe(listener: SnapshotListener<T>): Unsubscribe {

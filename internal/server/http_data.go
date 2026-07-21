@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/crapthings/meldbase/core"
 )
@@ -254,6 +256,197 @@ func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "documents": encoded})
+}
+
+// count returns a policy-capped lower bound. It deliberately reuses the
+// regular query authorization path: a count must never reveal rows a caller
+// could not query, nor bypass a publication's result budget.
+func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.config.Authenticator.AuthenticateHTTP(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	body, err := readBounded(w, r, h.config.MaxBodyBytes)
+	if err != nil || meldbase.ValidateStrictJSON(body, h.config.MaxBodyBytes) != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	var envelope struct {
+		Version int             `json:"version"`
+		Query   json.RawMessage `json:"query"`
+	}
+	if err := decodeStrict(body, &envelope); err != nil || envelope.Version != 1 || len(envelope.Query) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_query_envelope")
+		return
+	}
+	query, err := meldbase.DecodeQuerySpecJSON(envelope.Query, h.config.QueryLimits)
+	if err != nil || query.HasModifiers() {
+		writeError(w, http.StatusBadRequest, "invalid_query")
+		return
+	}
+	policy, err := h.authorizeQuery(r.Context(), principal, r.PathValue("collection"), query)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	query, err = applyPolicy(query, policy)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	count := 0
+	authorized, err := underQueryPolicy(policy, func() error {
+		cursor, err := h.config.DB.Collection(r.PathValue("collection")).FindQuery(r.Context(), query)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		for {
+			_, exists, err := cursor.Next(r.Context())
+			if err != nil || !exists {
+				return err
+			}
+			count++
+		}
+	})
+	if !authorized {
+		writeError(w, http.StatusForbidden, "policy_expired")
+		return
+	}
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "count": count, "capped": count == policy.MaxResults})
+}
+
+// groupCount is a deliberately narrow aggregate: one permitted top-level
+// field and a count per distinct value. It shares query policy and result
+// budgets with document reads, so dashboard summaries cannot become a data
+// exfiltration side channel.
+func (h *Handler) groupCount(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.config.Authenticator.AuthenticateHTTP(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	body, err := readBounded(w, r, h.config.MaxBodyBytes)
+	if err != nil || meldbase.ValidateStrictJSON(body, h.config.MaxBodyBytes) != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	var envelope struct {
+		Version int             `json:"version"`
+		Query   json.RawMessage `json:"query"`
+		GroupBy string          `json:"groupBy"`
+	}
+	if err := decodeStrict(body, &envelope); err != nil || envelope.Version != 1 || len(envelope.Query) == 0 || envelope.GroupBy == "" || strings.Contains(envelope.GroupBy, ".") {
+		writeError(w, http.StatusBadRequest, "invalid_aggregate")
+		return
+	}
+	query, err := meldbase.DecodeQuerySpecJSON(envelope.Query, h.config.QueryLimits)
+	if err != nil || query.HasModifiers() {
+		writeError(w, http.StatusBadRequest, "invalid_query")
+		return
+	}
+	policy, err := h.authorizeQuery(r.Context(), principal, r.PathValue("collection"), query)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if !policy.AllowAllAggregateFields {
+		if _, allowed := policy.AllowedAggregateFields[envelope.GroupBy]; !allowed {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+	}
+	// Group keys are themselves returned data. A field that is only queryable
+	// may be safe to test for equality but not safe to enumerate, so require
+	// the ordinary result-field grant as well.
+	if !policy.AllowAllResultFields {
+		if _, allowed := policy.AllowedResultFields[envelope.GroupBy]; !allowed {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+	}
+	query, err = applyPolicy(query, policy)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	type group struct {
+		Key   json.RawMessage `json:"key"`
+		Count int             `json:"count"`
+	}
+	groups := make(map[string]*group)
+	examined := 0
+	authorized, err := underQueryPolicy(policy, func() error {
+		cursor, err := h.config.DB.Collection(r.PathValue("collection")).FindQuery(r.Context(), query)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		for {
+			document, exists, err := cursor.Next(r.Context())
+			if err != nil || !exists {
+				return err
+			}
+			examined++
+			value, exists := document[envelope.GroupBy]
+			if !exists {
+				value = meldbase.Null()
+			}
+			raw, err := meldbase.MarshalWireValue(value)
+			if err != nil {
+				return err
+			}
+			key := string(raw)
+			item := groups[key]
+			if item == nil {
+				if len(groups) >= 100 {
+					return meldbase.ErrResourceLimit
+				}
+				item = &group{Key: json.RawMessage(raw)}
+				groups[key] = item
+			}
+			item.Count++
+		}
+	})
+	if !authorized {
+		writeError(w, http.StatusForbidden, "policy_expired")
+		return
+	}
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	result := make([]group, 0, len(groups))
+	for _, item := range groups {
+		result = append(result, *item)
+	}
+	// Map iteration is intentionally randomized by Go. A canonical key order
+	// keeps dashboard output, cache keys, and SDK tests deterministic.
+	sort.Slice(result, func(left, right int) bool {
+		return string(result[left].Key) < string(result[right].Key)
+	})
+	budget, err := newWirePayloadBudget(h.config.MaxQueryResultBytes, httpQueryEnvelopeBytes)
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	for _, item := range result {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			writeEngineError(w, err)
+			return
+		}
+		if err := budget.add(raw); err != nil {
+			writeEngineError(w, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "groups": result, "capped": examined == policy.MaxResults})
 }
 
 func (h *Handler) authorizeQuery(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {

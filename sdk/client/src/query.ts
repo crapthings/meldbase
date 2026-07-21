@@ -1,6 +1,7 @@
 import type { Comparison, Filter, QueryExpr, QueryLimits, QuerySpec, SortField, Value } from "./types.js";
 import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
 import { assertPath, cloneValue, compareValues, getPath, valueByteLength, valueEquals } from "./safe-value.js";
+import { normalizePageSort, pageFilterAfter } from './cursor.js';
 
 const fieldOperators = new Set(["$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists", "$not"]);
 
@@ -8,6 +9,8 @@ export interface QueryOptions {
   readonly sort?: readonly SortField[];
   readonly skip?: number;
   readonly limit?: number;
+  readonly first?: number;
+  readonly after?: string;
   readonly limits?: Partial<QueryLimits>;
 }
 
@@ -17,6 +20,8 @@ function limitsWith(overrides?: Partial<QueryLimits>): QueryLimits {
 
 export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): QuerySpec {
   const limits = limitsWith(options.limits);
+  if (options.limit !== undefined && options.first !== undefined) throw new QueryValidationError("Use either limit or first, not both");
+  if (options.after !== undefined && options.skip !== undefined) throw new QueryValidationError("Seek pagination cannot be combined with skip");
   let nodes = 0;
   const addNode = (): void => {
     nodes += 1;
@@ -83,17 +88,23 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
     return result;
   };
 
-  const sort = options.sort?.map((field) => {
+  let sort = options.sort?.map((field) => {
     assertPath(field.path);
     if (field.direction !== 1 && field.direction !== -1) throw new QueryValidationError("Sort direction must be 1 or -1");
     return { ...field };
   });
   if (sort && sort.length > limits.maxSortFields) throw new QueryValidationError("Too many sort fields");
+  if (options.after !== undefined || options.first !== undefined) {
+    if (!sort) throw new QueryValidationError("Seek pagination requires sort");
+    sort = [...normalizePageSort(sort)];
+    if (sort.length > limits.maxSortFields) throw new QueryValidationError("Seek pagination needs room for the _id tie-breaker");
+  }
   const skip = options.skip;
-  const limit = options.limit;
+  const limit = options.first ?? options.limit;
   if (skip !== undefined && (!Number.isSafeInteger(skip) || skip < 0)) throw new QueryValidationError("skip must be a non-negative integer");
   if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0 || limit > limits.maxLimit)) throw new QueryValidationError("limit is outside the allowed range");
-  return { version: 1, where: compileFilter(filter, 0), ...(sort ? { sort } : {}), ...(skip !== undefined ? { skip } : {}), ...(limit !== undefined ? { limit } : {}) };
+  const scopedFilter = options.after === undefined ? filter : { $and: [filter, pageFilterAfter(options.after, sort as readonly SortField[])] };
+  return { version: 1, where: compileFilter(scopedFilter, 0), ...(sort ? { sort } : {}), ...(skip !== undefined ? { skip } : {}), ...(limit !== undefined ? { limit } : {}) };
 }
 
 export function matches(document: import("./types.js").Document, expression: QueryExpr): boolean {

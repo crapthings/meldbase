@@ -51,6 +51,17 @@ export interface DeleteResult {
   readonly deletedCount: number;
 }
 
+export interface CountResult {
+  readonly count: number;
+  // True means count is a policy-capped lower bound, not an exact total.
+  readonly capped: boolean;
+}
+
+export interface GroupCountResult {
+  readonly groups: readonly { readonly key: Value; readonly count: number }[];
+  readonly capped: boolean;
+}
+
 export type CompareOperator = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
 
 // QueryExpr is the transport contract shared by local execution and the server.

@@ -26,16 +26,18 @@ type Authenticator interface {
 }
 
 type QueryPolicy struct {
-	PolicyVersion        string
-	Lease                *QueryPolicyLease
-	Constraint           *meldbase.QuerySpec
-	MaxResults           int
-	AllowAllQueryPaths   bool
-	AllowedQueryPaths    map[string]struct{}
-	AllowAllResultFields bool
-	AllowedResultFields  map[string]struct{}
-	additionalLease      *QueryPolicyLease
-	compositeLeases      bool
+	PolicyVersion           string
+	Lease                   *QueryPolicyLease
+	Constraint              *meldbase.QuerySpec
+	MaxResults              int
+	AllowAllQueryPaths      bool
+	AllowedQueryPaths       map[string]struct{}
+	AllowAllAggregateFields bool
+	AllowedAggregateFields  map[string]struct{}
+	AllowAllResultFields    bool
+	AllowedResultFields     map[string]struct{}
+	additionalLease         *QueryPolicyLease
+	compositeLeases         bool
 }
 
 // QueryPolicyResolver adds a dynamic, data-only visibility policy after the
@@ -80,6 +82,7 @@ type InsertPolicy struct {
 // the optional pointer itself is copied into server-owned storage.
 func freezeQueryPolicy(policy QueryPolicy) QueryPolicy {
 	policy.AllowedQueryPaths = cloneStringSet(policy.AllowedQueryPaths)
+	policy.AllowedAggregateFields = cloneStringSet(policy.AllowedAggregateFields)
 	policy.AllowedResultFields = cloneStringSet(policy.AllowedResultFields)
 	if policy.Constraint != nil {
 		constraint := *policy.Constraint
@@ -150,13 +153,15 @@ func intersectQueryPolicies(base, additional QueryPolicy) (QueryPolicy, error) {
 	versionInput := base.PolicyVersion + "\x00" + additional.PolicyVersion
 	versionHash := sha256.Sum256([]byte(versionInput))
 	result := QueryPolicy{
-		PolicyVersion:        "intersection-" + hex.EncodeToString(versionHash[:]),
-		MaxResults:           min(base.MaxResults, additional.MaxResults),
-		AllowAllQueryPaths:   base.AllowAllQueryPaths && additional.AllowAllQueryPaths,
-		AllowedQueryPaths:    intersectStringSets(base.AllowAllQueryPaths, base.AllowedQueryPaths, additional.AllowAllQueryPaths, additional.AllowedQueryPaths),
-		AllowAllResultFields: base.AllowAllResultFields && additional.AllowAllResultFields,
-		AllowedResultFields:  intersectStringSets(base.AllowAllResultFields, base.AllowedResultFields, additional.AllowAllResultFields, additional.AllowedResultFields),
-		compositeLeases:      true,
+		PolicyVersion:           "intersection-" + hex.EncodeToString(versionHash[:]),
+		MaxResults:              min(base.MaxResults, additional.MaxResults),
+		AllowAllQueryPaths:      base.AllowAllQueryPaths && additional.AllowAllQueryPaths,
+		AllowedQueryPaths:       intersectStringSets(base.AllowAllQueryPaths, base.AllowedQueryPaths, additional.AllowAllQueryPaths, additional.AllowedQueryPaths),
+		AllowAllAggregateFields: base.AllowAllAggregateFields && additional.AllowAllAggregateFields,
+		AllowedAggregateFields:  intersectStringSets(base.AllowAllAggregateFields, base.AllowedAggregateFields, additional.AllowAllAggregateFields, additional.AllowedAggregateFields),
+		AllowAllResultFields:    base.AllowAllResultFields && additional.AllowAllResultFields,
+		AllowedResultFields:     intersectStringSets(base.AllowAllResultFields, base.AllowedResultFields, additional.AllowAllResultFields, additional.AllowedResultFields),
+		compositeLeases:         true,
 	}
 	if base.Constraint != nil && additional.Constraint != nil {
 		constraint := base.Constraint.Constrain(*additional.Constraint)

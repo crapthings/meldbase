@@ -29,6 +29,15 @@
       "items": {
         "$ref": "#/$defs/collectionAccess"
       }
+    },
+    "rpcMethods": {
+      "type": "array",
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "description": "Exact named RPC methods callable by a verified workspace principal. Omitted means no RPC methods are allowed.",
+      "items": {
+        "$ref": "#/$defs/rpcMethod"
+      }
     }
   },
   "$defs": {
@@ -36,6 +45,11 @@
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_]{0,127}$",
       "description": "A simple server-owned field or collection name."
+    },
+    "rpcMethod": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+      "description": "An exact public application RPC method name."
     },
     "documentField": {
       "type": "string",
@@ -71,6 +85,9 @@
         "queryPaths": {
           "$ref": "#/$defs/pathList"
         },
+        "aggregateFields": {
+          "$ref": "#/$defs/fieldList"
+        },
         "resultFields": {
           "$ref": "#/$defs/fieldList"
         },
@@ -97,7 +114,8 @@
           "enum": [
             "collaborative",
             "owner",
-            "rpc_only"
+            "rpc_only",
+            "read_only"
           ]
         },
         "ownerField": {

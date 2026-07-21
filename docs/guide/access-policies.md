@@ -34,14 +34,17 @@ meld serve \
       "mode": "collaborative",
       "fields": {
         "queryPaths": ["title", "done"],
+        "aggregateFields": ["done"],
         "resultFields": ["title", "done"],
         "inputFields": ["title", "done"],
         "updatePaths": ["title", "done"]
       }
     },
     {"collection": "private_notes", "mode": "owner", "ownerField": "ownerId"},
+    {"collection": "incident_events", "mode": "read_only"},
     {"collection": "payroll", "mode": "rpc_only"}
-  ]
+  ],
+  "rpcMethods": ["incidents.declare", "incidents.acknowledge"]
 }
 ```
 
@@ -77,11 +80,14 @@ strict parser remains the final authority for every semantic check.
 
 `fields` is a composable restriction, not another access mode. Each omitted
 field list means all fields for that operation; an explicit empty list means no
-application fields. All entries are bounded, unique, and validated at startup.
+application fields. `aggregateFields` is intentionally stricter: it is denied
+unless explicitly listed, because grouping enumerates returned values. All
+entries are bounded, unique, and validated at startup.
 
 | Declaration | Applies to | Meaning |
 | --- | --- | --- |
 | `queryPaths` | fetch, mutation target, subscription | Client may filter or sort only by these document paths. `_id` remains a safe direct lookup. |
+| `aggregateFields` | `groupCount` | Explicit opt-in: client may group by only these top-level fields; the field must also appear in `resultFields`, because group keys are returned data. Omitted or empty means no grouping. |
 | `resultFields` | fetch, insert response, subscription snapshot/delta | Only these top-level fields are returned, plus `_id`. |
 | `inputFields` | insert | Only these top-level client fields are accepted. |
 | `updatePaths` | update | Only these document paths may be changed. |
@@ -96,11 +102,25 @@ selection mechanism. Those server-owned fields are always immutable on update.
 | --- | --- | --- | --- |
 | `collaborative` | Any verified member of the active workspace | Insert, update, delete inside that workspace | `workspaceId` on insert; immutable afterwards |
 | `owner` | Only the active workspace member whose `ownerField` equals `sub` | Only that same owner may mutate or delete | `workspaceId` and `ownerField` on insert; both immutable afterwards |
+| `read_only` | Any verified member of the active workspace | Denied | None; use named RPC methods for business writes |
 | `rpc_only` | Denied | Denied | None; expose only explicit application RPC methods if needed |
 
 Every listed mode is enforced by the same Go policy engine. Modes are presets,
 and `fields` only narrows those presets; neither creates another query
 implementation or a client-side callback.
+
+### Named RPC allowlist
+
+`rpcMethods` is an optional exact allowlist for named RPC methods. When omitted,
+the manifest allows no RPC methods. It answers only whether an authenticated
+workspace principal may reach a method at all; it does not grant role-,
+record-, or workflow-level permission. Put those business checks in the RPC
+handler.
+
+This makes a safe common shape declarative: use `read_only` for records the
+browser may subscribe to, then list the few transactional RPC methods that may
+change them. For more dynamic permissions, install a custom Go
+`RPCAuthorizer` instead.
 
 ## What a client request means
 
@@ -138,8 +158,8 @@ new-row check, without a client-side `allow` / `deny` callback order.
 Use `rpc_only` and named RPC methods for approvals, payments, ownership
 transfers, membership changes, credential records, or any operation whose
 authorization depends on more than the document's workspace and owner fields.
-`rpc_only` does not make RPC public: the application still installs an explicit
-`RPCAuthorizer` for every method.
+`rpc_only` does not make RPC public: the method must appear in `rpcMethods` or
+be allowed by a custom `RPCAuthorizer`.
 
 For read visibility based on memberships, roles, sharing links, or another
 collection, use a Go `Authorizer` or a server Worker `publish()` policy. Those

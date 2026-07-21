@@ -26,6 +26,7 @@ type CollectionAccessManifest struct {
 	Version        int                `json:"version"`
 	WorkspaceField string             `json:"workspaceField"`
 	Collections    []CollectionAccess `json:"collections"`
+	RPCMethods     []string           `json:"rpcMethods,omitempty"`
 }
 
 // WorkspaceAuthorizerConfig validates the manifest and returns the equivalent
@@ -40,6 +41,7 @@ func (manifest CollectionAccessManifest) WorkspaceAuthorizerConfig() (WorkspaceA
 	config := WorkspaceAuthorizerConfig{
 		CollectionAccess: manifest.Collections,
 		WorkspaceField:   manifest.WorkspaceField,
+		RPCMethods:       manifest.RPCMethods,
 	}
 	if _, err := NewWorkspaceAuthorizer(config); err != nil {
 		return WorkspaceAuthorizerConfig{}, err

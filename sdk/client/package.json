@@ -33,6 +33,8 @@
   "files": [
     "dist/index.js",
     "dist/index.d.ts",
+    "dist/cursor.js",
+    "dist/cursor.d.ts",
     "dist/local.js",
     "dist/local.d.ts",
     "dist/mutation.js",

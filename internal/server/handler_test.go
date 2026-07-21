@@ -30,6 +30,20 @@ func (testAuthenticator) AuthenticateHTTP(request *http.Request) (Principal, err
 
 type testAuthorizer struct{}
 
+// aggregateOnlyFieldAuthorizer models a field that may be grouped but is not
+// safe to return. Group keys must not turn aggregate capability into value
+// enumeration.
+type aggregateOnlyFieldAuthorizer struct{ testAuthorizer }
+
+func (aggregateOnlyFieldAuthorizer) AuthorizeQuery(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
+	policy, err := (testAuthorizer{}).AuthorizeQuery(ctx, principal, collection, query)
+	if err != nil {
+		return QueryPolicy{}, err
+	}
+	policy.AllowedAggregateFields = map[string]struct{}{"tenant": {}}
+	return policy, nil
+}
+
 type leaseAuthorizer struct {
 	testAuthorizer
 	mu      sync.RWMutex
@@ -65,8 +79,9 @@ func (testAuthorizer) AuthorizeQuery(_ context.Context, principal Principal, col
 	}
 	return QueryPolicy{
 		PolicyVersion: "test-v1", Constraint: &constraint, MaxResults: 10,
-		AllowedQueryPaths:   map[string]struct{}{"rank": {}, "title": {}},
-		AllowedResultFields: map[string]struct{}{"rank": {}, "title": {}},
+		AllowedQueryPaths:      map[string]struct{}{"rank": {}, "title": {}},
+		AllowedAggregateFields: map[string]struct{}{"rank": {}},
+		AllowedResultFields:    map[string]struct{}{"rank": {}, "title": {}},
 	}, nil
 }
 
@@ -152,6 +167,113 @@ func TestHTTPQueryAppliesRowPolicyBeforeLimitAndRedactsFields(t *testing.T) {
 		t.Fatalf("forbidden status = %d", forbiddenResponse.StatusCode)
 	}
 	_ = handler
+}
+
+func TestHTTPCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
+	db, _, server := newTestServer(t)
+	collection := db.Collection("items")
+	if err := collection.CreateIndex(context.Background(), "by_tenant", []meldbase.IndexField{{Field: "tenant", Order: 1}}, meldbase.IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	insertServerDocument(t, collection, "other", 1, "hidden")
+	for rank := 0; rank < 12; rank++ {
+		insertServerDocument(t, collection, "mine", int64(rank), "visible")
+	}
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/collections/items/count", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}}}`))
+	request.Header.Set("authorization", "Bearer valid")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	var body struct {
+		Count  int  `json:"count"`
+		Capped bool `json:"capped"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Count != 10 || !body.Capped {
+		t.Fatalf("count response = %+v, want capped visible lower bound", body)
+	}
+	if db.Stats().Queries.IndexScans == 0 {
+		t.Fatal("count did not use the workspace constraint index")
+	}
+}
+
+func TestHTTPGroupCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
+	db, _, server := newTestServer(t)
+	collection := db.Collection("items")
+	if err := collection.CreateIndex(context.Background(), "by_tenant", []meldbase.IndexField{{Field: "tenant", Order: 1}}, meldbase.IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	insertServerDocument(t, collection, "other", 0, "hidden")
+	for rank := 0; rank < 12; rank++ {
+		insertServerDocument(t, collection, "mine", int64(rank%2), "visible")
+	}
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/collections/items/group-count", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}},"groupBy":"rank"}`))
+	request.Header.Set("authorization", "Bearer valid")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	var body struct {
+		Groups []struct {
+			Key   json.RawMessage `json:"key"`
+			Count int             `json:"count"`
+		} `json:"groups"`
+		Capped bool `json:"capped"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Capped || len(body.Groups) != 2 {
+		t.Fatalf("group count response = %+v, want two capped visible groups", body)
+	}
+	for _, group := range body.Groups {
+		key, err := meldbase.UnmarshalWireValue(group.Key, meldbase.DefaultQueryLimits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rank, ok := key.Int64()
+		if !ok || (rank != 0 && rank != 1) || group.Count != 5 {
+			t.Fatalf("group = key %v count %d, want rank 0 or 1 with count 5", key, group.Count)
+		}
+	}
+
+	forbidden, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/collections/items/group-count", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}},"groupBy":"tenant"}`))
+	forbidden.Header.Set("authorization", "Bearer valid")
+	forbiddenResponse, err := http.DefaultClient.Do(forbidden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbiddenResponse.Body.Close()
+	if forbiddenResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("forbidden group status = %d", forbiddenResponse.StatusCode)
+	}
+
+	_, _, aggregateOnlyServer := newTestServerWithAuthorizer(t, aggregateOnlyFieldAuthorizer{})
+	defer aggregateOnlyServer.Close()
+	aggregateOnly, _ := http.NewRequest(http.MethodPost, aggregateOnlyServer.URL+"/v1/collections/items/group-count", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}},"groupBy":"tenant"}`))
+	aggregateOnly.Header.Set("authorization", "Bearer valid")
+	aggregateOnlyResponse, err := http.DefaultClient.Do(aggregateOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregateOnlyResponse.Body.Close()
+	if aggregateOnlyResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("aggregate-only group status = %d", aggregateOnlyResponse.StatusCode)
+	}
+	if db.Stats().Queries.IndexScans == 0 {
+		t.Fatal("group count did not use the workspace constraint index")
+	}
 }
 
 func TestHTTPInsertAppliesServerOwnedFieldsAndRejectsForbiddenInput(t *testing.T) {

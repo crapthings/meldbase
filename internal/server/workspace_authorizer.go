@@ -15,6 +15,7 @@ import (
 )
 
 var workspaceIdentifier = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,127}$`)
+var rpcMethodIdentifier = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
 
 // CollectionAccessMode defines one of the small, server-enforced generic data
 // API surfaces for a collection. Modes only produce the existing policy types;
@@ -33,6 +34,10 @@ const (
 	// CollectionAccessRPCOnly rejects every generic query and mutation. An
 	// application may still expose named RPC methods with its own RPCAuthorizer.
 	CollectionAccessRPCOnly CollectionAccessMode = "rpc_only"
+	// CollectionAccessReadOnly permits generic workspace-scoped reads and
+	// subscriptions, but rejects every generic mutation. It is intended for
+	// business records whose writes are named server RPC operations.
+	CollectionAccessReadOnly CollectionAccessMode = "read_only"
 )
 
 // CollectionAccess declares the generic data API surface for one collection.
@@ -49,10 +54,11 @@ type CollectionAccess struct {
 // empty list allows none. Server-owned workspace and owner fields remain
 // immutable regardless of these declarations.
 type CollectionAccessFields struct {
-	QueryPaths   []string `json:"queryPaths,omitempty"`
-	ResultFields []string `json:"resultFields,omitempty"`
-	InputFields  []string `json:"inputFields,omitempty"`
-	UpdatePaths  []string `json:"updatePaths,omitempty"`
+	QueryPaths      []string `json:"queryPaths,omitempty"`
+	AggregateFields []string `json:"aggregateFields,omitempty"`
+	ResultFields    []string `json:"resultFields,omitempty"`
+	InputFields     []string `json:"inputFields,omitempty"`
+	UpdatePaths     []string `json:"updatePaths,omitempty"`
 }
 
 // WorkspaceAuthorizerConfig declares the manifest-provided collections scoped
@@ -61,6 +67,7 @@ type CollectionAccessFields struct {
 type WorkspaceAuthorizerConfig struct {
 	CollectionAccess []CollectionAccess
 	WorkspaceField   string
+	RPCMethods       []string
 	MaxResults       int
 	MaxAffected      int
 }
@@ -70,6 +77,7 @@ type WorkspaceAuthorizerConfig struct {
 // identity provider supplies Principal.Tenant from the active workspace claim.
 type WorkspaceAuthorizer struct {
 	collections    map[string]workspaceCollectionAccess
+	rpcMethods     map[string]struct{}
 	workspaceField string
 	maxResults     int
 	maxAffected    int
@@ -101,7 +109,7 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 			return nil, fmt.Errorf("%s: collection declarations must be unique", declaration)
 		}
 		switch rule.Mode {
-		case CollectionAccessCollaborative, CollectionAccessRPCOnly:
+		case CollectionAccessCollaborative, CollectionAccessRPCOnly, CollectionAccessReadOnly:
 			if rule.OwnerField != "" {
 				return nil, fmt.Errorf("%s: only owner access may declare ownerField", declaration)
 			}
@@ -132,6 +140,16 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 			CollectionAccess: rule, policyVersion: "workspace-" + hex.EncodeToString(digest[:]),
 		}
 	}
+	rpcMethods := make(map[string]struct{}, len(config.RPCMethods))
+	for index, method := range config.RPCMethods {
+		if !rpcMethodIdentifier.MatchString(method) {
+			return nil, fmt.Errorf("RPC method[%d] is invalid", index)
+		}
+		if _, duplicate := rpcMethods[method]; duplicate {
+			return nil, fmt.Errorf("RPC method %q is duplicated", method)
+		}
+		rpcMethods[method] = struct{}{}
+	}
 	if config.MaxResults == 0 {
 		config.MaxResults = meldbase.DefaultQueryLimits.MaxLimit
 	}
@@ -143,7 +161,7 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 		return nil, errors.New("workspace policy limits are outside query limits")
 	}
 	return &WorkspaceAuthorizer{
-		collections: collections, workspaceField: config.WorkspaceField,
+		collections: collections, rpcMethods: rpcMethods, workspaceField: config.WorkspaceField,
 		maxResults: config.MaxResults, maxAffected: config.MaxAffected,
 	}, nil
 }
@@ -158,10 +176,12 @@ func (a *WorkspaceAuthorizer) AuthorizeQuery(_ context.Context, principal Princi
 		return QueryPolicy{}, err
 	}
 	allowAllQueryPaths, allowedQueryPaths := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.QueryPaths })
+	allowAllAggregateFields, allowedAggregateFields := collectionAccessAggregateFieldSet(rule.Fields)
 	allowAllResultFields, allowedResultFields := collectionAccessFieldSet(rule.Fields, func(fields *CollectionAccessFields) []string { return fields.ResultFields })
 	return QueryPolicy{
 		PolicyVersion: rule.policyVersion, Constraint: &constraint, MaxResults: a.maxResults,
 		AllowAllQueryPaths: allowAllQueryPaths, AllowedQueryPaths: allowedQueryPaths,
+		AllowAllAggregateFields: allowAllAggregateFields, AllowedAggregateFields: allowedAggregateFields,
 		AllowAllResultFields: allowAllResultFields, AllowedResultFields: allowedResultFields,
 	}, nil
 }
@@ -170,6 +190,9 @@ func (a *WorkspaceAuthorizer) AuthorizeInsert(_ context.Context, principal Princ
 	rule, err := a.allow(principal, collection)
 	if err != nil {
 		return InsertPolicy{}, err
+	}
+	if rule.Mode == CollectionAccessReadOnly {
+		return InsertPolicy{}, ErrForbidden
 	}
 	setFields := meldbase.Document{a.workspaceField: meldbase.String(principal.Tenant)}
 	if rule.Mode == CollectionAccessOwner {
@@ -194,6 +217,9 @@ func (a *WorkspaceAuthorizer) AuthorizeUpdate(ctx context.Context, principal Pri
 	if err != nil {
 		return UpdatePolicy{}, err
 	}
+	if rule.Mode == CollectionAccessReadOnly {
+		return UpdatePolicy{}, ErrForbidden
+	}
 	base, err := a.AuthorizeQuery(ctx, principal, collection, query)
 	if err != nil {
 		return UpdatePolicy{}, err
@@ -210,6 +236,13 @@ func (a *WorkspaceAuthorizer) AuthorizeUpdate(ctx context.Context, principal Pri
 }
 
 func (a *WorkspaceAuthorizer) AuthorizeDelete(ctx context.Context, principal Principal, collection string, query meldbase.QuerySpec) (DeletePolicy, error) {
+	rule, err := a.allow(principal, collection)
+	if err != nil {
+		return DeletePolicy{}, err
+	}
+	if rule.Mode == CollectionAccessReadOnly {
+		return DeletePolicy{}, ErrForbidden
+	}
 	base, err := a.AuthorizeQuery(ctx, principal, collection, query)
 	if err != nil {
 		return DeletePolicy{}, err
@@ -217,11 +250,17 @@ func (a *WorkspaceAuthorizer) AuthorizeDelete(ctx context.Context, principal Pri
 	return DeletePolicy{QueryPolicy: base, MaxAffected: a.maxAffected}, nil
 }
 
-// AuthorizeRPC fails closed until an application supplies an explicit
-// method-level authorizer. Workspace collection membership alone must not grant
-// access to trusted server methods.
-func (*WorkspaceAuthorizer) AuthorizeRPC(context.Context, Principal, string) error {
-	return ErrForbidden
+// AuthorizeRPC accepts only exact method names declared by the manifest, for a
+// verified workspace principal. The allowlist deliberately grants no role or
+// record-level authority; those decisions remain in the named RPC handler.
+func (a *WorkspaceAuthorizer) AuthorizeRPC(_ context.Context, principal Principal, method string) error {
+	if principal.Subject == "" || principal.Tenant == "" {
+		return ErrForbidden
+	}
+	if _, allowed := a.rpcMethods[method]; !allowed {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func (a *WorkspaceAuthorizer) constraint(principal Principal, rule workspaceCollectionAccess) (meldbase.QuerySpec, error) {
@@ -248,8 +287,9 @@ func normalizeCollectionAccessFields(fields *CollectionAccessFields) (*Collectio
 		return nil, nil
 	}
 	result := &CollectionAccessFields{
-		QueryPaths: cloneCollectionAccessStrings(fields.QueryPaths), ResultFields: cloneCollectionAccessStrings(fields.ResultFields),
-		InputFields: cloneCollectionAccessStrings(fields.InputFields), UpdatePaths: cloneCollectionAccessStrings(fields.UpdatePaths),
+		QueryPaths: cloneCollectionAccessStrings(fields.QueryPaths), AggregateFields: cloneCollectionAccessStrings(fields.AggregateFields),
+		ResultFields: cloneCollectionAccessStrings(fields.ResultFields), InputFields: cloneCollectionAccessStrings(fields.InputFields),
+		UpdatePaths: cloneCollectionAccessStrings(fields.UpdatePaths),
 	}
 	if err := validateCollectionAccessPathList(result.QueryPaths, "query"); err != nil {
 		return nil, err
@@ -258,6 +298,9 @@ func normalizeCollectionAccessFields(fields *CollectionAccessFields) (*Collectio
 		return nil, err
 	}
 	if err := validateCollectionAccessFieldList(result.ResultFields, "result"); err != nil {
+		return nil, err
+	}
+	if err := validateCollectionAccessFieldList(result.AggregateFields, "aggregate"); err != nil {
 		return nil, err
 	}
 	if err := validateCollectionAccessFieldList(result.InputFields, "input"); err != nil {
@@ -326,4 +369,23 @@ func collectionAccessFieldSet(fields *CollectionAccessFields, selectFields func(
 		result[value] = struct{}{}
 	}
 	return false, result
+}
+
+// Aggregates enumerate values and can reveal distributions a normal filtered
+// read does not. Unlike the ordinary field lists, built-in manifest aggregate
+// access is therefore opt-in: omitted means none, including when fields itself
+// is omitted. Custom Go Authorizers may still grant AllowAllAggregateFields.
+func collectionAccessAggregateFieldSet(fields *CollectionAccessFields) (bool, map[string]struct{}) {
+	if fields == nil || fields.AggregateFields == nil {
+		return false, map[string]struct{}{}
+	}
+	return false, collectionAccessStringSet(fields.AggregateFields)
+}
+
+func collectionAccessStringSet(values []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		result[value] = struct{}{}
+	}
+	return result
 }

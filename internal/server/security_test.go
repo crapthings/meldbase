@@ -14,12 +14,14 @@ func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	queryPaths := map[string]struct{}{"title": {}}
+	aggregateFields := map[string]struct{}{"title": {}}
 	resultFields := map[string]struct{}{"title": {}}
 	frozen := freezeQueryPolicy(QueryPolicy{
 		PolicyVersion: "policy-v1", Constraint: &constraint, MaxResults: 10,
-		AllowedQueryPaths: queryPaths, AllowedResultFields: resultFields,
+		AllowedQueryPaths: queryPaths, AllowedAggregateFields: aggregateFields, AllowedResultFields: resultFields,
 	})
 	queryPaths["secret"] = struct{}{}
+	aggregateFields["secret"] = struct{}{}
 	resultFields["secret"] = struct{}{}
 	constraint, _ = meldbase.CompileQuery(meldbase.Filter{"tenant": "other"}, meldbase.QueryOptions{})
 
@@ -43,6 +45,9 @@ func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
 	if _, leaked := projected["secret"]; leaked {
 		t.Fatal("mutated result field changed frozen projection")
 	}
+	if _, allowed := frozen.AllowedAggregateFields["secret"]; allowed {
+		t.Fatal("mutated aggregate field changed frozen policy")
+	}
 }
 
 func TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases(t *testing.T) {
@@ -52,17 +57,19 @@ func TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases(t *testing.T) {
 	workerConstraint, _ := meldbase.CompileQuery(meldbase.Filter{"state": "open"}, meldbase.QueryOptions{})
 	policy, err := intersectQueryPolicies(QueryPolicy{
 		PolicyVersion: "base-v1", Lease: baseLease, Constraint: &baseConstraint, MaxResults: 100,
-		AllowedQueryPaths:   map[string]struct{}{"state": {}, "rank": {}},
-		AllowedResultFields: map[string]struct{}{"state": {}, "secret": {}},
+		AllowedQueryPaths:      map[string]struct{}{"state": {}, "rank": {}},
+		AllowedAggregateFields: map[string]struct{}{"state": {}, "rank": {}},
+		AllowedResultFields:    map[string]struct{}{"state": {}, "secret": {}},
 	}, QueryPolicy{
 		PolicyVersion: "worker-v1", Lease: workerLease, Constraint: &workerConstraint, MaxResults: 10,
-		AllowedQueryPaths:   map[string]struct{}{"state": {}},
-		AllowedResultFields: map[string]struct{}{"state": {}},
+		AllowedQueryPaths:      map[string]struct{}{"state": {}},
+		AllowedAggregateFields: map[string]struct{}{"state": {}},
+		AllowedResultFields:    map[string]struct{}{"state": {}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.MaxResults != 10 || len(policy.AllowedQueryPaths) != 1 || len(policy.AllowedResultFields) != 1 || policy.additionalLease != workerLease {
+	if policy.MaxResults != 10 || len(policy.AllowedQueryPaths) != 1 || len(policy.AllowedAggregateFields) != 1 || len(policy.AllowedResultFields) != 1 || policy.additionalLease != workerLease {
 		t.Fatalf("intersection=%+v", policy)
 	}
 	query, _ := meldbase.CompileQuery(meldbase.Filter{}, meldbase.QueryOptions{})

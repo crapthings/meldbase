@@ -1,11 +1,12 @@
-import type { DeleteResult, Document, Filter, InputDocument, MutationResult, MutationSpec, QuerySpec, Update, Value } from "./types.js";
+import type { CountResult, DeleteResult, Document, Filter, GroupCountResult, InputDocument, MutationResult, MutationSpec, QuerySpec, Update, Value } from "./types.js";
 import type { QueryOptions } from "./query.js";
 import type { SnapshotListener, Unsubscribe } from "./local.js";
 import { compileQuery } from "./query.js";
 import { compileUpdate, encodeMutationSpec } from "./mutation.js";
-import { cloneDocument, newDocumentID } from "./safe-value.js";
+import { assertSafeKey, cloneDocument, newDocumentID } from "./safe-value.js";
 import { decodeDocument, decodeValue, encodeInputDocument, encodeQuerySpec, encodeValue, type WireQuerySpec, type WireValue } from "./wire.js";
 import { decodeProtocolDescriptor, MELDBASE_PROTOCOL_VERSION, supportsProtocol, type ProtocolDescriptor } from "./protocol.js";
+import { pageCursorFor, type PageResult } from './cursor.js';
 
 const REALTIME_TICKET_ACCEPT = "application/vnd.meldbase.realtime-ticket+json; capabilities=1";
 
@@ -190,6 +191,31 @@ export class MeldbaseClient {
     return body.documents.map((item) => decodeDocument(item) as T);
   }
 
+  async count(collection: string, query: QuerySpec, signal?: AbortSignal): Promise<CountResult> {
+    const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/count`, {
+      method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, query: encodeQuerySpec(query) }), ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) await throwRemoteError(response, 64 * 1024, "count");
+    const body = await boundedJSON(response, 64 * 1024);
+    if (!record(body) || !exactKeys(body, ["version", "count", "capped"]) || body.version !== 1 || !boundedCount(body.count) || typeof body.capped !== "boolean") throw new Error("Malformed count response");
+    return { count: body.count, capped: body.capped };
+  }
+
+  async groupCount(collection: string, query: QuerySpec, groupBy: string, signal?: AbortSignal): Promise<GroupCountResult> {
+    assertSafeKey(groupBy, "group field");
+    const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/group-count`, {
+      method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, query: encodeQuerySpec(query), groupBy }), ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) await throwRemoteError(response, this.#maxInboundBytes, "group count");
+    const body = await boundedJSON(response, this.#maxInboundBytes);
+    if (!record(body) || !exactKeys(body, ["version", "groups", "capped"]) || body.version !== 1 || !Array.isArray(body.groups) || body.groups.length > 100 || typeof body.capped !== "boolean") throw new Error("Malformed group count response");
+    const groups = body.groups.map((item) => {
+      if (!record(item) || !exactKeys(item, ["key", "count"]) || item.key === undefined || !boundedCount(item.count)) throw new Error("Malformed group count entry");
+      return { key: decodeValue(item.key), count: item.count };
+    });
+    return { groups, capped: body.capped };
+  }
+
   async insertOne<T extends Document>(collection: string, document: InputDocument, signal?: AbortSignal): Promise<T> {
 		// The client owns the document identity before network admission. This is
 		// essential for reconciling a post-admission cancellation: the server may
@@ -267,6 +293,8 @@ export class RemoteCollection<T extends Document> {
     const documents = await this.client.fetchQuery<T>(this.name, compileQuery(filter, { ...queryOptions, limit: 1 }), signal);
     return documents[0];
   }
+  count(filter: Filter = {}, options: { readonly signal?: AbortSignal } = {}): Promise<CountResult> { return this.client.count(this.name, compileQuery(filter), options.signal); }
+  groupCount(filter: Filter, groupBy: string, options: { readonly signal?: AbortSignal } = {}): Promise<GroupCountResult> { return this.client.groupCount(this.name, compileQuery(filter), groupBy, options.signal); }
   insertOne(document: InputDocument, options: { readonly signal?: AbortSignal } = {}): Promise<T> { return this.client.insertOne<T>(this.name, document, options.signal); }
   updateOne(filter: Filter, update: Update, options: { readonly signal?: AbortSignal } = {}): Promise<MutationResult> { return this.client.executeMutation(this.name, "updateOne", compileQuery(filter), compileUpdate(update), options.signal) as Promise<MutationResult>; }
   updateMany(filter: Filter, update: Update, options: { readonly signal?: AbortSignal } = {}): Promise<MutationResult> { return this.client.executeMutation(this.name, "updateMany", compileQuery(filter), compileUpdate(update), options.signal) as Promise<MutationResult>; }
@@ -278,6 +306,10 @@ export class RemoteLiveQuery<T extends Document> {
   readonly mode = "remote" as const;
   constructor(private readonly client: MeldbaseClient, readonly collection: string, readonly spec: QuerySpec) {}
   fetch(options: { readonly signal?: AbortSignal } = {}): Promise<T[]> { return this.client.fetchQuery<T>(this.collection, this.spec, options.signal); }
+  async fetchPage(options: { readonly signal?: AbortSignal } = {}): Promise<PageResult<T>> {
+    const documents = await this.fetch(options); const last = documents.at(-1);
+    return { documents, ...(last && this.spec.sort ? { nextCursor: pageCursorFor(last, this.spec.sort) } : {}) };
+  }
   subscribe(listener: SnapshotListener<T>, options: SubscribeOptions = {}): Unsubscribe {
     return this.client.subscribe(this.collection, this.spec, listener as SnapshotListener<Document>, options);
   }

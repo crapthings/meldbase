@@ -2,6 +2,8 @@ export { LocalCollection, LiveQuery } from "./local.js";
 export type { SnapshotListener, Unsubscribe } from "./local.js";
 export { compileQuery, executeQuery, matches } from "./query.js";
 export type { QueryOptions } from "./query.js";
+export { pageCursorFor, pageFilterAfter } from './cursor.js';
+export type { PageResult } from './cursor.js';
 export { QueryValidationError, DEFAULT_QUERY_LIMITS } from "./types.js";
 export { applyMutation, compileUpdate, decodeMutationSpec, encodeMutationSpec } from "./mutation.js";
 export type { WireMutationOperation, WireMutationSpec } from "./mutation.js";
@@ -16,9 +18,11 @@ export type { WireQueryExpr, WireQuerySpec, WireValue } from "./wire.js";
 export type {
   CompareOperator,
   Comparison,
+  CountResult,
   DeleteResult,
   Document,
   Filter,
+  GroupCountResult,
   InputDocument,
   MutationOperation,
   MutationResult,
