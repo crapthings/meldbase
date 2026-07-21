@@ -31,6 +31,8 @@ var (
 	ErrReclamationConflict               = errors.New("meldbase: online reclamation conflicted with concurrent writes")
 	ErrBackupUnsupported                 = errors.New("meldbase: physical backup requires an open durable database")
 	ErrBackupDestinationExists           = errors.New("meldbase: backup destination already exists or is the source")
+	ErrLogicalArchiveUnsupported         = errors.New("meldbase: logical archive requires an open durable database")
+	ErrLogicalArchiveDestinationExists   = errors.New("meldbase: logical archive destination already exists or is the source")
 	ErrVerificationUnsupported           = errors.New("meldbase: verification requires an existing database")
 	ErrDatabaseLocked                    = errors.New("meldbase: database is locked by another process")
 	ErrRollbackDetected                  = errors.New("meldbase: database rollback detected")

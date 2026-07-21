@@ -16,6 +16,8 @@ the embedded Go API or the HTTP/WebSocket server.
 | `meld verify --db <path>` | Perform a full offline verification. |
 | `meld backup --db <path> --out <new-path>` | Create a physical recovery artifact and JSON receipt. |
 | `meld restore --in <path> --receipt <path> --out <new-path>` | Verify and restore only to a new path. |
+| `meld export --db <path> --out <new-path>` | Create a versioned, data-only logical migration archive. |
+| `meld import --in <path> --out <new-path>` | Validate a logical archive and publish a newly built database. |
 | `meld index-build <start|list|resume|abort>` | Manage durable resumable index builds offline. |
 
 Use `meld <command> --help` for the complete flags. The
@@ -57,10 +59,13 @@ The optional embedded dashboard uses `MELDBASE_ADMIN_TOKEN`, with a minimum of
 
 ## Safety rules
 
-- Backup, restore, verification, and index build commands use the normal file
+- Backup, restore, export, import, verification, and index build commands use the normal file
   locking model; stop the writer before offline work.
-- Backup and restore destinations must be absent. A restore never overwrites a
-  database.
+- Backup, restore, export, and import destinations must be absent. An import or
+  restore never overwrites a database.
+- A logical archive is for alpha-format migration. It keeps collections,
+  documents, and indexes, but not database identity, commit history, rollback
+  anchors, or credentials.
 - `--dev-no-auth` grants unrestricted application access. Do not expose it on
   a public listener.
 - Run `meld durability-check` against an actual target volume before treating a

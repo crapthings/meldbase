@@ -22,8 +22,8 @@ layer—not a hosted MongoDB clone, an ORM, or a distributed database to operate
   workspace and owner scope; your application keeps ownership of users, roles,
   and identity.
 - **Operate with evidence.** Health probes, an authenticated dashboard,
-  physical backup/restore, offline verification, and a single-node runbook are
-  part of the project—not afterthoughts.
+  physical backup/restore, logical export/import, offline verification, and a
+  single-node runbook are part of the project—not afterthoughts.
 
 ## Start in two minutes
 
@@ -97,7 +97,7 @@ upgrades.
 | Application API | HTTP fetch/mutation endpoints plus ticket-authenticated WebSocket realtime. |
 | Tenant boundary | JWT-derived workspace/owner scoping, optional field limits, and RPC-only collections; clients never choose a trusted tenant. |
 | Business logic | Typed RPC, durable idempotency, and an optional authenticated Node.js worker boundary. |
-| Operations | `/livez`, `/readyz`, authenticated metrics/dashboard, inspect, verify, backup, restore, and restore drills. |
+| Operations | `/livez`, `/readyz`, authenticated metrics/dashboard, inspect, verify, backup, restore, export/import, and restore drills. |
 
 ### TypeScript and React
 
@@ -182,6 +182,19 @@ meld restore --in /srv/meldbase/backups/app.meld \
 meld verify --db /srv/meldbase/rehearsals/app-restored.meld
 ```
 
+For an alpha-format upgrade, use the matching old build to make a **logical**
+archive, then import it into a new database with the newer build. This carries
+collections, typed documents, and index definitions—not pages, database
+identity, commit history, or credentials. Both paths must be new.
+
+```sh
+old-meld export --db /srv/meldbase/data/app.meld \
+  --out /srv/meldbase/migrations/app.jsonl
+new-meld import --in /srv/meldbase/migrations/app.jsonl \
+  --out /srv/meldbase/data/app-upgraded.meld
+new-meld verify --db /srv/meldbase/data/app-upgraded.meld
+```
+
 Read the [single-node deployment and recovery guide](docs/single-node-deployment.md)
 before operating real data. The deeper storage guarantees, resource limits,
 rollback-anchor model, filesystem qualification, and release evidence are
@@ -197,9 +210,9 @@ documented separately so the getting-started path stays readable:
 
 Meldbase is early-stage and should not yet hold production data. The current
 format is revision 3 and intentionally evolves during alpha; older alpha files
-are unsupported, so export any personal test data before an incompatible
-upgrade. The project has one current storage path—there is no legacy runtime or
-fallback engine.
+are unsupported, so use the matching older build to export personal test data
+before an incompatible upgrade. The project has one current storage path—there
+is no legacy runtime or fallback engine.
 
 The core, server, SDKs, and single-node tooling are implemented and tested, but
 the project does **not** claim blanket power-loss qualification for every

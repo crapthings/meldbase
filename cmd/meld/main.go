@@ -29,7 +29,7 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: meld <access-policy|init|demo|serve|anchor-serve|anchor-qualification|inspect|verify|backup|restore|durability-check|destructive-volume-check|destructive-process-check|destructive-enospc-check|destructive-power-prepare|destructive-power-controller-keygen|destructive-power-controller-run|destructive-qemu-reset|destructive-qemu-process-kill|destructive-power-recover|destructive-power-receipt-check|destructive-power-matrix-check|destructive-corruption-check|destructive-qemu-eio|destructive-qemu-volatile-loss|destructive-manifest-build|storage-soak|qualification-environment-capture|qualification-session-init|qualification-session-record|qualification-session-status|qualification-session-power-status|qualification-session-power-prepare|qualification-session-power-recover|qualification-session-seal|qualification-artifacts-index-build|qualification-artifacts-index-verify|qualification-check|qualification-packet-keygen|qualification-packet-verify|index-build>")
+		return errors.New("usage: meld <access-policy|init|demo|serve|anchor-serve|anchor-qualification|inspect|verify|backup|restore|export|import|durability-check|destructive-volume-check|destructive-process-check|destructive-enospc-check|destructive-power-prepare|destructive-power-controller-keygen|destructive-power-controller-run|destructive-qemu-reset|destructive-qemu-process-kill|destructive-power-recover|destructive-power-receipt-check|destructive-power-matrix-check|destructive-corruption-check|destructive-qemu-eio|destructive-qemu-volatile-loss|destructive-manifest-build|storage-soak|qualification-environment-capture|qualification-session-init|qualification-session-record|qualification-session-status|qualification-session-power-status|qualification-session-power-prepare|qualification-session-power-recover|qualification-session-seal|qualification-artifacts-index-build|qualification-artifacts-index-verify|qualification-check|qualification-packet-keygen|qualification-packet-verify|index-build>")
 	}
 	switch args[0] {
 	case "access-policy":
@@ -156,6 +156,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runBackup(args[1:], stdout, stderr)
 	case "restore":
 		return runRestore(args[1:], stdout, stderr)
+	case "export":
+		return runLogicalExport(args[1:], stdout, stderr)
+	case "import":
+		return runLogicalImport(args[1:], stdout, stderr)
 	case "verify":
 		return runVerify(args[1:], stdout, stderr)
 	case "index-build":
