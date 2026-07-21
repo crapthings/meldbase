@@ -270,6 +270,9 @@ downgrade. A required capability that is absent always stops the worker with
 - Keep business user authentication and roles in the application; use
   `principal` as already-authenticated input, not as a substitute for an
   accounts system.
+- When using the built-in collection access manifest, list every browser-callable
+  method under `rpcMethods`; omitted means no RPC method is reachable. A custom
+  Go `RPCAuthorizer` can express more dynamic admission rules.
 - Validate every method argument and authorize every record-level action in the
   handler or Go-side authorizer.
 - Prefer a named `transactional` method for business writes instead of exposing
