@@ -4,8 +4,8 @@ This is the current-state audit for Meldbase, not a migration history. The
 database has one durable copy-on-write storage format (currently revision 3).
 There is no legacy engine, WAL replay mode, runtime format selection, or
 compatibility fallback. A non-empty file that is not the current format fails
-closed; historical alpha data must be exported with its matching old build and
-imported into a new database.
+closed. Alpha does not currently make a cross-version compatibility promise;
+future breaking changes will receive release-specific guidance when planned.
 
 ## Available now
 

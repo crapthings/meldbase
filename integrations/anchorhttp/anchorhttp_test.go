@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,8 +41,10 @@ const (
 )
 
 type faultHandler struct {
-	handler http.Handler
-	mode    atomic.Int32
+	handler                       http.Handler
+	mode                          atomic.Int32
+	persistedDroppedAdvance       chan<- struct{}
+	releaseDroppedAdvanceResponse <-chan struct{}
 }
 
 func (handler *faultHandler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -75,6 +78,19 @@ func (handler *faultHandler) ServeHTTP(response http.ResponseWriter, request *ht
 		// ambiguous even though the member may have durably accepted it.
 		recorder := httptest.NewRecorder()
 		handler.handler.ServeHTTP(recorder, request)
+		// Tests that model an ambiguous durable outcome must first observe the
+		// durable handler completing. Otherwise QuorumStore may correctly return
+		// early and cancel a request which had not reached this node yet.
+		if handler.persistedDroppedAdvance != nil {
+			handler.persistedDroppedAdvance <- struct{}{}
+		}
+		if handler.releaseDroppedAdvanceResponse != nil {
+			select {
+			case <-handler.releaseDroppedAdvanceResponse:
+			case <-request.Context().Done():
+				return
+			}
+		}
 		hijacker, ok := response.(http.Hijacker)
 		if !ok {
 			panic("test HTTP server does not support connection hijacking")
@@ -597,11 +613,32 @@ func TestQuorumAdvanceOutcomeIsAmbiguousWhenDurableResponsesAreLost(t *testing.T
 		defer node.close()
 	}
 	store := newTestQuorumNamed(t, nodes, "ambiguous-response-loss")
+	persisted := make(chan struct{}, 2)
+	releaseResponses := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseResponses) }) }
+	defer release()
+	for index := range 2 {
+		nodes[index].fault.persistedDroppedAdvance = persisted
+		nodes[index].fault.releaseDroppedAdvanceResponse = releaseResponses
+	}
 	nodes[0].fault.mode.Store(faultPersistThenDropAdvance)
 	nodes[1].fault.mode.Store(faultPersistThenDropAdvance)
 	nodes[2].fault.mode.Store(faultUnavailable)
 	target := testAnchor(1, 2)
-	if err := store.Advance(context.Background(), target); !errors.Is(err, ErrQuorum) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	advance := make(chan error, 1)
+	go func() { advance <- store.Advance(ctx, target) }()
+	for range 2 {
+		select {
+		case <-persisted:
+		case <-ctx.Done():
+			t.Fatalf("durable response-loss setup timed out: %v", ctx.Err())
+		}
+	}
+	release()
+	if err := <-advance; !errors.Is(err, ErrQuorum) {
 		t.Fatalf("lost durable responses error=%v", err)
 	}
 	for index := range nodes {
