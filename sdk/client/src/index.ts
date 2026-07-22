@@ -1,5 +1,3 @@
-export { LocalCollection, LiveQuery } from "./local.js";
-export type { SnapshotListener, Unsubscribe } from "./local.js";
 export { compileQuery, executeQuery, matches } from "./query.js";
 export type { FindOneOptions, QueryOptions } from "./query.js";
 export { pageCursorFor, pageFilterAfter } from './cursor.js';

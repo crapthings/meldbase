@@ -16,6 +16,8 @@ const packages = [
       "LICENSE", "README.md", "package.json",
       ...["cursor", "index", "local", "mutation", "protocol", "query", "remote", "safe-value", "types", "wire"]
         .flatMap((name) => [`dist/${name}.d.ts`, `dist/${name}.js`]),
+      ...["observer", "remote/client", "remote/collection", "remote/errors", "remote/realtime", "remote/shared", "remote/types"]
+        .flatMap((name) => [`dist/${name}.d.ts`, `dist/${name}.js`]),
     ],
   },
   {
@@ -124,14 +126,12 @@ function verifyRuntimeConsumer() {
   writeFileSync(join(consumer, "package.json"), JSON.stringify({ private: true, type: "module" }));
   writeFileSync(join(consumer, "smoke.mjs"), `
     import assert from "node:assert/strict";
-    import { LocalCollection, MeldbaseClient, MELDBASE_PROTOCOL_VERSION } from "@meldbase/client";
+    import { MeldbaseClient, MELDBASE_PROTOCOL_VERSION } from "@meldbase/client";
     import { LocalCollection as LocalSubpath } from "@meldbase/client/local";
-    import { MeldbaseClient as RemoteSubpath } from "@meldbase/client/remote";
     import { DEFAULT_QUERY_LIMITS } from "@meldbase/client/types";
     import { MeldbaseWorker, rpc } from "@meldbase/server";
     import { useLiveQuery } from "@meldbase/react";
-    assert.equal(LocalCollection, LocalSubpath);
-    assert.equal(MeldbaseClient, RemoteSubpath);
+    assert.equal(typeof LocalSubpath, "function");
     assert.equal(MELDBASE_PROTOCOL_VERSION, 1);
     assert(DEFAULT_QUERY_LIMITS.maxLimit > 0);
     assert.equal(typeof MeldbaseWorker, "function");
@@ -157,8 +157,8 @@ function verifyTypeScriptConsumer() {
    files: ["smoke.ts"],
   }));
   writeFileSync(join(consumer, "smoke.ts"), `
-    import { LocalCollection, type Document } from "@meldbase/client";
-    import type { RemoteLiveQuery } from "@meldbase/client/remote";
+    import type { Document, RemoteLiveQuery } from "@meldbase/client";
+    import { LocalCollection } from "@meldbase/client/local";
     import { rpc, type MethodDefinition } from "@meldbase/server";
     import { useLiveQuery, type LiveQueryResult } from "@meldbase/react";
     const collection = new LocalCollection<Document>();

@@ -21,7 +21,10 @@ security boundary.
 
 `LocalCollection` and `RemoteCollection` deliberately share the data-only
 filter, sort, pagination, and mutation grammar. They are not interchangeable
-database handles and do not promise method-for-method parity.
+database handles and do not promise method-for-method parity or automatic
+synchronization. The root `@meldbase/client` entry is remote-first; import
+`LocalCollection` explicitly from `@meldbase/client/local` for application-owned
+in-memory state.
 
 | Surface | Purpose | Deliberate boundary |
 | --- | --- | --- |

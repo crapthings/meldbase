@@ -1,7 +1,6 @@
 import { useMemo, useSyncExternalStore } from "react";
 import type { LiveQuery, Unsubscribe } from "@meldbase/client/local";
-import type { RemoteLiveQuery } from "@meldbase/client/remote";
-import type { SyncState, SyncStatus } from "@meldbase/client/remote";
+import type { RemoteLiveQuery, SyncState, SyncStatus } from "@meldbase/client";
 import type { Document } from "@meldbase/client/types";
 
 const EMPTY_DOCUMENTS: readonly never[] = Object.freeze([]);

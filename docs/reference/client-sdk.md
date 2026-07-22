@@ -13,6 +13,18 @@ SDK source for each release.
 The SDK and its wire contract are alpha. Read the [client protocol](../client-protocol)
 before implementing another client or relying on its transport behavior.
 
+## Choose an entry point
+
+Most applications use the root package and start with an authenticated remote
+collection. `LocalCollection` is intentionally a separate import for
+application-owned in-memory state; it is not a local cache or replica of the
+remote collection.
+
+| Import | Use it for |
+| --- | --- |
+| `@meldbase/client` | `MeldbaseClient`, remote collections, RPC, realtime, and shared types. |
+| `@meldbase/client/local` | Explicit in-memory documents, local queries, and local observers. |
+
 ## Start a remote client
 
 Create one `MeldbaseClient` for an API origin, then obtain typed collection
@@ -144,7 +156,7 @@ cache, a preview, or tests; it has no network, persistence, authorization, or
 automatic synchronization with a `RemoteCollection`.
 
 ```ts
-import { LocalCollection } from "@meldbase/client";
+import { LocalCollection } from "@meldbase/client/local";
 
 const local = new LocalCollection<Todo>();
 ```

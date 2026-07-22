@@ -1,14 +1,12 @@
 # @meldbase/client
 
-Isomorphic TypeScript client for Meldbase. It provides the same bounded,
-data-only query and mutation grammar for local collections and remote Go-backed
-collections. The package is an alpha preview.
+Isomorphic TypeScript client for Meldbase. The root entry is the authenticated
+remote client; the explicit `@meldbase/client/local` subpath provides a
+standalone in-memory state collection with the same bounded query grammar. The
+package is an alpha preview.
 
 ```ts
-import { LocalCollection, MeldbaseClient } from "@meldbase/client";
-
-const local = new LocalCollection([{ _id: "00000000000000000000000000000001", done: false }]);
-const open = local.find({ done: false });
+import { MeldbaseClient } from "@meldbase/client";
 
 const client = new MeldbaseClient({
   baseUrl: "https://api.example.com",
@@ -21,6 +19,25 @@ const stop = todos.find({ done: false }).subscribe((documents) => {
 });
 ```
 
+## Entry points
+
+Use the root package for an authenticated Meldbase collection:
+
+```ts
+import { MeldbaseClient } from "@meldbase/client";
+
+const client = new MeldbaseClient({ baseUrl, accessToken });
+const todos = client.collection("todos");
+```
+
+Use the local subpath only when application-owned memory is what you need:
+
+```ts
+import { LocalCollection } from "@meldbase/client/local";
+
+const drafts = new LocalCollection([{ _id: "00000000000000000000000000000001", done: false }]);
+```
+
 ## Local and remote are not interchangeable stores
 
 Both collection types use the same bounded filter, sort, pagination, and update
@@ -29,6 +46,9 @@ state: its synchronous `upsert(document)` is a local upsert with no network or
 policy check. `RemoteCollection` is an authenticated server boundary and
 intentionally offers only `insertOne`, bounded updates, and bounded deletes.
 It has no generic remote `replace` method.
+
+`LocalCollection` is not a cache, replica, or offline mode for
+`RemoteCollection`. Moving documents between them is explicit application code.
 
 `count` and `groupCount` are remote-only because their `capped` result conveys
 server policy and visibility limits. Do not substitute an exact local count for
@@ -98,8 +118,8 @@ or executable source and are validated on both sides of the connection. HTTP
 responses are read through a streaming byte ceiling and decoded only from exact
 versioned envelopes; chunked responses cannot bypass `maxInboundBytes`.
 
-Subpath exports are available as `@meldbase/client/local`,
-`@meldbase/client/remote`, and `@meldbase/client/types`.
+The explicit subpaths are `@meldbase/client/local` and
+`@meldbase/client/types`; remote APIs are imported from the root package.
 
 See the repository documentation for the current protocol, security model, and
 alpha compatibility boundary.

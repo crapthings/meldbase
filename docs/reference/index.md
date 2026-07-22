@@ -23,14 +23,16 @@ to the exact module version a Go application imports.
 
 The workspace packages are currently a preview and are not published to npm:
 
-- `@meldbase/client` — local collections and remote HTTP/WebSocket client.
+- `@meldbase/client` — remote HTTP/WebSocket client and shared query types.
+- `@meldbase/client/local` — explicit standalone in-memory collections.
 - `@meldbase/react` — `useLiveQuery` adapter for the client query object.
 - `@meldbase/server` — authenticated Node.js worker control boundary.
 
 `LocalCollection` and `RemoteCollection` share a query grammar, not a promise
-of identical authority or method sets. Read the [local/remote collection
-boundary](../client-protocol#local-and-remote-collection-boundary) before
-switching an application flow between them.
+of identical authority, synchronization, or method sets. The local subpath is
+not a cache or replica of the remote collection. Read the [local/remote
+collection boundary](../client-protocol#local-and-remote-collection-boundary)
+before switching an application flow between them.
 
 Start with the [client SDK API guide](./client-sdk) for user-facing methods,
 purposes, and examples. The generated [TypeScript API reference](/api/typescript/)

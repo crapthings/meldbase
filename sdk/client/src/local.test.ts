@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LocalCollection } from "./index.js";
+import { LocalCollection } from "./local.js";
 import type { Document } from "./index.js";
 
 const tick = () => new Promise<void>((resolve) => queueMicrotask(resolve));

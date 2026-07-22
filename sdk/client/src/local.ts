@@ -4,9 +4,9 @@ import { assertDocumentID, cloneDocument, cloneValue, newDocumentID, valueEquals
 import { compileQuery, executeQuery, matches } from "./query.js";
 import { applyMutation, compileUpdate } from "./mutation.js";
 import { pageCursorFor, type PageResult } from './cursor.js';
+import type { SnapshotListener, Unsubscribe } from "./observer.js";
 
-export type Unsubscribe = () => void;
-export type SnapshotListener<T extends Document> = (documents: readonly T[]) => void;
+export type { SnapshotListener, Unsubscribe } from "./observer.js";
 
 export class LiveQuery<T extends Document> {
 	readonly mode = "local" as const;

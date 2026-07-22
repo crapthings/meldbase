@@ -4,8 +4,8 @@ import { JSDOM } from "jsdom";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { encodeDocument, MeldbaseClient } from "@meldbase/client";
+import type { WebSocketLike } from "@meldbase/client";
 import { LocalCollection } from "@meldbase/client/local";
-import type { WebSocketLike } from "@meldbase/client/remote";
 import type { Document } from "@meldbase/client/types";
 import { useLiveQuery } from "./index.js";
 
