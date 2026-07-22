@@ -145,7 +145,7 @@ The transaction object provides only sequential point operations:
 | --- | --- |
 | `get(collection, id)` | Read one document from the transaction snapshot. |
 | `insert(collection, document)` | Insert a document and return its generated ID. |
-| `replace(collection, id, document)` | Replace one document at a known ID. |
+| `replace(collection, id, document)` | Fully replace one existing document at a known ID. An absent ID returns `not_found`; this is not an upsert. |
 | `update(collection, id, mutation)` | Apply a compiled `$set`/`$inc`/etc. mutation. |
 | `delete(collection, id)` | Delete one document at a known ID. |
 | `invalidatePublication(collection)` | Force subscriptions to re-authorize after a related visibility change. |

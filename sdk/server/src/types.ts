@@ -19,6 +19,7 @@ export interface PublicationContext extends MethodContext {
 export interface WriteTransaction {
   get(collection: string, id: string): Promise<Document>;
   insert(collection: string, document: InputDocument): Promise<string>;
+  /** Fully replace an existing document at id. Rejects with `not_found` when it is absent; this is not an upsert. */
   replace(collection: string, id: string, document: InputDocument): Promise<void>;
   update(collection: string, id: string, mutation: MutationSpec): Promise<void>;
   delete(collection: string, id: string): Promise<void>;

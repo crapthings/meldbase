@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { encodeDocument, encodeValue, MeldbaseClient, MeldbaseProtocolError, MeldbaseRemoteError, MeldbaseRPCError, MeldbaseRPCUnknownResultError } from "./index.js";
+import { encodeDocument, encodeValue, MeldbaseClient, MeldbaseClientClosedError, MeldbaseInsertUnknownResultError, MeldbaseProtocolError, MeldbaseRemoteError, MeldbaseRPCError, MeldbaseRPCUnknownResultError } from "./index.js";
 import type { Document, SyncState, WebSocketLike } from "./index.js";
 
 class FakeSocket implements WebSocketLike {
@@ -204,6 +204,15 @@ test("realtime safety limits must be positive safe integers", () => {
   }
 });
 
+test("client configuration has explicit URL and reconnect boundaries", () => {
+  for (const baseUrl of ["ftp://db.example", "https://user:pass@db.example", "https://db.example?mode=test", "https://db.example#fragment"]) {
+    assert.throws(() => new MeldbaseClient({ baseUrl }), /baseUrl must be an http\(s\) URL/);
+  }
+  assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", allowedRealtimeOrigins: ["https://db.example"] }), /ws\(s\) origins/);
+  assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", reconnect: { minDelayMs: 0 } }), /positive safe integer/);
+  assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", reconnect: { minDelayMs: 2, maxDelayMs: 1 } }), /must not exceed/);
+});
+
 test("HTTP responses are streamed under the byte limit and use exact versioned envelopes", async () => {
   let pulls = 0;
   let canceled = false;
@@ -234,7 +243,11 @@ test("HTTP responses are streamed under the byte limit and use exact versioned e
     const operation = scenario.operation === "query" ? collection.find().fetch()
       : scenario.operation === "insert" ? collection.insertOne({ title: "x" })
       : collection.deleteOne({});
-    await assert.rejects(operation, /Malformed (query|insert|delete) response/);
+    if (scenario.operation === "insert") {
+      await assert.rejects(operation, (error: unknown) => error instanceof MeldbaseInsertUnknownResultError && error.cause instanceof Error && /Malformed insert response/.test(error.cause.message));
+    } else {
+      await assert.rejects(operation, /Malformed (query|delete) response/);
+    }
     client.close();
   }
 
@@ -290,7 +303,7 @@ test("data operations and subscriptions expose stable remote error codes", async
   client.close();
 });
 
-test("remote insert owns its ID before transport and rejects a substituted response", async () => {
+test("remote insert owns its ID before transport and marks an unverifiable result as unknown", async () => {
   let suppliedID: string | undefined;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
@@ -300,9 +313,45 @@ test("remote insert owns its ID before transport and rejects a substituted respo
       return Response.json({ version: 1, document: encodeDocument({ _id: "00000000000000000000000000000009", title: "wrong" }) }, { status: 201 });
     },
   });
-  await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), /changed document ID/);
+  await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), (error: unknown) =>
+    error instanceof MeldbaseInsertUnknownResultError && error.documentId === suppliedID && error.cause instanceof Error && /changed document ID/.test(error.cause.message),
+  );
   assert.match(suppliedID ?? "", /^[0-9a-f]{32}$/);
   client.close();
+});
+
+test("remote insert exposes its assigned ID when transport admission is unknown", async () => {
+  const suppliedID = "00000000000000000000000000000001";
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () => { throw new Error("connection lost"); },
+  });
+  await assert.rejects(client.collection("todos").insertOne({ _id: suppliedID, title: "owned" }), (error: unknown) =>
+    error instanceof MeldbaseInsertUnknownResultError && error.documentId === suppliedID && error.cause instanceof Error && /connection lost/.test(error.cause.message),
+  );
+  client.close();
+});
+
+test("pre-dispatch insert failures are not reported as unknown results", async () => {
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    accessToken: () => { throw new Error("token refresh failed"); },
+    fetch: async () => { throw new Error("fetch should not run"); },
+  });
+  await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), (error: unknown) =>
+    error instanceof Error && !(error instanceof MeldbaseInsertUnknownResultError) && /token refresh failed/.test(error.message),
+  );
+  client.close();
+});
+
+test("closed clients reject every new operation", async () => {
+  const client = new MeldbaseClient({ baseUrl: "https://db.example", fetch: async () => Response.json({ version: 1, documents: [] }) });
+  const todos = client.collection("todos");
+  client.close();
+  assert.throws(() => client.collection("later"), MeldbaseClientClosedError);
+  await assert.rejects(todos.find().fetch(), MeldbaseClientClosedError);
+  assert.throws(() => todos.find().subscribe(() => {}), MeldbaseClientClosedError);
+  await assert.rejects(client.call("echo"), MeldbaseClientClosedError);
 });
 
 test("RPC call preserves typed values and returns structured safe errors", async () => {

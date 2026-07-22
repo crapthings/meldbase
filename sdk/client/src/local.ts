@@ -1,6 +1,6 @@
 import type { DeleteResult, Document, Filter, InputDocument, MutationResult, QuerySpec, Update, Value } from "./types.js";
-import type { QueryOptions } from "./query.js";
-import { cloneDocument, cloneValue, newDocumentID, valueEquals } from "./safe-value.js";
+import type { FindOneOptions, QueryOptions } from "./query.js";
+import { assertDocumentID, cloneDocument, cloneValue, newDocumentID, valueEquals } from "./safe-value.js";
 import { compileQuery, executeQuery, matches } from "./query.js";
 import { applyMutation, compileUpdate } from "./mutation.js";
 import { pageCursorFor, type PageResult } from './cursor.js';
@@ -12,10 +12,12 @@ export class LiveQuery<T extends Document> {
 	readonly mode = "local" as const;
   readonly spec: QuerySpec;
   readonly #source: LocalCollection<T>;
+  readonly #seekPagination: boolean;
 
   constructor(source: LocalCollection<T>, filter: Filter, options: QueryOptions = {}) {
     this.#source = source;
     this.spec = compileQuery(filter, options);
+    this.#seekPagination = options.first !== undefined;
   }
 
   fetch(): T[] {
@@ -23,6 +25,7 @@ export class LiveQuery<T extends Document> {
   }
 
   fetchPage(): PageResult<T> {
+    if (!this.#seekPagination) throw new Error("fetchPage requires a query created with first");
     const documents = this.fetch(); const last = documents.at(-1);
     return { documents, ...(last && this.spec.sort ? { nextCursor: pageCursorFor(last, this.spec.sort) } : {}) };
   }
@@ -52,6 +55,7 @@ export class LocalCollection<T extends Document = Document> {
 
   insert(document: T): void {
     const copy = cloneDocument(document);
+    assertDocumentID(copy._id);
     if (this.#documents.has(copy._id)) throw new Error(`Duplicate _id: ${copy._id}`);
     this.#documents.set(copy._id, copy);
     this.markChanged();
@@ -65,13 +69,16 @@ export class LocalCollection<T extends Document = Document> {
     return cloneDocument(copy);
   }
 
-  replace(document: T): void {
+  /** Create or fully replace one local document addressed by its _id. */
+  upsert(document: T): void {
     const copy = cloneDocument(document);
+    assertDocumentID(copy._id);
     this.#documents.set(copy._id, copy);
     this.markChanged();
   }
 
   remove(id: string): boolean {
+    assertDocumentID(id);
     const removed = this.#documents.delete(id);
     if (removed) this.markChanged();
     return removed;
@@ -81,7 +88,7 @@ export class LocalCollection<T extends Document = Document> {
     return new LiveQuery(this, filter, options);
   }
 
-  findOne(filter: Filter = {}, options: QueryOptions = {}): T | undefined {
+  findOne(filter: Filter = {}, options: FindOneOptions = {}): T | undefined {
     const documents = this.execute(compileQuery(filter, { ...options, limit: 1 }));
     return documents[0];
   }
@@ -114,7 +121,7 @@ export class LocalCollection<T extends Document = Document> {
       if (!matches(document, query.where) || (one && matchedCount > 0)) continue;
       matchedCount += 1; const after = applyMutation(document, mutation); if (!valueEquals(document, after)) staged.push(after);
     }
-    this.batch(() => { for (const document of staged) this.replace(document); });
+    this.batch(() => { for (const document of staged) this.upsert(document); });
     return { matchedCount, modifiedCount: staged.length };
   }
 

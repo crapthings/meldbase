@@ -44,7 +44,7 @@ const todos = client.collection<Todo>("todos");
 | `client.collection<T>(name)` | Gets the normal application API for one remote collection. | `client.collection<Todo>("todos")` |
 | `client.call<T>(method, args?, options?)` | Calls a named server Worker RPC. HTTP is the default transport; realtime can reuse a live socket. | `await client.call("todos.archive", [todoID], { idempotencyKey: newDocumentID() })` |
 | `client.realtimeProtocol` | Reads the discovered realtime protocol descriptor. It is `undefined` until a ticket has supplied one. | `client.realtimeProtocol?.capabilities` |
-| `client.close()` | Stops realtime subscriptions and closes the shared realtime connection. | `client.close()` |
+| `client.close()` | Permanently closes this client and its realtime connection. Create a new client to resume work. | `client.close()` |
 
 For an RPC that may have executed even if the caller loses its result, supply a
 stable `idempotencyKey` and explicitly handle retry policy. The SDK never
@@ -64,7 +64,7 @@ and result limits.
 | --- | --- | --- |
 | `collection.find(filter?, options?)` | Creates a remote query that can fetch once or subscribe live. | `todos.find({ done: false })` |
 | `collection.findOne(filter?, options?)` | Fetches the first matching document, or `undefined`. | `await todos.findOne({ _id: todoID })` |
-| `collection.insertOne(document, options?)` | Inserts one document. If `_id` is omitted, the client creates it before sending the request. | `await todos.insertOne({ title: "Ship", done: false, status: "open" })` |
+| `collection.insertOne(document, options?)` | Strictly inserts one document. If `_id` is omitted, the client creates it before sending the request. | `await todos.insertOne({ title: "Ship", done: false, status: "open" })` |
 | `collection.updateOne(filter, update, options?)` | Applies a bounded update to the first matching document. | `await todos.updateOne({ _id: todoID }, { $set: { done: true } })` |
 | `collection.updateMany(filter, update, options?)` | Applies a bounded update to every matching document. | `await todos.updateMany({ status: "open" }, { $set: { status: "active" } })` |
 | `collection.deleteOne(filter, options?)` | Deletes the first matching document. | `await todos.deleteOne({ _id: todoID })` |
@@ -73,13 +73,25 @@ and result limits.
 | `collection.groupCount(filter, groupBy, options?)` | Counts visible documents by one permitted top-level field; at most 100 groups are returned. | `await todos.groupCount({ done: false }, "status")` |
 
 Each remote operation accepts an optional `AbortSignal` in its options. An
-aborted write does not prove that the server did not commit it; retain a known
-document ID or use a server-owned idempotent RPC when reconciliation matters.
+aborted write does not prove that the server did not commit it. An insert whose
+result cannot be verified throws `MeldbaseInsertUnknownResultError`, which
+contains `documentId` for reconciliation; use a server-owned idempotent RPC
+when a business operation needs stronger retry semantics.
 
-There is deliberately no remote `replace()` method. Full-document replacement
-across an authorization boundary is easy to misuse; use `$set` and the other
-bounded update operators, or expose an atomic Worker RPC for a server-owned
-business operation.
+There is deliberately no remote `replace()` or `upsert()` method. Full-document
+replacement or filter-based upsert across an authorization boundary is easy to
+misuse; use `$set` and the other bounded update operators, or expose an atomic
+Worker RPC for a server-owned business operation.
+
+### Naming and cardinality
+
+`One` and `Many` are used only where a filter selects an effectful target set:
+`updateOne` / `deleteOne` stop after one match, while `updateMany` /
+`deleteMany` apply to every permitted match. `insertOne` is a strict creation
+of one document. Local `upsert(document)` has no suffix because its mandatory
+`_id` already names exactly one document; it creates that ID when absent or
+fully replaces it when present. There is intentionally no `upsertOne` or
+`upsertMany`: an unmatched filter must never silently become an insert.
 
 ### Filters and updates
 
@@ -107,12 +119,14 @@ realtime connection.
 | Name | Purpose | Example |
 | --- | --- | --- |
 | `query.fetch(options?)` | Fetches the current query snapshot over HTTP. | `await todos.find({ done: false }).fetch()` |
-| `query.fetchPage(options?)` | Fetches documents and derives a `nextCursor` from the final document. | `await todos.find({}, { sort, first: 50 }).fetchPage()` |
+| `query.fetchPage(options?)` | Fetches one seek page and derives a `nextCursor` from the final document. It requires `first`. | `await todos.find({}, { sort, first: 50 }).fetchPage()` |
 | `query.subscribe(listener, options?)` | Publishes an initial snapshot and later realtime snapshots; returns an unsubscribe function. | `const stop = todos.find({ done: false }).subscribe(render)` |
 | `SubscribeOptions.onStatus` | Observes connection state, an error, and the opaque resume token. | `query.subscribe(render, { onStatus: console.log })` |
 
 For growing collections, use seek pagination rather than `skip`. `first` and
-`after` require a sort; the SDK adds `_id` as a stable tie-breaker when needed.
+`after` require a sort; `after` also requires `first`. The SDK adds `_id` as a
+stable tie-breaker when needed. `fetchPage()` is only available on such a
+`first` query, so a cursor is never derived from an ordinary limited result.
 
 ```ts
 const sort = [{ path: "createdAt", direction: -1 }] as const;
@@ -140,7 +154,7 @@ const local = new LocalCollection<Todo>();
 | `new LocalCollection(initial?)` | Creates an in-memory collection. | `new LocalCollection<Todo>()` |
 | `local.insert(document)` | Strictly inserts a document that already has an `_id`; duplicate IDs throw. | `local.insert({ _id: todoID, title: "Draft", done: false, status: "open" })` |
 | `local.insertOne(document)` | Inserts a document and generates `_id` when it is absent. | `const todo = local.insertOne({ title: "Draft", done: false, status: "open" })` |
-| `local.replace(document)` | Fully replaces a local document, or inserts it when that ID is absent. | `local.replace({ ...todo, done: true })` |
+| `local.upsert(document)` | Creates or fully replaces the one local document addressed by its `_id`. | `local.upsert({ ...todo, done: true })` |
 | `local.remove(id)` | Removes by ID and reports whether a document was removed. | `local.remove(todoID)` |
 | `local.find(filter?, options?)` | Creates a local live query. | `local.find({ done: false })` |
 | `local.findOne(filter?, options?)` | Synchronously gets the first matching document. | `local.findOne({ _id: todoID })` |
@@ -152,13 +166,17 @@ const local = new LocalCollection<Todo>();
 | `local.execute(spec)` | Executes a compiled query specification. | `local.execute(compileQuery({ done: false }))` |
 | `local.onChange(listener)` | Observes every local collection change. | `const stop = local.onChange(render)` |
 
+All local stored IDs use the same non-zero, 32-character lowercase hexadecimal
+format as remote documents. Use `newDocumentID()` or let `insertOne()` create
+one.
+
 `local.find()` returns `LiveQuery`, which has the same three user-facing query
 methods as `RemoteLiveQuery`:
 
 | Name | Purpose | Example |
 | --- | --- | --- |
 | `query.fetch()` | Returns a synchronous snapshot. | `local.find({ done: false }).fetch()` |
-| `query.fetchPage()` | Returns a synchronous page and optional cursor. | `local.find({}, { sort, first: 20 }).fetchPage()` |
+| `query.fetchPage()` | Returns a synchronous seek page and optional cursor; it requires a `first` query. | `local.find({}, { sort, first: 20 }).fetchPage()` |
 | `query.subscribe(listener)` | Calls the listener initially and when this query result changes. | `local.find({ done: false }).subscribe(render)` |
 
 ## Use the React binding
@@ -231,6 +249,9 @@ and compiled `QuerySpec` and are the implementation layer used by
 - `MeldbaseRemoteError` preserves a safe server `code`, HTTP status, and
   operation name for data operations.
 - `MeldbaseRPCError` is the equivalent structured RPC error.
+- `MeldbaseInsertUnknownResultError` means an insert may have committed but its
+  result could not be verified; it carries the stable `documentId` to reconcile.
+- `MeldbaseClientClosedError` means code attempted new work after `client.close()`.
 - `QueryValidationError` means the SDK rejected an unsafe, malformed, or
   over-limit local query, update, cursor, or wire value before using it.
 

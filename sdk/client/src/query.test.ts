@@ -57,6 +57,12 @@ test("seek pagination rejects a cursor used with a different sort", () => {
   assert.throws(() => compileQuery({}, { sort: [{ path: "rank", direction: -1 }], first: 10, after: cursor }), QueryValidationError);
 });
 
+test("seek cursors require first", () => {
+  const document: Document = { _id: "00000000000000000000000000000001", rank: 1 };
+  const cursor = pageCursorFor(document, [{ path: "rank", direction: 1 }]);
+  assert.throws(() => compileQuery({}, { sort: [{ path: "rank", direction: 1 }], after: cursor }), /after requires first/);
+});
+
 test("rejects executable, dangerous, unknown, and expensive filters", () => {
   assert.throws(() => compileQuery({ x: (() => true) as never }), QueryValidationError);
   assert.throws(() => compileQuery({ "__proto__.polluted": true }), QueryValidationError);

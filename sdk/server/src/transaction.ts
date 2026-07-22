@@ -37,6 +37,8 @@ export class RemoteWriteTransaction implements WriteTransaction {
   }
 
   async replace(collection: string, id: string, document: InputDocument): Promise<void> {
+    // The Go WriteTransaction rejects an absent id. Keep this wire operation
+    // strict: browser-local upsert is intentionally not a server transaction API.
     await this.#operation("replace", collection, id, document);
   }
 

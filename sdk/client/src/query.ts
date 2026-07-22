@@ -14,6 +14,11 @@ export interface QueryOptions {
   readonly limits?: Partial<QueryLimits>;
 }
 
+/** Options for selecting one document. Pagination is intentionally excluded. */
+export interface FindOneOptions {
+  readonly sort?: readonly SortField[];
+}
+
 function limitsWith(overrides?: Partial<QueryLimits>): QueryLimits {
   return Object.freeze({ ...DEFAULT_QUERY_LIMITS, ...overrides });
 }
@@ -21,6 +26,7 @@ function limitsWith(overrides?: Partial<QueryLimits>): QueryLimits {
 export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): QuerySpec {
   const limits = limitsWith(options.limits);
   if (options.limit !== undefined && options.first !== undefined) throw new QueryValidationError("Use either limit or first, not both");
+  if (options.after !== undefined && options.first === undefined) throw new QueryValidationError("after requires first");
   if (options.after !== undefined && options.skip !== undefined) throw new QueryValidationError("Seek pagination cannot be combined with skip");
   let nodes = 0;
   const addNode = (): void => {

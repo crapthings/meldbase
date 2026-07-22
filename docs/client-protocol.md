@@ -25,8 +25,8 @@ database handles and do not promise method-for-method parity.
 
 | Surface | Purpose | Deliberate boundary |
 | --- | --- | --- |
-| `LocalCollection` | In-memory application state, tests, and local reactive views. | Its synchronous `replace(document)` is a local upsert. It makes no network request and applies no server policy. |
-| `RemoteCollection` | Authenticated HTTP/realtime access to a Go server. | It exposes `insertOne`, bounded `updateOne`/`updateMany`, and bounded `deleteOne`/`deleteMany`; every request is re-authorized and server-limited. It intentionally has no generic public `replace` operation. |
+| `LocalCollection` | In-memory application state, tests, and local reactive views. | Its synchronous `upsert(document)` creates or fully replaces the one document addressed by its canonical `_id`. It makes no network request and applies no server policy. |
+| `RemoteCollection` | Authenticated HTTP/realtime access to a Go server. | It exposes `insertOne`, bounded `updateOne`/`updateMany`, and bounded `deleteOne`/`deleteMany`; every request is re-authorized and server-limited. It intentionally has no generic public `replace` or `upsert` operation. |
 | `RemoteCollection.count` / `groupCount` | Policy-aware dashboard summaries. | They exist only remotely because `capped` describes server visibility and result budgets. A local exact count would have different authority and must not be mistaken for it. |
 
 For a server-owned full replacement inside an atomic business operation, use a
@@ -34,6 +34,14 @@ named `transactional` RPC and its worker `tx.replace(...)` capability. Do not
 emulate it in a browser by reading, changing, and writing a whole document:
 that loses the server's record-level authorization and optimistic transaction
 boundary.
+
+The names encode cardinality deliberately. `updateOne` and `deleteOne` stop
+after one filter match; their `Many` variants affect every permitted match.
+`insertOne` is strict creation. Local `upsert(document)` has no `One` suffix
+because its canonical `_id` already selects exactly one document. There is no
+`upsertOne` or `upsertMany`: a filter miss must not silently create a document.
+The worker's `tx.replace(...)` remains a different, strict operation: it
+replaces an existing known ID and returns `not_found` otherwise.
 
 ## Trust boundary
 
@@ -154,11 +162,11 @@ after readiness recovers. Reads may be retried after recovery.
 
 The TypeScript remote client assigns a random 128-bit `_id` before an insert is
 sent when the caller omitted one, and requires the successful response to carry
-that exact ID. If a coordinator admission races cancellation, the existing
-`rpc_outcome_unknown` transport code means the write may be durable; the caller
-still has that `_id` and can reconcile with an authorized point query instead of
-submitting a duplicate. Non-SDK clients should likewise supply their own stable
-document ID whenever they need this recovery property.
+that exact ID. If the transport fails after dispatch, or a successful response
+cannot be verified, it throws `MeldbaseInsertUnknownResultError`; its
+`documentId` is the exact ID to reconcile with an authorized point query instead
+of submitting a duplicate. Non-SDK clients should likewise supply their own
+stable document ID whenever they need this recovery property.
 
 Database resource admission failures use HTTP 413 and the fixed
 `resource_limit_exceeded` code. This is a terminal rejection: no document,

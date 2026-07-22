@@ -7,7 +7,7 @@ collections. The package is an alpha preview.
 ```ts
 import { LocalCollection, MeldbaseClient } from "@meldbase/client";
 
-const local = new LocalCollection([{ _id: "local-1", done: false }]);
+const local = new LocalCollection([{ _id: "00000000000000000000000000000001", done: false }]);
 const open = local.find({ done: false });
 
 const client = new MeldbaseClient({
@@ -25,7 +25,7 @@ const stop = todos.find({ done: false }).subscribe((documents) => {
 
 Both collection types use the same bounded filter, sort, pagination, and update
 grammar, but they have different authority. `LocalCollection` is in-memory
-state: its synchronous `replace(document)` is a local upsert with no network or
+state: its synchronous `upsert(document)` is a local upsert with no network or
 policy check. `RemoteCollection` is an authenticated server boundary and
 intentionally offers only `insertOne`, bounded updates, and bounded deletes.
 It has no generic remote `replace` method.
@@ -57,8 +57,9 @@ const secondPage = firstPage.nextCursor
 
 The cursor is bounded and validated against the supplied sort. It is not an
 authorization token: normal collection policy, tenant constraints, field
-policy, and result limits are applied again to every page request. `after` and
-`skip` cannot be combined.
+policy, and result limits are applied again to every page request. `after`
+requires `first` and cannot be combined with `skip`; `fetchPage()` likewise
+requires `first`.
 
 ## Policy-capped counts
 

@@ -126,7 +126,8 @@ point operation at a time:
 
 - `get(collection, id)`;
 - `insert(collection, document)`;
-- `replace(collection, id, document)`;
+- `replace(collection, id, document)` — fully replaces an existing known ID;
+  an absent ID returns `not_found` and is never created implicitly;
 - `update(collection, id, compiledMutation)`;
 - `delete(collection, id)`;
 - `invalidatePublication(collection)`.

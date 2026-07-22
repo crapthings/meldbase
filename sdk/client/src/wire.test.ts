@@ -26,4 +26,5 @@ test("wire decoder rejects duplicate and prototype-polluting object fields", () 
   assert.deepEqual(decodeValue(JSON.parse(JSON.stringify(encodeValue([1, null, "x"])))), [1, null, "x"]);
   assert.throws(() => decodeValue({ t: "int64", v: "9223372036854775808" }), /Malformed/);
   assert.throws(() => encodeDocument({ _id: "temporary-id" }), /Persisted _id/);
+  assert.throws(() => decodeDocument({ t: "object", v: [["_id", { t: "string", v: "temporary-id" }]] }), /Persisted document _id/);
 });

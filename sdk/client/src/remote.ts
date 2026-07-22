@@ -1,9 +1,9 @@
 import type { CountResult, DeleteResult, Document, Filter, GroupCountResult, InputDocument, MutationResult, MutationSpec, QuerySpec, Update, Value } from "./types.js";
-import type { QueryOptions } from "./query.js";
+import type { FindOneOptions, QueryOptions } from "./query.js";
 import type { SnapshotListener, Unsubscribe } from "./local.js";
 import { compileQuery } from "./query.js";
 import { compileUpdate, encodeMutationSpec } from "./mutation.js";
-import { assertSafeKey, cloneDocument, newDocumentID } from "./safe-value.js";
+import { assertDocumentID, assertSafeKey, cloneDocument, isDocumentID, newDocumentID } from "./safe-value.js";
 import { decodeDocument, decodeValue, encodeInputDocument, encodeQuerySpec, encodeValue, type WireQuerySpec, type WireValue } from "./wire.js";
 import { decodeProtocolDescriptor, MELDBASE_PROTOCOL_VERSION, supportsProtocol, type ProtocolDescriptor } from "./protocol.js";
 import { pageCursorFor, type PageResult } from './cursor.js';
@@ -69,6 +69,27 @@ export class MeldbaseRemoteError extends Error {
 	}
 }
 
+/** The client has been closed permanently. Create a new client to reconnect. */
+export class MeldbaseClientClosedError extends Error {
+  constructor() {
+    super("Meldbase client is closed; create a new client to reconnect");
+    this.name = "MeldbaseClientClosedError";
+  }
+}
+
+/**
+ * The insert may have reached the server, but the client could not verify its
+ * result. Use documentId to reconcile before retrying the same logical write.
+ */
+export class MeldbaseInsertUnknownResultError extends Error {
+  readonly cause: unknown;
+  constructor(readonly documentId: string, cause: unknown) {
+    super(`Insert result is unknown for document ${documentId}; the document may have been created`);
+    this.name = "MeldbaseInsertUnknownResultError";
+    this.cause = cause;
+  }
+}
+
 export class MeldbaseRPCError extends MeldbaseRemoteError {
 	constructor(code: string, status: number) {
 		super(code, status, "RPC");
@@ -124,10 +145,10 @@ export class MeldbaseClient {
   readonly #maxSnapshotDocuments: number;
   readonly #allowedRealtimeOrigins: ReadonlySet<string>;
 	readonly #maxRPCArguments: number;
+  #closed = false;
 
   constructor(options: ClientOptions) {
-    this.#baseUrl = options.baseUrl.replace(/\/$/, "");
-    if (!/^https?:\/\//.test(this.#baseUrl)) throw new Error("baseUrl must be an http(s) URL");
+    this.#baseUrl = normalizeBaseURL(options.baseUrl);
     this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.#accessToken = options.accessToken;
     this.#maxInboundBytes = positiveLimit(options.maxInboundBytes, 4 * 1024 * 1024, "maxInboundBytes");
@@ -135,20 +156,26 @@ export class MeldbaseClient {
 		this.#maxRPCArguments = positiveLimit(options.maxRPCArguments, 32, "maxRPCArguments");
     const base = new URL(this.#baseUrl);
     const defaultRealtimeOrigin = `${base.protocol === "https:" ? "wss:" : "ws:"}//${base.host}`;
-    this.#allowedRealtimeOrigins = new Set(options.allowedRealtimeOrigins ?? [defaultRealtimeOrigin]);
+    this.#allowedRealtimeOrigins = new Set((options.allowedRealtimeOrigins ?? [defaultRealtimeOrigin]).map(normalizeRealtimeOrigin));
     this.#realtime = new RealtimeConnection(options, () => this.createTicket());
   }
 
   collection<T extends Document = Document>(name: string): RemoteCollection<T> {
-    if (!/^[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(name)) throw new Error("Invalid collection name");
+    this.assertOpen();
+    assertCollectionName(name);
     return new RemoteCollection(name, this);
   }
 
-  close(): void { this.#realtime.close(); }
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#realtime.close();
+  }
 
   get realtimeProtocol(): ProtocolDescriptor | undefined { return this.#realtime.protocol; }
 
 	async call<T extends Value = Value>(method: string, args: readonly Value[] = [], options: CallOptions = {}): Promise<T> {
+		this.assertOpen();
 		if (!/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(method)) throw new Error("Invalid RPC method name");
 		if (args.length > this.#maxRPCArguments) throw new Error("RPC argument limit exceeded");
 		if (options.transport !== undefined && options.transport !== "http" && options.transport !== "realtime") throw new Error("Invalid RPC transport");
@@ -178,6 +205,8 @@ export class MeldbaseClient {
 	}
 
   async fetchQuery<T extends Document>(collection: string, query: QuerySpec, signal?: AbortSignal): Promise<T[]> {
+    this.assertOpen();
+    assertCollectionName(collection);
     const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/query`, {
       method: "POST",
       headers: await this.headers(),
@@ -188,10 +217,16 @@ export class MeldbaseClient {
     const body = await boundedJSON(response, this.#maxInboundBytes);
     if (!record(body) || !exactKeys(body, ["version", "documents"]) || body.version !== 1 || !Array.isArray(body.documents)) throw new Error("Malformed query response");
     if (body.documents.length > this.#maxSnapshotDocuments) throw new Error("Query response document limit exceeded");
-    return body.documents.map((item) => decodeDocument(item) as T);
+    return body.documents.map((item) => {
+      const document = decodeDocument(item) as T;
+      assertDocumentID(document._id, "Remote document _id");
+      return document;
+    });
   }
 
   async count(collection: string, query: QuerySpec, signal?: AbortSignal): Promise<CountResult> {
+    this.assertOpen();
+    assertCollectionName(collection);
     const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/count`, {
       method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, query: encodeQuerySpec(query) }), ...(signal ? { signal } : {}),
     });
@@ -202,6 +237,8 @@ export class MeldbaseClient {
   }
 
   async groupCount(collection: string, query: QuerySpec, groupBy: string, signal?: AbortSignal): Promise<GroupCountResult> {
+    this.assertOpen();
+    assertCollectionName(collection);
     assertSafeKey(groupBy, "group field");
     const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/group-count`, {
       method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, query: encodeQuerySpec(query), groupBy }), ...(signal ? { signal } : {}),
@@ -217,23 +254,38 @@ export class MeldbaseClient {
   }
 
   async insertOne<T extends Document>(collection: string, document: InputDocument, signal?: AbortSignal): Promise<T> {
-		// The client owns the document identity before network admission. This is
-		// essential for reconciling a post-admission cancellation: the server may
-		// have committed even though this call cannot receive its success body.
-		const id = document._id ?? newDocumentID();
-		const input: InputDocument = document._id === undefined ? { ...document, _id: id } : document;
-    const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/documents`, {
-      method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, document: encodeInputDocument(input) }), ...(signal ? { signal } : {}),
-    });
+    this.assertOpen();
+    assertCollectionName(collection);
+    const id = document._id ?? newDocumentID();
+    const input: InputDocument = document._id === undefined ? { ...document, _id: id } : document;
+    const body = JSON.stringify({ version: 1, document: encodeInputDocument(input) });
+    const headers = await this.headers();
+    let response: Response;
+    try {
+      response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/documents`, {
+        method: "POST", headers, body, ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      throw new MeldbaseInsertUnknownResultError(id, error);
+    }
     if (!response.ok) await throwRemoteError(response, this.#maxInboundBytes, "insert");
-    const body = await boundedJSON(response, this.#maxInboundBytes);
-    if (!record(body) || !exactKeys(body, ["version", "document"]) || body.version !== 1 || body.document === undefined) throw new Error("Malformed insert response");
-		const inserted = decodeDocument(body.document) as T;
-		if (inserted._id !== id) throw new Error("Insert response changed document ID");
-		return inserted;
+    try {
+      const result = await boundedJSON(response, this.#maxInboundBytes);
+      if (!record(result) || !exactKeys(result, ["version", "document"]) || result.version !== 1 || result.document === undefined) throw new Error("Malformed insert response");
+      const inserted = decodeDocument(result.document) as T;
+      assertDocumentID(inserted._id, "Remote document _id");
+      if (inserted._id !== id) throw new Error("Insert response changed document ID");
+      return inserted;
+    } catch (error) {
+      throw new MeldbaseInsertUnknownResultError(id, error);
+    }
   }
 
   async executeMutation(collection: string, action: "updateOne" | "updateMany" | "deleteOne" | "deleteMany", query: QuerySpec, update?: MutationSpec, signal?: AbortSignal): Promise<MutationResult | DeleteResult> {
+    this.assertOpen();
+    assertCollectionName(collection);
+    if (action !== "updateOne" && action !== "updateMany" && action !== "deleteOne" && action !== "deleteMany") throw new Error("Invalid mutation action");
+    if ((action.startsWith("update") && update === undefined) || (action.startsWith("delete") && update !== undefined)) throw new Error("Invalid mutation payload");
     const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/mutations`, {
       method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, action, query: encodeQuerySpec(query), ...(update ? { update: encodeMutationSpec(update) } : {}) }), ...(signal ? { signal } : {}),
     });
@@ -248,7 +300,13 @@ export class MeldbaseClient {
   }
 
   subscribe(collection: string, query: QuerySpec, listener: SnapshotListener<Document>, options: SubscribeOptions): Unsubscribe {
+    this.assertOpen();
+    assertCollectionName(collection);
     return this.#realtime.subscribe(collection, encodeQuerySpec(query), listener, options.onStatus);
+  }
+
+  private assertOpen(): void {
+    if (this.#closed) throw new MeldbaseClientClosedError();
   }
 
   private async headers(): Promise<Record<string, string>> {
@@ -286,15 +344,15 @@ export class MeldbaseClient {
 export class RemoteCollection<T extends Document> {
   constructor(readonly name: string, private readonly client: MeldbaseClient) {}
   find(filter: Filter = {}, options: QueryOptions = {}): RemoteLiveQuery<T> {
-    return new RemoteLiveQuery(this.client, this.name, compileQuery(filter, options));
+    return new RemoteLiveQuery(this.client, this.name, compileQuery(filter, options), options.first !== undefined);
   }
-  async findOne(filter: Filter = {}, options: QueryOptions & { readonly signal?: AbortSignal } = {}): Promise<T | undefined> {
+  async findOne(filter: Filter = {}, options: FindOneOptions & { readonly signal?: AbortSignal } = {}): Promise<T | undefined> {
     const { signal, ...queryOptions } = options;
     const documents = await this.client.fetchQuery<T>(this.name, compileQuery(filter, { ...queryOptions, limit: 1 }), signal);
     return documents[0];
   }
   count(filter: Filter = {}, options: { readonly signal?: AbortSignal } = {}): Promise<CountResult> { return this.client.count(this.name, compileQuery(filter), options.signal); }
-  groupCount(filter: Filter, groupBy: string, options: { readonly signal?: AbortSignal } = {}): Promise<GroupCountResult> { return this.client.groupCount(this.name, compileQuery(filter), groupBy, options.signal); }
+  groupCount(filter: Filter | undefined, groupBy: string, options: { readonly signal?: AbortSignal } = {}): Promise<GroupCountResult> { return this.client.groupCount(this.name, compileQuery(filter ?? {}), groupBy, options.signal); }
   insertOne(document: InputDocument, options: { readonly signal?: AbortSignal } = {}): Promise<T> { return this.client.insertOne<T>(this.name, document, options.signal); }
   updateOne(filter: Filter, update: Update, options: { readonly signal?: AbortSignal } = {}): Promise<MutationResult> { return this.client.executeMutation(this.name, "updateOne", compileQuery(filter), compileUpdate(update), options.signal) as Promise<MutationResult>; }
   updateMany(filter: Filter, update: Update, options: { readonly signal?: AbortSignal } = {}): Promise<MutationResult> { return this.client.executeMutation(this.name, "updateMany", compileQuery(filter), compileUpdate(update), options.signal) as Promise<MutationResult>; }
@@ -304,9 +362,10 @@ export class RemoteCollection<T extends Document> {
 
 export class RemoteLiveQuery<T extends Document> {
   readonly mode = "remote" as const;
-  constructor(private readonly client: MeldbaseClient, readonly collection: string, readonly spec: QuerySpec) {}
+  constructor(private readonly client: MeldbaseClient, readonly collection: string, readonly spec: QuerySpec, private readonly seekPagination = false) {}
   fetch(options: { readonly signal?: AbortSignal } = {}): Promise<T[]> { return this.client.fetchQuery<T>(this.collection, this.spec, options.signal); }
   async fetchPage(options: { readonly signal?: AbortSignal } = {}): Promise<PageResult<T>> {
+    if (!this.seekPagination) throw new Error("fetchPage requires a query created with first");
     const documents = await this.fetch(options); const last = documents.at(-1);
     return { documents, ...(last && this.spec.sort ? { nextCursor: pageCursorFor(last, this.spec.sort) } : {}) };
   }
@@ -342,11 +401,13 @@ class RealtimeConnection {
     this.#maxSnapshotDocuments = positiveLimit(options.maxSnapshotDocuments, 10_000, "maxSnapshotDocuments");
     const defaultDeltaOperations = Math.min(Number.MAX_SAFE_INTEGER, this.#maxSnapshotDocuments * 4);
     this.#maxDeltaOperations = positiveLimit(options.maxDeltaOperations, defaultDeltaOperations, "maxDeltaOperations");
-    this.#minDelay = options.reconnect?.minDelayMs ?? 250;
-    this.#maxDelay = options.reconnect?.maxDelayMs ?? 15_000;
+    this.#minDelay = positiveLimit(options.reconnect?.minDelayMs, 250, "reconnect.minDelayMs");
+    this.#maxDelay = positiveLimit(options.reconnect?.maxDelayMs, 15_000, "reconnect.maxDelayMs");
+    if (this.#minDelay > this.#maxDelay) throw new Error("reconnect.minDelayMs must not exceed reconnect.maxDelayMs");
   }
 
   subscribe(collection: string, query: WireQuerySpec, listener: SnapshotListener<Document>, onStatus?: (status: SyncStatus) => void): Unsubscribe {
+    if (this.#closed) throw new MeldbaseClientClosedError();
     const requestId = crypto.randomUUID();
     const subscription: ActiveSubscription = { requestId, collection, query, listener, token: undefined, serverId: undefined, documents: [], ...(onStatus ? { onStatus } : {}) };
 		const capabilityError = this.capabilityError(["query.delta"]);
@@ -708,6 +769,28 @@ function validRPCErrorCode(value: unknown): value is string { return typeof valu
 function validRPCIdempotencyKey(value: string): boolean { return /^[A-Za-z0-9_-]{22,128}$/.test(value); }
 function boundedCount(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 
+function assertCollectionName(value: string): void {
+  if (!/^[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(value)) throw new Error("Invalid collection name");
+}
+
+function normalizeBaseURL(value: string): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error("baseUrl must be an http(s) URL"); }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password || url.search || url.hash) {
+    throw new Error("baseUrl must be an http(s) URL without credentials, query, or fragment");
+  }
+  return url.toString().replace(/\/$/, "");
+}
+
+function normalizeRealtimeOrigin(value: string): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error("allowedRealtimeOrigins must contain ws(s) origins"); }
+  if ((url.protocol !== "ws:" && url.protocol !== "wss:") || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
+    throw new Error("allowedRealtimeOrigins must contain ws(s) origins");
+  }
+  return url.origin;
+}
+
 async function throwRemoteError(response: Response, maxBytes: number, operation: string): Promise<never> {
   const body = await boundedJSON(response, maxBytes);
   if (!record(body) || !exactKeys(body, ["error"]) || !record(body.error) ||
@@ -804,10 +887,6 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
-function isDocumentID(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value) && value !== "00000000000000000000000000000000";
 }
 
 async function boundedJSON(response: Response, maxBytes: number): Promise<unknown> {

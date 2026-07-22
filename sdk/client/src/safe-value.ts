@@ -3,14 +3,22 @@ import { QueryValidationError } from "./types.js";
 
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
 const encoder = new TextEncoder();
+const DOCUMENT_ID_PATTERN = /^[0-9a-f]{32}$/;
+const ZERO_DOCUMENT_ID = "00000000000000000000000000000000";
 
 // newDocumentID creates the portable 128-bit lowercase-hex identity used by
-// both local and remote inserts. Remote writes assign it before transport so a
-// timeout or post-admission cancellation still leaves the caller with a key to
-// reconcile rather than an unaddressable server-generated document.
+// both local and remote inserts.
 export function newDocumentID(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function isDocumentID(value: unknown): value is string {
+  return typeof value === "string" && DOCUMENT_ID_PATTERN.test(value) && value !== ZERO_DOCUMENT_ID;
+}
+
+export function assertDocumentID(value: unknown, label = "Document _id"): asserts value is string {
+  if (!isDocumentID(value)) throw new QueryValidationError(`${label} must be a non-zero 32-character lowercase hexadecimal ID`);
 }
 
 export function assertSafeKey(key: string, label = "field"): void {

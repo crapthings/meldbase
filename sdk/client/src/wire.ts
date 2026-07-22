@@ -1,6 +1,6 @@
 import type { Document, InputDocument, QueryExpr, QueryLimits, QuerySpec, SortField, Value } from "./types.js";
 import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
-import { assertPath, assertSafeKey, cloneDocument, valueByteLength } from "./safe-value.js";
+import { assertDocumentID, assertPath, assertSafeKey, cloneDocument, isDocumentID, valueByteLength } from "./safe-value.js";
 
 export type WireValue =
   | { readonly t: "null" }
@@ -98,7 +98,7 @@ function encodeDocumentFields(document: InputDocument, requireID: boolean): Wire
     const value = document[key];
     if (value === undefined) throw new QueryValidationError(`Undefined document value at ${key}`);
     if (key === "_id") {
-      if (typeof value !== "string" || !isDocumentID(value)) throw new QueryValidationError("Persisted _id must be a 32-character lowercase hexadecimal ID");
+      if (!isDocumentID(value)) throw new QueryValidationError("Persisted _id must be a non-zero 32-character lowercase hexadecimal ID");
       return [key, { t: "id", v: value } satisfies WireValue] as const;
     }
     return [key, encodeValue(value)] as const;
@@ -111,7 +111,9 @@ export function decodeDocument(input: unknown): Document {
   if (value === null || typeof value !== "object" || Array.isArray(value) || value instanceof Date || value instanceof Uint8Array) {
     throw new QueryValidationError("Wire document must be an object");
   }
-  return cloneDocument(value as Document);
+  const document = cloneDocument(value as Document);
+  assertDocumentID(document._id, "Persisted document _id");
+  return document;
 }
 
 export function encodeQuerySpec(spec: QuerySpec): WireQuerySpec {
@@ -231,10 +233,8 @@ function base64ToBytes(value: string): Uint8Array {
 
 function encodeQueryValue(path: string, value: Value): WireValue {
   if (path === "_id") {
-    if (typeof value !== "string" || !isDocumentID(value)) throw new QueryValidationError("_id query value must be a 32-character lowercase hexadecimal ID");
+    if (!isDocumentID(value)) throw new QueryValidationError("_id query value must be a non-zero 32-character lowercase hexadecimal ID");
     return { t: "id", v: value };
   }
   return encodeValue(value);
 }
-
-function isDocumentID(value: string): boolean { return /^[0-9a-f]{32}$/.test(value); }
