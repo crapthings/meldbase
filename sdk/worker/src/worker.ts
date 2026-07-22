@@ -246,14 +246,14 @@ export class MeldbaseWorker {
   }
 
   async #invoke(frame: Record<string, unknown>): Promise<void> {
-    exactKeys(frame, ["v", "type", "callId", "method", "mode", "actor", "arguments"]);
+    exactKeys(frame, ["v", "type", "callId", "method", "mode", "actor", "input"]);
     if (typeof frame.callId !== "string" || typeof frame.method !== "string" || (frame.mode !== "rpc" && frame.mode !== "transactional") ||
-        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.workspaceId !== "string" || !Array.isArray(frame.arguments)) {
+        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.workspaceId !== "string" || frame.input === undefined) {
       throw new Error("Invalid invoke frame");
     }
     const definition = this.#methods.get(frame.method);
     if (!definition || definition.mode !== frame.mode || this.#calls.has(frame.callId)) throw new Error("Invoke does not match registration");
-    const args = frame.arguments.map((argument) => decodeValue(argument));
+    const input = decodeValue(frame.input);
     const controller = new AbortController();
     const context: RPCContext = {
       actor: Object.freeze({ id: frame.actor.id, workspaceId: frame.actor.workspaceId }),
@@ -265,8 +265,8 @@ export class MeldbaseWorker {
     this.#calls.set(frame.callId, active);
     try {
       const result = definition.mode === "transactional"
-        ? await definition.handler(context, args, active.transaction!)
-        : await definition.handler(context, args);
+        ? await definition.handler(context, input, active.transaction!)
+        : await definition.handler(context, input);
       if (controller.signal.aborted) return;
       this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "result", callId: frame.callId, result: encodeValue(result) });
     } catch (error) {

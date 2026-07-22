@@ -83,7 +83,7 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
   assert.deepEqual(contract.workerProtocol.hubFrames, [
     { type: "authorize_query", required: ["actor", "callId", "collection", "query", "type", "v"], optional: [] },
     { type: "cancel", required: ["callId", "type", "v"], optional: [] },
-    { type: "invoke", required: ["actor", "arguments", "callId", "method", "mode", "type", "v"], optional: [] },
+    { type: "invoke", required: ["actor", "callId", "input", "method", "mode", "type", "v"], optional: [] },
     { type: "registered", required: ["limits", "protocol", "sessionId", "type", "v"], optional: [] },
     { type: "tx_error", required: ["callId", "error", "opId", "type", "v"], optional: [] },
     { type: "tx_result", required: ["callId", "opId", "result", "type", "v"], optional: [] },
@@ -124,7 +124,7 @@ function harness(
   return { worker, sockets, factoryCalls, states };
 }
 
-test("server worker resolves the secure Meldbase authority URL", async () => {
+test("Worker resolves the secure Meldbase authority URL", async () => {
   const value = harness({ echo: rpc(() => "ok") }, "meldbase://control.example.test:9443");
   await startHarness(value);
   assert.equal(value.factoryCalls[0]!.url, "wss://control.example.test:9443/v1/workers");
@@ -147,11 +147,11 @@ async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSock
   return socket;
 }
 
-test("server worker registers without URL credentials and handles typed RPC", async () => {
+test("Worker registers without URL credentials and handles typed RPC", async () => {
   const value = harness({
-    "math.echo": rpc((context, args) => {
+    "math.echo": rpc((context, input) => {
       assert.deepEqual(context.actor, { id: "user-1", workspaceId: "workspace-a" });
-      return args[0]!;
+      return input;
     }),
     "orders.reject": rpc(() => { throw new MeldbaseError("orders.not_ready", { retryAfter: 60n }); }),
   });
@@ -163,7 +163,7 @@ test("server worker registers without URL credentials and handles typed RPC", as
 
   socket.message({
     v: 1, type: "invoke", callId: "call-1", method: "math.echo", mode: "rpc",
-    actor: { id: "user-1", workspaceId: "workspace-a" }, arguments: [{ t: "int64", v: "42" }],
+    actor: { id: "user-1", workspaceId: "workspace-a" }, input: { t: "int64", v: "42" },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -172,7 +172,7 @@ test("server worker registers without URL credentials and handles typed RPC", as
 
   socket.message({
     v: 1, type: "invoke", callId: "call-2", method: "orders.reject", mode: "rpc",
-    actor: { id: "user-1", workspaceId: "" }, arguments: [],
+    actor: { id: "user-1", workspaceId: "" }, input: { t: "null" },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -255,7 +255,7 @@ test("worker capability discovery accepts additive features and rejects missing 
 test("transactional worker serializes point operations and returns one result", async () => {
   const documentID = "00112233445566778899aabbccddeeff";
   const value = harness({
-    "orders.create": rpc.transactional(async (_context, _args, tx) => {
+    "orders.create": rpc.transactional(async (_context, _input, tx) => {
       const id = await tx.insert("orders", { status: "created" });
       const document = await tx.get("orders", id);
       await tx.replace("orders", id, { status: "confirmed" });
@@ -268,7 +268,7 @@ test("transactional worker serializes point operations and returns one result", 
   const socket = await startHarness(value);
   socket.message({
     v: 1, type: "invoke", callId: "call-tx", method: "orders.create", mode: "transactional",
-    actor: { id: "user-1", workspaceId: "" }, arguments: [],
+    actor: { id: "user-1", workspaceId: "" }, input: { t: "null" },
   });
 
   await waitFor(() => socket.sent.length === 1);
@@ -330,7 +330,7 @@ test("worker cancellation aborts handler and reconnect re-registers", async () =
   const first = await startHarness(value);
   first.message({
     v: 1, type: "invoke", callId: "slow-call", method: "slow", mode: "rpc",
-    actor: { id: "user-1", workspaceId: "" }, arguments: [],
+    actor: { id: "user-1", workspaceId: "" }, input: { t: "null" },
   });
   first.message({ v: 1, type: "cancel", callId: "slow-call" });
   await waitFor(() => aborted);
@@ -437,7 +437,7 @@ test("worker rejects unsafe configuration and protocol frames", async () => {
   await started;
   socket.message({
     v: 1, type: "invoke", callId: "legacy-identity", method: "ok", mode: "rpc",
-    principal: { subject: "user-1", workspace: "team-a" }, arguments: [],
+    principal: { subject: "user-1", workspace: "team-a" }, input: { t: "null" },
   });
   await waitFor(() => errors.length > 0);
   assert.match(errors[0]!.message, /unknown or missing fields|Invalid invoke frame/);

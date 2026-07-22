@@ -48,8 +48,8 @@ func TestPublicServerFacadeCanRegisterAndCallRPC(t *testing.T) {
 		DB: db, Authenticator: authenticator{}, Authorizer: authorizer{}, RPCAuthorizer: authorizer{},
 		PublicRealtimeURL: "ws://example.invalid/v1/realtime",
 		RPCMethods: map[string]server.RPCMethod{
-			"echo": func(_ context.Context, _ server.Actor, arguments []meldbase.Value) (meldbase.Value, error) {
-				return meldbase.Array(arguments...), nil
+			"echo": func(_ context.Context, _ server.Actor, input meldbase.Value) (meldbase.Value, error) {
+				return input, nil
 			},
 		},
 	})
@@ -58,7 +58,7 @@ func TestPublicServerFacadeCanRegisterAndCallRPC(t *testing.T) {
 	}
 	httpServer := httptest.NewServer(handler)
 	defer httpServer.Close()
-	response, err := http.Post(httpServer.URL+"/v1/rpc", "application/json", strings.NewReader(`{"v":1,"type":"call","requestId":"public-1","method":"echo","arguments":[{"t":"date","v":"2026-07-16T00:00:00.000Z"}]}`))
+	response, err := http.Post(httpServer.URL+"/v1/rpc", "application/json", strings.NewReader(`{"v":1,"type":"call","requestId":"public-1","method":"echo","input":{"t":"date","v":"2026-07-16T00:00:00.000Z"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

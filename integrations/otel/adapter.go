@@ -478,7 +478,7 @@ var intDescriptors = []intDescriptor{
 	{name: "meldbase.rpc.active", description: "Currently executing RPC handlers.", unit: "{call}", kind: intGauge, read: serverValue(func(s admin.Sample) uint64 { return s.Server.RPCActive })},
 	{name: "meldbase.rpc.failure", description: "RPC application or internal failures.", unit: "{call}", kind: intCounter, read: serverValue(func(s admin.Sample) uint64 { return s.Server.RPCFailed })},
 	{name: "meldbase.rpc.busy", description: "RPC calls rejected by concurrency budgets.", unit: "{call}", kind: intCounter, read: serverValue(func(s admin.Sample) uint64 { return s.Server.RPCBusy })},
-	{name: "meldbase.worker.connected", description: "Current authenticated server workers.", unit: "{worker}", kind: intGauge, read: serverValue(func(s admin.Sample) uint64 { return s.Server.Worker.ConnectedWorkers })},
+	{name: "meldbase.worker.connected", description: "Current authenticated trusted Workers.", unit: "{worker}", kind: intGauge, read: serverValue(func(s admin.Sample) uint64 { return s.Server.Worker.ConnectedWorkers })},
 	{name: "meldbase.worker.protocol.failure", description: "Worker sessions closed for protocol failures.", unit: "{event}", kind: intCounter, read: serverValue(func(s admin.Sample) uint64 { return s.Server.Worker.ProtocolFailures })},
 	{name: "meldbase.worker.policy.invalidation", description: "Durable worker publication policy invalidations.", unit: "{event}", kind: intCounter, read: serverValue(func(s admin.Sample) uint64 { return s.Server.Worker.PolicyInvalidations })},
 }

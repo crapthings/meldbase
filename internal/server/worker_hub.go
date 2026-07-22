@@ -254,8 +254,8 @@ func (hub *WorkerHub) ResolveRPCMethod(name string) (RPCMethod, bool) {
 	if !ok {
 		return nil, false
 	}
-	return func(ctx context.Context, actor Actor, arguments []meldbase.Value) (meldbase.Value, error) {
-		return owner.connection.invoke(ctx, name, "rpc", actor, arguments, nil)
+	return func(ctx context.Context, actor Actor, input meldbase.Value) (meldbase.Value, error) {
+		return owner.connection.invoke(ctx, name, "rpc", actor, input, nil)
 	}, true
 }
 
@@ -264,8 +264,8 @@ func (hub *WorkerHub) ResolveRPCTransactionalMethod(name string) (RPCTransaction
 	if !ok {
 		return nil, false
 	}
-	return func(ctx context.Context, actor Actor, arguments []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
-		return owner.connection.invoke(ctx, name, "transactional", actor, arguments, tx)
+	return func(ctx context.Context, actor Actor, input meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
+		return owner.connection.invoke(ctx, name, "transactional", actor, input, tx)
 	}, true
 }
 
@@ -683,7 +683,7 @@ type workerPolicyResult struct {
 	err        error
 }
 
-func (worker *workerConnection) invoke(ctx context.Context, method, mode string, actor Actor, arguments []meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
+func (worker *workerConnection) invoke(ctx context.Context, method, mode string, actor Actor, input meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
 	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || (mode == "transactional") != (tx != nil) {
 		return meldbase.Value{}, errors.New("worker invocation unavailable")
 	}
@@ -716,20 +716,16 @@ func (worker *workerConnection) invoke(ctx context.Context, method, mode string,
 		delete(worker.pending, callID)
 		worker.mu.Unlock()
 	}()
-	wireArguments := make([]json.RawMessage, len(arguments))
-	for index, argument := range arguments {
-		encoded, err := meldbase.MarshalWireValue(argument)
-		if err != nil {
-			return meldbase.Value{}, err
-		}
-		wireArguments[index] = encoded
+	wireInput, err := meldbase.MarshalWireValue(input)
+	if err != nil {
+		return meldbase.Value{}, err
 	}
 	worker.hub.stats.callsStarted.Add(1)
 	worker.hub.stats.callsActive.Add(1)
 	defer worker.hub.stats.callsActive.Add(^uint64(0))
 	if err := worker.send(ctx, map[string]any{
 		"v": protocolVersion, "type": "invoke", "callId": callID, "method": method, "mode": mode,
-		"actor": map[string]any{"id": actor.ID, "workspaceId": actor.WorkspaceID}, "arguments": wireArguments,
+		"actor": map[string]any{"id": actor.ID, "workspaceId": actor.WorkspaceID}, "input": json.RawMessage(wireInput),
 	}); err != nil {
 		worker.hub.stats.callsFailed.Add(1)
 		return meldbase.Value{}, err

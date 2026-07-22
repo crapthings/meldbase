@@ -46,7 +46,6 @@ type Config struct {
 	RPCAuthorizer                  RPCAuthorizer
 	MaxConcurrentRPC               int
 	MaxRPCPerConnection            int
-	MaxRPCArguments                int
 	MaxRPCResultBytes              int
 	RPCIdempotencyStore            RPCIdempotencyStore
 	RPCIdempotencyRetention        time.Duration
@@ -129,12 +128,6 @@ func New(config Config) (*Handler, error) {
 	}
 	if config.MaxRPCPerConnection > config.MaxConcurrentRPC {
 		return nil, errors.New("max RPC per connection exceeds global RPC concurrency")
-	}
-	if config.MaxRPCArguments <= 0 {
-		config.MaxRPCArguments = 32
-	}
-	if config.MaxRPCArguments > 1024 {
-		return nil, errors.New("max RPC arguments exceeds 1024")
 	}
 	if config.MaxRPCResultBytes <= 0 {
 		config.MaxRPCResultBytes = config.MaxBodyBytes
@@ -508,7 +501,7 @@ func (s *socketSession) handleMessage(raw []byte) error {
 		}
 		return s.subscribe(message.RequestID, message.Collection, message.Query, message.ResumeToken, message.Mode)
 	case "call":
-		envelope, err := decodeRPCCallEnvelope(raw, s.handler.config.MaxRPCArguments)
+		envelope, err := decodeRPCCallEnvelope(raw)
 		if err != nil {
 			return err
 		}

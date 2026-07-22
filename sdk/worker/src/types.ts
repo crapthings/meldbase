@@ -29,8 +29,8 @@ export interface WriteTransaction {
   invalidateReadPolicy(collection: string): Promise<void>;
 }
 
-export type RPCHandler = (context: RPCContext, args: readonly Value[]) => Value | Promise<Value>;
-export type TransactionalRPCHandler = (context: RPCContext, args: readonly Value[], transaction: WriteTransaction) => Value | Promise<Value>;
+export type RPCHandler = (context: RPCContext, input: Value) => Value | Promise<Value>;
+export type TransactionalRPCHandler = (context: RPCContext, input: Value, transaction: WriteTransaction) => Value | Promise<Value>;
 
 export type RPCDefinition =
   | { readonly mode: "rpc"; readonly handler: RPCHandler }

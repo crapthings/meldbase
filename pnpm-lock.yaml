@@ -83,14 +83,14 @@ importers:
         specifier: ^8.0.0
         version: 8.1.4(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0)
 
-  examples/server-worker:
+  examples/worker:
     dependencies:
       '@meldbase/client':
         specifier: workspace:*
         version: link:../../sdk/client
-      '@meldbase/server':
+      '@meldbase/worker':
         specifier: workspace:*
-        version: link:../../sdk/server
+        version: link:../../sdk/worker
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -134,7 +134,7 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
-  sdk/server:
+  sdk/worker:
     dependencies:
       '@meldbase/client':
         specifier: workspace:*

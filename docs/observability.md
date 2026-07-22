@@ -169,7 +169,7 @@ never freeze sampling, subscription cleanup, or database work.
 `SamplerOptions.Server` may additionally reference the public `*server.Handler`.
 Its fixed-cardinality snapshot adds authenticated realtime connection gauges and
 aggregate HTTP/WebSocket RPC requests, active/success/failure/cancel/reject/busy
-counters, bytes, arguments and latency. Optional RPC idempotency adds fixed
+counters, request/result bytes and latency. Optional RPC idempotency adds fixed
 claim, replay, conflict, in-progress, outcome-unknown and store-failure counters;
 transactional RPC adds atomic commit, rollback and successful no-op counters.
 It never exports keys or fingerprints. The sample omits the `server` field when

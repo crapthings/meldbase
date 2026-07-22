@@ -131,8 +131,8 @@ async function waitFor(predicate: () => boolean, description: string): Promise<v
 
 async function startSDKWorker(server: RunningServer): Promise<RunningWorker> {
   await waitFor(() => server.workerURL !== undefined, "the worker control endpoint");
-  await execFileAsync("pnpm", ["--filter", "@meldbase/server", "build"], { cwd: repository });
-  const script = fileURLToPath(new URL("../../server/test/worker-hub-e2e.mjs", import.meta.url));
+  await execFileAsync("pnpm", ["--filter", "@meldbase/worker", "build"], { cwd: repository });
+  const script = fileURLToPath(new URL("../../worker/test/worker-hub-e2e.mjs", import.meta.url));
   const child = spawn(process.execPath, [script], {
     cwd: repository,
     env: { ...process.env, MELDBASE_WORKER_URL: server.workerURL!, MELDBASE_WORKER_TOKEN: workerToken },
@@ -221,12 +221,12 @@ test("TypeScript remote mutations and RPC interoperate with live Go and Node wor
     assert.deepEqual(await todos.deleteOne({ _id: inserted._id }), { deletedCount: 1 });
     assert.deepEqual(await todos.find({ _id: inserted._id }).fetch(), []);
 
-	assert.equal(await client.call("sdk.echo", [42n]), 42n);
-	assert.equal(await client.call("sdk.echo", [7n], { transport: "realtime" }), 7n);
-	await assert.rejects(client.call("sdk.reject"), (error: unknown) =>
+	assert.equal(await client.call("sdk.echo", 42n), 42n);
+	assert.equal(await client.call("sdk.echo", 7n, { transport: "realtime" }), 7n);
+	await assert.rejects(client.call("sdk.reject", null), (error: unknown) =>
 		error instanceof MeldbaseError && error.code === "orders.already_paid" && error.data?.retryAfter === 60n,
 	);
-	await assert.rejects(client.call("sdk.reject", [], { transport: "realtime" }), (error: unknown) =>
+	await assert.rejects(client.call("sdk.reject", null, { transport: "realtime" }), (error: unknown) =>
 		error instanceof MeldbaseError && error.code === "orders.already_paid" && error.data?.retryAfter === 60n,
 	);
   } finally {

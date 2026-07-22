@@ -54,7 +54,7 @@ const todos = client.collection<Todo>("todos");
 | --- | --- | --- |
 | `new MeldbaseClient(options)` | Creates the authenticated HTTP and realtime client. | `new MeldbaseClient({ baseUrl, accessToken })` |
 | `client.collection<T>(name)` | Gets the normal application API for one remote collection. | `client.collection<Todo>("todos")` |
-| `client.call<T>(method, args?, options?)` | Calls a named application RPC. A Go handler or trusted Worker may implement it. HTTP is the default transport; realtime can reuse a live socket. | `await client.call("todos.archive", [todoID], { idempotencyKey: newDocumentID() })` |
+| `client.call<T>(method, input, options?)` | Calls a named application RPC with one required `Value` input. A Go handler or trusted Worker may implement it. HTTP is the default transport; realtime can reuse a live socket. | `await client.call("todos.archive", { todoID }, { idempotencyKey: newDocumentID() })` |
 | `client.realtimeProtocol` | Reads the discovered realtime protocol descriptor. It is `undefined` until a ticket has supplied one. | `client.realtimeProtocol?.capabilities` |
 | `client.close()` | Permanently closes this client and its realtime connection. Create a new client to resume work. | `client.close()` |
 

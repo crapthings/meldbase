@@ -471,13 +471,12 @@ func TestJWTWorkspaceActorIsForwardedToTrustedWorkerRPC(t *testing.T) {
 			workerDone <- context.Canceled
 			return
 		}
-		arguments, _ := invoke["arguments"].([]any)
 		workerDone <- writeSocketJSON(workerContext, worker, map[string]any{
-			"v": protocolVersion, "type": "result", "callId": invoke["callId"], "result": arguments[0],
+			"v": protocolVersion, "type": "result", "callId": invoke["callId"], "result": invoke["input"],
 		})
 	}()
 	tokenA := signedWorkspaceJWT(t, secret, "user-a", "team-a", now)
-	request, _ := http.NewRequest(http.MethodPost, api.URL+"/v1/rpc", strings.NewReader(`{"v":1,"type":"call","requestId":"workspace-call","method":"workspace.echo","arguments":[{"t":"string","v":"ok"}]}`))
+	request, _ := http.NewRequest(http.MethodPost, api.URL+"/v1/rpc", strings.NewReader(`{"v":1,"type":"call","requestId":"workspace-call","method":"workspace.echo","input":{"t":"string","v":"ok"}}`))
 	request.Header.Set("Authorization", "Bearer "+tokenA)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -492,7 +491,7 @@ func TestJWTWorkspaceActorIsForwardedToTrustedWorkerRPC(t *testing.T) {
 	}
 
 	tokenB := signedWorkspaceJWT(t, secret, "user-a", "team-b", now)
-	request, _ = http.NewRequest(http.MethodPost, api.URL+"/v1/rpc", strings.NewReader(`{"v":1,"type":"call","requestId":"workspace-denied","method":"workspace.echo","arguments":[]}`))
+	request, _ = http.NewRequest(http.MethodPost, api.URL+"/v1/rpc", strings.NewReader(`{"v":1,"type":"call","requestId":"workspace-denied","method":"workspace.echo","input":{"t":"null"}}`))
 	request.Header.Set("Authorization", "Bearer "+tokenB)
 	response, err = http.DefaultClient.Do(request)
 	if err != nil {

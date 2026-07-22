@@ -72,8 +72,8 @@
         "type": "invoke",
         "required": [
           "actor",
-          "arguments",
           "callId",
+          "input",
           "method",
           "mode",
           "type",
@@ -249,7 +249,7 @@
     {
       "type": "call",
       "required": [
-        "arguments",
+        "input",
         "method",
         "requestId",
         "type",

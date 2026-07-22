@@ -165,7 +165,7 @@ test("capabilities are enforced for work added after realtime authentication", a
 	socket.message({ v: 1, type: "authenticated" });
 	assert.equal(socket.sent.length, 2);
 	await assert.rejects(
-		client.call("orders.create", [], { transport: "realtime", idempotencyKey: "abcdefghijklmnopqrstuv" }),
+		client.call("orders.create", null, { transport: "realtime", idempotencyKey: "abcdefghijklmnopqrstuv" }),
 		(error: unknown) => error instanceof MeldbaseProtocolError && error.required[0] === "rpc.idempotency",
 	);
 	assert.equal(socket.sent.length, 2);
@@ -198,7 +198,6 @@ test("realtime safety limits must be positive safe integers", () => {
     { maxInboundBytes: 0 },
     { maxSnapshotDocuments: -1 },
     { maxDeltaOperations: Number.MAX_SAFE_INTEGER + 1 },
-		{ maxRPCArguments: 0 },
   ]) {
 		assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", ...options }), /(positive safe integer|must be boolean)/);
   }
@@ -351,7 +350,7 @@ test("closed clients reject every new operation", async () => {
   assert.throws(() => client.collection("later"), MeldbaseClientClosedError);
   await assert.rejects(todos.find().fetch(), MeldbaseClientClosedError);
   assert.throws(() => todos.find().subscribe(() => {}), MeldbaseClientClosedError);
-  await assert.rejects(client.call("echo"), MeldbaseClientClosedError);
+	await assert.rejects(client.call("echo", null), MeldbaseClientClosedError);
 });
 
 test("RPC call preserves typed values and returns structured safe errors", async () => {
@@ -366,10 +365,10 @@ test("RPC call preserves typed values and returns structured safe errors", async
 			result: encodeValue({ total: 9223372036854775807n, at: new Date("2026-07-16T00:00:00.000Z"), bytes: new Uint8Array([0, 255]) }),
 		});
 	};
-	const client = new MeldbaseClient({ baseUrl: "https://db.example", fetch: fetcher, accessToken: () => "secret", maxRPCArguments: 3 });
+	const client = new MeldbaseClient({ baseUrl: "https://db.example", fetch: fetcher, accessToken: () => "secret" });
 	const idempotencyKey = "abcdefghijklmnopqrstuv";
 	const result = await client.call<{ readonly total: bigint; readonly at: Date; readonly bytes: Uint8Array }>(
-		"billing.calculate", [9223372036854775807n, new Date("2026-07-16T00:00:00.000Z"), new Uint8Array([1, 2])],
+		"billing.calculate", { amount: 9223372036854775807n, at: new Date("2026-07-16T00:00:00.000Z"), bytes: new Uint8Array([1, 2]) },
 		{ idempotencyKey },
 	);
 	assert.equal(result.total, 9223372036854775807n);
@@ -383,20 +382,21 @@ test("RPC call preserves typed values and returns structured safe errors", async
 	delete callEnvelope.requestId;
 	assert.deepEqual(callEnvelope, {
 		v: 1, type: "call", idempotencyKey, method: "billing.calculate",
-		arguments: [
-			{ t: "int64", v: "9223372036854775807" },
-			{ t: "date", v: "2026-07-16T00:00:00.000Z" },
-			{ t: "binary", v: "AQI=" },
-		],
+		input: { t: "object", v: [
+			["amount", { t: "int64", v: "9223372036854775807" }],
+			["at", { t: "date", v: "2026-07-16T00:00:00.000Z" }],
+			["bytes", { t: "binary", v: "AQI=" }],
+		] },
 	});
 
 	fail = true;
-	await assert.rejects(client.call("billing.calculate"), (error: unknown) =>
+	await assert.rejects(client.call("billing.calculate", null), (error: unknown) =>
 		error instanceof MeldbaseError && error.code === "billing.quota_exceeded" && error.data?.retryAfter === 60n,
 	);
-	await assert.rejects(client.call("bad/name"), /Invalid RPC method name/);
-	await assert.rejects(client.call("billing.calculate", [1, 2, 3, 4]), /argument limit/);
-	await assert.rejects(client.call("billing.calculate", [], { idempotencyKey: "too-short" }), /Invalid RPC idempotency key/);
+	await assert.rejects(client.call("bad/name", null), /Invalid RPC method name/);
+	await assert.rejects(client.call("billing.calculate", null, { idempotencyKey: "too-short" }), /Invalid RPC idempotency key/);
+	await assert.rejects(client.call("billing.calculate", undefined as never), /Unsupported value type/);
+	await assert.rejects(client.call("billing.calculate", new (class Input {})() as never), /plain object prototype/);
 	client.close();
 });
 
@@ -405,7 +405,7 @@ test("RPC call preserves generic internal errors raised before its envelope is d
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ error: { kind: "internal", code: "unauthenticated" } }, { status: 401 }),
   });
-  await assert.rejects(client.call("billing.calculate"), (error: unknown) =>
+	await assert.rejects(client.call("billing.calculate", null), (error: unknown) =>
     error instanceof MeldbaseInternalError && error.code === "unauthenticated" && error.status === 401 && error.operation === "RPC",
   );
   client.close();
@@ -437,7 +437,7 @@ test("RPC call propagates AbortSignal and rejects malformed success responses", 
 			return Response.json({ v: 1, type: "result", requestId: "wrong", result: encodeValue("ok"), unexpected: true });
 		},
 	});
-	await assert.rejects(client.call("echo", [], { signal: controller.signal }), /Malformed RPC response/);
+	await assert.rejects(client.call("echo", null, { signal: controller.signal }), /Malformed RPC response/);
 	client.close();
 });
 
@@ -454,7 +454,7 @@ test("realtime RPC preserves typed values and closes a call-only socket when set
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
   });
   const pending = client.call<{ readonly total: bigint; readonly bytes: Uint8Array }>(
-    "billing.calculate", [9223372036854775807n], { transport: "realtime", idempotencyKey: "abcdefghijklmnopqrstuv" },
+    "billing.calculate", 9223372036854775807n, { transport: "realtime", idempotencyKey: "abcdefghijklmnopqrstuv" },
   );
   await settle();
   assert.equal(ticketRequests, 1);
@@ -464,7 +464,7 @@ test("realtime RPC preserves typed values and closes a call-only socket when set
   socket.message({ v: 1, type: "authenticated" });
   const call = JSON.parse(socket.sent[1] as string) as Record<string, unknown>;
   assert.equal(call.idempotencyKey, "abcdefghijklmnopqrstuv");
-  assert.deepEqual(call.arguments, [{ t: "int64", v: "9223372036854775807" }]);
+  assert.deepEqual(call.input, { t: "int64", v: "9223372036854775807" });
   socket.message({
     v: 1, type: "result", requestId: call.requestId,
     result: encodeValue({ total: 9223372036854775807n, bytes: new Uint8Array([0, 255]) }),
@@ -490,13 +490,13 @@ test("realtime RPC multiplexes with subscriptions, exposes errors, and sends can
   socket.message({ v: 1, type: "authenticated" });
   assert.equal((JSON.parse(socket.sent[1] as string) as { type: string }).type, "subscribe");
 
-  const successful = client.call("echo", ["ok"], { transport: "realtime" });
+  const successful = client.call("echo", "ok", { transport: "realtime" });
   const successCall = JSON.parse(socket.sent[2] as string) as Record<string, unknown>;
   socket.message({ v: 1, type: "result", requestId: successCall.requestId, result: encodeValue("ok") });
   assert.equal(await successful, "ok");
   assert.equal(socket.readyState, 1);
 
-  const failed = client.call("fail", [], { transport: "realtime" });
+  const failed = client.call("fail", null, { transport: "realtime" });
   const failedCall = JSON.parse(socket.sent[3] as string) as Record<string, unknown>;
   socket.message({ v: 1, type: "error", requestId: failedCall.requestId, error: { kind: "business", code: "billing.quota_exceeded" } });
   await assert.rejects(failed, (error: unknown) =>
@@ -505,7 +505,7 @@ test("realtime RPC multiplexes with subscriptions, exposes errors, and sends can
 
   const controller = new AbortController();
   const reason = new Error("caller stopped waiting");
-  const canceled = client.call("slow", [], { transport: "realtime", signal: controller.signal });
+  const canceled = client.call("slow", null, { transport: "realtime", signal: controller.signal });
   const canceledCall = JSON.parse(socket.sent[4] as string) as Record<string, unknown>;
   controller.abort(reason);
   await assert.rejects(canceled, (error: unknown) => error === reason);
@@ -530,7 +530,7 @@ test("realtime RPC disconnect reports unknown result and is never automatically 
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     reconnect: { minDelayMs: 1, maxDelayMs: 1 },
   });
-  const pending = client.call("charge", [10n], { transport: "realtime" });
+  const pending = client.call("charge", 10n, { transport: "realtime" });
   await settle();
   const socket = sockets[0] as FakeSocket;
   socket.open();
@@ -556,7 +556,7 @@ test("realtime RPC socket errors fail pending calls without retrying", async () 
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     reconnect: { minDelayMs: 1, maxDelayMs: 1 },
   });
-  const pending = client.call("charge", [], { transport: "realtime" });
+  const pending = client.call("charge", null, { transport: "realtime" });
   await settle();
   const socket = sockets[0] as FakeSocket;
   socket.open();
@@ -578,7 +578,7 @@ test("malformed realtime RPC terminal frames fail the shared connection closed",
     fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
     webSocketFactory: () => { socket = new FakeSocket(); return socket; },
   });
-  const pending = client.call("echo", [], { transport: "realtime" });
+  const pending = client.call("echo", null, { transport: "realtime" });
   await settle();
   const active = socket as unknown as FakeSocket;
   active.open();

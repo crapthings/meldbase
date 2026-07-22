@@ -53,6 +53,10 @@ export function cloneValue(value: Value, depth = 0): Value {
   if (value instanceof Uint8Array) return value.slice();
   if (Array.isArray(value)) return value.map((item) => cloneValue(item, depth + 1));
   if (typeof value === "object") {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new QueryValidationError("Objects must use a plain object prototype");
+    }
     const source = value as { readonly [key: string]: Value | undefined };
     const out: Record<string, Value> = Object.create(null) as Record<string, Value>;
     for (const key of Object.keys(value)) {

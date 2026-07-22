@@ -1,7 +1,7 @@
 import type { CountResult, DeleteResult, Document, GroupCountResult, InputDocument, MutationResult, MutationSpec, QuerySpec, Value } from "../types.js";
 import type { SnapshotListener, Unsubscribe } from "../observer.js";
 import { encodeMutationSpec } from "../mutation.js";
-import { assertDocumentID, assertSafeKey, newDocumentID } from "../safe-value.js";
+import { assertDocumentID, assertSafeKey, cloneValue, newDocumentID } from "../safe-value.js";
 import { decodeDocument, decodeValue, encodeInputDocument, encodeQuerySpec, encodeValue } from "../wire.js";
 import { decodeProtocolDescriptor, MELDBASE_PROTOCOL_VERSION, type ProtocolDescriptor } from "../protocol.js";
 import { RemoteCollection } from "./collection.js";
@@ -20,7 +20,6 @@ export class MeldbaseClient {
   readonly #maxInboundBytes: number;
   readonly #maxSnapshotDocuments: number;
   readonly #allowedRealtimeOrigins: ReadonlySet<string>;
-  readonly #maxRPCArguments: number;
   #closed = false;
 
   constructor(options: ClientOptions) {
@@ -29,7 +28,6 @@ export class MeldbaseClient {
     this.#accessToken = options.accessToken;
     this.#maxInboundBytes = positiveLimit(options.maxInboundBytes, 4 * 1024 * 1024, "maxInboundBytes");
     this.#maxSnapshotDocuments = positiveLimit(options.maxSnapshotDocuments, 10_000, "maxSnapshotDocuments");
-    this.#maxRPCArguments = positiveLimit(options.maxRPCArguments, 32, "maxRPCArguments");
     const base = new URL(this.#baseUrl);
     const defaultRealtimeOrigin = `${base.protocol === "https:" ? "wss:" : "ws:"}//${base.host}`;
     this.#allowedRealtimeOrigins = new Set((options.allowedRealtimeOrigins ?? [defaultRealtimeOrigin]).map(normalizeRealtimeOrigin));
@@ -40,15 +38,15 @@ export class MeldbaseClient {
   close(): void { if (this.#closed) return; this.#closed = true; this.#realtime.close(); }
   get realtimeProtocol(): ProtocolDescriptor | undefined { return this.#realtime.protocol; }
 
-  async call<T extends Value = Value>(method: string, args: readonly Value[] = [], options: CallOptions = {}): Promise<T> {
+  async call<T extends Value = Value>(method: string, input: Value, options: CallOptions = {}): Promise<T> {
     this.assertOpen();
     if (!/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(method)) throw new Error("Invalid RPC method name");
-    if (args.length > this.#maxRPCArguments) throw new Error("RPC argument limit exceeded");
+    const safeInput = cloneValue(input);
     if (options.transport !== undefined && options.transport !== "http" && options.transport !== "realtime") throw new Error("Invalid RPC transport");
     if (options.idempotencyKey !== undefined && !validRPCIdempotencyKey(options.idempotencyKey)) throw new Error("Invalid RPC idempotency key");
-    if (options.transport === "realtime") return this.#realtime.call<T>(method, args, options.signal, options.idempotencyKey);
+    if (options.transport === "realtime") return this.#realtime.call<T>(method, safeInput, options.signal, options.idempotencyKey);
     const requestId = crypto.randomUUID();
-    const response = await this.#fetch(`${this.#baseUrl}/v1/rpc`, { method: "POST", headers: await this.headers(), body: JSON.stringify({ v: MELDBASE_PROTOCOL_VERSION, type: "call", requestId, ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}), method, arguments: args.map(encodeValue) }), ...(options.signal ? { signal: options.signal } : {}) });
+    const response = await this.#fetch(`${this.#baseUrl}/v1/rpc`, { method: "POST", headers: await this.headers(), body: JSON.stringify({ v: MELDBASE_PROTOCOL_VERSION, type: "call", requestId, ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}), method, input: encodeValue(safeInput) }), ...(options.signal ? { signal: options.signal } : {}) });
     const body = await boundedJSON(response, this.#maxInboundBytes);
     if (!response.ok) {
       if (record(body) && exactKeys(body, ["v", "type", "requestId", "error"]) && body.v === MELDBASE_PROTOCOL_VERSION && body.type === "error" && body.requestId === requestId) {

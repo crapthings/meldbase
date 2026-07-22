@@ -1,0 +1,9 @@
+{
+  "formatVersion": 2,
+  "adminSchemaVersion": 18,
+  "root": "admin.Sample",
+  "extends": 17,
+  "removals": [
+    "server.rpcArguments"
+  ]
+}

@@ -240,8 +240,8 @@ are the authoritative boundary.
   guide](docs/observability.md), and [current capability audit](docs/mvp-audit.md).
 - **Extend Meldbase.** Read the [terminology and semantic boundaries](docs/terminology.md),
   [architecture](docs/architecture.md), [client
-  protocol](docs/client-protocol.md), [server worker SDK
-  guide](docs/guide/server-worker-sdk.md), and [CONTRIBUTING.md](CONTRIBUTING.md)
+  protocol](docs/client-protocol.md), [Worker SDK
+  guide](docs/guide/worker-sdk.md), and [CONTRIBUTING.md](CONTRIBUTING.md)
   before changing storage, protocols, or SDKs.
 
 Need a specific guide or API reference? Browse the **[documentation

@@ -81,7 +81,7 @@ type rpcIdempotencyAction struct {
 	store RPCIdempotencyStore
 }
 
-func newRPCIdempotencyClaim(actor Actor, envelope rpcCallEnvelope, arguments []meldbase.Value, sessionID [16]byte, retention time.Duration) (RPCIdempotencyClaim, error) {
+func newRPCIdempotencyClaim(actor Actor, envelope rpcCallEnvelope, input meldbase.Value, sessionID [16]byte, retention time.Duration) (RPCIdempotencyClaim, error) {
 	if envelope.IdempotencyKey == nil || !validRPCIdempotencyKey(*envelope.IdempotencyKey) || allZero16(sessionID) || retention <= 0 {
 		return RPCIdempotencyClaim{}, errors.New("invalid RPC idempotency claim")
 	}
@@ -100,13 +100,11 @@ func newRPCIdempotencyClaim(actor Actor, envelope rpcCallEnvelope, arguments []m
 	fingerprint := sha256.New()
 	writeHashFrame(fingerprint, []byte("meldbase-rpc-request-v1"))
 	writeHashFrame(fingerprint, []byte(envelope.Method))
-	for _, argument := range arguments {
-		canonical, err := meldbase.MarshalWireValue(argument)
-		if err != nil {
-			return RPCIdempotencyClaim{}, err
-		}
-		writeHashFrame(fingerprint, canonical)
+	canonical, err := meldbase.MarshalWireValue(input)
+	if err != nil {
+		return RPCIdempotencyClaim{}, err
 	}
+	writeHashFrame(fingerprint, canonical)
 	claim := RPCIdempotencyClaim{
 		KeyHash: sha256.Sum256([]byte(*envelope.IdempotencyKey)), SessionID: sessionID, ClaimID: claimID,
 		ExpiresAt: time.Now().UTC().Add(retention),

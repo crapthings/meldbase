@@ -56,7 +56,7 @@ func TestProtocolDescriptorsAreCanonicalAndConfigurationHonest(t *testing.T) {
 	configured := realtimeProtocolDescriptor(Config{
 		RPCIdempotencyStore: newMemoryIdempotencyStore(),
 		RPCTransactionalMethods: map[string]RPCTransactionalMethod{
-			"orders.create": func(context.Context, Actor, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
+			"orders.create": func(context.Context, Actor, meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error) {
 				return meldbase.Null(), nil
 			},
 		},
@@ -78,7 +78,7 @@ func TestRealtimeProtocolV1FrameVocabularyMatchesSharedContract(t *testing.T) {
 	contract := loadProtocolV1Contract(t)
 	wantClient := []protocolFrameContract{
 		{Type: "authenticate", Required: []string{"ticket", "type", "v"}},
-		{Type: "call", Required: []string{"arguments", "method", "requestId", "type", "v"}, Optional: []string{"idempotencyKey"}},
+		{Type: "call", Required: []string{"input", "method", "requestId", "type", "v"}, Optional: []string{"idempotencyKey"}},
 		{Type: "cancel", Required: []string{"requestId", "type", "v"}},
 		{Type: "ping", Required: []string{"type", "v"}},
 		{Type: "subscribe", Required: []string{"collection", "query", "requestId", "type", "v"}, Optional: []string{"mode", "resumeToken"}},
@@ -116,7 +116,7 @@ func TestWorkerProtocolV1ContractIsCanonical(t *testing.T) {
 	wantHub := []protocolFrameContract{
 		{Type: "authorize_query", Required: []string{"actor", "callId", "collection", "query", "type", "v"}},
 		{Type: "cancel", Required: []string{"callId", "type", "v"}},
-		{Type: "invoke", Required: []string{"actor", "arguments", "callId", "method", "mode", "type", "v"}},
+		{Type: "invoke", Required: []string{"actor", "callId", "input", "method", "mode", "type", "v"}},
 		{Type: "registered", Required: []string{"limits", "protocol", "sessionId", "type", "v"}},
 		{Type: "tx_error", Required: []string{"callId", "error", "opId", "type", "v"}},
 		{Type: "tx_result", Required: []string{"callId", "opId", "result", "type", "v"}},

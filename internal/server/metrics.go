@@ -20,7 +20,6 @@ type ServerStats struct {
 	RPCCanceled               uint64         `json:"rpcCanceled"`
 	RPCRejected               uint64         `json:"rpcRejected"`
 	RPCBusy                   uint64         `json:"rpcBusy"`
-	RPCArguments              uint64         `json:"rpcArguments"`
 	RPCRequestBytes           uint64         `json:"rpcRequestBytes"`
 	RPCResultBytes            uint64         `json:"rpcResultBytes"`
 	RPCTotalNanos             uint64         `json:"rpcTotalNanos"`
@@ -43,7 +42,7 @@ type serverMetrics struct {
 	rpcRequests, rpcActive                            atomic.Uint64
 	rpcSucceeded, rpcFailed, rpcCanceled              atomic.Uint64
 	rpcRejected, rpcBusy                              atomic.Uint64
-	rpcArguments, rpcRequestBytes                     atomic.Uint64
+	rpcRequestBytes                                   atomic.Uint64
 	rpcResultBytes, rpcTotalNanos                     atomic.Uint64
 	rpcMaxNanos                                       atomic.Uint64
 	rpcIdempotencyClaims, rpcIdempotencyReplays       atomic.Uint64
@@ -75,8 +74,8 @@ func (h *Handler) Stats() ServerStats {
 		RPCRequests:               h.metrics.rpcRequests.Load(), RPCActive: h.metrics.rpcActive.Load(),
 		RPCSucceeded: h.metrics.rpcSucceeded.Load(), RPCFailed: h.metrics.rpcFailed.Load(),
 		RPCCanceled: h.metrics.rpcCanceled.Load(), RPCRejected: h.metrics.rpcRejected.Load(), RPCBusy: h.metrics.rpcBusy.Load(),
-		RPCArguments: h.metrics.rpcArguments.Load(), RPCRequestBytes: h.metrics.rpcRequestBytes.Load(),
-		RPCResultBytes: h.metrics.rpcResultBytes.Load(), RPCTotalNanos: h.metrics.rpcTotalNanos.Load(),
+		RPCRequestBytes: h.metrics.rpcRequestBytes.Load(),
+		RPCResultBytes:  h.metrics.rpcResultBytes.Load(), RPCTotalNanos: h.metrics.rpcTotalNanos.Load(),
 		RPCMaxLatency:        time.Duration(h.metrics.rpcMaxNanos.Load()),
 		RPCIdempotencyClaims: h.metrics.rpcIdempotencyClaims.Load(), RPCIdempotencyReplays: h.metrics.rpcIdempotencyReplays.Load(),
 		RPCIdempotencyConflicts: h.metrics.rpcIdempotencyConflicts.Load(), RPCIdempotencyInProgress: h.metrics.rpcIdempotencyInProgress.Load(),
@@ -87,9 +86,8 @@ func (h *Handler) Stats() ServerStats {
 	}
 }
 
-func (h *Handler) beginRPC(arguments, requestBytes int) rpcMetricSpan {
+func (h *Handler) beginRPC(requestBytes int) rpcMetricSpan {
 	h.metrics.rpcActive.Add(1)
-	h.metrics.rpcArguments.Add(uint64(arguments))
 	h.metrics.rpcRequestBytes.Add(uint64(requestBytes))
 	return rpcMetricSpan{started: time.Now()}
 }

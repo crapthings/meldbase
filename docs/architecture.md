@@ -43,8 +43,8 @@ token and publishes business roots plus the terminal System record in one COW
 generation. Contention is a durable conflict, not an implicit method retry.
 Handlers may not hide external side effects inside this contract.
 
-Server JavaScript uses a separate trusted worker process and a language-neutral
-WebSocket control protocol. A private worker hub dynamically resolves methods
+The Worker SDK runs in a separate trusted Node.js process and uses a
+language-neutral WebSocket control protocol. A private worker hub dynamically resolves methods
 and data-only query read policies; it cannot bypass client RPC authorization or
 publish documents directly. Go predeclares every worker-managed collection,
 intersects Worker constraints with the local Authorizer and owns projection,

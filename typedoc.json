@@ -3,7 +3,7 @@
   "entryPoints": [
     "sdk/client",
     "sdk/react",
-    "sdk/server"
+    "sdk/worker"
   ],
   "entryPointStrategy": "packages",
   "name": "Meldbase TypeScript API",

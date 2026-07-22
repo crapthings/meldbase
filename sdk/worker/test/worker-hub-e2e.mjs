@@ -13,13 +13,13 @@ const worker = new MeldbaseWorker({
   workerId: "go-hub-e2e-worker",
   webSocketFactory: (workerURL, { headers }) => new WebSocket(workerURL, { headers }),
   methods: {
-    "sdk.echo": rpc((_context, args) => args[0] ?? null),
+    "sdk.echo": rpc((_context, input) => input),
     "sdk.reject": rpc(() => { throw new MeldbaseError("orders.already_paid", { retryAfter: 60n }); }),
-    "sdk.create": rpc.transactional(async ({ actor }, _args, transaction) => {
+    "sdk.create": rpc.transactional(async ({ actor }, _input, transaction) => {
       const id = await transaction.insert("items", { rank: 7n, workspace: actor.workspaceId, title: "created" });
       return transaction.get("items", id);
     }),
-    "sdk.exercise": rpc.transactional(async ({ actor }, _args, transaction) => {
+    "sdk.exercise": rpc.transactional(async ({ actor }, _input, transaction) => {
       const id = await transaction.insert("items", { rank: 1n, workspace: actor.workspaceId, title: "temporary" });
       await transaction.replace("items", id, { rank: 2n, workspace: actor.workspaceId, title: "replaced" });
       await transaction.update("items", id, compileUpdate({ $set: { title: "updated" } }));

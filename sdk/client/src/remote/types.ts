@@ -32,7 +32,6 @@ export interface ClientOptions {
   readonly maxInboundBytes?: number;
   readonly maxSnapshotDocuments?: number;
   readonly maxDeltaOperations?: number;
-  readonly maxRPCArguments?: number;
   readonly reconnect?: { readonly minDelayMs?: number; readonly maxDelayMs?: number };
 }
 

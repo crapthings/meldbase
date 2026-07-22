@@ -21,8 +21,8 @@ const packages = [
     ],
   },
   {
-    directory: "sdk/server",
-    name: "@meldbase/server",
+    directory: "sdk/worker",
+    name: "@meldbase/worker",
     expected: [
       "LICENSE", "README.md", "package.json",
       ...["definitions", "errors", "index", "protocol", "shared", "transaction", "types", "worker"]
@@ -129,7 +129,7 @@ function verifyRuntimeConsumer() {
     import { MeldbaseClient, MELDBASE_PROTOCOL_VERSION } from "@meldbase/client";
     import { LocalCollection as LocalSubpath } from "@meldbase/client/local";
     import { DEFAULT_QUERY_LIMITS } from "@meldbase/client/types";
-    import { MeldbaseWorker, rpc } from "@meldbase/server";
+    import { MeldbaseWorker, rpc } from "@meldbase/worker";
     import { useLiveQuery } from "@meldbase/react";
     assert.equal(typeof LocalSubpath, "function");
     assert.equal(MELDBASE_PROTOCOL_VERSION, 1);
@@ -159,11 +159,11 @@ function verifyTypeScriptConsumer() {
   writeFileSync(join(consumer, "smoke.ts"), `
     import type { Document, RemoteLiveQuery } from "@meldbase/client";
     import { LocalCollection } from "@meldbase/client/local";
-    import { rpc, type RPCDefinition } from "@meldbase/server";
+    import { rpc, type RPCDefinition } from "@meldbase/worker";
     import { useLiveQuery, type LiveQueryResult } from "@meldbase/react";
     const collection = new LocalCollection<Document>();
     const result: LiveQueryResult<Document> = useLiveQuery(collection.find());
-    const method: RPCDefinition = rpc((_context, values) => values[0] ?? null);
+    const method: RPCDefinition = rpc((_context, input) => input);
     declare const remote: RemoteLiveQuery<Document>;
     useLiveQuery(remote);
     void result; void method;

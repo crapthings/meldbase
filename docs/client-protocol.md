@@ -375,7 +375,7 @@ For dynamic authorization, deployments attach a shared `QueryPolicyLease` to
 the returned policy and revoke it when the backing authorization version
 changes. A policy without a lease is explicitly static for the lifetime of that
 request/subscription; the server does not poll the Authorizer on every commit.
-The server JavaScript SDK can supply an additional data-only policy for
+The Worker SDK can supply an additional data-only policy for
 Go-predeclared collections. Its constraint, path set, projection and cap are
 intersected with the local Authorizer; Worker disconnect revokes its lease and
 forces a safe resync instead of falling back to the local policy.
@@ -383,21 +383,22 @@ forces a safe resync instead of falling back to the local policy.
 ## RPC calls
 
 Application methods use the same closed typed-value codec rather than inventing
-a second JSON type system. The TypeScript API is intentionally close to
-`Meteor.call`, but returns a Promise and supports `AbortSignal`:
+a second JSON type system. Every RPC has one required input value; business
+methods normally use a named object, while arrays and scalars remain valid
+single inputs. The TypeScript API returns a Promise and supports `AbortSignal`:
 
 ```ts
-const result = await client.call("billing.calculate", [accountId, 10n], {
+const result = await client.call("billing.calculate", { accountId, amount: 10n }, {
   signal: controller.signal,
 });
 
-const realtimeResult = await client.call("billing.calculate", [accountId, 10n], {
+const realtimeResult = await client.call("billing.calculate", { accountId, amount: 10n }, {
   transport: "realtime",
   signal: controller.signal,
 });
 
 // Explicit caller retry identity; the SDK still never retries automatically.
-const receipt = await client.call("orders.checkout", [orderId], {
+const receipt = await client.call("orders.checkout", { orderId }, {
   idempotencyKey: crypto.randomUUID(),
 });
 ```
@@ -411,11 +412,11 @@ added after authentication are sent immediately on that socket. A call-only
 socket closes when its last call settles. Both transports use the same envelope:
 
 ```json
-{"v":1,"type":"call","requestId":"uuid","method":"billing.calculate","arguments":[{"t":"int64","v":"10"}]}
+{"v":1,"type":"call","requestId":"uuid","method":"billing.calculate","input":{"t":"object","v":[["amount",{"t":"int64","v":"10"}]]}}
 {"v":1,"type":"result","requestId":"uuid","result":{"t":"string","v":"accepted"}}
 ```
 
-Arguments and the single result are wire `Value`s, preserving Int64/`bigint`,
+The input and single result are wire `Value`s, preserving Int64/`bigint`,
 Date, Binary, arrays and safe objects. They contain no executable source,
 callbacks, prototypes or arbitrary class instances. Method names match
 `[A-Za-z][A-Za-z0-9_.-]{0,127}`.

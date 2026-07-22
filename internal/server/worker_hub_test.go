@@ -41,12 +41,12 @@ func (buffer *synchronizedBuffer) String() string {
 	return buffer.b.String()
 }
 
-func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
+func TestWorkerHubWorkerSDKEndToEnd(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skip("Node.js is required for the server SDK end-to-end test")
+		t.Skip("Node.js is required for the Worker SDK end-to-end test")
 	}
-	script, err := filepath.Abs(filepath.Join("..", "..", "sdk", "server", "test", "worker-hub-e2e.mjs"))
+	script, err := filepath.Abs(filepath.Join("..", "..", "sdk", "worker", "test", "worker-hub-e2e.mjs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(script), "..", "dist", "index.js")); err != nil {
-		t.Skip("server SDK is not built; run pnpm --filter @meldbase/server build first")
+		t.Skip("Worker SDK is not built; run pnpm --filter @meldbase/worker build first")
 	}
 
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "worker-sdk-e2e.meld2"))
@@ -109,13 +109,13 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 	defer cancel()
 	defer func() {
 		if err := command.Process.Signal(os.Interrupt); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			t.Errorf("stop server SDK worker: %v", err)
+			t.Errorf("stop Worker SDK worker: %v", err)
 		}
 		if err := command.Wait(); err != nil {
-			t.Errorf("server SDK worker exited: %v\n%s", err, output.String())
+			t.Errorf("Worker SDK worker exited: %v\n%s", err, output.String())
 		}
 		if err := ctx.Err(); err != nil {
-			t.Errorf("server SDK worker shutdown exceeded deadline: %v\n%s", err, output.String())
+			t.Errorf("Worker SDK worker shutdown exceeded deadline: %v\n%s", err, output.String())
 		}
 	}()
 
@@ -125,13 +125,13 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server SDK worker did not register\n%s", output.String())
+			t.Fatalf("Worker SDK worker did not register\n%s", output.String())
 		}
 		time.Sleep(time.Millisecond)
 	}
-	response := postRPC(t, public.URL, "sdk.echo", `{"version":1,"arguments":[{"t":"int64","v":"42"}]}`, true)
+	response := postRPC(t, public.URL, "sdk.echo", `{"version":1,"input":{"t":"int64","v":"42"}}`, true)
 	assertRPCResultInt(t, response, 42)
-	transaction := postIdempotentRPC(t, public.URL, "sdk.create", "worker_sdk_e2e_key_0001", []any{})
+	transaction := postIdempotentRPC(t, public.URL, "sdk.create", "worker_sdk_e2e_key_0001", rpcNullInput())
 	if transaction.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(transaction.Body)
 		transaction.Body.Close()
@@ -141,7 +141,7 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 	if stats := db.Stats(); stats.Documents != 1 || stats.Collections != 1 {
 		t.Fatalf("transaction did not commit through Go: %+v", stats)
 	}
-	exercise := postIdempotentRPC(t, public.URL, "sdk.exercise", "worker_sdk_e2e_key_0002", []any{})
+	exercise := postIdempotentRPC(t, public.URL, "sdk.exercise", "worker_sdk_e2e_key_0002", rpcNullInput())
 	if exercise.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(exercise.Body)
 		exercise.Body.Close()
@@ -183,7 +183,7 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 		t.Fatalf("read-policy response=%s", result.Documents)
 	}
 	if !strings.Contains(output.String(), "ready") {
-		t.Fatalf("server SDK worker did not complete startup\n%s", output.String())
+		t.Fatalf("Worker SDK worker did not complete startup\n%s", output.String())
 	}
 }
 
@@ -217,12 +217,11 @@ func TestWorkerHubRoutesTypedRPCAndUnregistersOnDisconnect(t *testing.T) {
 			workerDone <- io.ErrUnexpectedEOF
 			return
 		}
-		arguments, _ := message["arguments"].([]any)
 		workerDone <- writeSocketJSON(workerContext, worker, map[string]any{
-			"v": protocolVersion, "type": "result", "callId": message["callId"], "result": arguments[0],
+			"v": protocolVersion, "type": "result", "callId": message["callId"], "result": message["input"],
 		})
 	}()
-	response := postRPC(t, api.URL, "math.echo", `{"version":1,"arguments":[{"t":"int64","v":"42"}]}`, true)
+	response := postRPC(t, api.URL, "math.echo", `{"version":1,"input":{"t":"int64","v":"42"}}`, true)
 	assertRPCResultInt(t, response, 42)
 	if err := <-workerDone; err != nil {
 		t.Fatal(err)
@@ -451,7 +450,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 		})
 	}()
 	key := "workertransaction00001"
-	if got := readRPCStringResult(t, postIdempotentRPC(t, api.URL, "orders.create", key, []any{})); got != "worker-created" {
+	if got := readRPCStringResult(t, postIdempotentRPC(t, api.URL, "orders.create", key, rpcNullInput())); got != "worker-created" {
 		t.Fatalf("worker result=%q", got)
 	}
 	if err := <-workerDone; err != nil {
@@ -480,7 +479,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 	if stats := hub.Stats(); stats.CallsSucceeded != 1 || stats.TransactionOps != 4 || stats.PolicyInvalidations != 1 {
 		t.Fatalf("transaction worker stats=%+v", stats)
 	}
-	if got := readRPCStringResult(t, postIdempotentRPC(t, api.URL, "orders.create", key, []any{})); got != "worker-created" {
+	if got := readRPCStringResult(t, postIdempotentRPC(t, api.URL, "orders.create", key, rpcNullInput())); got != "worker-created" {
 		t.Fatalf("worker replay=%q", got)
 	}
 	if stats := hub.Stats(); stats.CallsStarted != 1 || db.Stats().CommitSequence != 2 {
@@ -511,11 +510,11 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 		})
 	}()
 	invalidOnlyKey := "workertransaction00002"
-	assertRPCError(t, postIdempotentRPC(t, api.URL, "orders.invalidate", invalidOnlyKey, []any{}), http.StatusBadRequest, "rpc_transaction_requires_write")
+	assertRPCError(t, postIdempotentRPC(t, api.URL, "orders.invalidate", invalidOnlyKey, rpcNullInput()), http.StatusBadRequest, "rpc_transaction_requires_write")
 	if err := <-invalidOnlyDone; err != nil {
 		t.Fatal(err)
 	}
-	assertRPCError(t, postIdempotentRPC(t, api.URL, "orders.invalidate", invalidOnlyKey, []any{}), http.StatusBadRequest, "rpc_transaction_requires_write")
+	assertRPCError(t, postIdempotentRPC(t, api.URL, "orders.invalidate", invalidOnlyKey, rpcNullInput()), http.StatusBadRequest, "rpc_transaction_requires_write")
 	if generation, exists, err := policyStore.LoadPolicyGeneration(context.Background(), "orders"); err != nil || !exists || generation != committedReadPolicy.generation {
 		t.Fatalf("invalid-only generation=%x exists=%v err=%v", generation, exists, err)
 	}
@@ -872,7 +871,7 @@ func TestWorkerHubCannotShadowReservedLocalMethod(t *testing.T) {
 	_, err := New(Config{
 		DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{},
 		PublicRealtimeURL: "ws://placeholder.invalid/v1/realtime", ResumeTokenKey: []byte("0123456789abcdef0123456789abcdef"),
-		RPCMethods: map[string]RPCMethod{"local.method": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+		RPCMethods: map[string]RPCMethod{"local.method": func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Null(), nil
 		}},
 		RPCMethodResolver: hub, RPCAuthorizer: rpcTestAuthorizer{allow: true},

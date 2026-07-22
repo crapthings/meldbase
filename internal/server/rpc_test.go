@@ -29,32 +29,33 @@ func (authorizer rpcTestAuthorizer) AuthorizeRPC(_ context.Context, actor Actor,
 func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 	var calls atomic.Uint64
 	methods := map[string]RPCMethod{
-		"math.add": func(_ context.Context, actor Actor, arguments []meldbase.Value) (meldbase.Value, error) {
+		"math.add": func(_ context.Context, actor Actor, input meldbase.Value) (meldbase.Value, error) {
 			calls.Add(1)
-			if actor.WorkspaceID != "mine" || len(arguments) != 2 {
+			values, ok := input.ArrayValue()
+			if actor.WorkspaceID != "mine" || !ok || len(values) != 2 {
 				return meldbase.Value{}, errors.New("bad invocation")
 			}
-			left, leftOK := arguments[0].Int64()
-			right, rightOK := arguments[1].Int64()
+			left, leftOK := values[0].Int64()
+			right, rightOK := values[1].Int64()
 			if !leftOK || !rightOK {
-				return meldbase.Value{}, &MeldbaseError{Code: "math.invalid_arguments"}
+				return meldbase.Value{}, &MeldbaseError{Code: "math.invalid_input"}
 			}
 			return meldbase.Int(left + right), nil
 		},
-		"fails": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+		"fails": func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Value{}, errors.New("secret database detail")
 		},
-		"panics": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+		"panics": func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 			panic("secret panic detail")
 		},
-		"forbidden": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+		"forbidden": func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 			calls.Add(1)
 			return meldbase.Null(), nil
 		},
 	}
 	_, handler, server := newRPCServer(t, methods, rpcTestAuthorizer{allow: true}, Config{})
 
-	response := postRPC(t, server.URL, "math.add", `{"version":1,"arguments":[{"t":"int64","v":"9223372036854775800"},{"t":"int64","v":"7"}]}`, true)
+	response := postRPC(t, server.URL, "math.add", `{"version":1,"input":{"t":"array","v":[{"t":"int64","v":"9223372036854775800"},{"t":"int64","v":"7"}]}}`, true)
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("success status=%d", response.StatusCode)
@@ -80,14 +81,14 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"math.add", `{"version":1,"arguments":[]}`, false, http.StatusUnauthorized, "unauthenticated"},
-		{"missing", `{"version":1,"arguments":[]}`, true, http.StatusNotFound, "rpc_not_found"},
-		{"forbidden", `{"version":1,"arguments":[]}`, true, http.StatusForbidden, "forbidden"},
+		{"math.add", `{"version":1,"input":{"t":"null"}}`, false, http.StatusUnauthorized, "unauthenticated"},
+		{"missing", `{"version":1,"input":{"t":"null"}}`, true, http.StatusNotFound, "rpc_not_found"},
+		{"forbidden", `{"version":1,"input":{"t":"null"}}`, true, http.StatusForbidden, "forbidden"},
 		{"math.add", `{"version":1}`, true, http.StatusBadRequest, "invalid_rpc_envelope"},
-		{"math.add", `{"version":1,"arguments":[{"t":"unknown"}]}`, true, http.StatusBadRequest, "invalid_rpc_argument"},
-		{"math.add", `{"version":1,"arguments":[{"t":"string","v":"x"},{"t":"int64","v":"1"}]}`, true, http.StatusBadRequest, "math.invalid_arguments"},
-		{"fails", `{"version":1,"arguments":[]}`, true, http.StatusInternalServerError, "internal"},
-		{"panics", `{"version":1,"arguments":[]}`, true, http.StatusInternalServerError, "internal"},
+		{"math.add", `{"version":1,"input":{"t":"unknown"}}`, true, http.StatusBadRequest, "invalid_rpc_argument"},
+		{"math.add", `{"version":1,"input":{"t":"string","v":"x"}}`, true, http.StatusBadRequest, "math.invalid_input"},
+		{"fails", `{"version":1,"input":{"t":"null"}}`, true, http.StatusInternalServerError, "internal"},
+		{"panics", `{"version":1,"input":{"t":"null"}}`, true, http.StatusInternalServerError, "internal"},
 	} {
 		response := postRPC(t, server.URL, scenario.method, scenario.body, scenario.auth)
 		body, _ := io.ReadAll(response.Body)
@@ -108,7 +109,7 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 	}
 	stats := handler.Stats()
 	if stats.RPCRequests != 7 || stats.RPCActive != 0 || stats.RPCSucceeded != 1 || stats.RPCFailed != 3 ||
-		stats.RPCCanceled != 0 || stats.RPCRejected != 3 || stats.RPCBusy != 0 || stats.RPCArguments != 4 ||
+		stats.RPCCanceled != 0 || stats.RPCRejected != 3 || stats.RPCBusy != 0 ||
 		stats.RPCRequestBytes == 0 || stats.RPCResultBytes == 0 || stats.RPCTotalNanos == 0 || stats.RPCMaxLatency <= 0 {
 		t.Fatalf("RPC stats=%+v", stats)
 	}
@@ -116,14 +117,14 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 
 func TestHTTPRPCIngressRejectsDuplicateJSONKeysBeforeMethodExecution(t *testing.T) {
 	var calls atomic.Uint64
-	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return meldbase.Null(), nil
 	}
 	_, handler, server := newRPCServer(t, map[string]RPCMethod{"safe": method}, rpcTestAuthorizer{allow: true}, Config{})
 	for _, body := range []string{
-		`{"v":1,"v":1,"type":"call","requestId":"duplicate-version","method":"safe","arguments":[]}`,
-		`{"v":1,"type":"call","requestId":"duplicate-value","method":"safe","arguments":[{"t":"string","v":"first","v":"second"}]}`,
+		`{"v":1,"v":1,"type":"call","requestId":"duplicate-version","method":"safe","input":{"t":"null"}}`,
+		`{"v":1,"type":"call","requestId":"duplicate-value","method":"safe","input":{"t":"string","v":"first","v":"second"}}`,
 	} {
 		request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/rpc", strings.NewReader(body))
 		if err != nil {
@@ -149,28 +150,35 @@ func TestHTTPRPCIngressRejectsDuplicateJSONKeysBeforeMethodExecution(t *testing.
 	}
 }
 
+func TestRPCCallEnvelopeRejectsLegacyArgumentsField(t *testing.T) {
+	_, err := decodeRPCCallEnvelope([]byte(`{"v":1,"type":"call","requestId":"legacy","method":"safe","input":{"t":"null"},"arguments":[]}`))
+	if err == nil {
+		t.Fatal("legacy arguments field was accepted")
+	}
+}
+
 func TestRPCMapsDatabaseAvailabilityWithoutLeakingEngineErrors(t *testing.T) {
-	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Value{}, errors.Join(errors.New("private disk detail"), meldbase.ErrDurability)
 	}
 	_, _, server := newRPCServer(t, map[string]RPCMethod{"failstop": method}, rpcTestAuthorizer{allow: true}, Config{})
-	response := postRPC(t, server.URL, "failstop", `{"version":1,"arguments":[]}`, true)
+	response := postRPC(t, server.URL, "failstop", `{"version":1,"input":{"t":"null"}}`, true)
 	assertRPCError(t, response, http.StatusServiceUnavailable, "database_unavailable")
 }
 
 func TestRPCMapsCommitOutcomeUnknownWithoutInvitingRetry(t *testing.T) {
-	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Value{}, errors.Join(meldbase.ErrCommitOutcomeUnknown, context.Canceled)
 	}
 	_, _, server := newRPCServer(t, map[string]RPCMethod{"uncertain": method}, rpcTestAuthorizer{allow: true}, Config{})
-	response := postRPC(t, server.URL, "uncertain", `{"version":1,"arguments":[]}`, true)
+	response := postRPC(t, server.URL, "uncertain", `{"version":1,"input":{"t":"null"}}`, true)
 	assertRPCError(t, response, http.StatusConflict, "rpc_outcome_unknown")
 }
 
 func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	original := map[string]RPCMethod{
-		"wait": func(ctx context.Context, _ Actor, _ []meldbase.Value) (meldbase.Value, error) {
+		"wait": func(ctx context.Context, _ Actor, _ meldbase.Value) (meldbase.Value, error) {
 			close(started)
 			select {
 			case <-release:
@@ -182,24 +190,24 @@ func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 	}
 	_, _, server := newRPCServer(t, original, rpcTestAuthorizer{allow: true}, Config{MaxConcurrentRPC: 1})
 	delete(original, "wait")
-	original["injected"] = func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	original["injected"] = func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Null(), nil
 	}
 
 	firstDone := make(chan *http.Response, 1)
-	go func() { firstDone <- postRPC(t, server.URL, "wait", `{"version":1,"arguments":[]}`, true) }()
+	go func() { firstDone <- postRPC(t, server.URL, "wait", `{"version":1,"input":{"t":"null"}}`, true) }()
 	select {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("first RPC did not start")
 	}
-	busy := postRPC(t, server.URL, "wait", `{"version":1,"arguments":[]}`, true)
+	busy := postRPC(t, server.URL, "wait", `{"version":1,"input":{"t":"null"}}`, true)
 	busyBody, _ := io.ReadAll(busy.Body)
 	busy.Body.Close()
 	if busy.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(busyBody), `"rpc_busy"`) {
 		t.Fatalf("busy status=%d body=%s", busy.StatusCode, busyBody)
 	}
-	injected := postRPC(t, server.URL, "injected", `{"version":1,"arguments":[]}`, true)
+	injected := postRPC(t, server.URL, "injected", `{"version":1,"input":{"t":"null"}}`, true)
 	_ = injected.Body.Close()
 	if injected.StatusCode != http.StatusNotFound {
 		t.Fatalf("mutated registry method status=%d", injected.StatusCode)
@@ -215,7 +223,7 @@ func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 func TestRPCClientCancellationPropagatesToMethodContext(t *testing.T) {
 	started, canceled := make(chan struct{}), make(chan struct{})
 	methods := map[string]RPCMethod{
-		"cancel": func(ctx context.Context, _ Actor, _ []meldbase.Value) (meldbase.Value, error) {
+		"cancel": func(ctx context.Context, _ Actor, _ meldbase.Value) (meldbase.Value, error) {
 			close(started)
 			<-ctx.Done()
 			close(canceled)
@@ -224,7 +232,7 @@ func TestRPCClientCancellationPropagatesToMethodContext(t *testing.T) {
 	}
 	_, _, server := newRPCServer(t, methods, rpcTestAuthorizer{allow: true}, Config{})
 	ctx, cancel := context.WithCancel(context.Background())
-	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/rpc", strings.NewReader(`{"v":1,"type":"call","requestId":"cancel-1","method":"cancel","arguments":[]}`))
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/rpc", strings.NewReader(`{"v":1,"type":"call","requestId":"cancel-1","method":"cancel","input":{"t":"null"}}`))
 	request.Header.Set("authorization", "Bearer valid")
 	request.Header.Set("content-type", "application/json")
 	done := make(chan error, 1)
@@ -257,7 +265,7 @@ func TestRPCConfigurationRequiresExplicitSafeBounds(t *testing.T) {
 	base := Config{
 		DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{},
 		PublicRealtimeURL: "ws://example.invalid/v1/realtime",
-		RPCMethods: map[string]RPCMethod{"ok": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+		RPCMethods: map[string]RPCMethod{"ok": func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Null(), nil
 		}},
 	}
@@ -277,10 +285,10 @@ func TestRPCConfigurationRequiresExplicitSafeBounds(t *testing.T) {
 
 func TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors(t *testing.T) {
 	methods := map[string]RPCMethod{
-		"echo": func(_ context.Context, _ Actor, arguments []meldbase.Value) (meldbase.Value, error) {
-			return meldbase.Array(arguments...), nil
+		"echo": func(_ context.Context, _ Actor, input meldbase.Value) (meldbase.Value, error) {
+			return input, nil
 		},
-		"reject": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+		"reject": func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 			return meldbase.Value{}, &MeldbaseError{Code: "orders.not_ready"}
 		},
 	}
@@ -290,7 +298,7 @@ func TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors(t *testing.T) 
 
 	if err := writeSocketJSON(ctx, connection, map[string]any{
 		"v": 1, "type": "call", "requestId": "ws-1", "method": "echo",
-		"arguments": []any{map[string]any{"t": "int64", "v": "9223372036854775807"}, map[string]any{"t": "binary", "v": "AP8="}},
+		"input": map[string]any{"t": "array", "v": []any{map[string]any{"t": "int64", "v": "9223372036854775807"}, map[string]any{"t": "binary", "v": "AP8="}}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +322,7 @@ func TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors(t *testing.T) 
 		t.Fatalf("binary=%v/%t", binary, ok)
 	}
 
-	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "call", "requestId": "ws-2", "method": "reject", "arguments": []any{}}); err != nil {
+	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "call", "requestId": "ws-2", "method": "reject", "input": map[string]any{"t": "null"}}); err != nil {
 		t.Fatal(err)
 	}
 	rejected := readMap(t, ctx, connection)
@@ -334,8 +342,8 @@ func TestWebSocketRPCCancelDuplicateLimitAndDisconnect(t *testing.T) {
 	started := make(chan string, 4)
 	canceled := make(chan string, 4)
 	methods := map[string]RPCMethod{
-		"wait": func(ctx context.Context, _ Actor, arguments []meldbase.Value) (meldbase.Value, error) {
-			name, _ := arguments[0].StringValue()
+		"wait": func(ctx context.Context, _ Actor, input meldbase.Value) (meldbase.Value, error) {
+			name, _ := input.StringValue()
 			started <- name
 			<-ctx.Done()
 			canceled <- name
@@ -349,7 +357,7 @@ func TestWebSocketRPCCancelDuplicateLimitAndDisconnect(t *testing.T) {
 		t.Helper()
 		if err := writeSocketJSON(ctx, connection, map[string]any{
 			"v": 1, "type": "call", "requestId": requestID, "method": "wait",
-			"arguments": []any{map[string]any{"t": "string", "v": name}},
+			"input": map[string]any{"t": "string", "v": name},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -425,7 +433,6 @@ func newRPCServer(t *testing.T, methods map[string]RPCMethod, authorizer RPCAuth
 		PublicRealtimeURL: "ws://placeholder.invalid/v1/realtime", ResumeTokenKey: []byte("0123456789abcdef0123456789abcdef"),
 		MaxBodyBytes: 1 << 16, RPCMethods: methods, RPCAuthorizer: authorizer,
 		MaxConcurrentRPC: overrides.MaxConcurrentRPC, MaxRPCPerConnection: overrides.MaxRPCPerConnection,
-		MaxRPCArguments:             overrides.MaxRPCArguments,
 		MaxRPCResultBytes:           overrides.MaxRPCResultBytes,
 		RPCIdempotencyStore:         overrides.RPCIdempotencyStore,
 		RPCIdempotencyRetention:     overrides.RPCIdempotencyRetention,
@@ -469,18 +476,18 @@ func socketRPCErrorCode(message map[string]any) string {
 func postRPC(t *testing.T, serverURL, method, body string, authenticated bool) *http.Response {
 	t.Helper()
 	var legacy struct {
-		Version   int             `json:"version"`
-		Arguments json.RawMessage `json:"arguments"`
+		Version int             `json:"version"`
+		Input   json.RawMessage `json:"input"`
 	}
 	if err := json.Unmarshal([]byte(body), &legacy); err != nil {
 		t.Fatal(err)
 	}
-	var arguments any
-	if len(legacy.Arguments) > 0 {
-		arguments = json.RawMessage(legacy.Arguments)
+	var input any
+	if len(legacy.Input) > 0 {
+		input = json.RawMessage(legacy.Input)
 	}
 	envelope, err := json.Marshal(map[string]any{
-		"v": legacy.Version, "type": "call", "requestId": "request-1", "method": method, "arguments": arguments,
+		"v": legacy.Version, "type": "call", "requestId": "request-1", "method": method, "input": input,
 	})
 	if err != nil {
 		t.Fatal(err)

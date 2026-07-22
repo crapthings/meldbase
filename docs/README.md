@@ -27,8 +27,8 @@ copying it into a guide, reference, or design note.
 - [Client SDK API guide](reference/client-sdk.md)
 - [Client HTTP/WebSocket protocol](client-protocol.md)
 - [RPC idempotency](rpc-idempotency.md)
-- [Server worker SDK guide and examples](guide/server-worker-sdk.md)
-- [Server worker protocol](server-js-sdk.md)
+- [Worker SDK guide and examples](guide/worker-sdk.md)
+- [Worker control protocol](worker-protocol.md)
 
 ## Operations and qualification
 

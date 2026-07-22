@@ -26,7 +26,8 @@ The workspace packages are currently a preview and are not published to npm:
 - `@meldbase/client` — remote HTTP/WebSocket client and shared query types.
 - `@meldbase/client/local` — explicit standalone in-memory collections.
 - `@meldbase/react` — `useLiveQuery` adapter for the client query object.
-- `@meldbase/server` — authenticated Node.js worker control boundary.
+- `@meldbase/worker` — trusted Node.js Worker control boundary; it is not the
+  Meldbase server or a client endpoint.
 
 `LocalCollection` and `RemoteCollection` share a query grammar, not a promise
 of identical authority, synchronization, or method sets. The local subpath is
@@ -37,9 +38,9 @@ before switching an application flow between them.
 Start with the [client SDK API guide](./client-sdk) for user-facing methods,
 purposes, and examples. The generated [TypeScript API reference](/api/typescript/)
 is published with this site from the exact SDK source in each release and is the
-symbol-level reference. Use the [server worker SDK guide](../guide/server-worker-sdk)
+symbol-level reference. Use the [Worker SDK guide](../guide/worker-sdk)
 for integration patterns, examples, and lifecycle guidance; use the [worker
-protocol](../server-js-sdk) for its control-plane contract.
+control protocol](../worker-protocol) for its control-plane contract.
 
 ## Transport and CLI
 

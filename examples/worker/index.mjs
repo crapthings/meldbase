@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 
 import { compileQuery } from "@meldbase/client";
-import { MeldbaseError, MeldbaseWorker, readPolicy, rpc } from "@meldbase/server";
+import { MeldbaseError, MeldbaseWorker, readPolicy, rpc } from "@meldbase/worker";
 
 const token = process.env.MELDBASE_WORKER_TOKEN;
 if (!token) throw new Error("MELDBASE_WORKER_TOKEN is required");

@@ -1,12 +1,12 @@
 {
-  "name": "@meldbase/server",
+  "name": "@meldbase/worker",
   "version": "0.1.0-alpha.11",
   "description": "Trusted Node.js method and data-only read-policy worker SDK for Meldbase",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/crapthings/meldbase.git",
-    "directory": "sdk/server"
+    "directory": "sdk/worker"
   },
   "homepage": "https://github.com/crapthings/meldbase#readme",
   "bugs": "https://github.com/crapthings/meldbase/issues",

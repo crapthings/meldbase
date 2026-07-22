@@ -1,8 +1,9 @@
-# Server worker SDK guide
+# Worker SDK guide
 
-`@meldbase/server` lets a trusted Node.js process add **named application
-operations** and **read-visibility policies** to a Meldbase server. It is the
-place for server-side business rules that should not run in a browser.
+`@meldbase/worker` is a trusted Worker SDK, not the Meldbase server. Clients
+connect to Go; this package connects to Go's private control endpoint to add
+**named application operations** and optional **read-visibility narrowing**.
+It is the place for trusted business rules that should not run in a browser.
 
 It is deliberately not a general database client and it is not an accounts or
 user-management system. Your application still owns users, passwords, sessions,
@@ -14,22 +15,22 @@ Use the worker when you need one of these three things:
 
 | Need | Helper | Handler receives | Typical use |
 | --- | --- | --- | --- |
-| A named non-atomic server operation | `rpc` | actor, args, cancellation signal | calculate a quote; call an idempotent internal service |
-| A named operation with atomic Meldbase point writes | `rpc.transactional` | actor, args, `WriteTransaction` | create an order; change an owned record's state |
+| A named non-atomic server operation | `rpc` | actor, input, cancellation signal | calculate a quote; call an idempotent internal service |
+| A named operation with atomic Meldbase point writes | `rpc.transactional` | actor, input, `WriteTransaction` | create an order; change an owned record's state |
 | Per-user visibility for HTTP queries and realtime subscriptions | `readPolicy` | actor, requested query | show only documents owned by the current user |
 
 The worker connects to Meldbase's **private** worker control endpoint. Do not
 put its URL or token in a browser bundle. For the corresponding Go hub setup,
 protocol frames, and security guarantees, see the
-[server worker protocol](../server-js-sdk).
+[Worker control protocol](../worker-protocol).
 
 ## Start a worker
 
-Install the server SDK, the shared query helpers, and a WebSocket implementation
+Install the Worker SDK, the shared query helpers, and a WebSocket implementation
 in the trusted Node.js application:
 
 ```sh
-pnpm add @meldbase/server @meldbase/client ws
+pnpm add @meldbase/worker @meldbase/client ws
 ```
 
 This small worker exposes one ordinary RPC. The method name is part of your
@@ -37,11 +38,11 @@ application's API, so keep it stable and descriptive.
 
 ```ts
 import WebSocket from "ws";
-import { MeldbaseError, MeldbaseWorker, rpc } from "@meldbase/server";
+import { MeldbaseError, MeldbaseWorker, rpc } from "@meldbase/worker";
 import type { Value } from "@meldbase/client";
 
-function requiredString(args: readonly Value[], index: number): string {
-  const value = args[index];
+function requiredString(input: Value): string {
+  const value = input;
   if (typeof value !== "string" || value.length === 0) {
     throw new MeldbaseError("orders.invalid_argument");
   }
@@ -57,8 +58,8 @@ const worker = new MeldbaseWorker({
   workerId: "orders-worker-1",
   webSocketFactory: (url, { headers }) => new WebSocket(url, { headers }),
   methods: {
-    "orders.echo": rpc(({ actor }, args) => {
-      const message = requiredString(args, 0);
+    "orders.echo": rpc(({ actor }, input) => {
+      const message = requiredString(input);
       return {
         message,
         id: actor.id,
@@ -87,11 +88,10 @@ query parameters, or fragment. Use a full `wss://` URL when the private control
 endpoint has a nonstandard path; reserve `ws://` for local development and
 tests.
 
-Arguments have the shared `Value` type rather than an application-specific
-schema. Validate their number, type, range, and ownership before performing any
-business action. A small validation function such as `requiredString` makes the
-boundary clear and keeps AI-generated handlers from treating untrusted input as
-typed data.
+Input has the shared `Value` type rather than an application-specific schema.
+Validate its shape, type, range, and ownership before performing any business
+action. A small validation function such as `requiredString` makes the boundary
+clear and keeps AI-generated handlers from treating untrusted input as typed data.
 
 ## Ordinary RPC: `rpc`
 
@@ -101,7 +101,7 @@ typed data.
 - `context.actor.workspaceId` — the authenticated active-workspace identifier;
 - `context.signal` — aborted when the client call is canceled or the worker
   connection ends;
-- `args` — the typed values sent to the method.
+- `input` — the one typed value sent to the method.
 
 Use it for computation, reads from an application service, or a downstream call
 that already has its own idempotency contract. A normal RPC has no Meldbase
@@ -111,8 +111,8 @@ best-effort: pass the signal to cancellable work, but do not assume a canceled
 request proves that an external side effect did not happen.
 
 ```ts
-"orders.quote": rpc(async ({ actor, signal }, args) => {
-  const sku = requiredString(args, 0);
+"orders.quote": rpc(async ({ actor, signal }, input) => {
+  const sku = requiredString(input);
   const quote = await pricingService.quote({
     accountID: actor.id,
     workspaceID: actor.workspaceId,
@@ -159,11 +159,11 @@ will reject concurrent transaction operations. Use `compileUpdate` from
 
 ```ts
 import { compileUpdate } from "@meldbase/client";
-import { MeldbaseError, rpc } from "@meldbase/server";
+import { MeldbaseError, rpc } from "@meldbase/worker";
 
 const methods = {
-  "orders.create": rpc.transactional(async ({ actor }, args, tx) => {
-    const description = requiredString(args, 0);
+  "orders.create": rpc.transactional(async ({ actor }, input, tx) => {
+    const description = requiredString(input);
 
     const id = await tx.insert("orders", {
       workspace: actor.workspaceId,
@@ -181,8 +181,8 @@ const methods = {
     return { id, status: "submitted" };
   }),
 
-  "orders.cancel": rpc.transactional(async ({ actor }, args, tx) => {
-    const id = requiredString(args, 0);
+  "orders.cancel": rpc.transactional(async ({ actor }, input, tx) => {
+    const id = requiredString(input);
     const order = await tx.get("orders", id);
 
     if (order.owner !== actor.id || order.workspace !== actor.workspaceId) {
@@ -219,7 +219,7 @@ its local authorizer, so both sides must allow the read.
 
 ```ts
 import { compileQuery } from "@meldbase/client";
-import { readPolicy } from "@meldbase/server";
+import { readPolicy } from "@meldbase/worker";
 
 const readPolicies = {
   orders: readPolicy({
@@ -290,5 +290,5 @@ legacy control frame. This is a local SDK compatibility error, not a
   only when an external collection changes their visibility meaning.
 
 For the complete control-plane contract and Go hub setup, continue to the
-[server worker protocol](../server-js-sdk). The generated
+[Worker control protocol](../worker-protocol). The generated
 [TypeScript API reference](../api/typescript/) is the symbol-level reference.

@@ -22,17 +22,17 @@ var (
 const maxRPCErrorDataBytes = 64 << 10
 
 // RPCMethod is a bounded, authenticated non-atomic application operation.
-// Arguments and results use Meldbase's closed Value model, preserving Int64,
+// Input and results use Meldbase's closed Value model, preserving Int64,
 // Date, Binary and object semantics across Go and JavaScript. Any database
 // write or external effect a handler reaches outside a WriteTransaction is not
 // atomic with its RPC terminal result.
-type RPCMethod func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error)
+type RPCMethod func(context.Context, Actor, meldbase.Value) (meldbase.Value, error)
 
 // RPCTransactionalMethod stages point writes against a short immutable
 // snapshot. A successful result and all staged writes share one durable
 // publication with the RPC idempotency terminal record after optimistic commit
 // validation.
-type RPCTransactionalMethod func(context.Context, Actor, []meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error)
+type RPCTransactionalMethod func(context.Context, Actor, meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error)
 
 // RPCMethodResolver resolves dynamic trusted-worker methods. It is consulted
 // only after the immutable local registry misses.
@@ -46,7 +46,7 @@ type RPCTransactionalMethodResolver interface {
 	ResolveRPCTransactionalMethod(string) (RPCTransactionalMethod, bool)
 }
 
-// RPCAuthorizer is evaluated for every call before arguments are decoded or
+// RPCAuthorizer is evaluated for every call before input is decoded or
 // application code runs. Registration alone never grants call permission.
 type RPCAuthorizer interface {
 	AuthorizeRPC(context.Context, Actor, string) error
@@ -84,12 +84,12 @@ func (err *MeldbaseInternalError) Error() string {
 }
 
 type rpcCallEnvelope struct {
-	Version        int                `json:"v"`
-	Type           string             `json:"type"`
-	RequestID      string             `json:"requestId"`
-	IdempotencyKey *string            `json:"idempotencyKey,omitempty"`
-	Method         string             `json:"method"`
-	Arguments      *[]json.RawMessage `json:"arguments"`
+	Version        int              `json:"v"`
+	Type           string           `json:"type"`
+	RequestID      string           `json:"requestId"`
+	IdempotencyKey *string          `json:"idempotencyKey,omitempty"`
+	Method         string           `json:"method"`
+	Input          *json.RawMessage `json:"input"`
 }
 
 type rpcOutcome struct {
@@ -119,7 +119,7 @@ func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	envelope, err := decodeRPCCallEnvelope(body, h.config.MaxRPCArguments)
+	envelope, err := decodeRPCCallEnvelope(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_rpc_envelope")
 		return
@@ -136,7 +136,7 @@ func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 		writeRPCError(w, http.StatusForbidden, envelope.RequestID, "forbidden")
 		return
 	}
-	arguments, err := decodeRPCArguments(*envelope.Arguments, h.config.QueryLimits)
+	input, err := decodeRPCInput(*envelope.Input, h.config.QueryLimits)
 	if err != nil {
 		h.metrics.rpcRejected.Add(1)
 		writeRPCError(w, http.StatusBadRequest, envelope.RequestID, "invalid_rpc_argument")
@@ -150,7 +150,7 @@ func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 		writeRPCError(w, http.StatusServiceUnavailable, envelope.RequestID, "rpc_busy")
 		return
 	}
-	outcome := h.executeRPC(r.Context(), actor, method, transactionalMethod, envelope, arguments, len(body))
+	outcome := h.executeRPC(r.Context(), actor, method, transactionalMethod, envelope, input, len(body))
 	if outcome.code != "" {
 		writeJSON(w, outcome.status, rpcOutcomeErrorMessage(envelope.RequestID, outcome))
 		return
@@ -175,7 +175,7 @@ func (h *Handler) resolveRPCMethod(name string) (RPCMethod, RPCTransactionalMeth
 	return method, transactionalMethod, standardExists, transactionalExists
 }
 
-func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod, transactionalMethod RPCTransactionalMethod, envelope rpcCallEnvelope, arguments []meldbase.Value, requestBytes int) rpcOutcome {
+func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod, transactionalMethod RPCTransactionalMethod, envelope rpcCallEnvelope, input meldbase.Value, requestBytes int) rpcOutcome {
 	var action *rpcIdempotencyAction
 	if envelope.IdempotencyKey != nil {
 		if h.config.RPCIdempotencyStore == nil {
@@ -183,7 +183,7 @@ func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod,
 			h.metrics.rpcIdempotencyFailures.Add(1)
 			return rpcOutcome{status: http.StatusServiceUnavailable, code: "rpc_idempotency_unavailable"}
 		}
-		claim, err := newRPCIdempotencyClaim(actor, envelope, arguments, h.rpcSessionID, h.config.RPCIdempotencyRetention)
+		claim, err := newRPCIdempotencyClaim(actor, envelope, input, h.rpcSessionID, h.config.RPCIdempotencyRetention)
 		if err != nil {
 			h.metrics.rpcRejected.Add(1)
 			h.metrics.rpcIdempotencyFailures.Add(1)
@@ -267,11 +267,11 @@ func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod,
 			h.metrics.rpcRejected.Add(1)
 			return rpcOutcome{status: http.StatusBadRequest, code: "rpc_idempotency_required"}
 		}
-		return h.executeTransactionalRPC(ctx, actor, transactionalMethod, arguments, requestBytes, *action)
+		return h.executeTransactionalRPC(ctx, actor, transactionalMethod, input, requestBytes, *action)
 	}
 
-	span := h.beginRPC(len(arguments), requestBytes)
-	result, callErr := invokeRPCMethod(ctx, method, actor, arguments)
+	span := h.beginRPC(requestBytes)
+	result, callErr := invokeRPCMethod(ctx, method, actor, input)
 	if callErr != nil {
 		h.metrics.rpcAtomicRollbacks.Add(1)
 		metricOutcome := "failed"
@@ -315,7 +315,7 @@ func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod,
 	return rpcOutcome{result: json.RawMessage(encoded)}
 }
 
-func (h *Handler) executeTransactionalRPC(ctx context.Context, actor Actor, method RPCTransactionalMethod, arguments []meldbase.Value, requestBytes int, action rpcIdempotencyAction) rpcOutcome {
+func (h *Handler) executeTransactionalRPC(ctx context.Context, actor Actor, method RPCTransactionalMethod, input meldbase.Value, requestBytes int, action rpcIdempotencyAction) rpcOutcome {
 	store, ok := action.store.(*durableRPCIdempotencyStore)
 	if !ok || store.db != h.config.DB {
 		h.metrics.rpcRejected.Add(1)
@@ -328,12 +328,12 @@ func (h *Handler) executeTransactionalRPC(ctx context.Context, actor Actor, meth
 		h.metrics.rpcIdempotencyFailures.Add(1)
 		return rpcOutcome{status: http.StatusServiceUnavailable, code: "rpc_idempotency_unavailable"}
 	}
-	span := h.beginRPC(len(arguments), requestBytes)
+	span := h.beginRPC(requestBytes)
 	var encoded []byte
 	var callErr error
 	invalidResult := false
 	cas, composite, commitErr := h.config.DB.MeldbaseSystemWrite(ctx, expected, func(tx *meldbase.WriteTransaction) ([]byte, error) {
-		result, err := invokeRPCTransactionalMethod(ctx, method, actor, arguments, tx)
+		result, err := invokeRPCTransactionalMethod(ctx, method, actor, input, tx)
 		if err != nil {
 			callErr = err
 			return nil, err
@@ -438,27 +438,19 @@ func (h *Handler) markRPCUnknown(action rpcIdempotencyAction) {
 	_ = action.store.MarkUnknown(ctx, action.claim)
 }
 
-func decodeRPCCallEnvelope(raw []byte, maxArguments int) (rpcCallEnvelope, error) {
+func decodeRPCCallEnvelope(raw []byte) (rpcCallEnvelope, error) {
 	var envelope rpcCallEnvelope
 	if err := decodeStrict(raw, &envelope); err != nil || envelope.Version != protocolVersion || envelope.Type != "call" ||
 		!rpcRequestIDPattern.MatchString(envelope.RequestID) || !validRPCMethodName(envelope.Method) ||
-		envelope.Arguments == nil || len(*envelope.Arguments) > maxArguments ||
+		envelope.Input == nil ||
 		(envelope.IdempotencyKey != nil && !validRPCIdempotencyKey(*envelope.IdempotencyKey)) {
 		return rpcCallEnvelope{}, errors.New("invalid RPC call envelope")
 	}
 	return envelope, nil
 }
 
-func decodeRPCArguments(rawArguments []json.RawMessage, limits meldbase.QueryLimits) ([]meldbase.Value, error) {
-	arguments := make([]meldbase.Value, len(rawArguments))
-	for index, raw := range rawArguments {
-		value, err := meldbase.UnmarshalWireValue(raw, limits)
-		if err != nil {
-			return nil, err
-		}
-		arguments[index] = value
-	}
-	return arguments, nil
+func decodeRPCInput(rawInput json.RawMessage, limits meldbase.QueryLimits) (meldbase.Value, error) {
+	return meldbase.UnmarshalWireValue(rawInput, limits)
 }
 
 func internalRPCOutcome(status int, code string) rpcOutcome {
@@ -570,7 +562,7 @@ func (s *socketSession) startRPCCall(envelope rpcCallEnvelope, requestBytes int)
 		s.enqueue(rpcErrorMessage(envelope.RequestID, "forbidden"))
 		return
 	}
-	arguments, err := decodeRPCArguments(*envelope.Arguments, s.handler.config.QueryLimits)
+	input, err := decodeRPCInput(*envelope.Input, s.handler.config.QueryLimits)
 	if err != nil {
 		s.handler.metrics.rpcRejected.Add(1)
 		s.enqueue(rpcErrorMessage(envelope.RequestID, "invalid_rpc_argument"))
@@ -621,7 +613,7 @@ func (s *socketSession) startRPCCall(envelope rpcCallEnvelope, requestBytes int)
 			<-s.handler.rpcSlots
 		}
 		defer cleanup()
-		outcome := s.handler.executeRPC(ctx, s.actor, method, transactionalMethod, envelope, arguments, requestBytes)
+		outcome := s.handler.executeRPC(ctx, s.actor, method, transactionalMethod, envelope, input, requestBytes)
 		cleanup()
 		if outcome.code != "" {
 			s.enqueue(rpcOutcomeErrorMessage(envelope.RequestID, outcome))
@@ -646,20 +638,20 @@ func (s *socketSession) removeRPCCall(requestID string) {
 	s.mu.Unlock()
 }
 
-func invokeRPCMethod(ctx context.Context, method RPCMethod, actor Actor, arguments []meldbase.Value) (result meldbase.Value, err error) {
+func invokeRPCMethod(ctx context.Context, method RPCMethod, actor Actor, input meldbase.Value) (result meldbase.Value, err error) {
 	defer func() {
 		if recover() != nil {
 			result, err = meldbase.Value{}, errors.New("RPC handler panic")
 		}
 	}()
-	return method(ctx, actor, arguments)
+	return method(ctx, actor, input)
 }
 
-func invokeRPCTransactionalMethod(ctx context.Context, method RPCTransactionalMethod, actor Actor, arguments []meldbase.Value, tx *meldbase.WriteTransaction) (result meldbase.Value, err error) {
+func invokeRPCTransactionalMethod(ctx context.Context, method RPCTransactionalMethod, actor Actor, input meldbase.Value, tx *meldbase.WriteTransaction) (result meldbase.Value, err error) {
 	defer func() {
 		if recover() != nil {
 			result, err = meldbase.Value{}, errors.New("RPC handler panic")
 		}
 	}()
-	return method(ctx, actor, arguments, tx)
+	return method(ctx, actor, input, tx)
 }

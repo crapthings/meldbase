@@ -1,14 +1,13 @@
-# Server JavaScript SDK and worker protocol
+# Worker SDK and control protocol
 
-The server JavaScript SDK runs in a separate trusted Node.js worker process. It
-does not embed an unrestricted JavaScript runtime inside the Go database
-process. Go remains authoritative for authentication, authorization, resource
-limits, typed-value validation, idempotency, transaction commit and reactive
-delivery.
+The Worker SDK runs in a separate trusted Node.js process. It is not the
+Meldbase server and clients never connect to it. Go remains authoritative for
+authentication, authorization, resource limits, typed-value validation,
+idempotency, transaction commit, and reactive delivery.
 
 This page specifies the control-plane and security contract. For a
 method-by-method introduction with copy-adaptable TypeScript examples, start
-with the [server worker SDK guide](guide/server-worker-sdk).
+with the [Worker SDK guide](guide/worker-sdk).
 
 The control protocol is language-neutral so future runtimes can implement the
 same contract. The Node package is the first implementation, not a privileged
@@ -21,8 +20,8 @@ the public client API. A worker connects outbound over `wss`, authenticates with
 a dedicated worker credential and registers a bounded set of method names and
 modes. Browser-originated control connections are rejected. Client bearer
 tokens, idempotency keys and transport request IDs are never forwarded to a
-worker; it receives only the authenticated actor (`id`, `workspaceId`), method
-arguments or canonical requested query, and a hub-generated call ID.
+worker; it receives only the authenticated actor (`id`, `workspaceId`), one
+typed method input or canonical requested query, and a hub-generated call ID.
 
 One live worker owns a method name or the Worker read policy for a managed
 collection. Registration conflicts fail closed instead of load-balancing
@@ -94,7 +93,7 @@ Worker registration:
 
 The hub replies with `registered` and an opaque process-session ID. The hub then
 sends `invoke` frames containing `callId`, method, mode, the authenticated
-identity and typed arguments. The SDK exposes that identity to handlers as
+identity and one typed input. The SDK exposes that identity to handlers as
 `context.actor` (`id`, `workspaceId`). A worker answers with exactly one `result`
 or stable coded `error`.
 Arbitrary exception text and stack traces never cross back to clients.
@@ -110,7 +109,7 @@ Arbitrary exception text and stack traces never cross back to clients.
   "method": "orders.quote",
   "mode": "rpc",
   "actor": {"id": "user_42", "workspaceId": "team_a"},
-  "arguments": []
+  "input": {"t":"null"}
 }
 ```
 
@@ -258,7 +257,7 @@ controlMux.Handle("GET /v1/workers", workerHub)
 // Serve controlMux only on a private or mutually authenticated listener.
 ```
 
-Use the [server worker SDK guide](guide/server-worker-sdk) for the Node worker
+Use the [Worker SDK guide](guide/worker-sdk) for the Node worker
 construction, handlers, `MeldbaseError`, and lifecycle. It connects to this
 private hub through an authorization header rather than placing a credential in
 the URL.

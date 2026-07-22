@@ -15,7 +15,7 @@ future breaking changes will receive release-specific guidance when planned.
 | Documents and indexes | Closed document values, CRUD, bounded filters and updates, ordered compound/unique indexes, explain plans and persistent index builds. | `core/*_test.go`, `docs/query.md`, `docs/compound-indexes.md` |
 | Realtime | Ordered live queries, bounded queues, authenticated HTTP tickets, WebSocket snapshots/deltas and safe resumptions. | `core/reactive*`, `internal/server` |
 | Workspace and direct-API isolation | HS256 or JWKS JWT verification maps `sub` to actor ID and `workspace_id` to actor workspace ID. A strict, versioned collection-access manifest provides collaborative, owner-only, or RPC-only surfaces; optional field limits only narrow query paths, results, inserts, and updates. The server owns workspace/owner fields, intersects reads, writes, and subscriptions, and never lets a client select a trusted workspace. | `internal/server/auth_*.go`, `internal/server/workspace_authorizer*.go`, `cmd/meld/access_policy.go` |
-| SDKs | Go API plus TypeScript client, React adapter and server-worker SDK share typed request/query contracts. | `sdk/client`, `sdk/react`, `sdk/server` |
+| SDKs | Go API plus TypeScript client, React adapter and trusted Worker SDK share typed request/query contracts. | `sdk/client`, `sdk/react`, `sdk/worker` |
 | Operations | Health probes, authenticated admin dashboard and metrics, diagnostics, inspect, verify, backup, restore and a single-node backup/restore drill. | `admin`, `cmd/meld`, `docs/single-node-deployment.md` |
 | Resource limits | Bounded request/query/result, transaction, index-build, retention, page-cache and physical-file usage with aggregate telemetry. | `core/resource_limits.go`, `docs/observability.md` |
 

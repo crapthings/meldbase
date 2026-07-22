@@ -216,7 +216,7 @@ func representativePrometheusSample() Sample {
 		Server: &meldserver.ServerStats{
 			ActiveConnections: 2, ConnectionsAccepted: 11, RealtimeOutboundOverflows: 8,
 			RPCRequests: 41, RPCActive: 2, RPCSucceeded: 31, RPCFailed: 3, RPCCanceled: 2, RPCRejected: 4, RPCBusy: 1,
-			RPCArguments: 50, RPCRequestBytes: 4096, RPCResultBytes: 2048,
+			RPCRequestBytes: 4096, RPCResultBytes: 2048,
 			RPCTotalNanos: 7_000_000, RPCMaxLatency: 2 * time.Millisecond,
 			RPCIdempotencyClaims: 7, RPCIdempotencyReplays: 5, RPCIdempotencyConflicts: 1,
 			RPCIdempotencyInProgress: 3, RPCIdempotencyUnknown: 2, RPCIdempotencyFailures: 4,

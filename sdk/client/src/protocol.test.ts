@@ -66,7 +66,7 @@ test("TypeScript and Go share the immutable realtime protocol v1 contract", asyn
   ]);
   assert.deepEqual(contract.clientFrames, [
     { type: "authenticate", required: ["ticket", "type", "v"], optional: [] },
-    { type: "call", required: ["arguments", "method", "requestId", "type", "v"], optional: ["idempotencyKey"] },
+    { type: "call", required: ["input", "method", "requestId", "type", "v"], optional: ["idempotencyKey"] },
     { type: "cancel", required: ["requestId", "type", "v"], optional: [] },
     { type: "ping", required: ["type", "v"], optional: [] },
     { type: "subscribe", required: ["collection", "query", "requestId", "type", "v"], optional: ["mode", "resumeToken"] },

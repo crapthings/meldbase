@@ -21,7 +21,7 @@ interface ActiveSubscription {
 interface ActiveRPCCall {
   readonly requestId: string;
   readonly method: string;
-  readonly arguments: readonly WireValue[];
+  readonly input: WireValue;
   readonly idempotencyKey?: string;
   readonly resolve: (value: Value) => void;
   readonly reject: (error: Error) => void;
@@ -86,7 +86,7 @@ export class RealtimeConnection {
     };
   }
 
-  call<T extends Value>(method: string, args: readonly Value[], signal?: AbortSignal, idempotencyKey?: string): Promise<T> {
+  call<T extends Value>(method: string, input: Value, signal?: AbortSignal, idempotencyKey?: string): Promise<T> {
     if (this.#closed) return Promise.reject(new MeldbaseClientClosedError());
     if (this.#protocolError) return Promise.reject(this.#protocolError);
     const capabilityError = this.capabilityError(["rpc", ...(signal ? ["rpc.cancel"] : []), ...(idempotencyKey ? ["rpc.idempotency"] : [])]);
@@ -104,7 +104,7 @@ export class RealtimeConnection {
         this.closeIdleSocket();
       } : undefined;
       const call: ActiveRPCCall = {
-        requestId, method, arguments: args.map((value) => encodeValue(value)), ...(idempotencyKey ? { idempotencyKey } : {}),
+        requestId, method, input: encodeValue(input), ...(idempotencyKey ? { idempotencyKey } : {}),
         resolve: (value) => resolve(value as T), reject, ...(signal ? { signal } : {}), ...(abort ? { abort } : {}), sent: false,
       };
       this.#calls.set(requestId, call);
@@ -254,7 +254,7 @@ export class RealtimeConnection {
   private validateProtocol(protocol: ProtocolDescriptor | undefined): void { this.#protocol = protocol; if (!protocol) throw new MeldbaseProtocolError(["protocol.discovery"]); const required = new Set<string>(); if (this.#subscriptions.size > 0) required.add("query.delta"); if (this.#calls.size > 0) required.add("rpc"); for (const call of this.#calls.values()) { if (call.signal) required.add("rpc.cancel"); if (call.idempotencyKey) required.add("rpc.idempotency"); } const missing = [...required].filter((capability) => !protocol.capabilities.includes(capability)); if (!supportsProtocol(protocol, MELDBASE_PROTOCOL_VERSION) || missing.length > 0) { if (!protocol.versions.includes(MELDBASE_PROTOCOL_VERSION)) missing.unshift(`version.${MELDBASE_PROTOCOL_VERSION}`); throw new MeldbaseProtocolError(Object.freeze(missing)); } }
   private capabilityError(required: readonly string[]): MeldbaseProtocolError | undefined { if (!this.#protocol) return undefined; const missing = required.filter((capability) => !this.#protocol!.capabilities.includes(capability)); return missing.length === 0 ? undefined : new MeldbaseProtocolError(missing); }
   private sendSubscription(subscription: ActiveSubscription): void { const canResume = !this.#protocol || this.#protocol.capabilities.includes("query.resume"); const resumeToken = canResume ? subscription.token : undefined; if (!canResume) subscription.token = undefined; this.status(subscription, { state: resumeToken ? "resyncing" : "connecting", ...(resumeToken ? { token: resumeToken } : {}) }); this.send({ v: MELDBASE_PROTOCOL_VERSION, type: "subscribe", mode: "delta", requestId: subscription.requestId, collection: subscription.collection, query: subscription.query, ...(resumeToken ? { resumeToken } : {}) }); }
-  private sendCall(call: ActiveRPCCall): void { if (call.sent) return; call.sent = true; this.send({ v: MELDBASE_PROTOCOL_VERSION, type: "call", requestId: call.requestId, ...(call.idempotencyKey ? { idempotencyKey: call.idempotencyKey } : {}), method: call.method, arguments: call.arguments }); }
+  private sendCall(call: ActiveRPCCall): void { if (call.sent) return; call.sent = true; this.send({ v: MELDBASE_PROTOCOL_VERSION, type: "call", requestId: call.requestId, ...(call.idempotencyKey ? { idempotencyKey: call.idempotencyKey } : {}), method: call.method, input: call.input }); }
   private settleCall(call: ActiveRPCCall, outcome: Value | Error): void { if (!this.#calls.delete(call.requestId)) return; this.cleanupCall(call); if (outcome instanceof Error) call.reject(outcome); else call.resolve(outcome); this.closeIdleSocket(); }
   private cleanupCall(call: ActiveRPCCall): void { if (call.signal && call.abort) call.signal.removeEventListener("abort", call.abort); }
   private rejectCalls(error: Error): void { const calls = [...this.#calls.values()]; this.#calls.clear(); for (const call of calls) { this.cleanupCall(call); call.reject(error); } }

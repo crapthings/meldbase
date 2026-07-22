@@ -32,7 +32,7 @@ external side effects retain the outcome-unknown boundary described above.
 
 ## Wire contract
 
-The existing version-one `call` envelope gains one optional field:
+The `call` envelope has one required typed input:
 
 ```json
 {
@@ -41,7 +41,7 @@ The existing version-one `call` envelope gains one optional field:
   "requestId": "transport-attempt-id",
   "idempotencyKey": "caller-generated-128-bit-or-stronger-key",
   "method": "orders.checkout",
-  "arguments": []
+  "input": {"t":"null"}
 }
 ```
 
@@ -131,7 +131,7 @@ RPCTransactionalMethods: map[string]server.RPCTransactionalMethod{
     "orders.create": func(
         ctx context.Context,
         actor server.Actor,
-        arguments []meldbase.Value,
+        input meldbase.Value,
         tx *meldbase.WriteTransaction,
     ) (meldbase.Value, error) {
         id, err := tx.InsertOne("orders", meldbase.Document{
@@ -166,7 +166,7 @@ database transaction entry/byte limits during the callback, so a read-heavy
 handler cannot build an unbounded in-memory overlay before final validation.
 
 First-party server plumbing may additionally stage bounded private System
-mutations. The JavaScript server SDK uses this for
+mutations. The JavaScript Worker SDK uses this for
 `tx.invalidateReadPolicy(collection)`: its policy generation and the
 idempotency terminal share the business commit's Catalog/meta storage publication. The
 post-commit lease rotation runs synchronously after durability and before the

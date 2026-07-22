@@ -107,22 +107,22 @@ func (store *memoryIdempotencyStore) MarkUnknown(_ context.Context, claim RPCIde
 func TestRPCIdempotencyReplaysCanonicalResultAndRejectsKeyReuse(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
-	methods := map[string]RPCMethod{"echo": func(_ context.Context, _ Actor, arguments []meldbase.Value) (meldbase.Value, error) {
+	methods := map[string]RPCMethod{"echo": func(_ context.Context, _ Actor, input meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
-		return arguments[0], nil
+		return input, nil
 	}}
 	_, _, server := newRPCServer(t, methods, rpcTestAuthorizer{allow: true}, Config{RPCIdempotencyStore: store})
 	key := "abcdefghijklmnopqrstuv"
 
-	first := postIdempotentRPC(t, server.URL, "echo", key, []any{map[string]any{"t": "int64", "v": "7"}})
+	first := postIdempotentRPC(t, server.URL, "echo", key, map[string]any{"t": "int64", "v": "7"})
 	assertRPCResultInt(t, first, 7)
-	second := postIdempotentRPC(t, server.URL, "echo", key, []any{map[string]any{"t": "int64", "v": "7"}})
+	second := postIdempotentRPC(t, server.URL, "echo", key, map[string]any{"t": "int64", "v": "7"})
 	assertRPCResultInt(t, second, 7)
 	if calls.Load() != 1 {
 		t.Fatalf("idempotent method calls=%d", calls.Load())
 	}
 
-	conflict := postIdempotentRPC(t, server.URL, "echo", key, []any{map[string]any{"t": "int64", "v": "8"}})
+	conflict := postIdempotentRPC(t, server.URL, "echo", key, map[string]any{"t": "int64", "v": "8"})
 	assertRPCError(t, conflict, http.StatusConflict, "rpc_idempotency_conflict")
 	if calls.Load() != 1 {
 		t.Fatalf("conflicting key executed method: %d", calls.Load())
@@ -132,20 +132,20 @@ func TestRPCIdempotencyReplaysCanonicalResultAndRejectsKeyReuse(t *testing.T) {
 func TestRPCIdempotencyReplaysApplicationErrorsAndFailsClosedWithoutStore(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
-	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return meldbase.Value{}, &MeldbaseError{Code: "billing.quota_exceeded", Data: meldbase.Document{"retryAfter": meldbase.Int(60)}}
 	}
 	_, _, server := newRPCServer(t, map[string]RPCMethod{"fail": method}, rpcTestAuthorizer{allow: true}, Config{RPCIdempotencyStore: store})
 	key := "abcdefghijklmnopqrstuv"
-	assertRPCBusinessErrorData(t, postIdempotentRPC(t, server.URL, "fail", key, []any{}), "billing.quota_exceeded", meldbase.Document{"retryAfter": meldbase.Int(60)})
-	assertRPCBusinessErrorData(t, postIdempotentRPC(t, server.URL, "fail", key, []any{}), "billing.quota_exceeded", meldbase.Document{"retryAfter": meldbase.Int(60)})
+	assertRPCBusinessErrorData(t, postIdempotentRPC(t, server.URL, "fail", key, rpcNullInput()), "billing.quota_exceeded", meldbase.Document{"retryAfter": meldbase.Int(60)})
+	assertRPCBusinessErrorData(t, postIdempotentRPC(t, server.URL, "fail", key, rpcNullInput()), "billing.quota_exceeded", meldbase.Document{"retryAfter": meldbase.Int(60)})
 	if calls.Load() != 1 {
 		t.Fatalf("application error calls=%d", calls.Load())
 	}
 
 	_, _, withoutStore := newRPCServer(t, map[string]RPCMethod{"fail": method}, rpcTestAuthorizer{allow: true}, Config{})
-	assertRPCError(t, postIdempotentRPC(t, withoutStore.URL, "fail", key, []any{}), http.StatusServiceUnavailable, "rpc_idempotency_unavailable")
+	assertRPCError(t, postIdempotentRPC(t, withoutStore.URL, "fail", key, rpcNullInput()), http.StatusServiceUnavailable, "rpc_idempotency_unavailable")
 	if calls.Load() != 1 {
 		t.Fatal("method ran when idempotency store was unavailable")
 	}
@@ -155,7 +155,7 @@ func TestRPCIdempotencyConcurrentDuplicateIsInProgress(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	started, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Uint64
-	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		close(started)
 		<-release
@@ -164,13 +164,13 @@ func TestRPCIdempotencyConcurrentDuplicateIsInProgress(t *testing.T) {
 	_, _, server := newRPCServer(t, map[string]RPCMethod{"work": method}, rpcTestAuthorizer{allow: true}, Config{RPCIdempotencyStore: store})
 	key := "abcdefghijklmnopqrstuv"
 	firstDone := make(chan *http.Response, 1)
-	go func() { firstDone <- postIdempotentRPC(t, server.URL, "work", key, []any{}) }()
+	go func() { firstDone <- postIdempotentRPC(t, server.URL, "work", key, rpcNullInput()) }()
 	select {
 	case <-started:
 	case <-time.After(3 * time.Second):
 		t.Fatal("first call did not start")
 	}
-	assertRPCError(t, postIdempotentRPC(t, server.URL, "work", key, []any{}), http.StatusConflict, "rpc_in_progress")
+	assertRPCError(t, postIdempotentRPC(t, server.URL, "work", key, rpcNullInput()), http.StatusConflict, "rpc_in_progress")
 	close(release)
 	response := <-firstDone
 	defer response.Body.Close()
@@ -183,7 +183,7 @@ func TestRPCIdempotencyCompletionFailureBecomesOutcomeUnknown(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	store.failComplete = true
 	var calls atomic.Uint64
-	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return meldbase.String("charged"), nil
 	}
@@ -191,8 +191,8 @@ func TestRPCIdempotencyCompletionFailureBecomesOutcomeUnknown(t *testing.T) {
 		RPCIdempotencyStore: store, RPCIdempotencyCommitTimeout: time.Millisecond,
 	})
 	key := "abcdefghijklmnopqrstuv"
-	assertRPCError(t, postIdempotentRPC(t, server.URL, "charge", key, []any{}), http.StatusConflict, "rpc_outcome_unknown")
-	assertRPCError(t, postIdempotentRPC(t, server.URL, "charge", key, []any{}), http.StatusConflict, "rpc_outcome_unknown")
+	assertRPCError(t, postIdempotentRPC(t, server.URL, "charge", key, rpcNullInput()), http.StatusConflict, "rpc_outcome_unknown")
+	assertRPCError(t, postIdempotentRPC(t, server.URL, "charge", key, rpcNullInput()), http.StatusConflict, "rpc_outcome_unknown")
 	if calls.Load() != 1 {
 		t.Fatalf("unknown outcome re-executed: %d", calls.Load())
 	}
@@ -201,13 +201,13 @@ func TestRPCIdempotencyCompletionFailureBecomesOutcomeUnknown(t *testing.T) {
 func TestRPCIdempotencyReplaysAcrossHTTPAndWebSocketTransports(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
-	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		return meldbase.Binary([]byte{0, 255}), nil
 	}
 	_, _, server := newRPCServer(t, map[string]RPCMethod{"receipt": method}, rpcTestAuthorizer{allow: true}, Config{RPCIdempotencyStore: store})
 	key := "abcdefghijklmnopqrstuv"
-	response := postIdempotentRPC(t, server.URL, "receipt", key, []any{})
+	response := postIdempotentRPC(t, server.URL, "receipt", key, rpcNullInput())
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(response.Body)
@@ -217,7 +217,7 @@ func TestRPCIdempotencyReplaysAcrossHTTPAndWebSocketTransports(t *testing.T) {
 	connection, ctx := openAuthenticatedRPCSocket(t, server.URL)
 	defer connection.CloseNow()
 	if err := writeSocketJSON(ctx, connection, map[string]any{
-		"v": 1, "type": "call", "requestId": "socket-attempt", "idempotencyKey": key, "method": "receipt", "arguments": []any{},
+		"v": 1, "type": "call", "requestId": "socket-attempt", "idempotencyKey": key, "method": "receipt", "input": rpcNullInput(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestRPCIdempotencyCancellationIsPersistedAsOutcomeUnknown(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	started := make(chan struct{})
 	var calls atomic.Uint64
-	method := func(ctx context.Context, _ Actor, _ []meldbase.Value) (meldbase.Value, error) {
+	method := func(ctx context.Context, _ Actor, _ meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
 		close(started)
 		<-ctx.Done()
@@ -251,7 +251,7 @@ func TestRPCIdempotencyCancellationIsPersistedAsOutcomeUnknown(t *testing.T) {
 	defer connection.CloseNow()
 	key := "abcdefghijklmnopqrstuv"
 	if err := writeSocketJSON(ctx, connection, map[string]any{
-		"v": 1, "type": "call", "requestId": "slow-attempt", "idempotencyKey": key, "method": "slow", "arguments": []any{},
+		"v": 1, "type": "call", "requestId": "slow-attempt", "idempotencyKey": key, "method": "slow", "input": rpcNullInput(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestRPCIdempotencyCancellationIsPersistedAsOutcomeUnknown(t *testing.T) {
 	if socketRPCErrorCode(message) != "rpc_outcome_unknown" {
 		t.Fatalf("cancel result=%+v", message)
 	}
-	assertRPCError(t, postIdempotentRPC(t, server.URL, "slow", key, []any{}), http.StatusConflict, "rpc_outcome_unknown")
+	assertRPCError(t, postIdempotentRPC(t, server.URL, "slow", key, rpcNullInput()), http.StatusConflict, "rpc_outcome_unknown")
 	if calls.Load() != 1 {
 		t.Fatalf("canceled unknown call re-executed: %d", calls.Load())
 	}
@@ -277,24 +277,18 @@ func TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed(t *testing.T) {
 	key := "abcdefghijklmnopqrstuv"
 	session := [16]byte{1}
 	envelope := rpcCallEnvelope{Method: "echo", IdempotencyKey: &key}
-	left, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "ab", ID: "c"}, envelope, []meldbase.Value{
-		meldbase.Object(meldbase.Document{"b": meldbase.Int(2), "a": meldbase.Int(1)}),
-	}, session, time.Hour)
+	left, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "ab", ID: "c"}, envelope, meldbase.Object(meldbase.Document{"b": meldbase.Int(2), "a": meldbase.Int(1)}), session, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	right, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "ab", ID: "c"}, envelope, []meldbase.Value{
-		meldbase.Object(meldbase.Document{"a": meldbase.Int(1), "b": meldbase.Int(2)}),
-	}, session, time.Hour)
+	right, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "ab", ID: "c"}, envelope, meldbase.Object(meldbase.Document{"a": meldbase.Int(1), "b": meldbase.Int(2)}), session, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if left.Fingerprint != right.Fingerprint || left.ScopeHash != right.ScopeHash || left.KeyHash != right.KeyHash {
 		t.Fatal("canonical equivalent claims produced different hashes")
 	}
-	otherScope, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "a", ID: "bc"}, envelope, []meldbase.Value{
-		meldbase.Object(meldbase.Document{"a": meldbase.Int(1), "b": meldbase.Int(2)}),
-	}, session, time.Hour)
+	otherScope, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "a", ID: "bc"}, envelope, meldbase.Object(meldbase.Document{"a": meldbase.Int(1), "b": meldbase.Int(2)}), session, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,19 +298,21 @@ func TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed(t *testing.T) {
 }
 
 func TestRPCIdempotencyEnvelopeRejectsWeakOrMalformedKeys(t *testing.T) {
-	arguments := `"arguments":[]`
+	input := `"input":{"t":"null"}`
 	for _, key := range []string{"", "too-short", "contains spaces and is long", strings.Repeat("a", 129)} {
-		raw := []byte(`{"v":1,"type":"call","requestId":"r","method":"echo",` + arguments + `,"idempotencyKey":"` + key + `"}`)
-		if _, err := decodeRPCCallEnvelope(raw, 32); err == nil {
+		raw := []byte(`{"v":1,"type":"call","requestId":"r","method":"echo",` + input + `,"idempotencyKey":"` + key + `"}`)
+		if _, err := decodeRPCCallEnvelope(raw); err == nil {
 			t.Fatalf("accepted idempotency key %q", key)
 		}
 	}
 }
 
-func postIdempotentRPC(t *testing.T, serverURL, method, key string, arguments []any) *http.Response {
+func rpcNullInput() map[string]any { return map[string]any{"t": "null"} }
+
+func postIdempotentRPC(t *testing.T, serverURL, method, key string, input any) *http.Response {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
-		"v": 1, "type": "call", "requestId": "attempt-1", "idempotencyKey": key, "method": method, "arguments": arguments,
+		"v": 1, "type": "call", "requestId": "attempt-1", "idempotencyKey": key, "method": method, "input": input,
 	})
 	if err != nil {
 		t.Fatal(err)

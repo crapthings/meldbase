@@ -37,13 +37,13 @@ func BenchmarkServerStatsSnapshot(b *testing.B) {
 
 func BenchmarkRPCMetricSpan(b *testing.B) {
 	handler := &Handler{startedAt: time.Now()}
-	method := RPCMethod(func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
+	method := RPCMethod(func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Null(), nil
 	})
 	b.ReportAllocs()
 	for range b.N {
-		span := handler.beginRPC(0, 32)
-		result, err := invokeRPCMethod(context.Background(), method, Actor{}, nil)
+		span := handler.beginRPC(32)
+		result, err := invokeRPCMethod(context.Background(), method, Actor{}, meldbase.Null())
 		if err != nil || result.Kind() != meldbase.NullKind {
 			b.Fatal(err)
 		}

@@ -24,6 +24,7 @@ type adminWireSchemaFixture struct {
 	Fields             []adminWireSchemaField `json:"fields"`
 	Extends            uint32                 `json:"extends,omitempty"`
 	Additions          []adminWireSchemaField `json:"additions,omitempty"`
+	Removals           []string               `json:"removals,omitempty"`
 }
 
 type adminWireSchemaField struct {
@@ -224,6 +225,30 @@ func loadAdminWireSchemaFixtureVersion(t *testing.T, version uint32) adminWireSc
 	base := loadAdminWireSchemaFixtureVersion(t, fixture.Extends)
 	base.AdminSchemaVersion = version
 	base.Fields = append(base.Fields, fixture.Additions...)
+	if len(fixture.Removals) > 0 {
+		removed := make(map[string]struct{}, len(fixture.Removals))
+		for _, path := range fixture.Removals {
+			if path == "" {
+				t.Fatalf("admin schema delta contains an empty removal")
+			}
+			if _, exists := removed[path]; exists {
+				t.Fatalf("admin schema delta removes %q more than once", path)
+			}
+			removed[path] = struct{}{}
+		}
+		fields := base.Fields[:0]
+		for _, field := range base.Fields {
+			if _, remove := removed[field.Path]; remove {
+				delete(removed, field.Path)
+				continue
+			}
+			fields = append(fields, field)
+		}
+		if len(removed) != 0 {
+			t.Fatalf("admin schema delta removes unknown paths: %+v", removed)
+		}
+		base.Fields = fields
+	}
 	sort.Slice(base.Fields, func(left, right int) bool { return base.Fields[left].Path < base.Fields[right].Path })
 	for index := 1; index < len(base.Fields); index++ {
 		if base.Fields[index-1].Path == base.Fields[index].Path {
