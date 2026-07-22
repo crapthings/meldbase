@@ -18,8 +18,6 @@ var (
 	ErrSubscriberLimit = errors.New("meldbase admin: subscriber limit reached")
 )
 
-const SchemaVersion uint32 = 18
-
 // StatsSource is implemented by *meldbase.DB.
 type StatsSource interface {
 	Stats() meldbase.DBStats
@@ -66,10 +64,8 @@ type SamplerStatus struct {
 	HistorySamples    uint64 `json:"historySamples"`
 }
 
-// Sample is an immutable point in the admin stream. Version identifies the
-// admin snapshot schema, not the database storage format.
+// Sample is an immutable point in the admin stream.
 type Sample struct {
-	Version  uint32                  `json:"version"`
 	Sequence uint64                  `json:"sequence"`
 	Stats    meldbase.DBStats        `json:"stats"`
 	Rates    Rates                   `json:"rates"`
@@ -165,7 +161,7 @@ func (s *Sampler) capture() {
 	}
 
 	s.sequence++
-	sample := Sample{Version: SchemaVersion, Sequence: s.sequence, Stats: stats, Server: serverStats}
+	sample := Sample{Sequence: s.sequence, Stats: stats, Server: serverStats}
 	var previous *Sample
 	if s.haveLatest {
 		prior := s.latest

@@ -44,7 +44,7 @@ func TestDiagnosticsAreOptInBoundedAndContainNoUserData(t *testing.T) {
 	}
 
 	snapshot := diagnostics.Snapshot()
-	if snapshot.Version != 1 || len(snapshot.Events) != 2 {
+	if len(snapshot.Events) != 2 {
 		t.Fatalf("snapshot=%+v", snapshot)
 	}
 	if snapshot.Stats.Recorded != 3 || snapshot.Stats.Overwritten != 1 || snapshot.Events[0].Sequence != 2 || snapshot.Events[1].Sequence != 3 {

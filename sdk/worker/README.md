@@ -15,7 +15,7 @@ const worker = new MeldbaseWorker({
   workerId: "application-1",
   webSocketFactory: (url, { headers }) => new WebSocket(url, { headers }),
   methods: {
-    "health.echo": rpc((_context, [value]) => value ?? null),
+    "health.echo": rpc((_context, input) => input),
   },
  readPolicies: {
     todos: readPolicy({
@@ -42,9 +42,6 @@ for local development or tests.
 The application supplies its WebSocket implementation; no transport package is
 bundled. Mount the Go worker hub on a private TLS listener and use a dedicated
 worker credential, never a browser or admin token.
-
-See `docs/guide/worker-sdk.md` for task-oriented methods, usage, and
-examples. See `docs/worker-protocol.md` for protocol and transaction semantics.
 
 ## Internal layout
 

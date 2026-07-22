@@ -1,7 +1,6 @@
 export type RecordValue = Record<string, unknown>;
 
 export type AdminSample = {
-  version: number;
   sequence: number;
   stats: RecordValue;
   rates: RecordValue;
@@ -19,7 +18,6 @@ export type AdminSample = {
 };
 
 export type HistoryResponse = {
-  version: number;
   samples: AdminSample[];
 };
 
@@ -37,7 +35,6 @@ export type DiagnosticEvent = {
 };
 
 export type DiagnosticResponse = {
-  version: number;
   session?: string;
   truncated?: boolean;
   hasMore?: boolean;
@@ -53,7 +50,6 @@ export type IndexCatalogEntry = {
 };
 
 export type IndexCatalogResponse = {
-  version: 1;
   indexes: IndexCatalogEntry[];
 };
 

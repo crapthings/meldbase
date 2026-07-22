@@ -79,7 +79,7 @@ func TestSamplerDerivesRatesAndBoundsHistory(t *testing.T) {
 	sampler.capture()
 
 	latest, ok := sampler.Latest()
-	if !ok || latest.Version != SchemaVersion || latest.Sequence != 2 || !latest.Rates.Valid {
+	if !ok || latest.Sequence != 2 || !latest.Rates.Valid {
 		t.Fatalf("latest=%+v ok=%t", latest, ok)
 	}
 	if latest.Rates.CommitsPerSecond != 2 || latest.Rates.ChangesPerSecond != 5 || latest.Rates.QueriesPerSecond != 3 {

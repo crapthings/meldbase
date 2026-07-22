@@ -203,9 +203,8 @@ func (h *Handler) history(writer http.ResponseWriter, _ *http.Request) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(writer).Encode(struct {
-		Version uint32   `json:"version"`
 		Samples []Sample `json:"samples"`
-	}{Version: SchemaVersion, Samples: h.sampler.History()})
+	}{Samples: h.sampler.History()})
 }
 
 func (h *Handler) diagnosticEvents(writer http.ResponseWriter, request *http.Request) {
@@ -262,9 +261,8 @@ func (h *Handler) indexes(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(writer).Encode(struct {
-		Version uint32  `json:"version"`
 		Indexes []entry `json:"indexes"`
-	}{Version: 1, Indexes: result})
+	}{Indexes: result})
 }
 
 func (h *Handler) prometheusMetrics(writer http.ResponseWriter, _ *http.Request) {

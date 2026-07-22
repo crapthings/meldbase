@@ -1,7 +1,5 @@
 import type { AdminSample, DiagnosticResponse, HistoryResponse, IndexCatalogResponse } from "./types";
 
-export const adminSchemaVersion = 18;
-
 async function authorized(path: string, token: string, signal?: AbortSignal): Promise<Response> {
   return fetch(path, {
     headers: { Authorization: `Bearer ${token}` },
@@ -14,7 +12,7 @@ export async function loadHistory(token: string): Promise<HistoryResponse> {
   const response = await authorized("/v1/stats/history", token);
   if (!response.ok) throw new Error(response.status === 401 ? "Invalid admin token" : `Admin API returned ${response.status}`);
   const history = await response.json() as HistoryResponse;
-  if (history.version !== adminSchemaVersion || !Array.isArray(history.samples)) throw new Error("Unsupported admin protocol");
+  if (!Array.isArray(history.samples)) throw new Error("Invalid admin response");
   return history;
 }
 
@@ -23,7 +21,7 @@ export async function loadDiagnostics(token: string, after: number, signal?: Abo
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Diagnostics returned ${response.status}`);
   const snapshot = await response.json() as DiagnosticResponse;
-  if (snapshot.version !== 1 || !Array.isArray(snapshot.events)) throw new Error("Unsupported diagnostics protocol");
+  if (!Array.isArray(snapshot.events)) throw new Error("Invalid diagnostics response");
   return snapshot;
 }
 
@@ -32,10 +30,10 @@ export async function loadIndexCatalog(token: string, signal?: AbortSignal): Pro
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Index catalog returned ${response.status}`);
   const catalog = await response.json() as IndexCatalogResponse;
-  if (catalog.version !== 1 || !Array.isArray(catalog.indexes) || catalog.indexes.some((index) =>
+  if (!Array.isArray(catalog.indexes) || catalog.indexes.some((index) =>
     typeof index.collection !== "string" || typeof index.name !== "string" || typeof index.unique !== "boolean" || !Array.isArray(index.fields) ||
     index.fields.some((field) => typeof field.path !== "string" || (field.order !== 1 && field.order !== -1)),
-  )) throw new Error("Unsupported index catalog protocol");
+  )) throw new Error("Invalid index catalog response");
   return catalog;
 }
 
@@ -56,7 +54,7 @@ function consumeEvents(chunk: string, onSample: (sample: AdminSample) => void): 
     const line = block.split("\n").find((item) => item.startsWith("data: "));
     if (!line) continue;
     const sample = JSON.parse(line.slice(6)) as AdminSample;
-    if (sample.version === adminSchemaVersion) onSample(sample);
+    onSample(sample);
   }
 }
 

@@ -199,7 +199,6 @@ func TestAdapterRequiresExplicitSourceAndMeterProvider(t *testing.T) {
 
 func representativeSample() admin.Sample {
 	return admin.Sample{
-		Version: admin.SchemaVersion,
 		Stats: meldbase.DBStats{
 			CommitSequence: 17, Collections: 3, Documents: 31, Indexes: 4,
 			Recovery: meldbase.RecoveryReport{

@@ -140,7 +140,6 @@ func TestMarshalPrometheusDoesNotReportRollbackLagWhenProtectionIsDisabled(t *te
 
 func representativePrometheusSample() Sample {
 	return Sample{
-		Version: SchemaVersion,
 		Stats: meldbase.DBStats{
 			Uptime: 3*time.Second + 250*time.Millisecond, Durable: true, WritesDisabled: true,
 			CommitSequence: 2, Collections: 3, Documents: 4, Indexes: 5, ActiveChangeWatchers: 6,

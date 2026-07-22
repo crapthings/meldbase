@@ -5,9 +5,7 @@ and hardware-specific Redfish, IPMI, hypervisor or managed-PDU integrations.
 Database and receipt schemas must not depend on a vendor API.
 
 Meldbase includes a reference `meld-power-redfish-adapter` implementation for
-the `redfish-computer-system-power-cycle` method. Its deployment and identity
-bootstrap are documented in
-[the Redfish power adapter runbook](../docs/redfish-power-adapter.md).
+the `redfish-computer-system-power-cycle` method.
 
 The controller agent runs on a machine outside the system being cut. It
 executes one preconfigured adapter executable with no command-line arguments.

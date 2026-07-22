@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -75,7 +74,7 @@ func TestHandlerRequiresAuthenticationAndExactOrigin(t *testing.T) {
 		t.Fatalf("unstable stats JSON schema=%v", wire["stats"])
 	}
 	var sample Sample
-	if err := json.Unmarshal(response.Body.Bytes(), &sample); err != nil || sample.Version != SchemaVersion || sample.Sequence != 1 {
+	if err := json.Unmarshal(response.Body.Bytes(), &sample); err != nil || sample.Sequence != 1 {
 		t.Fatalf("sample=%+v err=%v", sample, err)
 	}
 }
@@ -113,10 +112,9 @@ func TestHandlerPreflightAndHistory(t *testing.T) {
 		t.Fatalf("history status=%d body=%s", response.Code, response.Body.String())
 	}
 	var history struct {
-		Version uint32   `json:"version"`
 		Samples []Sample `json:"samples"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &history); err != nil || history.Version != SchemaVersion || len(history.Samples) != 1 {
+	if err := json.Unmarshal(response.Body.Bytes(), &history); err != nil || len(history.Samples) != 1 {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }
@@ -151,7 +149,6 @@ func TestIndexCatalogEndpointIsAuthenticatedAndReturnsDefinitionsOnly(t *testing
 		t.Fatalf("catalog status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
 	}
 	var catalog struct {
-		Version uint32 `json:"version"`
 		Indexes []struct {
 			Collection string `json:"collection"`
 			Name       string `json:"name"`
@@ -162,7 +159,7 @@ func TestIndexCatalogEndpointIsAuthenticatedAndReturnsDefinitionsOnly(t *testing
 			Unique bool `json:"unique"`
 		} `json:"indexes"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &catalog); err != nil || catalog.Version != 1 || len(catalog.Indexes) != 1 || catalog.Indexes[0].Collection != "tasks" || catalog.Indexes[0].Name != "by_state_created" || len(catalog.Indexes[0].Fields) != 2 || catalog.Indexes[0].Fields[1].Order != -1 || catalog.Indexes[0].Unique {
+	if err := json.Unmarshal(response.Body.Bytes(), &catalog); err != nil || len(catalog.Indexes) != 1 || catalog.Indexes[0].Collection != "tasks" || catalog.Indexes[0].Name != "by_state_created" || len(catalog.Indexes[0].Fields) != 2 || catalog.Indexes[0].Fields[1].Order != -1 || catalog.Indexes[0].Unique {
 		t.Fatalf("catalog=%+v err=%v", catalog, err)
 	}
 }
@@ -202,7 +199,7 @@ func TestHandlerStreamsInitialSample(t *testing.T) {
 			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &sample); err != nil {
 				t.Fatal(err)
 			}
-			if sample.Version != SchemaVersion || sample.Sequence != 1 {
+			if sample.Sequence != 1 {
 				t.Fatalf("stream sample=%+v", sample)
 			}
 			break
@@ -263,12 +260,10 @@ func TestEmbeddedDashboardIsOptInAndContainsNoData(t *testing.T) {
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	script := response.Body.String()
-	version := strconv.FormatUint(uint64(SchemaVersion), 10)
 	if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/javascript") ||
-		!strings.Contains(script, "Unsupported admin protocol") || !strings.Contains(script, "/v1/stats/stream") ||
+		!strings.Contains(script, "Invalid admin response") || !strings.Contains(script, "/v1/stats/stream") ||
 		!strings.Contains(script, "/v1/diagnostics") || !strings.Contains(script, "Authorization") ||
-		!strings.Contains(script, "rollbackAnchorGeneration") || !strings.Contains(script, "commitCoordinator") ||
-		!strings.Contains(script, version) {
+		!strings.Contains(script, "rollbackAnchorGeneration") || !strings.Contains(script, "commitCoordinator") {
 		t.Fatalf("dashboard script status=%d headers=%v", response.Code, response.Header())
 	}
 

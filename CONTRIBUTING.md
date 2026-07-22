@@ -47,5 +47,5 @@ conformance corpus when wire behavior changes.
 - Storage-format changes must remain fail-closed and document their migration or
   compatibility behavior.
 
-See `docs/architecture.md`, `docs/storage-format.md`, and `docs/mvp-audit.md`
-before proposing a structural change.
+Review the affected implementation, tests, and public API boundary before
+proposing a structural change.

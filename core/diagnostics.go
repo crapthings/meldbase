@@ -66,7 +66,6 @@ type DiagnosticStats struct {
 }
 
 type DiagnosticSnapshot struct {
-	Version    uint32            `json:"version"`
 	Session    uint64            `json:"session"`
 	StartedAt  time.Time         `json:"startedAt"`
 	CapturedAt time.Time         `json:"capturedAt"`
@@ -265,7 +264,7 @@ func (d *Diagnostics) Snapshot() DiagnosticSnapshot {
 // caller to continue from the last returned sequence.
 func (d *Diagnostics) SnapshotAfter(after uint64, limit int) DiagnosticSnapshot {
 	if d == nil {
-		return DiagnosticSnapshot{Version: 1, CapturedAt: time.Now()}
+		return DiagnosticSnapshot{CapturedAt: time.Now()}
 	}
 	d.mu.Lock()
 	if limit <= 0 || limit > len(d.events) {
@@ -297,7 +296,7 @@ func (d *Diagnostics) SnapshotAfter(after uint64, limit int) DiagnosticSnapshot 
 	stats.QueriesObserved = d.queriesObserved.Load()
 	stats.CommitsObserved = d.commitsObserved.Load()
 	return DiagnosticSnapshot{
-		Version: 1, Session: d.session, StartedAt: d.startedAt, CapturedAt: time.Now(), Stats: stats, Events: events,
+		Session: d.session, StartedAt: d.startedAt, CapturedAt: time.Now(), Stats: stats, Events: events,
 		Truncated: truncated, HasMore: hasMore,
 	}
 }
@@ -306,11 +305,11 @@ func (d *Diagnostics) SnapshotAfter(after uint64, limit int) DiagnosticSnapshot 
 // allows long-lived admin handlers to follow a safely replaced session.
 func (db *DB) DiagnosticSnapshotAfter(after uint64, limit int) DiagnosticSnapshot {
 	if db == nil {
-		return DiagnosticSnapshot{Version: 1, CapturedAt: time.Now()}
+		return DiagnosticSnapshot{CapturedAt: time.Now()}
 	}
 	diagnostics := db.diagnostics.Load()
 	if diagnostics == nil {
-		return DiagnosticSnapshot{Version: 1, CapturedAt: time.Now()}
+		return DiagnosticSnapshot{CapturedAt: time.Now()}
 	}
 	return diagnostics.SnapshotAfter(after, limit)
 }

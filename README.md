@@ -83,10 +83,9 @@ MELDBASE_BIN="$(pwd)/meld" ./meldbase-local/start.sh
 
 The API starts on `127.0.0.1:8080` and the embedded operator dashboard on
 `127.0.0.1:9091`. Your identity service signs the JWTs; the server verifies
-them and applies the configured collection-access boundary. See the
-[single-node guide](docs/single-node-deployment.md) for token requirements,
-dashboard access, reverse-proxy boundaries, backups, recovery drills, and
-upgrades.
+them and applies the configured collection-access boundary. Use `meld --help`
+and the generated API reference while the task-oriented documentation is
+rebuilt.
 
 ## What you can build today
 
@@ -132,8 +131,7 @@ const { documents, status, error } = useLiveQuery(query)
 ```
 
 See [`examples/realtime-todos`](examples/realtime-todos) for a runnable browser
-example, and the [client protocol](docs/client-protocol.md) for the exact
-HTTP/WebSocket contract.
+example.
 
 ## How the pieces fit
 
@@ -149,9 +147,7 @@ your Go process                    your application boundary
 The embedded core is useful on its own. Add the server only when another
 process, browser, or service needs access. The server does not become your user
 directory: it trusts a verified identity provider, derives an actor and active
-workspace from the token, and constrains configured business collections. The
-[collection access guide](docs/guide/access-policies.md) describes the small,
-declarative policy surface and where application business authorization begins.
+workspace from the token, and constrains configured business collections.
 
 ## Use it when
 
@@ -163,7 +159,7 @@ needs durable live queries without introducing a separate database product.
 It is deliberately not a fit when you need MongoDB wire compatibility,
 sharding, distributed transactions, automatic HA/failover, offline conflict
 resolution, complex aggregation, or built-in end-user identity. Those are not
-hidden roadmap promises; see the [capability audit](docs/mvp-audit.md).
+hidden roadmap promises.
 
 ## Durable data and operations
 
@@ -196,16 +192,8 @@ meld import --in /srv/meldbase/archives/app.jsonl \
 meld verify --db /srv/meldbase/rehearsals/app-imported.meld
 ```
 
-Read the [single-node deployment and recovery guide](docs/single-node-deployment.md)
-before operating real data. The deeper storage guarantees, resource limits,
-rollback-anchor model, filesystem qualification, and release evidence are
-documented separately so the getting-started path stays readable:
-
-- [Storage format and recovery](docs/storage-format.md)
-- [Observability and dashboard](docs/observability.md)
-- [Filesystem qualification](docs/filesystem-qualification.md)
-- [Rollback protection](docs/rollback-anchor-service.md)
-- [Release process](docs/releasing.md)
+Before operating real data, verify backup and restore on a disposable copy and
+inspect the command help for the exact operational contract.
 
 ## Current alpha status
 
@@ -219,34 +207,14 @@ fallback engine.
 The core, server, SDKs, and single-node tooling are implemented and tested, but
 the project does **not** claim blanket power-loss qualification for every
 filesystem, production-grade automatic HA, or the deferred features listed
-above. The [capability audit](docs/mvp-audit.md) and [roadmap](docs/roadmap.md)
-are the authoritative boundary.
+above.
 
 ## Documentation
 
-### Start with your goal
-
-- **Try Meldbase.** Run the [two-minute Go example](#start-in-two-minutes),
-  then use the [getting-started guide](docs/guide/getting-started.md) or the
-  [live todo example](docs/guide/realtime-todos.md). Read [safe alpha
-  evaluation](docs/alpha-evaluation.md) before putting important data in it.
-- **Build an application.** Start with [identity and workspace
-  isolation](docs/guide/identity-and-workspaces.md), [collection access
-  policies](docs/guide/access-policies.md), [realtime UI](docs/guide/realtime-todos.md),
-  and the [query contract](docs/query.md).
-- **Run a production service.** Follow [single-node deployment and
-  recovery](docs/single-node-deployment.md), then the [backup and upgrade
-  runbook](docs/operations/backup-and-upgrade.md), [observability
-  guide](docs/observability.md), and [current capability audit](docs/mvp-audit.md).
-- **Extend Meldbase.** Read the [terminology and semantic boundaries](docs/terminology.md),
-  [architecture](docs/architecture.md), [client
-  protocol](docs/client-protocol.md), [Worker SDK
-  guide](docs/guide/worker-sdk.md), and [CONTRIBUTING.md](CONTRIBUTING.md)
-  before changing storage, protocols, or SDKs.
-
-Need a specific guide or API reference? Browse the **[documentation
-site](https://crapthings.github.io/meldbase/)** or the [documentation index in
-this repository](docs/README.md).
+The documentation is being rebuilt around the current product contract. The
+generated [TypeScript API](https://crapthings.github.io/meldbase/api/typescript/)
+remains available; use the source, tests, and [CONTRIBUTING.md](CONTRIBUTING.md)
+as the current implementation reference.
 
 ## Contributing and verification
 
@@ -260,8 +228,7 @@ pnpm build:example
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance,
-[SECURITY.md](SECURITY.md) for private vulnerability reporting, and
-[docs/releasing.md](docs/releasing.md) for maintainer release gates.
+[SECURITY.md](SECURITY.md) for private vulnerability reporting.
 
 ## License
 

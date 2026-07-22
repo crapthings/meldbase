@@ -241,7 +241,7 @@ func (adapter *Adapter) observe(sink observationSink) {
 	}
 	adapter.collections.Add(1)
 	sample, ok := adapter.source.Latest()
-	valid := ok && sample.Version == admin.SchemaVersion
+	valid := ok
 	up := uint64(0)
 	if valid && !sample.Stats.Closed {
 		up = 1

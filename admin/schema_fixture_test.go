@@ -3,8 +3,6 @@ package admin
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -14,19 +12,6 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
-const adminWireSchemaFormatVersion uint32 = 1
-const adminWireSchemaDeltaFormatVersion uint32 = 2
-
-type adminWireSchemaFixture struct {
-	FormatVersion      uint32                 `json:"formatVersion"`
-	AdminSchemaVersion uint32                 `json:"adminSchemaVersion"`
-	Root               string                 `json:"root"`
-	Fields             []adminWireSchemaField `json:"fields"`
-	Extends            uint32                 `json:"extends,omitempty"`
-	Additions          []adminWireSchemaField `json:"additions,omitempty"`
-	Removals           []string               `json:"removals,omitempty"`
-}
-
 type adminWireSchemaField struct {
 	Path     string `json:"path"`
 	Type     string `json:"type"`
@@ -34,20 +19,8 @@ type adminWireSchemaField struct {
 	Nullable bool   `json:"nullable"`
 }
 
-func TestAdminSampleWireSchemaMatchesVersionedFixture(t *testing.T) {
-	want := loadAdminWireSchemaFixture(t)
-	got := buildAdminWireSchemaFixture(t)
-	if !reflect.DeepEqual(got, want) {
-		encoded, err := json.MarshalIndent(got, "", "  ")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Fatalf("admin schema %d drifted without a new golden fixture:\n%s", SchemaVersion, encoded)
-	}
-}
-
 func TestAdminSampleWireSchemaMatchesJSONEncoder(t *testing.T) {
-	fixture := buildAdminWireSchemaFixture(t)
+	fields := buildAdminWireSchema(t)
 	sample := Sample{Server: &meldserver.ServerStats{}}
 	encoded, err := json.Marshal(sample)
 	if err != nil {
@@ -57,9 +30,9 @@ func TestAdminSampleWireSchemaMatchesJSONEncoder(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	actual := make(map[string]string, len(fixture.Fields))
+	actual := make(map[string]string, len(fields))
 	collectAdminJSONPaths(t, decoded, "", actual)
-	for _, field := range fixture.Fields {
+	for _, field := range fields {
 		wireType, exists := actual[field.Path]
 		if !exists {
 			t.Fatalf("schema path %q is absent from populated JSON", field.Path)
@@ -83,22 +56,7 @@ func TestAdminSampleWireSchemaMatchesJSONEncoder(t *testing.T) {
 	}
 }
 
-// TestGenerateAdminSampleWireSchema is an explicit maintainer action. A schema
-// change must first increment SchemaVersion; generation then creates a new
-// full fixture or a reviewed delta fixture and leaves every historical contract
-// untouched.
-func TestGenerateAdminSampleWireSchema(t *testing.T) {
-	if os.Getenv("MELDBASE_GENERATE_ADMIN_SCHEMA") != "1" {
-		t.Skip("admin schema generation is an explicit maintainer action")
-	}
-	encoded, err := json.MarshalIndent(buildAdminWireSchemaFixture(t), "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fmt.Println(string(encoded))
-}
-
-func buildAdminWireSchemaFixture(t *testing.T) adminWireSchemaFixture {
+func buildAdminWireSchema(t *testing.T) []adminWireSchemaField {
 	t.Helper()
 	fields := make([]adminWireSchemaField, 0, 256)
 	collectAdminWireSchema(t, reflect.TypeOf(Sample{}), "", false, &fields)
@@ -108,10 +66,7 @@ func buildAdminWireSchemaFixture(t *testing.T) adminWireSchemaFixture {
 			t.Fatalf("duplicate admin schema path %q", fields[index].Path)
 		}
 	}
-	return adminWireSchemaFixture{
-		FormatVersion: adminWireSchemaFormatVersion, AdminSchemaVersion: SchemaVersion,
-		Root: "admin.Sample", Fields: fields,
-	}
+	return fields
 }
 
 func collectAdminWireSchema(t *testing.T, value reflect.Type, prefix string, inheritedOptional bool, fields *[]adminWireSchemaField) {
@@ -195,67 +150,6 @@ func adminJSONWireType(t *testing.T, value reflect.Type) string {
 		t.Fatalf("unsupported admin JSON field type %s", value)
 		return ""
 	}
-}
-
-func loadAdminWireSchemaFixture(t *testing.T) adminWireSchemaFixture {
-	t.Helper()
-	return loadAdminWireSchemaFixtureVersion(t, SchemaVersion)
-}
-
-func loadAdminWireSchemaFixtureVersion(t *testing.T, version uint32) adminWireSchemaFixture {
-	t.Helper()
-	path := filepath.Join("testdata", fmt.Sprintf("admin-schema-v%d.json", version))
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fixture adminWireSchemaFixture
-	if err := json.Unmarshal(raw, &fixture); err != nil {
-		t.Fatal(err)
-	}
-	if fixture.AdminSchemaVersion != version || fixture.Root != "admin.Sample" {
-		t.Fatalf("invalid admin schema fixture metadata: %+v", fixture)
-	}
-	if fixture.FormatVersion == adminWireSchemaFormatVersion {
-		return fixture
-	}
-	if fixture.FormatVersion != adminWireSchemaDeltaFormatVersion || fixture.Extends == 0 || fixture.Extends >= version || len(fixture.Fields) != 0 {
-		t.Fatalf("invalid admin schema delta fixture metadata: %+v", fixture)
-	}
-	base := loadAdminWireSchemaFixtureVersion(t, fixture.Extends)
-	base.AdminSchemaVersion = version
-	base.Fields = append(base.Fields, fixture.Additions...)
-	if len(fixture.Removals) > 0 {
-		removed := make(map[string]struct{}, len(fixture.Removals))
-		for _, path := range fixture.Removals {
-			if path == "" {
-				t.Fatalf("admin schema delta contains an empty removal")
-			}
-			if _, exists := removed[path]; exists {
-				t.Fatalf("admin schema delta removes %q more than once", path)
-			}
-			removed[path] = struct{}{}
-		}
-		fields := base.Fields[:0]
-		for _, field := range base.Fields {
-			if _, remove := removed[field.Path]; remove {
-				delete(removed, field.Path)
-				continue
-			}
-			fields = append(fields, field)
-		}
-		if len(removed) != 0 {
-			t.Fatalf("admin schema delta removes unknown paths: %+v", removed)
-		}
-		base.Fields = fields
-	}
-	sort.Slice(base.Fields, func(left, right int) bool { return base.Fields[left].Path < base.Fields[right].Path })
-	for index := 1; index < len(base.Fields); index++ {
-		if base.Fields[index-1].Path == base.Fields[index].Path {
-			t.Fatalf("admin schema delta duplicates path %q", base.Fields[index].Path)
-		}
-	}
-	return base
 }
 
 func collectAdminJSONPaths(t *testing.T, value map[string]any, prefix string, paths map[string]string) {
