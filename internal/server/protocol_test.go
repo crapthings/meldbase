@@ -96,7 +96,7 @@ func TestRealtimeProtocolV1FrameVocabularyMatchesSharedContract(t *testing.T) {
 	}
 	wantNested := []protocolShapeContract{
 		{Name: "delta.operation", Required: []string{"id", "op"}, Optional: []string{"before", "document"}},
-		{Name: "error", Required: []string{"code"}},
+		{Name: "error", Required: []string{"code", "kind"}, Optional: []string{"data"}},
 	}
 	if !equalProtocolFrames(contract.ClientFrames, wantClient) || !equalProtocolFrames(contract.ServerFrames, wantServer) || !equalProtocolShapes(contract.NestedShapes, wantNested) {
 		t.Fatalf("realtime protocol v1 frame contract drifted: client=%+v server=%+v nested=%+v", contract.ClientFrames, contract.ServerFrames, contract.NestedShapes)
@@ -129,7 +129,10 @@ func TestWorkerProtocolV1ContractIsCanonical(t *testing.T) {
 		{Type: "result", Required: []string{"callId", "result", "type", "v"}},
 		{Type: "tx_op", Required: []string{"callId", "collection", "opId", "operation", "type", "v"}, Optional: []string{"document", "id", "mutation"}},
 	}
-	wantNested := []protocolShapeContract{{Name: "actor", Required: []string{"id", "tenantId"}}}
+	wantNested := []protocolShapeContract{
+		{Name: "actor", Required: []string{"id", "tenantId"}},
+		{Name: "error", Required: []string{"code", "kind"}, Optional: []string{"data"}},
+	}
 	if !equalProtocolFrames(workerContract.HubFrames, wantHub) || !equalProtocolFrames(workerContract.WorkerFrames, wantWorker) || !equalProtocolShapes(workerContract.NestedShapes, wantNested) {
 		t.Fatalf("worker protocol v1 frame contract drifted: hub=%+v worker=%+v", workerContract.HubFrames, workerContract.WorkerFrames)
 	}

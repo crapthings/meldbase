@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 
 import { compileQuery } from "@meldbase/client";
-import { MeldbaseMethodError, MeldbaseWorker, publish, rpc, transactional } from "@meldbase/server";
+import { MeldbaseError, MeldbaseWorker, publish, rpc, transactional } from "@meldbase/server";
 
 const token = process.env.MELDBASE_WORKER_TOKEN;
 if (!token) throw new Error("MELDBASE_WORKER_TOKEN is required");
@@ -17,7 +17,7 @@ const worker = new MeldbaseWorker({
     "system.ping": rpc(({ actor }) => ({ ok: true, id: actor.id })),
     "orders.create": transactional(async ({ actor }, [description], tx) => {
       if (typeof description !== "string" || description.length === 0 || description.length > 500) {
-        throw new MeldbaseMethodError("invalid_description");
+        throw new MeldbaseError("orders.invalid_description");
       }
       const id = await tx.insert("orders", {
         owner: actor.id,

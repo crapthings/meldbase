@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
 import test from "node:test";
 import { promisify } from "node:util";
-import { MeldbaseClient } from "./index.js";
+import { MeldbaseClient, MeldbaseError } from "./index.js";
 import type { Document, WebSocketLike } from "./index.js";
 
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
@@ -221,8 +221,14 @@ test("TypeScript remote mutations and RPC interoperate with live Go and Node wor
     assert.deepEqual(await todos.deleteOne({ _id: inserted._id }), { deletedCount: 1 });
     assert.deepEqual(await todos.find({ _id: inserted._id }).fetch(), []);
 
-    assert.equal(await client.call("sdk.echo", [42n]), 42n);
-    assert.equal(await client.call("sdk.echo", [7n], { transport: "realtime" }), 7n);
+	assert.equal(await client.call("sdk.echo", [42n]), 42n);
+	assert.equal(await client.call("sdk.echo", [7n], { transport: "realtime" }), 7n);
+	await assert.rejects(client.call("sdk.reject"), (error: unknown) =>
+		error instanceof MeldbaseError && error.code === "orders.already_paid" && error.data?.retryAfter === 60n,
+	);
+	await assert.rejects(client.call("sdk.reject", [], { transport: "realtime" }), (error: unknown) =>
+		error instanceof MeldbaseError && error.code === "orders.already_paid" && error.data?.retryAfter === 60n,
+	);
   } finally {
     client.close();
     await worker?.stop();

@@ -61,9 +61,9 @@ const todos = client.collection<Todo>("todos");
 For an RPC that may have executed even if the caller loses its result, supply a
 stable `idempotencyKey` and explicitly handle retry policy. The SDK never
 automatically retries RPC calls. A realtime call that loses its terminal result
-throws `MeldbaseRPCUnknownResultError` rather than pretending that it failed
-before execution. See [RPC idempotency](../rpc-idempotency) for the server-side
-requirements.
+throws `MeldbaseInternalError` with code `outcome_unknown` rather than
+pretending that it failed before execution. See [RPC idempotency](../rpc-idempotency)
+for the server-side requirements.
 
 ## Work with a remote collection
 
@@ -86,9 +86,10 @@ and result limits.
 
 Each remote operation accepts an optional `AbortSignal` in its options. An
 aborted write does not prove that the server did not commit it. An insert whose
-result cannot be verified throws `MeldbaseInsertUnknownResultError`, which
-contains `documentId` for reconciliation; use a server-owned idempotent RPC
-when a business operation needs stronger retry semantics.
+result cannot be verified throws `MeldbaseInternalError` with code
+`outcome_unknown`; its `operation` identifies the insert and the original error
+is retained as `cause`. Use a server-owned idempotent RPC when a business
+operation needs stronger retry semantics.
 
 There is deliberately no remote `replace()` or `upsert()` method. Full-document
 replacement or filter-based upsert across an authorization boundary is easy to
@@ -258,11 +259,12 @@ and compiled `QuerySpec` and are the implementation layer used by
 - `DeleteResult` has `deletedCount`.
 - `CountResult` has `count` and `capped`; a capped count is not exact.
 - `GroupCountResult` has typed `{ key, count }` groups and `capped`.
-- `MeldbaseRemoteError` preserves a safe server `code`, HTTP status, and
-  operation name for data operations.
-- `MeldbaseRPCError` is the equivalent structured RPC error.
-- `MeldbaseInsertUnknownResultError` means an insert may have committed but its
-  result could not be verified; it carries the stable `documentId` to reconcile.
+- `MeldbaseError` is an expected application RPC result. Its code is namespaced
+  (for example `orders.already_paid`) and its optional `data` is safe,
+  structured application data.
+- `MeldbaseInternalError` is a Meldbase-owned failure. It preserves its safe
+  engine code, HTTP status (zero for WebSocket), operation name, and optional
+  local `cause`; `outcome_unknown` means the caller must reconcile before retrying.
 - `MeldbaseClientClosedError` means code attempted new work after `client.close()`.
 - `QueryValidationError` means the SDK rejected an unsafe, malformed, or
   over-limit local query, update, cursor, or wire value before using it.

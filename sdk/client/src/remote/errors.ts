@@ -1,7 +1,28 @@
-export class MeldbaseRemoteError extends Error {
-  constructor(readonly code: string, readonly status: number, readonly operation: string) {
+import type { Value } from "../types.js";
+
+export type MeldbaseErrorData = Readonly<Record<string, Value>>;
+
+/** An expected, application-owned RPC outcome. */
+export class MeldbaseError extends Error {
+  readonly data?: MeldbaseErrorData;
+
+  constructor(readonly code: string, data?: MeldbaseErrorData) {
+    if (!/^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})+$/.test(code)) throw new TypeError("Invalid Meldbase business error code");
+    super(`Meldbase operation failed: ${code}`);
+    this.name = "MeldbaseError";
+    if (data !== undefined) this.data = data;
+  }
+}
+
+/** A Meldbase-owned failure or an outcome that could not be determined safely. */
+export class MeldbaseInternalError extends Error {
+  readonly cause: unknown;
+
+  constructor(readonly code: string, readonly status = 0, readonly operation = "operation", cause?: unknown) {
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) throw new TypeError("Invalid Meldbase internal error code");
     super(`Meldbase ${operation} failed: ${code}`);
-    this.name = "MeldbaseRemoteError";
+    this.name = "MeldbaseInternalError";
+    this.cause = cause;
   }
 }
 
@@ -17,29 +38,6 @@ export class MeldbaseClientClosedError extends Error {
  * The insert may have reached the server, but the client could not verify its
  * result. Use documentId to reconcile before retrying the same logical write.
  */
-export class MeldbaseInsertUnknownResultError extends Error {
-  readonly cause: unknown;
-  constructor(readonly documentId: string, cause: unknown) {
-    super(`Insert result is unknown for document ${documentId}; the document may have been created`);
-    this.name = "MeldbaseInsertUnknownResultError";
-    this.cause = cause;
-  }
-}
-
-export class MeldbaseRPCError extends MeldbaseRemoteError {
-  constructor(code: string, status: number) {
-    super(code, status, "RPC");
-    this.name = "MeldbaseRPCError";
-  }
-}
-
-export class MeldbaseRPCUnknownResultError extends Error {
-  constructor(readonly requestId: string) {
-    super("Realtime RPC connection closed before a result was received; the method may have executed");
-    this.name = "MeldbaseRPCUnknownResultError";
-  }
-}
-
 export class MeldbaseProtocolError extends Error {
   readonly required: readonly string[];
   constructor(required: readonly string[]) {

@@ -1,4 +1,6 @@
-import { MeldbaseRemoteError } from "./errors.js";
+import { decodeValue } from "../wire.js";
+import type { Value } from "../types.js";
+import { MeldbaseInternalError, type MeldbaseErrorData } from "./errors.js";
 
 export function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -16,7 +18,30 @@ export function abortReason(signal: AbortSignal): Error {
 }
 
 export function validRPCErrorCode(value: unknown): value is string {
-  return typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value);
+	return typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value);
+}
+
+export function validBusinessErrorCode(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})+$/.test(value);
+}
+
+export type WireError =
+  | { readonly kind: "internal"; readonly code: string }
+  | { readonly kind: "business"; readonly code: string; readonly data?: MeldbaseErrorData };
+
+export function decodeWireError(value: unknown): WireError {
+  if (!record(value) || typeof value.kind !== "string" || typeof value.code !== "string") throw new Error("Malformed Meldbase error");
+  if (value.kind === "internal") {
+    if (!exactKeys(value, ["kind", "code"]) || !validRPCErrorCode(value.code)) throw new Error("Malformed internal Meldbase error");
+    return { kind: "internal", code: value.code };
+  }
+  if (value.kind !== "business" || !validBusinessErrorCode(value.code) || !exactKeys(value, value.data === undefined ? ["kind", "code"] : ["kind", "code", "data"])) {
+    throw new Error("Malformed business Meldbase error");
+  }
+  if (value.data === undefined) return { kind: "business", code: value.code };
+  const data = decodeValue(value.data);
+  if (!record(data)) throw new Error("Business Meldbase error data must be an object");
+  return { kind: "business", code: value.code, data: data as Readonly<Record<string, Value>> };
 }
 
 export function validRPCIdempotencyKey(value: string): boolean {
@@ -51,11 +76,12 @@ export function normalizeRealtimeOrigin(value: string): string {
 
 export async function throwRemoteError(response: Response, maxBytes: number, operation: string): Promise<never> {
   const body = await boundedJSON(response, maxBytes);
-  if (!record(body) || !exactKeys(body, ["error"]) || !record(body.error) ||
-    !exactKeys(body.error, ["code"]) || !validRPCErrorCode(body.error.code)) {
+  if (!record(body) || !exactKeys(body, ["error"])) {
     throw new Error(`Malformed ${operation} error response`);
   }
-  throw new MeldbaseRemoteError(body.error.code, response.status, operation);
+  const error = decodeWireError(body.error);
+  if (error.kind !== "internal") throw new Error(`Malformed ${operation} error response`);
+  throw new MeldbaseInternalError(error.code, response.status, operation);
 }
 
 export function positiveLimit(value: number | undefined, fallback: number, name: string): number {

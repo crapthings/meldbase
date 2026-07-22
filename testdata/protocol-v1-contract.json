@@ -34,6 +34,16 @@
           "tenantId"
         ],
         "optional": []
+      },
+      {
+        "name": "error",
+        "required": [
+          "code",
+          "kind"
+        ],
+        "optional": [
+          "data"
+        ]
       }
     ],
     "hubFrames": [
@@ -181,13 +191,28 @@
     "delta_failed",
     "duplicate_key",
     "forbidden",
+    "forbidden_field",
     "initial_snapshot_failed",
     "internal",
+    "invalid_aggregate",
+    "invalid_document",
+    "invalid_document_envelope",
+    "invalid_json",
+    "invalid_mutation_envelope",
+    "invalid_policy",
     "invalid_query",
+    "invalid_query_envelope",
     "invalid_request",
     "invalid_rpc_argument",
+    "invalid_rpc_envelope",
     "invalid_update",
+    "missing_update",
     "mutation_limit_exceeded",
+    "origin_forbidden",
+    "outcome_unknown",
+    "policy_expired",
+    "preflight_forbidden",
+    "request_too_large",
     "resource_limit_exceeded",
     "resume_failed",
     "rpc_busy",
@@ -206,6 +231,9 @@
     "subscription_ended",
     "subscription_failed",
     "subscription_limit_or_duplicate",
+    "unauthenticated",
+    "unexpected_update",
+    "unknown_mutation_action",
     "worker_busy"
   ],
   "clientFrames": [
@@ -370,9 +398,12 @@
     {
       "name": "error",
       "required": [
-        "code"
+        "code",
+        "kind"
       ],
-      "optional": []
+      "optional": [
+        "data"
+      ]
     }
   ]
 }

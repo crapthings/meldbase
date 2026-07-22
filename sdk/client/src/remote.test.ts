@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { encodeDocument, encodeValue, MeldbaseClient, MeldbaseClientClosedError, MeldbaseInsertUnknownResultError, MeldbaseProtocolError, MeldbaseRemoteError, MeldbaseRPCError, MeldbaseRPCUnknownResultError } from "./index.js";
+import { encodeDocument, encodeValue, MeldbaseClient, MeldbaseClientClosedError, MeldbaseError, MeldbaseInternalError, MeldbaseProtocolError } from "./index.js";
 import type { Document, SyncState, WebSocketLike } from "./index.js";
 
 class FakeSocket implements WebSocketLike {
@@ -244,7 +244,7 @@ test("HTTP responses are streamed under the byte limit and use exact versioned e
       : scenario.operation === "insert" ? collection.insertOne({ title: "x" })
       : collection.deleteOne({});
     if (scenario.operation === "insert") {
-      await assert.rejects(operation, (error: unknown) => error instanceof MeldbaseInsertUnknownResultError && error.cause instanceof Error && /Malformed insert response/.test(error.cause.message));
+      await assert.rejects(operation, (error: unknown) => error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.cause instanceof Error && /Malformed insert response/.test(error.cause.message));
     } else {
       await assert.rejects(operation, /Malformed (query|delete) response/);
     }
@@ -275,17 +275,17 @@ test("data operations and subscriptions expose stable remote error codes", async
     baseUrl: "https://db.example",
     fetch: async (input) => String(input).endsWith("/v1/realtime/tickets")
       ? Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol })
-      : Response.json({ error: { code: "database_unavailable" } }, { status: 503 }),
+      : Response.json({ error: { kind: "internal", code: "database_unavailable" } }, { status: 503 }),
     webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
   });
   await assert.rejects(client.collection("todos").find().fetch(), (error: unknown) =>
-    error instanceof MeldbaseRemoteError && error.code === "database_unavailable" && error.status === 503 && error.operation === "query",
+    error instanceof MeldbaseInternalError && error.code === "database_unavailable" && error.status === 503 && error.operation === "query",
   );
   await assert.rejects(client.collection("todos").insertOne({ title: "x" }), (error: unknown) =>
-    error instanceof MeldbaseRemoteError && error.code === "database_unavailable" && error.operation === "insert",
+    error instanceof MeldbaseInternalError && error.code === "database_unavailable" && error.operation === "insert",
   );
   await assert.rejects(client.collection("todos").deleteOne({ done: true }), (error: unknown) =>
-    error instanceof MeldbaseRemoteError && error.code === "database_unavailable" && error.operation === "mutation",
+    error instanceof MeldbaseInternalError && error.code === "database_unavailable" && error.operation === "mutation",
   );
 
   let subscriptionError: Error | undefined;
@@ -295,10 +295,10 @@ test("data operations and subscriptions expose stable remote error codes", async
   socket.open();
   socket.message({ v: 1, type: "authenticated" });
   const subscribe = JSON.parse(socket.sent[1] as string) as { requestId: string };
-  socket.message({ v: 1, type: "error", requestId: subscribe.requestId, error: { code: "database_unavailable" } });
+  socket.message({ v: 1, type: "error", requestId: subscribe.requestId, error: { kind: "internal", code: "database_unavailable" } });
   await settle();
-  assert.equal(subscriptionError instanceof MeldbaseRemoteError, true);
-  assert.equal((subscriptionError as MeldbaseRemoteError).code, "database_unavailable");
+  assert.equal(subscriptionError instanceof MeldbaseInternalError, true);
+  assert.equal((subscriptionError as MeldbaseInternalError).code, "database_unavailable");
   unsubscribe();
   client.close();
 });
@@ -314,7 +314,7 @@ test("remote insert owns its ID before transport and marks an unverifiable resul
     },
   });
   await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), (error: unknown) =>
-    error instanceof MeldbaseInsertUnknownResultError && error.documentId === suppliedID && error.cause instanceof Error && /changed document ID/.test(error.cause.message),
+    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.operation === `insert ${suppliedID}` && error.cause instanceof Error && /changed document ID/.test(error.cause.message),
   );
   assert.match(suppliedID ?? "", /^[0-9a-f]{32}$/);
   client.close();
@@ -327,7 +327,7 @@ test("remote insert exposes its assigned ID when transport admission is unknown"
     fetch: async () => { throw new Error("connection lost"); },
   });
   await assert.rejects(client.collection("todos").insertOne({ _id: suppliedID, title: "owned" }), (error: unknown) =>
-    error instanceof MeldbaseInsertUnknownResultError && error.documentId === suppliedID && error.cause instanceof Error && /connection lost/.test(error.cause.message),
+    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.operation === `insert ${suppliedID}` && error.cause instanceof Error && /connection lost/.test(error.cause.message),
   );
   client.close();
 });
@@ -339,7 +339,7 @@ test("pre-dispatch insert failures are not reported as unknown results", async (
     fetch: async () => { throw new Error("fetch should not run"); },
   });
   await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), (error: unknown) =>
-    error instanceof Error && !(error instanceof MeldbaseInsertUnknownResultError) && /token refresh failed/.test(error.message),
+    error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
   );
   client.close();
 });
@@ -360,7 +360,7 @@ test("RPC call preserves typed values and returns structured safe errors", async
 	const fetcher: typeof fetch = async (input, init) => {
 		requests.push({ url: String(input), ...(init ? { init } : {}) });
 		const call = JSON.parse(init?.body as string) as { requestId: string };
-		if (fail) return Response.json({ v: 1, type: "error", requestId: call.requestId, error: { code: "quota_exceeded" } }, { status: 400 });
+		if (fail) return Response.json({ v: 1, type: "error", requestId: call.requestId, error: { kind: "business", code: "billing.quota_exceeded", data: encodeValue({ retryAfter: 60n }) } }, { status: 400 });
 		return Response.json({
 			v: 1, type: "result", requestId: call.requestId,
 			result: encodeValue({ total: 9223372036854775807n, at: new Date("2026-07-16T00:00:00.000Z"), bytes: new Uint8Array([0, 255]) }),
@@ -392,12 +392,40 @@ test("RPC call preserves typed values and returns structured safe errors", async
 
 	fail = true;
 	await assert.rejects(client.call("billing.calculate"), (error: unknown) =>
-		error instanceof MeldbaseRPCError && error.code === "quota_exceeded" && error.status === 400,
+		error instanceof MeldbaseError && error.code === "billing.quota_exceeded" && error.data?.retryAfter === 60n,
 	);
 	await assert.rejects(client.call("bad/name"), /Invalid RPC method name/);
 	await assert.rejects(client.call("billing.calculate", [1, 2, 3, 4]), /argument limit/);
 	await assert.rejects(client.call("billing.calculate", [], { idempotencyKey: "too-short" }), /Invalid RPC idempotency key/);
 	client.close();
+});
+
+test("RPC call preserves generic internal errors raised before its envelope is decoded", async () => {
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () => Response.json({ error: { kind: "internal", code: "unauthenticated" } }, { status: 401 }),
+  });
+  await assert.rejects(client.call("billing.calculate"), (error: unknown) =>
+    error instanceof MeldbaseInternalError && error.code === "unauthenticated" && error.status === 401 && error.operation === "RPC",
+  );
+  client.close();
+});
+
+test("realtime ticket errors use the same internal error contract", async () => {
+  let statusError: Error | undefined;
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () => Response.json({ error: { kind: "internal", code: "unauthenticated" } }, { status: 401 }),
+    webSocketFactory: () => { throw new Error("socket must not open"); },
+  });
+  const unsubscribe = client.collection("todos").find().subscribe(() => {}, { onStatus: (status) => { statusError = status.error; } });
+  await settle();
+  await settle();
+  assert.equal(statusError instanceof MeldbaseInternalError, true);
+  assert.equal((statusError as MeldbaseInternalError).code, "unauthenticated");
+  assert.equal((statusError as MeldbaseInternalError).operation, "realtime ticket");
+  unsubscribe();
+  client.close();
 });
 
 test("RPC call propagates AbortSignal and rejects malformed success responses", async () => {
@@ -470,9 +498,9 @@ test("realtime RPC multiplexes with subscriptions, exposes errors, and sends can
 
   const failed = client.call("fail", [], { transport: "realtime" });
   const failedCall = JSON.parse(socket.sent[3] as string) as Record<string, unknown>;
-  socket.message({ v: 1, type: "error", requestId: failedCall.requestId, error: { code: "quota_exceeded" } });
+  socket.message({ v: 1, type: "error", requestId: failedCall.requestId, error: { kind: "business", code: "billing.quota_exceeded" } });
   await assert.rejects(failed, (error: unknown) =>
-    error instanceof MeldbaseRPCError && error.code === "quota_exceeded" && error.status === 0,
+    error instanceof MeldbaseError && error.code === "billing.quota_exceeded",
   );
 
   const controller = new AbortController();
@@ -510,7 +538,7 @@ test("realtime RPC disconnect reports unknown result and is never automatically 
   const call = JSON.parse(socket.sent[1] as string) as { requestId: string };
   socket.disconnect();
   await assert.rejects(pending, (error: unknown) =>
-    error instanceof MeldbaseRPCUnknownResultError && error.requestId === call.requestId,
+    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.operation === `RPC ${call.requestId}`,
   );
   await settle();
   await settle();
@@ -534,7 +562,7 @@ test("realtime RPC socket errors fail pending calls without retrying", async () 
   socket.open();
   socket.message({ v: 1, type: "authenticated" });
   socket.error();
-  await assert.rejects(pending, MeldbaseRPCUnknownResultError);
+  await assert.rejects(pending, MeldbaseInternalError);
   await settle();
   await settle();
   assert.equal(socket.closed?.code, 1011);

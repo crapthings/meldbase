@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { compileQuery, compileUpdate, MELDBASE_PROTOCOL_VERSION } from "@meldbase/client";
-import { MeldbaseMethodError, MeldbaseWorker, MeldbaseWorkerProtocolError, publish, rpc, transactional } from "./worker.js";
+import { MeldbaseError, MeldbaseWorker, MeldbaseWorkerProtocolError, publish, rpc, transactional } from "./worker.js";
 import type { WorkerSocket, WorkerSocketFactory } from "./worker.js";
 
 const WORKER_PROTOCOL = Object.freeze({
@@ -76,7 +76,10 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
     "cancel", "publication.policy", "rpc", "rpc.transactional",
     "transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
   ]);
-  assert.deepEqual(contract.workerProtocol.nestedShapes, [{ name: "actor", required: ["id", "tenantId"], optional: [] }]);
+  assert.deepEqual(contract.workerProtocol.nestedShapes, [
+    { name: "actor", required: ["id", "tenantId"], optional: [] },
+    { name: "error", required: ["code", "kind"], optional: ["data"] },
+  ]);
   assert.deepEqual(contract.workerProtocol.hubFrames, [
     { type: "authorize_query", required: ["actor", "callId", "collection", "query", "type", "v"], optional: [] },
     { type: "cancel", required: ["callId", "type", "v"], optional: [] },
@@ -150,7 +153,7 @@ test("server worker registers without URL credentials and handles typed RPC", as
       assert.deepEqual(context.actor, { id: "user-1", tenantId: "tenant-a" });
       return arguments_[0]!;
     }),
-    "orders.reject": rpc(() => { throw new MeldbaseMethodError("not_ready"); }),
+    "orders.reject": rpc(() => { throw new MeldbaseError("orders.not_ready", { retryAfter: 60n }); }),
   });
   const socket = await startHarness(value);
   assert.equal(value.factoryCalls[0]!.url, "wss://control.example.test/v1/workers");
@@ -173,7 +176,9 @@ test("server worker registers without URL credentials and handles typed RPC", as
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
-    v: 1, type: "error", callId: "call-2", error: { code: "not_ready" },
+    v: 1, type: "error", callId: "call-2", error: {
+      kind: "business", code: "orders.not_ready", data: { t: "object", v: [["retryAfter", { t: "int64", v: "60" }]] },
+    },
   });
   await value.worker.stop();
   assert.equal(value.worker.state, "stopped");
@@ -394,7 +399,7 @@ test("publication returns only a data constraint and static visibility declarati
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
-    v: 1, type: "policy_error", callId: "policy-2", error: { code: "forbidden" },
+    v: 1, type: "policy_error", callId: "policy-2", error: { kind: "internal", code: "forbidden" },
   });
   await worker.stop();
 });
@@ -403,7 +408,7 @@ test("worker rejects unsafe configuration and protocol frames", async () => {
   assert.throws(() => harness({ "bad/name": rpc(() => null) }), /Invalid worker method/);
   assert.throws(() => harness({ ok: rpc(() => null) }, "meldbase://control.example.test/v1/workers"), /cannot include a path/);
   assert.throws(() => harness({ ok: rpc(() => null) }, "meldbase://control.example.test?token=unsafe"), /without credentials/);
-  assert.throws(() => new MeldbaseMethodError("Bad-Code"), /Invalid/);
+  assert.throws(() => new MeldbaseError("Bad-Code"), /Invalid/);
   assert.throws(() => publish({ version: "bad", maxResults: 0, queryPaths: "*", resultFields: "*" }, () => compileQuery({})), /maxResults/);
   assert.throws(() => publish({ version: "bad", maxResults: 1, queryPaths: ["bad\0path"], resultFields: "*" }, () => compileQuery({})), /NUL/);
   const value = harness({ ok: rpc(() => null) });

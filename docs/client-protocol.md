@@ -151,25 +151,27 @@ not be used as a readiness probe.
 
 Engine closure and durability fail-stop are exposed over data HTTP endpoints as
 HTTP 503 with the fixed non-sensitive body
-`{"error":{"code":"database_unavailable"}}`. Initial and running realtime
+`{"error":{"kind":"internal","code":"database_unavailable"}}`. Initial and running realtime
 subscriptions use the matching strict error envelope:
 
 ```json
-{"v":1,"type":"error","requestId":"client-request-id","error":{"code":"database_unavailable"}}
+{"v":1,"type":"error","requestId":"client-request-id","error":{"kind":"internal","code":"database_unavailable"}}
 ```
 
-The TypeScript SDK preserves `code`, HTTP `status` (zero for WebSocket) and the
-operation in `MeldbaseRemoteError`. It does not infer that a mutation is safe to
-retry. Callers may retry only under an application-level idempotency contract
-after readiness recovers. Reads may be retried after recovery.
+The TypeScript SDK exposes this as `MeldbaseInternalError`, preserving `code`,
+HTTP `status` (zero for WebSocket) and operation. It does not infer that a
+mutation is safe to retry. Callers may retry only under an application-level
+idempotency contract after readiness recovers. Reads may be retried after
+recovery.
 
 The TypeScript remote client assigns a random 128-bit `_id` before an insert is
 sent when the caller omitted one, and requires the successful response to carry
 that exact ID. If the transport fails after dispatch, or a successful response
-cannot be verified, it throws `MeldbaseInsertUnknownResultError`; its
-`documentId` is the exact ID to reconcile with an authorized point query instead
-of submitting a duplicate. Non-SDK clients should likewise supply their own
-stable document ID whenever they need this recovery property.
+cannot be verified, it throws `MeldbaseInternalError` with code
+`outcome_unknown`; its operation identifies the insert and the original error is
+available as `cause`. Reconcile the exact document ID with an authorized point
+query instead of submitting a duplicate. Non-SDK clients should likewise supply
+their own stable document ID whenever they need this recovery property.
 
 Database resource admission failures use HTTP 413 and the fixed
 `resource_limit_exceeded` code. This is a terminal rejection: no document,
@@ -268,10 +270,10 @@ The checked-in `testdata/protocol-v1-contract.json` artifact freezes the ticket
 media type, base and conditional capabilities, all client and server frame
 names, their required/optional top-level fields, and the nested delta/error
 shapes. Its `workerProtocol` section freezes the private control descriptor,
-capabilities, frames, and `actor` shape. The artifact also freezes the sorted
-engine/transport-owned error-code registry; bounded application-defined
-`RPCError` codes remain explicit extensions rather than masquerading as engine
-codes. Both the Go server and TypeScript SDK read it in their compatibility
+capabilities, frames, and nested `actor`/`error` shapes. The artifact also
+freezes the sorted engine/transport-owned error-code registry; namespaced
+application-defined `MeldbaseError` codes remain explicit extensions rather
+than masquerading as engine codes. Both the Go server and TypeScript SDK read it in their compatibility
 suites. The public Go `server.ProtocolVersion` and
 TypeScript `MELDBASE_PROTOCOL_VERSION` constants must match it, and production
 encoders use those constants rather than independent numeric literals.
@@ -423,9 +425,10 @@ The public Go `server` package registers a fixed method map and a separate
 authenticated, then authorized by actor and method. The server copies the
 registry at construction, bounds body bytes, argument count, result bytes and
 concurrent handler executions, propagates HTTP cancellation through `context`,
-and converts handler panics or arbitrary errors to the non-sensitive `internal`
-code. A handler may intentionally return `&server.RPCError{Code: "..."}` with a
-bounded lowercase code; raw error text is never serialized.
+and converts handler panics or arbitrary errors to the non-sensitive
+`{"kind":"internal","code":"internal"}` result. A handler may intentionally
+return `&server.MeldbaseError{Code: "orders.already_paid"}` with a namespaced
+code and optional safe `Data`; raw error text is never serialized.
 
 Application and server failures use the matching `type: "error"` envelope with
 the same request ID. HTTP connection cancellation cancels the handler context.
@@ -439,7 +442,8 @@ For a realtime call, aborting its `AbortSignal` removes the local pending call
 and sends a `cancel` frame if the call was already sent. Cancellation is
 best-effort: the method may finish before the server observes it. If the socket
 closes before a terminal frame arrives, the Promise rejects with
-`MeldbaseRPCUnknownResultError`; the method may already have executed.
+`MeldbaseInternalError` code `outcome_unknown`; the method may already have
+executed.
 
 The SDK never automatically retries RPC calls; the protocol never infers retry
 safety. An optional `idempotencyKey` is accepted only when the server

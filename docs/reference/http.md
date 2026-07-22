@@ -184,7 +184,7 @@ as a whole rather than partially applied.
 ## Errors and retries
 
 Data endpoint errors use the non-sensitive shape
-`{"error":{"code":"..."}}`. Typical boundaries are `401 unauthenticated`,
+`{"error":{"kind":"internal","code":"..."}}`. Typical boundaries are `401 unauthenticated`,
 `403 forbidden`, `400` for a malformed or unsupported envelope, `413
 resource_limit_exceeded`, and `503 database_unavailable`. Raw storage errors,
 paths, credentials, and policy details never cross the API.

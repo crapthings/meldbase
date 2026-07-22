@@ -292,6 +292,8 @@ const worker = new MeldbaseWorker({
 await worker.start(); // resolves after registration; reconnect continues internally
 ```
 
-`MeldbaseMethodError` is the only way to expose a stable application error code.
-Other exceptions become `internal`; their messages and stacks stay inside the
-worker process. `stop()` aborts active handlers and ends the reconnect loop.
+`MeldbaseError` is the only way to expose a stable application error. Its code
+is a namespaced identifier such as `orders.already_paid`, and it may include
+safe structured data. Other exceptions become internal failures; their messages
+and stacks stay inside the worker process. `stop()` aborts active handlers and
+ends the reconnect loop.

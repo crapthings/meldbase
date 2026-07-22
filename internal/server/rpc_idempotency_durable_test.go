@@ -217,14 +217,14 @@ func TestTransactionalRPCRollsBackWritesBeforePersistingApplicationError(t *test
 			if _, err := tx.InsertOne("orders", meldbase.Document{"status": meldbase.String("must-rollback")}); err != nil {
 				return meldbase.Value{}, err
 			}
-			return meldbase.Value{}, &RPCError{Code: "order_rejected"}
+			return meldbase.Value{}, &MeldbaseError{Code: "orders.rejected"}
 		},
 	})
 	httpServer := httptest.NewServer(handler)
 	defer httpServer.Close()
 	key := "transactionalerror0001"
-	assertRPCError(t, postIdempotentRPC(t, httpServer.URL, "orders.reject", key, []any{}), http.StatusBadRequest, "order_rejected")
-	assertRPCError(t, postIdempotentRPC(t, httpServer.URL, "orders.reject", key, []any{}), http.StatusBadRequest, "order_rejected")
+	assertRPCError(t, postIdempotentRPC(t, httpServer.URL, "orders.reject", key, []any{}), http.StatusBadRequest, "orders.rejected")
+	assertRPCError(t, postIdempotentRPC(t, httpServer.URL, "orders.reject", key, []any{}), http.StatusBadRequest, "orders.rejected")
 	if calls.Load() != 1 {
 		t.Fatalf("application error calls=%d", calls.Load())
 	}

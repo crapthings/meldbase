@@ -5,9 +5,9 @@ import { assertDocumentID, assertSafeKey, newDocumentID } from "../safe-value.js
 import { decodeDocument, decodeValue, encodeInputDocument, encodeQuerySpec, encodeValue } from "../wire.js";
 import { decodeProtocolDescriptor, MELDBASE_PROTOCOL_VERSION, type ProtocolDescriptor } from "../protocol.js";
 import { RemoteCollection } from "./collection.js";
-import { MeldbaseClientClosedError, MeldbaseInsertUnknownResultError, MeldbaseProtocolError, MeldbaseRPCError } from "./errors.js";
+import { MeldbaseClientClosedError, MeldbaseError, MeldbaseInternalError, MeldbaseProtocolError } from "./errors.js";
 import { RealtimeConnection } from "./realtime.js";
-import { assertCollectionName, boundedCount, boundedJSON, exactKeys, normalizeBaseURL, normalizeRealtimeOrigin, positiveLimit, record, throwRemoteError, validRPCErrorCode, validRPCIdempotencyKey } from "./shared.js";
+import { assertCollectionName, boundedCount, boundedJSON, decodeWireError, exactKeys, normalizeBaseURL, normalizeRealtimeOrigin, positiveLimit, record, throwRemoteError, validRPCIdempotencyKey } from "./shared.js";
 import type { CallOptions, ClientOptions, RealtimeTicket, SubscribeOptions } from "./types.js";
 
 const REALTIME_TICKET_ACCEPT = "application/vnd.meldbase.realtime-ticket+json; capabilities=1";
@@ -51,9 +51,15 @@ export class MeldbaseClient {
     const response = await this.#fetch(`${this.#baseUrl}/v1/rpc`, { method: "POST", headers: await this.headers(), body: JSON.stringify({ v: MELDBASE_PROTOCOL_VERSION, type: "call", requestId, ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}), method, arguments: args.map(encodeValue) }), ...(options.signal ? { signal: options.signal } : {}) });
     const body = await boundedJSON(response, this.#maxInboundBytes);
     if (!response.ok) {
-      if (record(body) && body.v !== undefined && (!exactKeys(body, ["v", "type", "requestId", "error"]) || body.v !== MELDBASE_PROTOCOL_VERSION || body.type !== "error" || body.requestId !== requestId || !record(body.error) || !exactKeys(body.error, ["code"]) || !validRPCErrorCode(body.error.code))) throw new Error("Malformed RPC error response");
-      const code = record(body) && record(body.error) && validRPCErrorCode(body.error.code) ? body.error.code : "unknown";
-      throw new MeldbaseRPCError(code, response.status);
+      if (record(body) && exactKeys(body, ["v", "type", "requestId", "error"]) && body.v === MELDBASE_PROTOCOL_VERSION && body.type === "error" && body.requestId === requestId) {
+        const error = decodeWireError(body.error);
+        throw error.kind === "business" ? new MeldbaseError(error.code, error.data) : new MeldbaseInternalError(error.code, response.status, "RPC");
+      }
+      if (record(body) && exactKeys(body, ["error"])) {
+        const error = decodeWireError(body.error);
+        if (error.kind === "internal") throw new MeldbaseInternalError(error.code, response.status, "RPC");
+      }
+      throw new Error("Malformed RPC error response");
     }
     if (!record(body) || !exactKeys(body, ["v", "type", "requestId", "result"]) || body.v !== MELDBASE_PROTOCOL_VERSION || body.type !== "result" || body.requestId !== requestId || body.result === undefined) throw new Error("Malformed RPC response");
     return decodeValue(body.result) as T;
@@ -93,9 +99,9 @@ export class MeldbaseClient {
     const id = document._id ?? newDocumentID(); const input: InputDocument = document._id === undefined ? { ...document, _id: id } : document;
     const body = JSON.stringify({ version: 1, document: encodeInputDocument(input) }); const headers = await this.headers();
     let response: Response;
-    try { response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/documents`, { method: "POST", headers, body, ...(signal ? { signal } : {}) }); } catch (error) { throw new MeldbaseInsertUnknownResultError(id, error); }
+    try { response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/documents`, { method: "POST", headers, body, ...(signal ? { signal } : {}) }); } catch (error) { throw new MeldbaseInternalError("outcome_unknown", 0, `insert ${id}`, error); }
     if (!response.ok) await throwRemoteError(response, this.#maxInboundBytes, "insert");
-    try { const result = await boundedJSON(response, this.#maxInboundBytes); if (!record(result) || !exactKeys(result, ["version", "document"]) || result.version !== 1 || result.document === undefined) throw new Error("Malformed insert response"); const inserted = decodeDocument(result.document) as T; assertDocumentID(inserted._id, "Remote document _id"); if (inserted._id !== id) throw new Error("Insert response changed document ID"); return inserted; } catch (error) { throw new MeldbaseInsertUnknownResultError(id, error); }
+    try { const result = await boundedJSON(response, this.#maxInboundBytes); if (!record(result) || !exactKeys(result, ["version", "document"]) || result.version !== 1 || result.document === undefined) throw new Error("Malformed insert response"); const inserted = decodeDocument(result.document) as T; assertDocumentID(inserted._id, "Remote document _id"); if (inserted._id !== id) throw new Error("Insert response changed document ID"); return inserted; } catch (error) { throw new MeldbaseInternalError("outcome_unknown", 0, `insert ${id}`, error); }
   }
 
   async executeMutation(collection: string, action: "updateOne" | "updateMany" | "deleteOne" | "deleteMany", query: QuerySpec, update?: MutationSpec, signal?: AbortSignal): Promise<MutationResult | DeleteResult> {
@@ -115,7 +121,7 @@ export class MeldbaseClient {
   private async headers(): Promise<Record<string, string>> { const token = await this.#accessToken?.(); return { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }; }
   private async createTicket(): Promise<RealtimeTicket> {
     const response = await this.#fetch(`${this.#baseUrl}/v1/realtime/tickets`, { method: "POST", headers: { ...(await this.headers()), accept: REALTIME_TICKET_ACCEPT } });
-    if (!response.ok) throw new Error(`Realtime ticket failed (${response.status})`);
+    if (!response.ok) await throwRemoteError(response, 64 * 1024, "realtime ticket");
     const body = await boundedJSON(response, 64 * 1024);
     if (!record(body) || !exactKeys(body, body.protocol === undefined ? ["url", "ticket"] : ["url", "ticket", "protocol"]) || typeof body.url !== "string" || body.url.length === 0 || body.url.length > 4096 || typeof body.ticket !== "string" || body.ticket.length === 0 || body.ticket.length > 4096) throw new Error("Malformed realtime ticket response");
     let realtimeURL: URL; try { realtimeURL = new URL(body.url); } catch { throw new Error("Malformed realtime URL"); }

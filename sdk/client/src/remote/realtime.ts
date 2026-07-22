@@ -3,8 +3,8 @@ import type { SnapshotListener, Unsubscribe } from "../observer.js";
 import { cloneDocument, isDocumentID } from "../safe-value.js";
 import { decodeDocument, decodeValue, encodeValue, type WireQuerySpec, type WireValue } from "../wire.js";
 import { MELDBASE_PROTOCOL_VERSION, supportsProtocol, type ProtocolDescriptor } from "../protocol.js";
-import { MeldbaseClientClosedError, MeldbaseProtocolError, MeldbaseRemoteError, MeldbaseRPCError, MeldbaseRPCUnknownResultError } from "./errors.js";
-import { abortReason, asError, exactKeys, positiveLimit, record, validRPCErrorCode } from "./shared.js";
+import { MeldbaseClientClosedError, MeldbaseError, MeldbaseInternalError, MeldbaseProtocolError } from "./errors.js";
+import { abortReason, asError, decodeWireError, exactKeys, positiveLimit, record } from "./shared.js";
 import type { ClientOptions, RealtimeTicket, SyncStatus, WebSocketLike } from "./types.js";
 
 interface ActiveSubscription {
@@ -225,13 +225,21 @@ export class RealtimeConnection {
     if (message.type === "error" && typeof message.requestId === "string") {
       const call = this.#calls.get(message.requestId);
       if (call) {
-        if (!exactKeys(message, ["v", "type", "requestId", "error"]) || !record(message.error) || !exactKeys(message.error, ["code"]) || !validRPCErrorCode(message.error.code)) return this.protocolFailure("Malformed RPC error");
-        this.settleCall(call, new MeldbaseRPCError(message.error.code, 0)); return;
+        if (!exactKeys(message, ["v", "type", "requestId", "error"])) return this.protocolFailure("Malformed RPC error");
+        try {
+          const error = decodeWireError(message.error);
+          this.settleCall(call, error.kind === "business" ? new MeldbaseError(error.code, error.data) : new MeldbaseInternalError(error.code, 0, "RPC"));
+        } catch { this.protocolFailure("Malformed RPC error"); }
+        return;
       }
       const subscription = this.#subscriptions.get(message.requestId);
       if (subscription) {
-        if (!exactKeys(message, ["v", "type", "requestId", "error"]) || !record(message.error) || !exactKeys(message.error, ["code"]) || !validRPCErrorCode(message.error.code)) return this.protocolFailure("Malformed subscription error");
-        this.status(subscription, { state: "error", error: new MeldbaseRemoteError(message.error.code, 0, "subscription") });
+        if (!exactKeys(message, ["v", "type", "requestId", "error"])) return this.protocolFailure("Malformed subscription error");
+        try {
+          const error = decodeWireError(message.error);
+          if (error.kind !== "internal") return this.protocolFailure("Malformed subscription error");
+          this.status(subscription, { state: "error", error: new MeldbaseInternalError(error.code, 0, "subscription") });
+        } catch { this.protocolFailure("Malformed subscription error"); }
       }
     }
   }
@@ -250,7 +258,7 @@ export class RealtimeConnection {
   private settleCall(call: ActiveRPCCall, outcome: Value | Error): void { if (!this.#calls.delete(call.requestId)) return; this.cleanupCall(call); if (outcome instanceof Error) call.reject(outcome); else call.resolve(outcome); this.closeIdleSocket(); }
   private cleanupCall(call: ActiveRPCCall): void { if (call.signal && call.abort) call.signal.removeEventListener("abort", call.abort); }
   private rejectCalls(error: Error): void { const calls = [...this.#calls.values()]; this.#calls.clear(); for (const call of calls) { this.cleanupCall(call); call.reject(error); } }
-  private rejectCallsUnknown(): void { const calls = [...this.#calls.values()]; this.#calls.clear(); for (const call of calls) { this.cleanupCall(call); call.reject(new MeldbaseRPCUnknownResultError(call.requestId)); } }
+  private rejectCallsUnknown(): void { const calls = [...this.#calls.values()]; this.#calls.clear(); for (const call of calls) { this.cleanupCall(call); call.reject(new MeldbaseInternalError("outcome_unknown", 0, `RPC ${call.requestId}`)); } }
   private statusAll(status: SyncStatus): void { for (const subscription of this.#subscriptions.values()) this.status(subscription, status); }
   private status(subscription: ActiveSubscription, status: SyncStatus): void { if (subscription.onStatus) queueMicrotask(() => subscription.onStatus?.(status)); }
 }

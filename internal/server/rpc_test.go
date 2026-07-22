@@ -37,7 +37,7 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 			left, leftOK := arguments[0].Int64()
 			right, rightOK := arguments[1].Int64()
 			if !leftOK || !rightOK {
-				return meldbase.Value{}, &RPCError{Code: "invalid_arguments"}
+				return meldbase.Value{}, &MeldbaseError{Code: "math.invalid_arguments"}
 			}
 			return meldbase.Int(left + right), nil
 		},
@@ -85,14 +85,18 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 		{"forbidden", `{"version":1,"arguments":[]}`, true, http.StatusForbidden, "forbidden"},
 		{"math.add", `{"version":1}`, true, http.StatusBadRequest, "invalid_rpc_envelope"},
 		{"math.add", `{"version":1,"arguments":[{"t":"unknown"}]}`, true, http.StatusBadRequest, "invalid_rpc_argument"},
-		{"math.add", `{"version":1,"arguments":[{"t":"string","v":"x"},{"t":"int64","v":"1"}]}`, true, http.StatusBadRequest, "invalid_arguments"},
+		{"math.add", `{"version":1,"arguments":[{"t":"string","v":"x"},{"t":"int64","v":"1"}]}`, true, http.StatusBadRequest, "math.invalid_arguments"},
 		{"fails", `{"version":1,"arguments":[]}`, true, http.StatusInternalServerError, "internal"},
 		{"panics", `{"version":1,"arguments":[]}`, true, http.StatusInternalServerError, "internal"},
 	} {
 		response := postRPC(t, server.URL, scenario.method, scenario.body, scenario.auth)
 		body, _ := io.ReadAll(response.Body)
 		response.Body.Close()
-		if response.StatusCode != scenario.status || !strings.Contains(string(body), `"code":"`+scenario.code+`"`) {
+		kind := "internal"
+		if strings.Contains(scenario.code, ".") {
+			kind = "business"
+		}
+		if response.StatusCode != scenario.status || !strings.Contains(string(body), `"kind":"`+kind+`"`) || !strings.Contains(string(body), `"code":"`+scenario.code+`"`) {
 			t.Fatalf("%s status=%d body=%s", scenario.method, response.StatusCode, body)
 		}
 		if strings.Contains(string(body), "secret") {
@@ -277,7 +281,7 @@ func TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors(t *testing.T) 
 			return meldbase.Array(arguments...), nil
 		},
 		"reject": func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
-			return meldbase.Value{}, &RPCError{Code: "not_ready"}
+			return meldbase.Value{}, &MeldbaseError{Code: "orders.not_ready"}
 		},
 	}
 	_, _, server := newRPCServer(t, methods, rpcTestAuthorizer{allow: true}, Config{})
@@ -315,7 +319,7 @@ func TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors(t *testing.T) 
 	}
 	rejected := readMap(t, ctx, connection)
 	errorBody, _ := rejected["error"].(map[string]any)
-	if rejected["type"] != "error" || rejected["requestId"] != "ws-2" || errorBody["code"] != "not_ready" {
+	if rejected["type"] != "error" || rejected["requestId"] != "ws-2" || errorBody["kind"] != "business" || errorBody["code"] != "orders.not_ready" {
 		t.Fatalf("rejected=%+v", rejected)
 	}
 	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "ping"}); err != nil {

@@ -21,17 +21,21 @@ type protocolDescriptor struct {
 	Capabilities []string `json:"capabilities"`
 }
 
-// fixedProtocolErrorCodes is the engine/transport-owned v1 registry. RPCError
-// may additionally carry an application-owned code matching the public bounded
-// pattern; those extensions are intentionally not presented as engine codes.
+// fixedProtocolErrorCodes is the engine/transport-owned v1 registry.
+// MeldbaseError may additionally carry an application-owned namespaced code;
+// those extensions are intentionally not presented as engine codes.
 var fixedProtocolErrorCodes = []string{
-	"cancelled", "database_unavailable", "delta_failed", "duplicate_key", "forbidden",
-	"initial_snapshot_failed", "internal", "invalid_query", "invalid_request", "invalid_rpc_argument",
-	"invalid_update", "mutation_limit_exceeded", "resource_limit_exceeded", "resume_failed", "rpc_busy",
+	"cancelled", "database_unavailable", "delta_failed", "duplicate_key", "forbidden", "forbidden_field",
+	"initial_snapshot_failed", "internal", "invalid_aggregate", "invalid_document", "invalid_document_envelope",
+	"invalid_json", "invalid_mutation_envelope", "invalid_policy", "invalid_query", "invalid_query_envelope",
+	"invalid_request", "invalid_rpc_argument", "invalid_rpc_envelope", "invalid_update", "missing_update",
+	"mutation_limit_exceeded", "origin_forbidden", "outcome_unknown", "policy_expired", "preflight_forbidden",
+	"request_too_large", "resource_limit_exceeded", "resume_failed", "rpc_busy",
 	"rpc_canceled", "rpc_duplicate_request", "rpc_idempotency_conflict", "rpc_idempotency_required",
 	"rpc_idempotency_unavailable", "rpc_in_progress", "rpc_not_found", "rpc_outcome_unknown",
 	"rpc_result_invalid", "rpc_transaction_conflict", "rpc_transaction_requires_write", "snapshot_failed",
-	"subscription_ended", "subscription_failed", "subscription_limit_or_duplicate", "worker_busy",
+	"subscription_ended", "subscription_failed", "subscription_limit_or_duplicate", "unauthenticated", "unexpected_update",
+	"unknown_mutation_action", "worker_busy",
 }
 
 func realtimeProtocolDescriptor(config Config) protocolDescriptor {

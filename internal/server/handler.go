@@ -1031,7 +1031,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 func writeError(w http.ResponseWriter, status int, code string) {
-	writeJSON(w, status, map[string]any{"error": map[string]any{"code": code}})
+	writeJSON(w, status, map[string]any{"error": map[string]any{"kind": "internal", "code": code}})
 }
 func writeReadError(w http.ResponseWriter, err error) {
 	var tooLarge *http.MaxBytesError

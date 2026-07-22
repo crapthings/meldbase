@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	rpcIdempotencyRecordVersion = 1
+	rpcIdempotencyRecordVersion = 2
 	rpcIdempotencyHeaderBytes   = 128
 	rpcIdempotencyClaimAttempts = 16
 )
@@ -44,7 +44,9 @@ type rpcIdempotencyRecord struct {
 	claimID     [16]byte
 	expiresAt   time.Time
 	result      []byte
+	errorKind   string
 	errorCode   string
+	errorData   []byte
 	errorStatus int
 }
 
@@ -211,7 +213,7 @@ func (store *durableRPCIdempotencyStore) Claim(ctx context.Context, claim RPCIde
 		case idempotencyRecordResult:
 			return RPCIdempotencyDecision{Kind: RPCIdempotencyReplayResult, Result: append([]byte(nil), current.result...)}, nil
 		case idempotencyRecordError:
-			return RPCIdempotencyDecision{Kind: RPCIdempotencyReplayError, ErrorCode: current.errorCode, ErrorStatus: current.errorStatus}, nil
+			return RPCIdempotencyDecision{Kind: RPCIdempotencyReplayError, ErrorKind: current.errorKind, ErrorCode: current.errorCode, ErrorData: append([]byte(nil), current.errorData...), ErrorStatus: current.errorStatus}, nil
 		case idempotencyRecordUnknown:
 			return RPCIdempotencyDecision{Kind: RPCIdempotencyOutcomeUnknown}, nil
 		default:
@@ -233,14 +235,23 @@ func (store *durableRPCIdempotencyStore) Complete(ctx context.Context, completio
 }
 
 func rpcIdempotencyCompletionRecord(completion RPCIdempotencyCompletion) (rpcIdempotencyRecord, error) {
+	if completion.ErrorCode != "" && completion.ErrorKind == "" {
+		completion.ErrorKind = "internal"
+	}
 	record := rpcIdempotencyRecord{
 		fingerprint: completion.Claim.Fingerprint, sessionID: completion.Claim.SessionID,
 		claimID: completion.Claim.ClaimID, expiresAt: completion.Claim.ExpiresAt,
 	}
-	if len(completion.Result) > 0 && completion.ErrorCode == "" && completion.ErrorStatus == 0 {
+	if len(completion.Result) > 0 && completion.ErrorKind == "" && completion.ErrorCode == "" && len(completion.ErrorData) == 0 && completion.ErrorStatus == 0 {
 		record.state, record.result = idempotencyRecordResult, append([]byte(nil), completion.Result...)
-	} else if len(completion.Result) == 0 && rpcErrorCodePattern.MatchString(completion.ErrorCode) && completion.ErrorStatus >= 400 && completion.ErrorStatus <= 599 {
-		record.state, record.errorCode, record.errorStatus = idempotencyRecordError, completion.ErrorCode, completion.ErrorStatus
+	} else if len(completion.Result) == 0 && (completion.ErrorKind == "business" || completion.ErrorKind == "internal") && completion.ErrorStatus >= 400 && completion.ErrorStatus <= 599 {
+		if completion.ErrorKind == "business" && (!rpcBusinessErrorCodePattern.MatchString(completion.ErrorCode) || !validRPCBusinessErrorData(completion.ErrorData)) {
+			return rpcIdempotencyRecord{}, errors.New("invalid durable business error")
+		}
+		if completion.ErrorKind == "internal" && (!rpcInternalErrorCodePattern.MatchString(completion.ErrorCode) || len(completion.ErrorData) != 0) {
+			return rpcIdempotencyRecord{}, errors.New("invalid durable internal error")
+		}
+		record.state, record.errorKind, record.errorCode, record.errorData, record.errorStatus = idempotencyRecordError, completion.ErrorKind, completion.ErrorCode, append([]byte(nil), completion.ErrorData...), completion.ErrorStatus
 	} else {
 		return rpcIdempotencyRecord{}, errors.New("invalid durable idempotency terminal")
 	}
@@ -332,20 +343,26 @@ func encodeRPCIdempotencyRecord(record rpcIdempotencyRecord) ([]byte, error) {
 		return nil, errors.New("invalid RPC idempotency record")
 	}
 	if record.state == idempotencyRecordResult {
-		if len(record.result) == 0 || record.errorCode != "" || record.errorStatus != 0 {
+		if len(record.result) == 0 || record.errorKind != "" || record.errorCode != "" || len(record.errorData) != 0 || record.errorStatus != 0 {
 			return nil, errors.New("invalid RPC idempotency result")
 		}
 	} else if record.state == idempotencyRecordError {
-		if len(record.result) != 0 || !rpcErrorCodePattern.MatchString(record.errorCode) || record.errorStatus < 400 || record.errorStatus > 599 {
+		if len(record.result) != 0 || (record.errorKind != "business" && record.errorKind != "internal") || record.errorStatus < 400 || record.errorStatus > 599 ||
+			(record.errorKind == "business" && (!rpcBusinessErrorCodePattern.MatchString(record.errorCode) || !validRPCBusinessErrorData(record.errorData))) ||
+			(record.errorKind == "internal" && (!rpcInternalErrorCodePattern.MatchString(record.errorCode) || len(record.errorData) != 0)) {
 			return nil, errors.New("invalid RPC idempotency error")
 		}
-	} else if len(record.result) != 0 || record.errorCode != "" || record.errorStatus != 0 {
+	} else if len(record.result) != 0 || record.errorKind != "" || record.errorCode != "" || len(record.errorData) != 0 || record.errorStatus != 0 {
 		return nil, errors.New("invalid RPC idempotency non-terminal")
 	}
-	if len(record.errorCode) > 64 || len(record.result) > 16<<20 {
+	if len(record.errorKind) > 8 || len(record.errorCode) > 64 || len(record.result) > 16<<20 || len(record.errorData) > maxRPCErrorDataBytes {
 		return nil, errors.New("RPC idempotency terminal exceeds limit")
 	}
-	encoded := make([]byte, rpcIdempotencyHeaderBytes+len(record.errorCode)+len(record.result))
+	payload := record.result
+	if record.state == idempotencyRecordError {
+		payload = record.errorData
+	}
+	encoded := make([]byte, rpcIdempotencyHeaderBytes+len(record.errorKind)+len(record.errorCode)+len(payload))
 	copy(encoded[:8], rpcIdempotencyRecordMagic[:])
 	binary.LittleEndian.PutUint16(encoded[8:10], rpcIdempotencyRecordVersion)
 	encoded[10] = record.state
@@ -355,32 +372,64 @@ func encodeRPCIdempotencyRecord(record rpcIdempotencyRecord) ([]byte, error) {
 	copy(encoded[56:72], record.sessionID[:])
 	copy(encoded[72:88], record.claimID[:])
 	binary.LittleEndian.PutUint16(encoded[88:90], uint16(record.errorStatus))
-	binary.LittleEndian.PutUint16(encoded[90:92], uint16(len(record.errorCode)))
-	binary.LittleEndian.PutUint32(encoded[92:96], uint32(len(record.result)))
-	copy(encoded[rpcIdempotencyHeaderBytes:], record.errorCode)
-	copy(encoded[rpcIdempotencyHeaderBytes+len(record.errorCode):], record.result)
+	encoded[90] = byte(len(record.errorKind))
+	binary.LittleEndian.PutUint16(encoded[92:94], uint16(len(record.errorCode)))
+	binary.LittleEndian.PutUint32(encoded[94:98], uint32(len(payload)))
+	copy(encoded[rpcIdempotencyHeaderBytes:], record.errorKind)
+	copy(encoded[rpcIdempotencyHeaderBytes+len(record.errorKind):], record.errorCode)
+	copy(encoded[rpcIdempotencyHeaderBytes+len(record.errorKind)+len(record.errorCode):], payload)
 	return encoded, nil
 }
 
 func decodeRPCIdempotencyRecord(encoded []byte) (rpcIdempotencyRecord, error) {
-	if len(encoded) < rpcIdempotencyHeaderBytes || string(encoded[:8]) != string(rpcIdempotencyRecordMagic[:]) ||
-		binary.LittleEndian.Uint16(encoded[8:10]) != rpcIdempotencyRecordVersion || encoded[11] != 0 ||
-		binary.LittleEndian.Uint32(encoded[12:16]) != rpcIdempotencyHeaderBytes || !allZeroBytes(encoded[96:rpcIdempotencyHeaderBytes]) {
+	if len(encoded) < rpcIdempotencyHeaderBytes || string(encoded[:8]) != string(rpcIdempotencyRecordMagic[:]) || encoded[11] != 0 ||
+		binary.LittleEndian.Uint32(encoded[12:16]) != rpcIdempotencyHeaderBytes {
 		return rpcIdempotencyRecord{}, errors.New("corrupt RPC idempotency record")
 	}
-	codeLength := int(binary.LittleEndian.Uint16(encoded[90:92]))
-	resultLength := int(binary.LittleEndian.Uint32(encoded[92:96]))
-	if codeLength > 64 || resultLength > 16<<20 || rpcIdempotencyHeaderBytes+codeLength+resultLength != len(encoded) {
+	version := binary.LittleEndian.Uint16(encoded[8:10])
+	if version != 1 && version != rpcIdempotencyRecordVersion {
+		return rpcIdempotencyRecord{}, errors.New("corrupt RPC idempotency record")
+	}
+	var kindLength, codeLength, payloadLength int
+	var errorKind string
+	if version == 1 {
+		if !allZeroBytes(encoded[96:rpcIdempotencyHeaderBytes]) {
+			return rpcIdempotencyRecord{}, errors.New("corrupt RPC idempotency record")
+		}
+		codeLength = int(binary.LittleEndian.Uint16(encoded[90:92]))
+		payloadLength = int(binary.LittleEndian.Uint32(encoded[92:96]))
+	} else {
+		if encoded[91] != 0 || !allZeroBytes(encoded[98:rpcIdempotencyHeaderBytes]) {
+			return rpcIdempotencyRecord{}, errors.New("corrupt RPC idempotency record")
+		}
+		kindLength = int(encoded[90])
+		codeLength = int(binary.LittleEndian.Uint16(encoded[92:94]))
+		payloadLength = int(binary.LittleEndian.Uint32(encoded[94:98]))
+	}
+	if kindLength > 8 || codeLength > 64 || payloadLength > 16<<20 || rpcIdempotencyHeaderBytes+kindLength+codeLength+payloadLength != len(encoded) {
 		return rpcIdempotencyRecord{}, errors.New("corrupt RPC idempotency terminal length")
 	}
 	expiresMillis := int64(binary.LittleEndian.Uint64(encoded[16:24]))
 	if expiresMillis <= 0 {
 		return rpcIdempotencyRecord{}, errors.New("corrupt RPC idempotency expiry")
 	}
+	payloadStart := rpcIdempotencyHeaderBytes + kindLength + codeLength
+	if version == rpcIdempotencyRecordVersion && kindLength != 0 {
+		errorKind = string(encoded[rpcIdempotencyHeaderBytes : rpcIdempotencyHeaderBytes+kindLength])
+	}
 	record := rpcIdempotencyRecord{
 		state: encoded[10], expiresAt: time.UnixMilli(expiresMillis).UTC(), errorStatus: int(binary.LittleEndian.Uint16(encoded[88:90])),
-		errorCode: string(encoded[rpcIdempotencyHeaderBytes : rpcIdempotencyHeaderBytes+codeLength]),
-		result:    append([]byte(nil), encoded[rpcIdempotencyHeaderBytes+codeLength:]...),
+		errorKind: errorKind,
+		errorCode: string(encoded[rpcIdempotencyHeaderBytes+kindLength : payloadStart]),
+	}
+	payload := append([]byte(nil), encoded[payloadStart:]...)
+	if record.state == idempotencyRecordError {
+		if version == 1 {
+			record.errorKind = "internal"
+		}
+		record.errorData = payload
+	} else {
+		record.result = payload
 	}
 	copy(record.fingerprint[:], encoded[24:56])
 	copy(record.sessionID[:], encoded[56:72])

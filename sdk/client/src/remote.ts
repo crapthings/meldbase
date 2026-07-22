@@ -4,12 +4,11 @@ export { MeldbaseClient } from "./remote/client.js";
 export { RemoteCollection, RemoteLiveQuery } from "./remote/collection.js";
 export {
   MeldbaseClientClosedError,
-  MeldbaseInsertUnknownResultError,
+  MeldbaseError,
+  MeldbaseInternalError,
   MeldbaseProtocolError,
-  MeldbaseRemoteError,
-  MeldbaseRPCError,
-  MeldbaseRPCUnknownResultError,
 } from "./remote/errors.js";
+export type { MeldbaseErrorData } from "./remote/errors.js";
 export type {
   CallOptions,
   ClientOptions,

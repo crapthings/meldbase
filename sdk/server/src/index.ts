@@ -1,5 +1,6 @@
 export {
-  MeldbaseMethodError,
+  MeldbaseError,
+  MeldbaseInternalError,
   MeldbaseWorkerProtocolError,
   MeldbaseWorker,
   publish,

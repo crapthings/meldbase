@@ -8,7 +8,7 @@ import {
 } from "@meldbase/client";
 import type { Document, InputDocument, MutationSpec, Value } from "@meldbase/client";
 
-import { MeldbaseMethodError } from "./errors.js";
+import { MeldbaseInternalError } from "./errors.js";
 import { COLLECTION_PATTERN, deferred, type Deferred, ERROR_PATTERN, ID_PATTERN, record } from "./shared.js";
 import type { WriteTransaction } from "./types.js";
 
@@ -69,11 +69,11 @@ export class RemoteWriteTransaction implements WriteTransaction {
       pending.deferred.resolve(decodeValue(frame.result));
       return;
     }
-    if (!record(frame.error) || typeof frame.error.code !== "string" || !ERROR_PATTERN.test(frame.error.code)) {
+    if (!record(frame.error) || frame.error.kind !== "internal" || typeof frame.error.code !== "string" || !ERROR_PATTERN.test(frame.error.code)) {
       pending.deferred.reject(new Error("Invalid transaction error"));
       return;
     }
-    pending.deferred.reject(new MeldbaseMethodError(frame.error.code));
+    pending.deferred.reject(new MeldbaseInternalError(frame.error.code, 0, "transaction"));
   }
 
   close(error: Error): void {

@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 
 import { compileQuery, compileUpdate } from "@meldbase/client";
-import { MeldbaseWorker, publish, rpc, transactional } from "../dist/index.js";
+import { MeldbaseError, MeldbaseWorker, publish, rpc, transactional } from "../dist/index.js";
 
 const url = process.env.MELDBASE_WORKER_URL;
 const token = process.env.MELDBASE_WORKER_TOKEN;
@@ -14,6 +14,7 @@ const worker = new MeldbaseWorker({
   webSocketFactory: (workerURL, { headers }) => new WebSocket(workerURL, { headers }),
   methods: {
     "sdk.echo": rpc((_context, arguments_) => arguments_[0] ?? null),
+    "sdk.reject": rpc(() => { throw new MeldbaseError("orders.already_paid", { retryAfter: 60n }); }),
     "sdk.create": transactional(async ({ actor }, _arguments, transaction) => {
       const id = await transaction.insert("items", { rank: 7n, tenant: actor.tenantId, title: "created" });
       return transaction.get("items", id);

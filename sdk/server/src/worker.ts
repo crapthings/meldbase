@@ -8,7 +8,7 @@ import {
 import type { ProtocolDescriptor, WireValue } from "@meldbase/client";
 
 import { publish, rpc, transactional, validatePublicationOptions } from "./definitions.js";
-import { MeldbaseMethodError, MeldbaseWorkerProtocolError } from "./errors.js";
+import { MeldbaseError, MeldbaseWorkerProtocolError } from "./errors.js";
 import { validateWorkerProtocol } from "./protocol.js";
 import {
   abortableDelay,
@@ -35,7 +35,7 @@ import type {
 } from "./types.js";
 
 export { publish, rpc, transactional } from "./definitions.js";
-export { MeldbaseMethodError, MeldbaseWorkerProtocolError } from "./errors.js";
+export { MeldbaseError, MeldbaseInternalError, MeldbaseWorkerProtocolError } from "./errors.js";
 export type {
   MethodContext,
   MethodDefinition,
@@ -271,8 +271,10 @@ export class MeldbaseWorker {
       this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "result", callId: frame.callId, result: encodeValue(result) });
     } catch (error) {
       if (controller.signal.aborted) return;
-      const code = error instanceof MeldbaseMethodError ? error.code : "internal";
-      this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "error", callId: frame.callId, error: { code } });
+      const payload = error instanceof MeldbaseError
+        ? { kind: "business", code: error.code, ...(error.data ? { data: encodeValue(error.data) } : {}) }
+        : { kind: "internal", code: "internal" };
+      this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "error", callId: frame.callId, error: payload });
     } finally {
       active.transaction?.close(new Error("Transaction method completed"));
       this.#calls.delete(frame.callId);
@@ -301,7 +303,7 @@ export class MeldbaseWorker {
       const constraint = await definition.handler(context);
       if (controller.signal.aborted) return;
       if (constraint === null) {
-        this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "policy_error", callId: frame.callId, error: { code: "forbidden" } });
+        this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "policy_error", callId: frame.callId, error: { kind: "internal", code: "forbidden" } });
         return;
       }
       if (constraint.sort !== undefined || constraint.skip !== undefined || constraint.limit !== undefined) {
@@ -312,8 +314,7 @@ export class MeldbaseWorker {
       this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "policy", callId: frame.callId, constraint: encoded });
     } catch (error) {
       if (controller.signal.aborted) return;
-      const code = error instanceof MeldbaseMethodError && error.code === "forbidden" ? "forbidden" : "internal";
-      this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "policy_error", callId: frame.callId, error: { code } });
+      this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "policy_error", callId: frame.callId, error: { kind: "internal", code: "internal" } });
     } finally {
       this.#calls.delete(frame.callId);
     }

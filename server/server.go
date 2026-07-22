@@ -27,7 +27,8 @@ type (
 	RPCMethodResolver              = internal.RPCMethodResolver
 	RPCTransactionalMethodResolver = internal.RPCTransactionalMethodResolver
 	RPCAuthorizer                  = internal.RPCAuthorizer
-	RPCError                       = internal.RPCError
+	MeldbaseError                  = internal.MeldbaseError
+	MeldbaseInternalError          = internal.MeldbaseInternalError
 	RPCIdempotencyStore            = internal.RPCIdempotencyStore
 	RPCIdempotencyClaim            = internal.RPCIdempotencyClaim
 	RPCIdempotencyCompletion       = internal.RPCIdempotencyCompletion

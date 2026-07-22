@@ -40,14 +40,18 @@ type RPCIdempotencyClaim struct {
 type RPCIdempotencyDecision struct {
 	Kind        RPCIdempotencyDecisionKind
 	Result      []byte
+	ErrorKind   string
 	ErrorCode   string
+	ErrorData   []byte
 	ErrorStatus int
 }
 
 type RPCIdempotencyCompletion struct {
 	Claim       RPCIdempotencyClaim
 	Result      []byte
+	ErrorKind   string
 	ErrorCode   string
+	ErrorData   []byte
 	ErrorStatus int
 }
 
@@ -115,15 +119,17 @@ func newRPCIdempotencyClaim(actor Actor, envelope rpcCallEnvelope, arguments []m
 func validateRPCIdempotencyDecision(decision RPCIdempotencyDecision, maxResultBytes int) error {
 	switch decision.Kind {
 	case RPCIdempotencyExecute, RPCIdempotencyInProgress, RPCIdempotencyOutcomeUnknown, RPCIdempotencyConflict:
-		if len(decision.Result) != 0 || decision.ErrorCode != "" || decision.ErrorStatus != 0 {
+		if len(decision.Result) != 0 || decision.ErrorKind != "" || decision.ErrorCode != "" || len(decision.ErrorData) != 0 || decision.ErrorStatus != 0 {
 			return errors.New("invalid non-terminal idempotency decision")
 		}
 	case RPCIdempotencyReplayResult:
-		if len(decision.Result) == 0 || len(decision.Result) > maxResultBytes || decision.ErrorCode != "" || decision.ErrorStatus != 0 {
+		if len(decision.Result) == 0 || len(decision.Result) > maxResultBytes || decision.ErrorKind != "" || decision.ErrorCode != "" || len(decision.ErrorData) != 0 || decision.ErrorStatus != 0 {
 			return errors.New("invalid replay result")
 		}
 	case RPCIdempotencyReplayError:
-		if len(decision.Result) != 0 || !rpcErrorCodePattern.MatchString(decision.ErrorCode) || decision.ErrorStatus < 400 || decision.ErrorStatus > 599 {
+		if len(decision.Result) != 0 || (decision.ErrorKind != "business" && decision.ErrorKind != "internal") || decision.ErrorStatus < 400 || decision.ErrorStatus > 599 ||
+			(decision.ErrorKind == "business" && (!rpcBusinessErrorCodePattern.MatchString(decision.ErrorCode) || !validRPCBusinessErrorData(decision.ErrorData))) ||
+			(decision.ErrorKind == "internal" && (!rpcInternalErrorCodePattern.MatchString(decision.ErrorCode) || len(decision.ErrorData) != 0)) {
 			return errors.New("invalid replay error")
 		}
 	default:

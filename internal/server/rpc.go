@@ -12,11 +12,14 @@ import (
 )
 
 var (
-	rpcMethodNamePattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
-	rpcErrorCodePattern      = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-	rpcRequestIDPattern      = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-	rpcIdempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22,128}$`)
+	rpcMethodNamePattern        = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
+	rpcInternalErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	rpcBusinessErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})+$`)
+	rpcRequestIDPattern         = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	rpcIdempotencyKeyPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{22,128}$`)
 )
+
+const maxRPCErrorDataBytes = 64 << 10
 
 // RPCMethod is a bounded, authenticated data-only request handler. Arguments
 // and results use Meldbase's closed Value model, preserving Int64, Date, Binary
@@ -47,11 +50,35 @@ type RPCAuthorizer interface {
 	AuthorizeRPC(context.Context, Actor, string) error
 }
 
-// RPCError exposes one stable, non-sensitive application error code. Arbitrary
-// handler errors are returned as "internal" and their text never crosses the
-// transport boundary.
-type RPCError struct {
+// MeldbaseError is an expected, application-owned RPC failure. Code is a
+// namespaced stable identifier (for example "orders.already_paid"); Data is an
+// optional safe document sent to the caller. Arbitrary handler errors are
+// always classified as MeldbaseInternalError instead.
+type MeldbaseError struct {
 	Code string
+	Data meldbase.Document
+}
+
+func (err *MeldbaseError) Error() string {
+	if err == nil {
+		return "meldbase error"
+	}
+	return "meldbase: " + err.Code
+}
+
+// MeldbaseInternalError is Meldbase-owned error state. Applications should
+// return MeldbaseError for deliberate business outcomes and let all other
+// failures be safely normalized by the server.
+type MeldbaseInternalError struct {
+	Code   string
+	Status int
+}
+
+func (err *MeldbaseInternalError) Error() string {
+	if err == nil {
+		return "meldbase internal error"
+	}
+	return "meldbase internal: " + err.Code
 }
 
 type rpcCallEnvelope struct {
@@ -67,13 +94,8 @@ type rpcOutcome struct {
 	result json.RawMessage
 	status int
 	code   string
-}
-
-func (err *RPCError) Error() string {
-	if err == nil {
-		return "meldbase RPC error"
-	}
-	return "meldbase RPC: " + err.Code
+	kind   string
+	data   json.RawMessage
 }
 
 func validRPCMethodName(name string) bool    { return rpcMethodNamePattern.MatchString(name) }
@@ -128,7 +150,7 @@ func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 	}
 	outcome := h.executeRPC(r.Context(), actor, method, transactionalMethod, envelope, arguments, len(body))
 	if outcome.code != "" {
-		writeRPCError(w, outcome.status, envelope.RequestID, outcome.code)
+		writeJSON(w, outcome.status, rpcOutcomeErrorMessage(envelope.RequestID, outcome))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -199,8 +221,27 @@ func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod,
 			h.metrics.rpcIdempotencyReplays.Add(1)
 			return rpcOutcome{result: append(json.RawMessage(nil), decision.Result...)}
 		case RPCIdempotencyReplayError:
+			if decision.ErrorKind == "business" && len(decision.ErrorData) != 0 {
+				value, err := meldbase.UnmarshalWireValue(decision.ErrorData, h.config.QueryLimits)
+				if err != nil {
+					h.metrics.rpcRejected.Add(1)
+					h.metrics.rpcIdempotencyFailures.Add(1)
+					return internalRPCOutcome(http.StatusServiceUnavailable, "rpc_idempotency_unavailable")
+				}
+				canonical, err := meldbase.MarshalWireValue(value)
+				if err != nil || !bytes.Equal(canonical, decision.ErrorData) {
+					h.metrics.rpcRejected.Add(1)
+					h.metrics.rpcIdempotencyFailures.Add(1)
+					return internalRPCOutcome(http.StatusServiceUnavailable, "rpc_idempotency_unavailable")
+				}
+				if _, ok := value.ObjectValue(); !ok {
+					h.metrics.rpcRejected.Add(1)
+					h.metrics.rpcIdempotencyFailures.Add(1)
+					return internalRPCOutcome(http.StatusServiceUnavailable, "rpc_idempotency_unavailable")
+				}
+			}
 			h.metrics.rpcIdempotencyReplays.Add(1)
-			return rpcOutcome{status: decision.ErrorStatus, code: decision.ErrorCode}
+			return rpcOutcome{status: decision.ErrorStatus, code: decision.ErrorCode, kind: decision.ErrorKind, data: append(json.RawMessage(nil), decision.ErrorData...)}
 		default:
 			if status, code, ok := idempotencyDecisionError(decision); ok {
 				h.metrics.rpcRejected.Add(1)
@@ -236,20 +277,20 @@ func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod,
 			metricOutcome = "canceled"
 		}
 		h.finishRPC(span, metricOutcome, 0)
-		status, code := classifyRPCError(callErr)
+		outcome := classifyRPCOutcome(callErr)
 		if action != nil {
 			if metricOutcome == "canceled" {
 				h.metrics.rpcIdempotencyUnknown.Add(1)
 				h.markRPCUnknown(*action)
 				return rpcOutcome{status: http.StatusConflict, code: "rpc_outcome_unknown"}
 			}
-			if !h.completeRPCIdempotency(*action, RPCIdempotencyCompletion{Claim: action.claim, ErrorCode: code, ErrorStatus: status}) {
+			if !h.completeRPCIdempotency(*action, RPCIdempotencyCompletion{Claim: action.claim, ErrorCode: outcome.code, ErrorKind: outcome.kind, ErrorData: outcome.data, ErrorStatus: outcome.status}) {
 				h.metrics.rpcIdempotencyUnknown.Add(1)
 				h.metrics.rpcIdempotencyFailures.Add(1)
 				return rpcOutcome{status: http.StatusConflict, code: "rpc_outcome_unknown"}
 			}
 		}
-		return rpcOutcome{status: status, code: code}
+		return outcome
 	}
 	encoded, err := meldbase.MarshalWireValue(result)
 	if err != nil || len(encoded) > h.config.MaxRPCResultBytes {
@@ -314,21 +355,21 @@ func (h *Handler) executeTransactionalRPC(ctx context.Context, actor Actor, meth
 			metricOutcome = "canceled"
 		}
 		h.finishRPC(span, metricOutcome, 0)
-		status, code := classifyRPCError(callErr)
+		outcome := classifyRPCOutcome(callErr)
 		if invalidResult {
-			status, code = http.StatusInternalServerError, "rpc_result_invalid"
+			outcome = internalRPCOutcome(http.StatusInternalServerError, "rpc_result_invalid")
 		}
 		if metricOutcome == "canceled" {
 			h.metrics.rpcIdempotencyUnknown.Add(1)
 			h.markRPCUnknown(action)
 			return rpcOutcome{status: http.StatusConflict, code: "rpc_outcome_unknown"}
 		}
-		if !h.completeRPCIdempotency(action, RPCIdempotencyCompletion{Claim: action.claim, ErrorCode: code, ErrorStatus: status}) {
+		if !h.completeRPCIdempotency(action, RPCIdempotencyCompletion{Claim: action.claim, ErrorCode: outcome.code, ErrorKind: outcome.kind, ErrorData: outcome.data, ErrorStatus: outcome.status}) {
 			h.metrics.rpcIdempotencyUnknown.Add(1)
 			h.metrics.rpcIdempotencyFailures.Add(1)
 			return rpcOutcome{status: http.StatusConflict, code: "rpc_outcome_unknown"}
 		}
-		return rpcOutcome{status: status, code: code}
+		return outcome
 	}
 	if errors.Is(commitErr, meldbase.ErrWriteConflict) {
 		h.finishRPC(span, "failed", 0)
@@ -377,6 +418,9 @@ func (h *Handler) executeTransactionalRPC(ctx context.Context, actor Actor, meth
 }
 
 func (h *Handler) completeRPCIdempotency(action rpcIdempotencyAction, completion RPCIdempotencyCompletion) bool {
+	if completion.ErrorCode != "" && completion.ErrorKind == "" {
+		completion.ErrorKind = "internal"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), h.config.RPCIdempotencyCommitTimeout)
 	defer cancel()
 	if err := action.store.Complete(ctx, completion); err != nil {
@@ -415,28 +459,77 @@ func decodeRPCArguments(rawArguments []json.RawMessage, limits meldbase.QueryLim
 	return arguments, nil
 }
 
-func classifyRPCError(err error) (int, string) {
+func internalRPCOutcome(status int, code string) rpcOutcome {
+	return rpcOutcome{status: status, code: code, kind: "internal"}
+}
+
+func classifyRPCOutcome(err error) rpcOutcome {
 	if errors.Is(err, meldbase.ErrCommitOutcomeUnknown) {
-		return http.StatusConflict, "rpc_outcome_unknown"
+		return internalRPCOutcome(http.StatusConflict, "rpc_outcome_unknown")
 	}
 	if errors.Is(err, meldbase.ErrDurability) || errors.Is(err, meldbase.ErrClosed) ||
 		errors.Is(err, meldbase.ErrWriteTransactionUnsupported) {
-		return http.StatusServiceUnavailable, "database_unavailable"
+		return internalRPCOutcome(http.StatusServiceUnavailable, "database_unavailable")
 	}
 	if errors.Is(err, errRPCWorkerBusy) {
-		return http.StatusServiceUnavailable, "worker_busy"
+		return internalRPCOutcome(http.StatusServiceUnavailable, "worker_busy")
 	}
 	if errors.Is(err, meldbase.ErrResourceLimit) {
-		return http.StatusRequestEntityTooLarge, "resource_limit_exceeded"
+		return internalRPCOutcome(http.StatusRequestEntityTooLarge, "resource_limit_exceeded")
 	}
-	var exposed *RPCError
-	if errors.As(err, &exposed) && exposed != nil && rpcErrorCodePattern.MatchString(exposed.Code) {
-		return http.StatusBadRequest, exposed.Code
+	var business *MeldbaseError
+	if errors.As(err, &business) && business != nil && rpcBusinessErrorCodePattern.MatchString(business.Code) {
+		outcome := rpcOutcome{status: http.StatusBadRequest, code: business.Code, kind: "business"}
+		if business.Data != nil {
+			encoded, marshalErr := meldbase.MarshalWireValue(meldbase.Object(business.Data))
+			if marshalErr != nil || len(encoded) > maxRPCErrorDataBytes {
+				return internalRPCOutcome(http.StatusInternalServerError, "internal")
+			}
+			outcome.data = json.RawMessage(encoded)
+		}
+		return outcome
+	}
+	var internal *MeldbaseInternalError
+	if errors.As(err, &internal) && internal != nil && rpcInternalErrorCodePattern.MatchString(internal.Code) {
+		status := internal.Status
+		if status < 400 || status > 599 {
+			status = http.StatusInternalServerError
+		}
+		return internalRPCOutcome(status, internal.Code)
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return http.StatusRequestTimeout, "rpc_canceled"
+		return internalRPCOutcome(http.StatusRequestTimeout, "rpc_canceled")
 	}
-	return http.StatusInternalServerError, "internal"
+	return internalRPCOutcome(http.StatusInternalServerError, "internal")
+}
+
+func validRPCBusinessErrorData(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	if len(data) > maxRPCErrorDataBytes {
+		return false
+	}
+	value, err := meldbase.UnmarshalWireValue(data, meldbase.QueryLimits{
+		MaxWireBytes: maxRPCErrorDataBytes, MaxDepth: 64, MaxNodes: 1 << 20,
+		MaxArrayItems: 1 << 20, MaxValueBytes: maxRPCErrorDataBytes,
+	})
+	if err != nil {
+		return false
+	}
+	canonical, err := meldbase.MarshalWireValue(value)
+	if err != nil || !bytes.Equal(canonical, data) {
+		return false
+	}
+	_, ok := value.ObjectValue()
+	return ok
+}
+
+// classifyRPCError is kept internal for existing engine tests; public wire
+// classification additionally carries the business/internal distinction.
+func classifyRPCError(err error) (int, string) {
+	outcome := classifyRPCOutcome(err)
+	return outcome.status, outcome.code
 }
 
 func rpcResultMessage(requestID string, encoded json.RawMessage) map[string]any {
@@ -444,11 +537,22 @@ func rpcResultMessage(requestID string, encoded json.RawMessage) map[string]any 
 }
 
 func rpcErrorMessage(requestID, code string) map[string]any {
-	return map[string]any{"v": protocolVersion, "type": "error", "requestId": requestID, "error": map[string]any{"code": code}}
+	return rpcOutcomeErrorMessage(requestID, internalRPCOutcome(http.StatusInternalServerError, code))
+}
+
+func rpcOutcomeErrorMessage(requestID string, outcome rpcOutcome) map[string]any {
+	if outcome.kind == "" {
+		outcome.kind = "internal"
+	}
+	errorBody := map[string]any{"kind": outcome.kind, "code": outcome.code}
+	if len(outcome.data) != 0 {
+		errorBody["data"] = json.RawMessage(outcome.data)
+	}
+	return map[string]any{"v": protocolVersion, "type": "error", "requestId": requestID, "error": errorBody}
 }
 
 func writeRPCError(w http.ResponseWriter, status int, requestID, code string) {
-	writeJSON(w, status, rpcErrorMessage(requestID, code))
+	writeJSON(w, status, rpcOutcomeErrorMessage(requestID, internalRPCOutcome(status, code)))
 }
 
 func (s *socketSession) startRPCCall(envelope rpcCallEnvelope, requestBytes int) {
@@ -518,7 +622,7 @@ func (s *socketSession) startRPCCall(envelope rpcCallEnvelope, requestBytes int)
 		outcome := s.handler.executeRPC(ctx, s.actor, method, transactionalMethod, envelope, arguments, requestBytes)
 		cleanup()
 		if outcome.code != "" {
-			s.enqueue(rpcErrorMessage(envelope.RequestID, outcome.code))
+			s.enqueue(rpcOutcomeErrorMessage(envelope.RequestID, outcome))
 			return
 		}
 		s.enqueue(rpcResultMessage(envelope.RequestID, outcome.result))

@@ -37,13 +37,13 @@ application's API, so keep it stable and descriptive.
 
 ```ts
 import WebSocket from "ws";
-import { MeldbaseMethodError, MeldbaseWorker, rpc } from "@meldbase/server";
+import { MeldbaseError, MeldbaseWorker, rpc } from "@meldbase/server";
 import type { Value } from "@meldbase/client";
 
 function requiredString(arguments_: readonly Value[], index: number): string {
   const value = arguments_[index];
   if (typeof value !== "string" || value.length === 0) {
-    throw new MeldbaseMethodError("invalid_argument");
+    throw new MeldbaseError("orders.invalid_argument");
   }
   return value;
 }
@@ -123,13 +123,15 @@ an external side effect did not happen.
 ```
 
 To return a deliberate, stable application error to the caller, throw
-`MeldbaseMethodError`. Its code must be lower-case snake case (for example
-`"invalid_argument"`, `"not_found"`, or `"payment_required"`). Any other
-exception is reported as `internal`; its message and stack stay in the worker.
+`MeldbaseError`. Its code must be namespaced lower-case segments (for example
+`"orders.invalid_argument"`, `"catalog.unknown_sku"`, or
+`"billing.payment_required"`). Its optional second argument is safe structured
+data. Any other exception is reported as `internal`; its message and stack stay
+in the worker.
 
 ```ts
 if (!catalog.has(sku)) {
-  throw new MeldbaseMethodError("unknown_sku");
+  throw new MeldbaseError("catalog.unknown_sku", { sku });
 }
 ```
 
@@ -156,7 +158,7 @@ will reject concurrent transaction operations. Use `compileUpdate` from
 
 ```ts
 import { compileUpdate } from "@meldbase/client";
-import { MeldbaseMethodError, transactional } from "@meldbase/server";
+import { MeldbaseError, transactional } from "@meldbase/server";
 
 const methods = {
   "orders.create": transactional(async ({ actor }, arguments_, tx) => {
@@ -183,10 +185,10 @@ const methods = {
     const order = await tx.get("orders", id);
 
     if (order.owner !== actor.id || order.tenant !== actor.tenantId) {
-      throw new MeldbaseMethodError("forbidden");
+      throw new MeldbaseError("orders.not_owner");
     }
     if (order.status !== "submitted") {
-      throw new MeldbaseMethodError("invalid_order_state");
+      throw new MeldbaseError("orders.invalid_state");
     }
 
     await tx.update("orders", id, compileUpdate({

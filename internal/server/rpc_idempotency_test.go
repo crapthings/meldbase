@@ -64,6 +64,7 @@ func (store *memoryIdempotencyStore) Claim(_ context.Context, claim RPCIdempoten
 	}
 	decision := record.decision
 	decision.Result = append([]byte(nil), decision.Result...)
+	decision.ErrorData = append([]byte(nil), decision.ErrorData...)
 	return decision, nil
 }
 
@@ -81,7 +82,7 @@ func (store *memoryIdempotencyStore) Complete(_ context.Context, completion RPCI
 	if len(completion.Result) > 0 {
 		record.decision = RPCIdempotencyDecision{Kind: RPCIdempotencyReplayResult, Result: append([]byte(nil), completion.Result...)}
 	} else {
-		record.decision = RPCIdempotencyDecision{Kind: RPCIdempotencyReplayError, ErrorCode: completion.ErrorCode, ErrorStatus: completion.ErrorStatus}
+		record.decision = RPCIdempotencyDecision{Kind: RPCIdempotencyReplayError, ErrorKind: completion.ErrorKind, ErrorCode: completion.ErrorCode, ErrorData: append([]byte(nil), completion.ErrorData...), ErrorStatus: completion.ErrorStatus}
 	}
 	store.records[key] = record
 	return nil
@@ -133,12 +134,12 @@ func TestRPCIdempotencyReplaysApplicationErrorsAndFailsClosedWithoutStore(t *tes
 	var calls atomic.Uint64
 	method := func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error) {
 		calls.Add(1)
-		return meldbase.Value{}, &RPCError{Code: "quota_exceeded"}
+		return meldbase.Value{}, &MeldbaseError{Code: "billing.quota_exceeded", Data: meldbase.Document{"retryAfter": meldbase.Int(60)}}
 	}
 	_, _, server := newRPCServer(t, map[string]RPCMethod{"fail": method}, rpcTestAuthorizer{allow: true}, Config{RPCIdempotencyStore: store})
 	key := "abcdefghijklmnopqrstuv"
-	assertRPCError(t, postIdempotentRPC(t, server.URL, "fail", key, []any{}), http.StatusBadRequest, "quota_exceeded")
-	assertRPCError(t, postIdempotentRPC(t, server.URL, "fail", key, []any{}), http.StatusBadRequest, "quota_exceeded")
+	assertRPCBusinessErrorData(t, postIdempotentRPC(t, server.URL, "fail", key, []any{}), "billing.quota_exceeded", meldbase.Document{"retryAfter": meldbase.Int(60)})
+	assertRPCBusinessErrorData(t, postIdempotentRPC(t, server.URL, "fail", key, []any{}), "billing.quota_exceeded", meldbase.Document{"retryAfter": meldbase.Int(60)})
 	if calls.Load() != 1 {
 		t.Fatalf("application error calls=%d", calls.Load())
 	}
@@ -356,5 +357,28 @@ func assertRPCError(t *testing.T, response *http.Response, status int, code stri
 	body, _ := io.ReadAll(response.Body)
 	if response.StatusCode != status || !strings.Contains(string(body), `"code":"`+code+`"`) {
 		t.Fatalf("error status=%d body=%s want=%d/%s", response.StatusCode, body, status, code)
+	}
+}
+
+func assertRPCBusinessErrorData(t *testing.T, response *http.Response, code string, expected meldbase.Document) {
+	t.Helper()
+	defer response.Body.Close()
+	var envelope struct {
+		Error struct {
+			Kind string          `json:"kind"`
+			Code string          `json:"code"`
+			Data json.RawMessage `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadRequest || envelope.Error.Kind != "business" || envelope.Error.Code != code {
+		t.Fatalf("business error status=%d envelope=%+v", response.StatusCode, envelope)
+	}
+	value, err := meldbase.UnmarshalWireValue(envelope.Error.Data, meldbase.QueryLimits{})
+	actual, ok := value.ObjectValue()
+	if err != nil || !ok || !actual.Equal(expected) {
+		t.Fatalf("business error data=%+v/%t err=%v", actual, ok, err)
 	}
 }

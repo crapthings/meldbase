@@ -937,21 +937,49 @@ type workerErrorFrame struct {
 	Type    string `json:"type"`
 	CallID  string `json:"callId"`
 	Error   struct {
-		Code string `json:"code"`
+		Kind string          `json:"kind"`
+		Code string          `json:"code"`
+		Data json.RawMessage `json:"data,omitempty"`
 	} `json:"error"`
 }
 
 func (worker *workerConnection) handleError(raw []byte) error {
 	var frame workerErrorFrame
 	if err := decodeStrict(raw, &frame); err != nil || frame.Version != protocolVersion || frame.Type != "error" ||
-		!workerOperationIDPattern.MatchString(frame.CallID) || !rpcErrorCodePattern.MatchString(frame.Error.Code) {
+		!workerOperationIDPattern.MatchString(frame.CallID) || (frame.Error.Kind != "business" && frame.Error.Kind != "internal") {
 		return workerProtocol("invalid worker error")
 	}
 	pending := worker.takePending(frame.CallID)
 	if pending == nil || pending.result == nil {
 		return workerProtocol("worker error has no active call")
 	}
-	pending.result <- workerCallResult{err: &RPCError{Code: frame.Error.Code}}
+	if frame.Error.Kind == "internal" {
+		if len(frame.Error.Data) != 0 || !rpcInternalErrorCodePattern.MatchString(frame.Error.Code) {
+			return workerProtocol("invalid worker internal error")
+		}
+		pending.result <- workerCallResult{err: &MeldbaseInternalError{Code: frame.Error.Code}}
+		return nil
+	}
+	if !rpcBusinessErrorCodePattern.MatchString(frame.Error.Code) {
+		return workerProtocol("invalid worker business error")
+	}
+	business := &MeldbaseError{Code: frame.Error.Code}
+	if len(frame.Error.Data) != 0 {
+		value, err := meldbase.UnmarshalWireValue(frame.Error.Data, worker.hub.config.PolicyQueryLimits)
+		if err != nil {
+			return workerProtocol("invalid worker business error data")
+		}
+		canonical, err := meldbase.MarshalWireValue(value)
+		if err != nil || !bytes.Equal(canonical, frame.Error.Data) {
+			return workerProtocol("non-canonical worker business error data")
+		}
+		data, ok := value.ObjectValue()
+		if !ok {
+			return workerProtocol("invalid worker business error data")
+		}
+		business.Data = data
+	}
+	pending.result <- workerCallResult{err: business}
 	return nil
 }
 
@@ -983,7 +1011,8 @@ func (worker *workerConnection) handlePolicy(raw []byte) error {
 func (worker *workerConnection) handlePolicyError(raw []byte) error {
 	var frame workerErrorFrame
 	if err := decodeStrict(raw, &frame); err != nil || frame.Version != protocolVersion || frame.Type != "policy_error" ||
-		!workerOperationIDPattern.MatchString(frame.CallID) || (frame.Error.Code != "forbidden" && frame.Error.Code != "internal") {
+		!workerOperationIDPattern.MatchString(frame.CallID) || frame.Error.Kind != "internal" || len(frame.Error.Data) != 0 ||
+		(frame.Error.Code != "forbidden" && frame.Error.Code != "internal") {
 		return workerProtocol("invalid worker policy error")
 	}
 	pending := worker.takePending(frame.CallID)
@@ -1058,7 +1087,7 @@ func (worker *workerConnection) handleTransactionOperation(ctx context.Context, 
 	if err != nil {
 		return worker.send(ctx, map[string]any{
 			"v": protocolVersion, "type": "tx_error", "callId": frame.CallID, "opId": frame.OperationID,
-			"error": map[string]any{"code": classifyWorkerTransactionError(err)},
+			"error": map[string]any{"kind": "internal", "code": classifyWorkerTransactionError(err)},
 		})
 	}
 	encoded, err := meldbase.MarshalWireValue(result)
