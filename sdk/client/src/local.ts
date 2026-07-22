@@ -107,7 +107,7 @@ export class LocalCollection<T extends Document = Document> {
   }
 
   execute(spec: QuerySpec): T[] {
-    return executeQuery(this.#documents.values(), spec).map(cloneDocument);
+    return executeQuery(this.queryCandidates(spec), spec).map(cloneDocument);
   }
 
   onChange(listener: () => void): Unsubscribe {
@@ -117,7 +117,7 @@ export class LocalCollection<T extends Document = Document> {
 
   private updateMatching(filter: Filter, update: Update, one: boolean): MutationResult {
     const query = compileQuery(filter); const mutation = compileUpdate(update); const staged: T[] = []; let matchedCount = 0;
-    for (const document of this.#documents.values()) {
+    for (const document of this.queryCandidates(query)) {
       if (!matches(document, query.where) || (one && matchedCount > 0)) continue;
       matchedCount += 1; const after = applyMutation(document, mutation); if (!valueEquals(document, after)) staged.push(after);
     }
@@ -127,8 +127,15 @@ export class LocalCollection<T extends Document = Document> {
 
   private deleteMatching(filter: Filter, one: boolean): DeleteResult {
     const query = compileQuery(filter); const ids: string[] = [];
-    for (const document of this.#documents.values()) { if (matches(document, query.where) && (!one || ids.length === 0)) ids.push(document._id); }
+    for (const document of this.queryCandidates(query)) { if (matches(document, query.where) && (!one || ids.length === 0)) ids.push(document._id); }
     this.batch(() => { for (const id of ids) this.remove(id); }); return { deletedCount: ids.length };
+  }
+
+  private queryCandidates(spec: QuerySpec): Iterable<T> {
+    const id = requiredDocumentID(spec.where);
+    if (id === undefined) return this.#documents.values();
+    const document = this.#documents.get(id);
+    return document === undefined ? [] : [document];
   }
 
   private markChanged(): void {
@@ -140,6 +147,22 @@ export class LocalCollection<T extends Document = Document> {
     this.#changed = false;
     for (const listener of [...this.#listeners]) queueMicrotask(listener);
   }
+}
+
+// An equality condition on _id is a required primary-key constraint only when
+// it occurs outside OR/not. The remaining predicate still runs below, so an
+// additional condition or contradictory _id comparison preserves exact query
+// semantics while avoiding a collection scan.
+function requiredDocumentID(expression: QuerySpec["where"]): string | undefined {
+  if (expression.op === "compare" && expression.cmp === "eq" && expression.path === "_id" && typeof expression.value === "string") {
+    return expression.value;
+  }
+  if (expression.op !== "and") return undefined;
+  for (const argument of expression.args) {
+    const id = requiredDocumentID(argument);
+    if (id !== undefined) return id;
+  }
+  return undefined;
 }
 
 

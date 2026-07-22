@@ -81,3 +81,17 @@ test("findOne uses the shared query compiler and returns an isolated document", 
   if (found) (found as { title: string }).title = "mutated";
   assert.equal(collection.findOne({ _id: "00000000000000000000000000000002" })?.title, "first");
 });
+
+test("primary-key constrained local queries preserve additional predicates and mutations", () => {
+  const collection = new LocalCollection<Document>([
+    { _id: id(1), status: "open", title: "first" },
+    { _id: id(2), status: "closed", title: "second" },
+  ]);
+
+  assert.deepEqual(collection.find({ _id: id(1), status: "open" }).fetch().map((document) => document._id), [id(1)]);
+  assert.deepEqual(collection.find({ _id: id(1), status: "closed" }).fetch(), []);
+  assert.deepEqual(collection.updateOne({ _id: id(1), status: "open" }, { $set: { title: "updated" } }), { matchedCount: 1, modifiedCount: 1 });
+  assert.deepEqual(collection.deleteMany({ _id: id(2), status: "open" }), { deletedCount: 0 });
+  assert.equal(collection.findOne({ _id: id(1) })?.title, "updated");
+  assert.equal(collection.findOne({ _id: id(2) })?.title, "second");
+});

@@ -170,7 +170,7 @@ const local = new LocalCollection<Todo>();
 | `local.upsert(document)` | Creates or fully replaces the one local document addressed by its `_id`. | `local.upsert({ ...todo, done: true })` |
 | `local.remove(id)` | Removes by ID and reports whether a document was removed. | `local.remove(todoID)` |
 | `local.find(filter?, options?)` | Creates a local live query. | `local.find({ done: false })` |
-| `local.findOne(filter?, options?)` | Synchronously gets the first matching document. | `local.findOne({ _id: todoID })` |
+| `local.findOne(filter?, options?)` | Synchronously gets the first matching document. An exact `_id` condition uses the local primary-key map; other filters scan local state. | `local.findOne({ _id: todoID })` |
 | `local.updateOne(filter, update)` | Updates the first matching document. | `local.updateOne({ _id: todoID }, { $set: { done: true } })` |
 | `local.updateMany(filter, update)` | Updates every matching document. | `local.updateMany({ done: false }, { $set: { status: "active" } })` |
 | `local.deleteOne(filter)` | Deletes the first matching document. | `local.deleteOne({ _id: todoID })` |
@@ -181,7 +181,8 @@ const local = new LocalCollection<Todo>();
 
 All local stored IDs use the same non-zero, 32-character lowercase hexadecimal
 format as remote documents. Use `newDocumentID()` or let `insertOne()` create
-one.
+one. Exact `_id` constraints also narrow local `find`, `findOne`, update, and
+delete operations to that one candidate before the remaining predicate runs.
 
 `local.find()` returns `LiveQuery`, which has the same three user-facing query
 methods as `RemoteLiveQuery`:
