@@ -24,7 +24,7 @@ tokens, idempotency keys and transport request IDs are never forwarded to a
 worker; it receives only the authenticated actor (`id`, `workspaceId`), method
 arguments or canonical requested query, and a hub-generated call ID.
 
-One live worker owns a method name or the Worker publication for a managed
+One live worker owns a method name or the Worker read policy for a managed
 collection. Registration conflicts fail closed instead of load-balancing
 nondeterministically. Disconnect atomically removes all of the worker's
 registrations and fails its in-flight calls. A later worker may then register
@@ -50,11 +50,11 @@ every `registered` frame; an older Hub or an omitted descriptor is rejected:
     "versions": [1],
     "capabilities": [
       "cancel",
-      "publication.policy",
+      "read_policy",
       "rpc",
       "rpc.transactional",
       "transaction.compiled_update",
-      "transaction.invalidate_publication",
+      "transaction.invalidate_read_policy",
       "transaction.point_operations"
     ]
   }
@@ -63,7 +63,7 @@ every `registered` frame; an older Hub or an omitted descriptor is rejected:
 
 The descriptor uses the same canonical bounded decoder as the browser SDK.
 Unknown sorted capabilities are forward-additive. The SDK verifies every
-capability required by its registered methods and Worker-publication modes before
+capability required by its registered methods and Worker read-policy modes before
 becoming ready. A missing descriptor, wrong worker protocol version, or missing
 required support is terminal rather than a reconnect loop. The request header is confined
 to the separately authenticated, non-browser control listener and contains no
@@ -80,7 +80,7 @@ Worker registration:
     {"name": "orders.quote", "mode": "rpc"},
     {"name": "orders.create", "mode": "transactional"}
   ],
-  "publications": [
+  "readPolicies": [
     {
       "collection": "orders",
       "version": "orders-owner-v1",
@@ -131,7 +131,7 @@ point operation at a time:
   an absent ID returns `not_found` and is never created implicitly;
 - `update(collection, id, compiledMutation)`;
 - `delete(collection, id)`;
-- `invalidatePublication(collection)`.
+- `invalidateReadPolicy(collection)`.
 
 Each `tx_op` carries a call-local `opId`; the hub returns one typed `tx_result`
 or stable `tx_error`. Operations are executed against the fixed snapshot and
@@ -145,18 +145,18 @@ transaction resource limits.
 and is decoded by Go under the same bounded, data-only mutation grammar used by
 HTTP and local TypeScript collections.
 
-`invalidatePublication` is for the narrower case where a Worker publication's
+`invalidateReadPolicy` is for the narrower case where a Worker read policy's
 authorization meaning depends on data outside the collection it queries. For
 example, a transaction that changes an `organization_members` record can
-invalidate the `orders` Worker publication. It stages a new random policy generation
+invalidate the `orders` Worker read policy. It stages a new random policy generation
 in the private System tree beside the business mutations and RPC terminal.
 The old policy lease is revoked only after that root is durable and before the
 business ChangeBatch is emitted, so existing subscriptions resync instead of
 continuing under stale visibility. A conflict, handler error or failed commit
 publishes neither the generation nor the lease rotation. The operation may be
-issued at most once per Worker publication in one transaction and must accompany at
+issued at most once per Worker read policy in one transaction and must accompany at
 least one business mutation; it is not needed for ordinary changes to documents
-already covered by the Worker publication query. An invalidation-only call completes
+already covered by the Worker read-policy query. An invalidation-only call completes
 durably with `rpc_transaction_requires_write`; it is never reported as an
 ambiguous outcome.
 
@@ -175,21 +175,21 @@ Unknown, duplicate or malformed terminal/operation frames close the worker
 connection.
 
 The hub exports fixed-cardinality totals and gauges only: connected workers,
-registered methods/publications, active calls/policy evaluations, their bounded
+registered methods/read policies, active calls/policy evaluations, their bounded
 outcomes, protocol failures, bytes and transactional operations. It never labels metrics
 with worker IDs, method names, actors, workspaces or application error codes.
 Committed policy invalidations have their own total, making unexpected resync
 pressure visible without putting collection names into metrics.
 
-## Worker publications: data-only read policies
+## Worker read policies
 
-Worker publication ownership is a Go-side trust anchor. `PublicationCollections` must
+Worker read-policy ownership is a Go-side trust anchor. `ReadPolicyCollections` must
 list every collection whose query visibility is delegated. A Worker cannot add
 a new authority domain by registering an arbitrary name. A managed collection
 with no connected owner fails closed; collections not listed continue through
 the local `Authorizer` alone.
 
-A Worker publication is a read-visibility extension only: it can narrow HTTP
+A Worker read policy is a read-visibility extension only: it can narrow HTTP
 queries and realtime subscriptions, but cannot authorize generic inserts,
 updates, or deletes. Despite its name, it never publishes documents or events.
 Put role-dependent writes in a Go `Authorizer` or an explicitly authorized RPC
@@ -212,7 +212,7 @@ has an independent two-second default deadline (configurable up to 30 seconds)
 and shares the worker's pending-call budget, so a slow policy cannot accumulate
 unbounded subscription starts.
 
-Every registered Worker publication owns a `QueryPolicyLease`. Disconnect first marks
+Every registered Worker read policy owns a `QueryPolicyLease`. Disconnect first marks
 that lease revoked and removes the owner. Existing subscriptions stop before
 any new authorized output and request a safe resync; new requests fail closed
 until a worker registers again. Effective-query and policy fingerprints bind
@@ -236,7 +236,7 @@ policyGenerations, err := server.NewDurablePolicyGenerationStore(db)
 if err != nil { log.Fatal(err) }
 workerHub, err := server.NewWorkerHub(server.WorkerHubConfig{
     Authenticator: workerAuth,
-    PublicationCollections: []string{"orders"},
+    ReadPolicyCollections: []string{"orders"},
     PolicyGenerationStore: policyGenerations,
 })
 if err != nil { log.Fatal(err) }

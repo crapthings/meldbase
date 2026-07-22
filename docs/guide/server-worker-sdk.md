@@ -14,9 +14,9 @@ Use the worker when you need one of these three things:
 
 | Need | Helper | Handler receives | Typical use |
 | --- | --- | --- | --- |
-| A named server operation without an atomic database write | `rpc` | actor, arguments, cancellation signal | calculate a quote; call an idempotent internal service |
-| A named operation with atomic Meldbase point writes | `transactional` | actor, arguments, `WriteTransaction` | create an order; change an owned record's state |
-| Per-user visibility for HTTP queries and realtime subscriptions | `publish` | actor, requested query | show only documents owned by the current user |
+| A named non-atomic server operation | `rpc` | actor, args, cancellation signal | calculate a quote; call an idempotent internal service |
+| A named operation with atomic Meldbase point writes | `rpc.transactional` | actor, args, `WriteTransaction` | create an order; change an owned record's state |
+| Per-user visibility for HTTP queries and realtime subscriptions | `readPolicy` | actor, requested query | show only documents owned by the current user |
 
 The worker connects to Meldbase's **private** worker control endpoint. Do not
 put its URL or token in a browser bundle. For the corresponding Go hub setup,
@@ -40,8 +40,8 @@ import WebSocket from "ws";
 import { MeldbaseError, MeldbaseWorker, rpc } from "@meldbase/server";
 import type { Value } from "@meldbase/client";
 
-function requiredString(arguments_: readonly Value[], index: number): string {
-  const value = arguments_[index];
+function requiredString(args: readonly Value[], index: number): string {
+  const value = args[index];
   if (typeof value !== "string" || value.length === 0) {
     throw new MeldbaseError("orders.invalid_argument");
   }
@@ -57,8 +57,8 @@ const worker = new MeldbaseWorker({
   workerId: "orders-worker-1",
   webSocketFactory: (url, { headers }) => new WebSocket(url, { headers }),
   methods: {
-    "orders.echo": rpc(({ actor }, arguments_) => {
-      const message = requiredString(arguments_, 0);
+    "orders.echo": rpc(({ actor }, args) => {
+      const message = requiredString(args, 0);
       return {
         message,
         id: actor.id,
@@ -95,23 +95,24 @@ typed data.
 
 ## Ordinary RPC: `rpc`
 
-`rpc(handler)` is for a named operation that does not need Meldbase's atomic
-write transaction. It receives:
+`rpc(handler)` is for a named non-atomic operation. It receives:
 
 - `context.actor.id` — the authenticated application identity;
 - `context.actor.workspaceId` — the authenticated active-workspace identifier;
 - `context.signal` — aborted when the client call is canceled or the worker
   connection ends;
-- `arguments_` — the typed values sent to the method.
+- `args` — the typed values sent to the method.
 
 Use it for computation, reads from an application service, or a downstream call
-that already has its own idempotency contract. Cancellation is best-effort: pass
-the signal to cancellable work, but do not assume a canceled request proves that
-an external side effect did not happen.
+that already has its own idempotency contract. A normal RPC has no Meldbase
+transaction: any external effect, and any database write reached outside a
+supplied transaction, is outside its atomicity guarantee. Cancellation is
+best-effort: pass the signal to cancellable work, but do not assume a canceled
+request proves that an external side effect did not happen.
 
 ```ts
-"orders.quote": rpc(async ({ actor, signal }, arguments_) => {
-  const sku = requiredString(arguments_, 0);
+"orders.quote": rpc(async ({ actor, signal }, args) => {
+  const sku = requiredString(args, 0);
   const quote = await pricingService.quote({
     accountID: actor.id,
     workspaceID: actor.workspaceId,
@@ -135,9 +136,9 @@ if (!catalog.has(sku)) {
 }
 ```
 
-## Atomic write RPC: `transactional`
+## Atomic write RPC: `rpc.transactional`
 
-`transactional(handler)` runs the handler against a Go-owned optimistic
+`rpc.transactional(handler)` runs the handler against a Go-owned optimistic
 transaction. It is the normal choice when a method must validate a request and
 write business documents as one atomic outcome.
 
@@ -150,7 +151,7 @@ The transaction object provides only sequential point operations:
 | `replace(collection, id, document)` | Fully replace one existing document at a known ID. An absent ID returns `not_found`; this is not an upsert. |
 | `update(collection, id, mutation)` | Apply a compiled `$set`/`$inc`/etc. mutation. |
 | `delete(collection, id)` | Delete one document at a known ID. |
-| `invalidatePublication(collection)` | Force subscriptions to re-authorize after a related visibility change. |
+| `invalidateReadPolicy(collection)` | Force subscriptions to re-authorize after a related visibility change. |
 
 Await every transaction operation before starting the next one. The worker SDK
 will reject concurrent transaction operations. Use `compileUpdate` from
@@ -158,11 +159,11 @@ will reject concurrent transaction operations. Use `compileUpdate` from
 
 ```ts
 import { compileUpdate } from "@meldbase/client";
-import { MeldbaseError, transactional } from "@meldbase/server";
+import { MeldbaseError, rpc } from "@meldbase/server";
 
 const methods = {
-  "orders.create": transactional(async ({ actor }, arguments_, tx) => {
-    const description = requiredString(arguments_, 0);
+  "orders.create": rpc.transactional(async ({ actor }, args, tx) => {
+    const description = requiredString(args, 0);
 
     const id = await tx.insert("orders", {
       workspace: actor.workspaceId,
@@ -180,8 +181,8 @@ const methods = {
     return { id, status: "submitted" };
   }),
 
-  "orders.cancel": transactional(async ({ actor }, arguments_, tx) => {
-    const id = requiredString(arguments_, 0);
+  "orders.cancel": rpc.transactional(async ({ actor }, args, tx) => {
+    const id = requiredString(args, 0);
     const order = await tx.get("orders", id);
 
     if (order.owner !== actor.id || order.workspace !== actor.workspaceId) {
@@ -200,17 +201,16 @@ const methods = {
 ```
 
 Do **not** make network calls, send email, charge a card, or mutate another
-database while a `transactional` handler is running. Only Meldbase point
+database while a `rpc.transactional` handler is running. Only Meldbase point
 mutations participate in the atomic commit. If a touched document conflicts,
 the operation ends with `rpc_transaction_conflict`; JavaScript is not silently
 re-run for you.
 
-## Read visibility: `publish`
+## Read visibility: `readPolicy`
 
-`publish(options, handler)` creates a **Worker publication**: a declaration of
-how one pre-approved collection may be read by HTTP queries and realtime
-subscriptions. It is a **read filter**, not a generic write permission, event
-publisher, or way to return documents from Node.
+`readPolicy(options, handler)` declares how one pre-approved collection may be
+read by HTTP queries and realtime subscriptions. It is a read constraint, not a
+generic write permission, event publisher, or way to return documents from Node.
 
 The handler returns a predicate built with `compileQuery`, or `null` to deny the
 request. It may only narrow what the client requested: sorting, skipping, and
@@ -219,16 +219,16 @@ its local authorizer, so both sides must allow the read.
 
 ```ts
 import { compileQuery } from "@meldbase/client";
-import { publish } from "@meldbase/server";
+import { readPolicy } from "@meldbase/server";
 
-const publications = {
-  orders: publish({
+const readPolicies = {
+  orders: readPolicy({
     // Change this whenever the handler or its static declarations change.
     version: "orders-owner-v1",
     maxResults: 100,
     // Fields a browser query is allowed to filter on.
     queryPaths: ["status", "createdAt"],
-    // Fields it may receive through this Worker publication.
+    // Fields it may receive through this Worker read policy.
     resultFields: ["workspace", "owner", "description", "status", "createdAt"],
   }, ({ actor }) => {
     if (!actor.id) return null;
@@ -246,8 +246,8 @@ change to the predicate or those declarations must receive a new `version`, so
 old authorization and resume state cannot be reused under a different policy.
 
 If visibility for `orders` also depends on a membership record in another
-collection, a transactional method that changes membership should additionally
-call `await tx.invalidatePublication("orders")`. This makes existing `orders`
+collection, a transactional RPC that changes membership should additionally
+call `await tx.invalidateReadPolicy("orders")`. This makes existing `orders`
 subscriptions re-authorize. Use it only for that cross-collection visibility
 case; ordinary writes to `orders` already flow through the normal reactive
 change path. It may be called once per collection in a transaction and must be
@@ -284,9 +284,9 @@ legacy control frame. This is a local SDK compatibility error, not a
   Go `RPCAuthorizer` can express more dynamic admission rules.
 - Validate every method argument and authorize every record-level action in the
   handler or Go-side authorizer.
-- Prefer a named `transactional` method for business writes instead of exposing
+- Prefer a named `rpc.transactional` method for business writes instead of exposing
   broad browser write access.
-- Keep Worker publications narrow, version them when changed, and invalidate
+- Keep Worker read policies narrow, version them when changed, and invalidate
   only when an external collection changes their visibility meaning.
 
 For the complete control-plane contract and Go hub setup, continue to the

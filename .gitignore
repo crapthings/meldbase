@@ -17,6 +17,7 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+.antigravitycli/
 tmp/
 local-playground/
 docs/.vitepress/cache/

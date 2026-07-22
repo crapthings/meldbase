@@ -37,7 +37,7 @@ func (err *workerProtocolError) Error() string { return err.message }
 func workerProtocol(message string) error      { return &workerProtocolError{message: message} }
 
 // WorkerIdentity identifies a control-plane worker credential. It is separate
-// from the application Actor passed to RPC and publication handlers.
+// from the application Actor passed to RPC and read-policy handlers.
 type WorkerIdentity struct{ ID string }
 
 // WorkerAuthenticator is a separate control-plane trust boundary. Client
@@ -74,11 +74,11 @@ func (authenticator *workerTokenAuthenticator) AuthenticateWorker(request *http.
 
 type WorkerHubConfig struct {
 	Authenticator            WorkerAuthenticator
-	PublicationCollections   []string
+	ReadPolicyCollections    []string
 	RegistrationTimeout      time.Duration
 	MaxFrameBytes            int
 	MaxMethodsPerWorker      int
-	MaxPublicationsPerWorker int
+	MaxReadPoliciesPerWorker int
 	MaxPendingCalls          int
 	MaxOperationsPerCall     int
 	PolicyQueryLimits        meldbase.QueryLimits
@@ -93,8 +93,8 @@ type WorkerHub struct {
 	config              WorkerHubConfig
 	mu                  sync.RWMutex
 	owners              map[string]workerMethodOwner
-	publications        map[string]workerPublicationOwner
-	managedPublications map[string]struct{}
+	readPolicies        map[string]workerReadPolicyOwner
+	managedReadPolicies map[string]struct{}
 	reserved            map[string]struct{}
 	stats               workerHubMetrics
 }
@@ -104,15 +104,15 @@ type workerMethodOwner struct {
 	mode       string
 }
 
-type workerPublicationOwner struct {
-	connection  *workerConnection
-	publication workerPublication
+type workerReadPolicyOwner struct {
+	connection *workerConnection
+	readPolicy workerReadPolicy
 }
 
 type WorkerHubStats struct {
 	ConnectedWorkers       uint64 `json:"connectedWorkers"`
 	RegisteredMethods      uint64 `json:"registeredMethods"`
-	RegisteredPublications uint64 `json:"registeredPublications"`
+	RegisteredReadPolicies uint64 `json:"registeredReadPolicies"`
 	CallsStarted           uint64 `json:"callsStarted"`
 	CallsActive            uint64 `json:"callsActive"`
 	CallsSucceeded         uint64 `json:"callsSucceeded"`
@@ -134,7 +134,7 @@ type WorkerHubStats struct {
 }
 
 type workerHubMetrics struct {
-	connectedWorkers, registeredMethods, registeredPublications atomic.Uint64
+	connectedWorkers, registeredMethods, registeredReadPolicies atomic.Uint64
 	callsStarted, callsActive                                   atomic.Uint64
 	callsSucceeded, callsFailed                                 atomic.Uint64
 	callsCanceled, callsBusy                                    atomic.Uint64
@@ -170,11 +170,11 @@ func NewWorkerHub(config WorkerHubConfig) (*WorkerHub, error) {
 	if config.MaxMethodsPerWorker > 4096 {
 		return nil, errors.New("worker method limit exceeds 4096")
 	}
-	if config.MaxPublicationsPerWorker <= 0 {
-		config.MaxPublicationsPerWorker = 128
+	if config.MaxReadPoliciesPerWorker <= 0 {
+		config.MaxReadPoliciesPerWorker = 128
 	}
-	if config.MaxPublicationsPerWorker > 4096 {
-		return nil, errors.New("worker publication limit exceeds 4096")
+	if config.MaxReadPoliciesPerWorker > 4096 {
+		return nil, errors.New("worker read-policy limit exceeds 4096")
 	}
 	if config.MaxPendingCalls <= 0 {
 		config.MaxPendingCalls = 64
@@ -194,20 +194,20 @@ func NewWorkerHub(config WorkerHubConfig) (*WorkerHub, error) {
 	if config.PolicyEvaluationTimeout > 30*time.Second {
 		return nil, errors.New("worker policy evaluation timeout exceeds 30 seconds")
 	}
-	managedPublications := make(map[string]struct{}, len(config.PublicationCollections))
-	for _, collection := range config.PublicationCollections {
+	managedReadPolicies := make(map[string]struct{}, len(config.ReadPolicyCollections))
+	for _, collection := range config.ReadPolicyCollections {
 		if !workerCollectionNamePattern.MatchString(collection) {
-			return nil, errors.New("worker publication collection is invalid")
+			return nil, errors.New("worker read-policy collection is invalid")
 		}
-		if _, duplicate := managedPublications[collection]; duplicate {
-			return nil, errors.New("worker publication collection is duplicated")
+		if _, duplicate := managedReadPolicies[collection]; duplicate {
+			return nil, errors.New("worker read-policy collection is duplicated")
 		}
-		managedPublications[collection] = struct{}{}
+		managedReadPolicies[collection] = struct{}{}
 	}
-	config.PublicationCollections = append([]string(nil), config.PublicationCollections...)
+	config.ReadPolicyCollections = append([]string(nil), config.ReadPolicyCollections...)
 	return &WorkerHub{
 		config: config, owners: make(map[string]workerMethodOwner),
-		publications: make(map[string]workerPublicationOwner), managedPublications: managedPublications,
+		readPolicies: make(map[string]workerReadPolicyOwner), managedReadPolicies: managedReadPolicies,
 		reserved: make(map[string]struct{}),
 	}, nil
 }
@@ -235,7 +235,7 @@ func (hub *WorkerHub) Stats() WorkerHubStats {
 	}
 	return WorkerHubStats{
 		ConnectedWorkers: hub.stats.connectedWorkers.Load(), RegisteredMethods: hub.stats.registeredMethods.Load(),
-		RegisteredPublications: hub.stats.registeredPublications.Load(),
+		RegisteredReadPolicies: hub.stats.registeredReadPolicies.Load(),
 		CallsStarted:           hub.stats.callsStarted.Load(), CallsActive: hub.stats.callsActive.Load(),
 		CallsSucceeded: hub.stats.callsSucceeded.Load(), CallsFailed: hub.stats.callsFailed.Load(),
 		CallsCanceled: hub.stats.callsCanceled.Load(), CallsBusy: hub.stats.callsBusy.Load(),
@@ -274,8 +274,8 @@ func (hub *WorkerHub) ResolveQueryPolicy(ctx context.Context, actor Actor, colle
 		return QueryPolicy{}, false, nil
 	}
 	hub.mu.RLock()
-	_, managed := hub.managedPublications[collection]
-	owner, ok := hub.publications[collection]
+	_, managed := hub.managedReadPolicies[collection]
+	owner, ok := hub.readPolicies[collection]
 	hub.mu.RUnlock()
 	if !managed {
 		return QueryPolicy{}, false, nil
@@ -283,7 +283,7 @@ func (hub *WorkerHub) ResolveQueryPolicy(ctx context.Context, actor Actor, colle
 	if !ok || owner.connection == nil {
 		return QueryPolicy{}, true, ErrForbidden
 	}
-	policy, err := owner.connection.invokePolicy(ctx, actor, query, owner.publication)
+	policy, err := owner.connection.invokePolicy(ctx, actor, query, owner.readPolicy)
 	return policy, true, err
 }
 
@@ -298,11 +298,11 @@ func (hub *WorkerHub) resolve(name, mode string) (workerMethodOwner, bool) {
 }
 
 type workerRegistration struct {
-	Version      int                             `json:"v"`
-	Type         string                          `json:"type"`
-	WorkerID     string                          `json:"workerId"`
-	Methods      []workerRegistrationMethod      `json:"methods"`
-	Publications []workerRegistrationPublication `json:"publications,omitempty"`
+	Version      int                            `json:"v"`
+	Type         string                         `json:"type"`
+	WorkerID     string                         `json:"workerId"`
+	Methods      []workerRegistrationMethod     `json:"methods"`
+	ReadPolicies []workerRegistrationReadPolicy `json:"readPolicies,omitempty"`
 }
 
 type workerRegistrationMethod struct {
@@ -310,7 +310,7 @@ type workerRegistrationMethod struct {
 	Mode string `json:"mode"`
 }
 
-type workerRegistrationPublication struct {
+type workerRegistrationReadPolicy struct {
 	Collection   string          `json:"collection"`
 	Version      string          `json:"version"`
 	MaxResults   int             `json:"maxResults"`
@@ -318,7 +318,7 @@ type workerRegistrationPublication struct {
 	ResultFields json.RawMessage `json:"resultFields"`
 }
 
-type workerPublication struct {
+type workerReadPolicy struct {
 	collection           string
 	declarationDigest    [32]byte
 	generation           [16]byte
@@ -331,47 +331,47 @@ type workerPublication struct {
 	lease                *QueryPolicyLease
 }
 
-func normalizeWorkerPublication(registration workerRegistrationPublication) (workerPublication, error) {
+func normalizeWorkerReadPolicy(registration workerRegistrationReadPolicy) (workerReadPolicy, error) {
 	if !workerCollectionNamePattern.MatchString(registration.Collection) || !validPolicyVersion(registration.Version) ||
 		registration.MaxResults <= 0 || registration.MaxResults > meldbase.DefaultQueryLimits.MaxLimit {
-		return workerPublication{}, errors.New("invalid worker publication")
+		return workerReadPolicy{}, errors.New("invalid worker read policy")
 	}
 	queryAll, queryPaths, queryList, err := decodeWorkerPolicyFields(registration.QueryPaths, true)
 	if err != nil {
-		return workerPublication{}, err
+		return workerReadPolicy{}, err
 	}
 	resultAll, resultFields, resultList, err := decodeWorkerPolicyFields(registration.ResultFields, false)
 	if err != nil {
-		return workerPublication{}, err
+		return workerReadPolicy{}, err
 	}
 	canonical, err := json.Marshal(map[string]any{
 		"collection": registration.Collection, "version": registration.Version, "maxResults": registration.MaxResults,
 		"queryPaths": policyFieldDeclaration(queryAll, queryList), "resultFields": policyFieldDeclaration(resultAll, resultList),
 	})
 	if err != nil {
-		return workerPublication{}, err
+		return workerReadPolicy{}, err
 	}
-	publication := workerPublication{
+	readPolicy := workerReadPolicy{
 		collection: registration.Collection, declarationDigest: sha256.Sum256(canonical), maxResults: registration.MaxResults,
 		allowAllQueryPaths: queryAll, allowedQueryPaths: queryPaths,
 		allowAllResultFields: resultAll, allowedResultFields: resultFields,
 	}
-	return activateWorkerPublication(publication, [16]byte{})
+	return activateWorkerReadPolicy(readPolicy, [16]byte{})
 }
 
-func activateWorkerPublication(publication workerPublication, generation [16]byte) (workerPublication, error) {
-	versionInput := make([]byte, 0, len(publication.declarationDigest)+len(generation))
-	versionInput = append(versionInput, publication.declarationDigest[:]...)
+func activateWorkerReadPolicy(readPolicy workerReadPolicy, generation [16]byte) (workerReadPolicy, error) {
+	versionInput := make([]byte, 0, len(readPolicy.declarationDigest)+len(generation))
+	versionInput = append(versionInput, readPolicy.declarationDigest[:]...)
 	versionInput = append(versionInput, generation[:]...)
 	digest := sha256.Sum256(versionInput)
-	publication.policyVersion = "publication-" + hex.EncodeToString(digest[:])
-	publication.generation = generation
-	lease, err := NewQueryPolicyLease(publication.policyVersion)
+	readPolicy.policyVersion = "read-policy-" + hex.EncodeToString(digest[:])
+	readPolicy.generation = generation
+	lease, err := NewQueryPolicyLease(readPolicy.policyVersion)
 	if err != nil {
-		return workerPublication{}, err
+		return workerReadPolicy{}, err
 	}
-	publication.lease = lease
-	return publication, nil
+	readPolicy.lease = lease
+	return readPolicy, nil
 }
 
 func decodeWorkerPolicyFields(raw json.RawMessage, queryPaths bool) (bool, map[string]struct{}, []string, error) {
@@ -380,16 +380,16 @@ func decodeWorkerPolicyFields(raw json.RawMessage, queryPaths bool) (bool, map[s
 		if wildcard == "*" {
 			return true, nil, nil, nil
 		}
-		return false, nil, nil, errors.New("invalid worker publication wildcard")
+		return false, nil, nil, errors.New("invalid worker read-policy wildcard")
 	}
 	var values []string
 	if len(raw) == 0 || decodeStrict(raw, &values) != nil || len(values) > 256 {
-		return false, nil, nil, errors.New("invalid worker publication field policy")
+		return false, nil, nil, errors.New("invalid worker read-policy field policy")
 	}
 	result := make(map[string]struct{}, len(values))
 	for _, value := range values {
 		if _, duplicate := result[value]; duplicate {
-			return false, nil, nil, errors.New("duplicate worker publication field")
+			return false, nil, nil, errors.New("duplicate worker read-policy field")
 		}
 		if queryPaths {
 			expression, _ := json.Marshal(map[string]any{"version": 1, "where": map[string]any{"op": "exists", "path": value, "value": true}})
@@ -458,7 +458,7 @@ func (hub *WorkerHub) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		"v": protocolVersion, "type": "registered", "sessionId": hex.EncodeToString(sessionID[:]),
 		"limits": map[string]any{
 			"maxPendingCalls": hub.config.MaxPendingCalls, "maxOperationsPerCall": hub.config.MaxOperationsPerCall,
-			"maxPublicationsPerWorker":  hub.config.MaxPublicationsPerWorker,
+			"maxReadPoliciesPerWorker":  hub.config.MaxReadPoliciesPerWorker,
 			"policyEvaluationTimeoutMs": hub.config.PolicyEvaluationTimeout.Milliseconds(),
 		},
 	}
@@ -484,9 +484,9 @@ func (worker *workerConnection) readRegistration(ctx context.Context) (workerReg
 	var registration workerRegistration
 	if err := decodeStrict(raw, &registration); err != nil || registration.Version != protocolVersion || registration.Type != "register" ||
 		!workerIDPattern.MatchString(registration.WorkerID) ||
-		(len(registration.Methods) == 0 && len(registration.Publications) == 0) ||
+		(len(registration.Methods) == 0 && len(registration.ReadPolicies) == 0) ||
 		len(registration.Methods) > worker.hub.config.MaxMethodsPerWorker ||
-		len(registration.Publications) > worker.hub.config.MaxPublicationsPerWorker {
+		len(registration.ReadPolicies) > worker.hub.config.MaxReadPoliciesPerWorker {
 		return workerRegistration{}, errors.New("invalid worker registration")
 	}
 	seen := make(map[string]struct{}, len(registration.Methods))
@@ -499,37 +499,37 @@ func (worker *workerConnection) readRegistration(ctx context.Context) (workerReg
 		}
 		seen[method.Name] = struct{}{}
 	}
-	seenPublications := make(map[string]struct{}, len(registration.Publications))
-	for _, publication := range registration.Publications {
-		if _, duplicate := seenPublications[publication.Collection]; duplicate {
-			return workerRegistration{}, errors.New("duplicate worker publication")
+	seenReadPolicies := make(map[string]struct{}, len(registration.ReadPolicies))
+	for _, readPolicy := range registration.ReadPolicies {
+		if _, duplicate := seenReadPolicies[readPolicy.Collection]; duplicate {
+			return workerRegistration{}, errors.New("duplicate worker read policy")
 		}
-		if _, err := normalizeWorkerPublication(publication); err != nil {
+		if _, err := normalizeWorkerReadPolicy(readPolicy); err != nil {
 			return workerRegistration{}, err
 		}
-		seenPublications[publication.Collection] = struct{}{}
+		seenReadPolicies[readPolicy.Collection] = struct{}{}
 	}
 	return registration, nil
 }
 
 func (hub *WorkerHub) register(ctx context.Context, worker *workerConnection, registration workerRegistration) error {
-	publications := make([]workerPublication, len(registration.Publications))
-	for index, declared := range registration.Publications {
-		publication, err := normalizeWorkerPublication(declared)
+	readPolicies := make([]workerReadPolicy, len(registration.ReadPolicies))
+	for index, declared := range registration.ReadPolicies {
+		readPolicy, err := normalizeWorkerReadPolicy(declared)
 		if err != nil {
 			return err
 		}
 		if hub.config.PolicyGenerationStore != nil {
-			generation, _, err := hub.config.PolicyGenerationStore.LoadPolicyGeneration(ctx, publication.collection)
+			generation, _, err := hub.config.PolicyGenerationStore.LoadPolicyGeneration(ctx, readPolicy.collection)
 			if err != nil {
 				return err
 			}
-			publication, err = activateWorkerPublication(publication, generation)
+			readPolicy, err = activateWorkerReadPolicy(readPolicy, generation)
 			if err != nil {
 				return err
 			}
 		}
-		publications[index] = publication
+		readPolicies[index] = readPolicy
 	}
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
@@ -541,26 +541,26 @@ func (hub *WorkerHub) register(ctx context.Context, worker *workerConnection, re
 			return errors.New("worker method already owned")
 		}
 	}
-	for _, publication := range publications {
-		if _, managed := hub.managedPublications[publication.collection]; !managed {
-			return errors.New("worker publication collection is not managed by this hub")
+	for _, readPolicy := range readPolicies {
+		if _, managed := hub.managedReadPolicies[readPolicy.collection]; !managed {
+			return errors.New("worker read-policy collection is not managed by this hub")
 		}
-		if _, exists := hub.publications[publication.collection]; exists {
-			return errors.New("worker publication already owned")
+		if _, exists := hub.readPolicies[readPolicy.collection]; exists {
+			return errors.New("worker read policy already owned")
 		}
 	}
 	worker.workerID = registration.WorkerID
 	worker.methods = append([]workerRegistrationMethod(nil), registration.Methods...)
-	worker.publications = publications
+	worker.readPolicies = readPolicies
 	for _, method := range worker.methods {
 		hub.owners[method.Name] = workerMethodOwner{connection: worker, mode: method.Mode}
 	}
-	for _, publication := range worker.publications {
-		hub.publications[publication.collection] = workerPublicationOwner{connection: worker, publication: publication}
+	for _, readPolicy := range worker.readPolicies {
+		hub.readPolicies[readPolicy.collection] = workerReadPolicyOwner{connection: worker, readPolicy: readPolicy}
 	}
 	hub.stats.connectedWorkers.Add(1)
 	hub.stats.registeredMethods.Add(uint64(len(worker.methods)))
-	hub.stats.registeredPublications.Add(uint64(len(worker.publications)))
+	hub.stats.registeredReadPolicies.Add(uint64(len(worker.readPolicies)))
 	return nil
 }
 
@@ -574,11 +574,11 @@ func (hub *WorkerHub) unregister(worker *workerConnection) {
 			delete(hub.owners, method.Name)
 		}
 	}
-	for _, publication := range worker.publications {
-		if owner, exists := hub.publications[publication.collection]; exists && owner.connection == worker {
-			delete(hub.publications, publication.collection)
+	for _, readPolicy := range worker.readPolicies {
+		if owner, exists := hub.readPolicies[readPolicy.collection]; exists && owner.connection == worker {
+			delete(hub.readPolicies, readPolicy.collection)
 		}
-		revokePolicyLeaseNow(publication.lease)
+		revokePolicyLeaseNow(readPolicy.lease)
 	}
 	hub.mu.Unlock()
 	worker.fail(errors.New("worker disconnected"))
@@ -586,8 +586,8 @@ func (hub *WorkerHub) unregister(worker *workerConnection) {
 	if len(worker.methods) > 0 {
 		hub.stats.registeredMethods.Add(^uint64(len(worker.methods) - 1))
 	}
-	if len(worker.publications) > 0 {
-		hub.stats.registeredPublications.Add(^uint64(len(worker.publications) - 1))
+	if len(worker.readPolicies) > 0 {
+		hub.stats.registeredReadPolicies.Add(^uint64(len(worker.readPolicies) - 1))
 	}
 }
 
@@ -596,7 +596,7 @@ func (hub *WorkerHub) stagePolicyInvalidation(worker *workerConnection, tx *meld
 		return errPolicyInvalidationUnavailable
 	}
 	hub.mu.RLock()
-	owner, owned := hub.publications[collection]
+	owner, owned := hub.readPolicies[collection]
 	hub.mu.RUnlock()
 	if !owned || owner.connection != worker {
 		return ErrForbidden
@@ -620,21 +620,21 @@ func (hub *WorkerHub) commitPolicyInvalidation(worker *workerConnection, collect
 	}
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
-	owner, exists := hub.publications[collection]
+	owner, exists := hub.readPolicies[collection]
 	if !exists || owner.connection != worker {
 		return
 	}
-	previous := owner.publication
-	next, err := activateWorkerPublication(previous, generation)
+	previous := owner.readPolicy
+	next, err := activateWorkerReadPolicy(previous, generation)
 	if err != nil {
-		delete(hub.publications, collection)
+		delete(hub.readPolicies, collection)
 		revokePolicyLeaseNow(previous.lease)
 		return
 	}
-	hub.publications[collection] = workerPublicationOwner{connection: worker, publication: next}
-	for index := range worker.publications {
-		if worker.publications[index].collection == collection {
-			worker.publications[index] = next
+	hub.readPolicies[collection] = workerReadPolicyOwner{connection: worker, readPolicy: next}
+	for index := range worker.readPolicies {
+		if worker.readPolicies[index].collection == collection {
+			worker.readPolicies[index] = next
 			break
 		}
 	}
@@ -656,7 +656,7 @@ type workerConnection struct {
 	socket       *websocket.Conn
 	workerID     string
 	methods      []workerRegistrationMethod
-	publications []workerPublication
+	readPolicies []workerReadPolicy
 	writeMu      sync.Mutex
 	mu           sync.Mutex
 	pending      map[string]*workerPendingCall
@@ -754,8 +754,8 @@ func (worker *workerConnection) invoke(ctx context.Context, method, mode string,
 	}
 }
 
-func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, query meldbase.QuerySpec, publication workerPublication) (QueryPolicy, error) {
-	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || publication.lease == nil ||
+func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, query meldbase.QuerySpec, readPolicy workerReadPolicy) (QueryPolicy, error) {
+	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || readPolicy.lease == nil ||
 		actor.ID == "" || len(actor.ID) > 4096 || len(actor.WorkspaceID) > 4096 ||
 		!utf8.ValidString(actor.ID) || !utf8.ValidString(actor.WorkspaceID) {
 		return QueryPolicy{}, errors.New("worker policy invocation unavailable")
@@ -795,7 +795,7 @@ func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, q
 	worker.hub.stats.policyActive.Add(1)
 	defer worker.hub.stats.policyActive.Add(^uint64(0))
 	if err := worker.send(evaluationContext, map[string]any{
-		"v": protocolVersion, "type": "authorize_query", "callId": callID, "collection": publication.collection,
+		"v": protocolVersion, "type": "authorize_query", "callId": callID, "collection": readPolicy.collection,
 		"actor": map[string]any{"id": actor.ID, "workspaceId": actor.WorkspaceID},
 		"query": json.RawMessage(encodedQuery),
 	}); err != nil {
@@ -814,10 +814,10 @@ func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, q
 		}
 		worker.hub.stats.policySucceeded.Add(1)
 		return QueryPolicy{
-			PolicyVersion: publication.policyVersion, Lease: publication.lease, Constraint: result.constraint,
-			MaxResults:         publication.maxResults,
-			AllowAllQueryPaths: publication.allowAllQueryPaths, AllowedQueryPaths: publication.allowedQueryPaths,
-			AllowAllResultFields: publication.allowAllResultFields, AllowedResultFields: publication.allowedResultFields,
+			PolicyVersion: readPolicy.policyVersion, Lease: readPolicy.lease, Constraint: result.constraint,
+			MaxResults:         readPolicy.maxResults,
+			AllowAllQueryPaths: readPolicy.allowAllQueryPaths, AllowedQueryPaths: readPolicy.allowedQueryPaths,
+			AllowAllResultFields: readPolicy.allowAllResultFields, AllowedResultFields: readPolicy.allowedResultFields,
 		}, nil
 	case <-evaluationContext.Done():
 		if ctx.Err() != nil {
@@ -1074,7 +1074,7 @@ func (worker *workerConnection) handleTransactionOperation(ctx context.Context, 
 	worker.hub.stats.transactionOps.Add(1)
 	var result meldbase.Value
 	var err error
-	if frame.Operation == "invalidate_publication" {
+	if frame.Operation == "invalidate_read_policy" {
 		if frame.ID != "" || len(frame.Document) != 0 || len(frame.Mutation) != 0 {
 			err = meldbase.ErrInvalidDocument
 		} else {

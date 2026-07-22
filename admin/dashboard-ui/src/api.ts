@@ -1,6 +1,6 @@
 import type { AdminSample, DiagnosticResponse, HistoryResponse, IndexCatalogResponse } from "./types";
 
-export const adminSchemaVersion = 16;
+export const adminSchemaVersion = 17;
 
 async function authorized(path: string, token: string, signal?: AbortSignal): Promise<Response> {
   return fetch(path, {

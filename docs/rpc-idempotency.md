@@ -167,7 +167,7 @@ handler cannot build an unbounded in-memory overlay before final validation.
 
 First-party server plumbing may additionally stage bounded private System
 mutations. The JavaScript server SDK uses this for
-`tx.invalidatePublication(collection)`: its policy generation and the
+`tx.invalidateReadPolicy(collection)`: its policy generation and the
 idempotency terminal share the business commit's Catalog/meta storage publication. The
 post-commit lease rotation runs synchronously after durability and before the
 matching ChangeBatch is offered to reactive subscribers. It never runs for a

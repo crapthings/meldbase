@@ -6,12 +6,15 @@ export interface Actor {
   readonly workspaceId: string;
 }
 
-export interface MethodContext {
+/** The authenticated context of one RPC invocation. */
+export interface RPCContext {
   readonly actor: Actor;
   readonly signal: AbortSignal;
 }
 
-export interface PublicationContext extends MethodContext {
+export interface ReadPolicyContext {
+  readonly actor: Actor;
+  readonly signal: AbortSignal;
   readonly collection: string;
   readonly query: QuerySpec;
 }
@@ -23,27 +26,27 @@ export interface WriteTransaction {
   replace(collection: string, id: string, document: InputDocument): Promise<void>;
   update(collection: string, id: string, mutation: MutationSpec): Promise<void>;
   delete(collection: string, id: string): Promise<void>;
-  invalidatePublication(collection: string): Promise<void>;
+  invalidateReadPolicy(collection: string): Promise<void>;
 }
 
-export type MethodHandler = (context: MethodContext, arguments_: readonly Value[]) => Value | Promise<Value>;
-export type TransactionalMethodHandler = (context: MethodContext, arguments_: readonly Value[], transaction: WriteTransaction) => Value | Promise<Value>;
+export type RPCHandler = (context: RPCContext, args: readonly Value[]) => Value | Promise<Value>;
+export type TransactionalRPCHandler = (context: RPCContext, args: readonly Value[], transaction: WriteTransaction) => Value | Promise<Value>;
 
-export type MethodDefinition =
-  | { readonly mode: "rpc"; readonly handler: MethodHandler }
-  | { readonly mode: "transactional"; readonly handler: TransactionalMethodHandler };
+export type RPCDefinition =
+  | { readonly mode: "rpc"; readonly handler: RPCHandler }
+  | { readonly mode: "transactional"; readonly handler: TransactionalRPCHandler };
 
-export interface PublicationOptions {
+export interface ReadPolicyOptions {
   readonly version: string;
   readonly maxResults: number;
   readonly queryPaths: "*" | readonly string[];
   readonly resultFields: "*" | readonly string[];
 }
 
-export type PublicationHandler = (context: PublicationContext) => QuerySpec | null | Promise<QuerySpec | null>;
+export type ReadPolicyHandler = (context: ReadPolicyContext) => QuerySpec | null | Promise<QuerySpec | null>;
 
-export interface PublicationDefinition extends PublicationOptions {
-  readonly handler: PublicationHandler;
+export interface ReadPolicyDefinition extends ReadPolicyOptions {
+  readonly handler: ReadPolicyHandler;
 }
 
 export interface WorkerSocket {
@@ -65,8 +68,8 @@ export interface WorkerOptions {
   readonly url: string;
   readonly token: string;
   readonly workerId: string;
-  readonly methods?: Readonly<Record<string, MethodDefinition>>;
-  readonly publications?: Readonly<Record<string, PublicationDefinition>>;
+  readonly methods?: Readonly<Record<string, RPCDefinition>>;
+  readonly readPolicies?: Readonly<Record<string, ReadPolicyDefinition>>;
   readonly webSocketFactory: WorkerSocketFactory;
   readonly reconnectMinMs?: number;
   readonly reconnectMaxMs?: number;

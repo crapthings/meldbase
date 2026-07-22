@@ -1071,12 +1071,12 @@ func TestWorkerControlRequiresLoopbackAndDedicatedToken(t *testing.T) {
 	}
 }
 
-func TestWorkerPublicationsRequireControlListener(t *testing.T) {
+func TestWorkerReadPoliciesRequireControlListener(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{
-		"serve", "--db", filepath.Join(t.TempDir(), "data.meld"), "--dev-no-auth", "--worker-publications", "orders",
+		"serve", "--db", filepath.Join(t.TempDir(), "data.meld"), "--dev-no-auth", "--worker-read-policies", "orders",
 	}, &output, &output)
 	if err == nil || !strings.Contains(err.Error(), "--worker-addr") {
-		t.Fatalf("worker publications without listener error=%v", err)
+		t.Fatalf("worker read policies without listener error=%v", err)
 	}
 }

@@ -21,9 +21,11 @@ var (
 
 const maxRPCErrorDataBytes = 64 << 10
 
-// RPCMethod is a bounded, authenticated data-only request handler. Arguments
-// and results use Meldbase's closed Value model, preserving Int64, Date, Binary
-// and object semantics across Go and JavaScript.
+// RPCMethod is a bounded, authenticated non-atomic application operation.
+// Arguments and results use Meldbase's closed Value model, preserving Int64,
+// Date, Binary and object semantics across Go and JavaScript. Any database
+// write or external effect a handler reaches outside a WriteTransaction is not
+// atomic with its RPC terminal result.
 type RPCMethod func(context.Context, Actor, []meldbase.Value) (meldbase.Value, error)
 
 // RPCTransactionalMethod stages point writes against a short immutable

@@ -116,7 +116,7 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 		`meldbase_rpc_atomic_commits_total 6`,
 		`meldbase_rpc_atomic_rollbacks_total 3`,
 		`meldbase_worker_connected 2`,
-		`meldbase_worker_registered_publications 3`,
+		`meldbase_worker_registered_read_policies 3`,
 		`meldbase_worker_policy_evaluations_total 13`,
 		`meldbase_worker_policy_denied_total 2`,
 		`meldbase_worker_policy_invalidations_total 4`,
@@ -222,7 +222,7 @@ func representativePrometheusSample() Sample {
 			RPCIdempotencyInProgress: 3, RPCIdempotencyUnknown: 2, RPCIdempotencyFailures: 4,
 			RPCAtomicCommits: 6, RPCAtomicRollbacks: 3, RPCAtomicNoopCompletions: 2,
 			Worker: meldserver.WorkerHubStats{
-				ConnectedWorkers: 2, RegisteredMethods: 5, RegisteredPublications: 3,
+				ConnectedWorkers: 2, RegisteredMethods: 5, RegisteredReadPolicies: 3,
 				CallsStarted: 19, CallsActive: 1, CallsBusy: 2, ProtocolFailures: 1, TransactionOps: 17,
 				PolicyEvaluations: 13, PolicyActive: 1, PolicyDenied: 2, PolicyFailed: 1, PolicyBusy: 1, PolicyInvalidations: 4,
 			},

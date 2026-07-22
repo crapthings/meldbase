@@ -125,7 +125,7 @@ func TestWorkerProtocolV1ContractIsCanonical(t *testing.T) {
 		{Type: "error", Required: []string{"callId", "error", "type", "v"}},
 		{Type: "policy", Required: []string{"callId", "constraint", "type", "v"}},
 		{Type: "policy_error", Required: []string{"callId", "error", "type", "v"}},
-		{Type: "register", Required: []string{"methods", "publications", "type", "v", "workerId"}},
+		{Type: "register", Required: []string{"methods", "readPolicies", "type", "v", "workerId"}},
 		{Type: "result", Required: []string{"callId", "result", "type", "v"}},
 		{Type: "tx_op", Required: []string{"callId", "collection", "opId", "operation", "type", "v"}, Optional: []string{"document", "id", "mutation"}},
 	}

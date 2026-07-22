@@ -1,7 +1,7 @@
 {
   "name": "@meldbase/server",
   "version": "0.1.0-alpha.11",
-  "description": "Trusted Node.js method and data-only publication worker SDK for Meldbase",
+  "description": "Trusted Node.js method and data-only read-policy worker SDK for Meldbase",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

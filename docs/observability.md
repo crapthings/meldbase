@@ -178,7 +178,7 @@ result or error strings. The CLI connects this source automatically when its
 admin listener is enabled.
 
 When the handler uses a `WorkerHub`, the same server snapshot includes fixed
-worker gauges/totals: connected workers, registered methods/publications,
+worker gauges/totals: connected workers, registered methods/read policies,
 active/started/successful/failed/canceled/busy calls, policy evaluation
 outcomes, protocol failures, control bytes, transaction operations and committed
 policy invalidations. This exposes unexpected authorization-driven resync

@@ -19,11 +19,11 @@
     "version": 1,
     "capabilities": [
       "cancel",
-      "publication.policy",
+      "read_policy",
       "rpc",
       "rpc.transactional",
       "transaction.compiled_update",
-      "transaction.invalidate_publication",
+      "transaction.invalidate_read_policy",
       "transaction.point_operations"
     ],
     "nestedShapes": [
@@ -150,7 +150,7 @@
         "type": "register",
         "required": [
           "methods",
-          "publications",
+          "readPolicies",
           "type",
           "v",
           "workerId"

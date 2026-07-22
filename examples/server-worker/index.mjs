@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 
 import { compileQuery } from "@meldbase/client";
-import { MeldbaseError, MeldbaseWorker, publish, rpc, transactional } from "@meldbase/server";
+import { MeldbaseError, MeldbaseWorker, readPolicy, rpc } from "@meldbase/server";
 
 const token = process.env.MELDBASE_WORKER_TOKEN;
 if (!token) throw new Error("MELDBASE_WORKER_TOKEN is required");
@@ -15,7 +15,7 @@ const worker = new MeldbaseWorker({
   onError: (error) => console.error("[meldbase worker]", error.message),
   methods: {
     "system.ping": rpc(({ actor }) => ({ ok: true, id: actor.id })),
-    "orders.create": transactional(async ({ actor }, [description], tx) => {
+    "orders.create": rpc.transactional(async ({ actor }, [description], tx) => {
       if (typeof description !== "string" || description.length === 0 || description.length > 500) {
         throw new MeldbaseError("orders.invalid_description");
       }
@@ -27,8 +27,8 @@ const worker = new MeldbaseWorker({
       return tx.get("orders", id);
     }),
   },
-  publications: {
-    orders: publish({
+  readPolicies: {
+    orders: readPolicy({
       version: "orders-owner-v1",
       maxResults: 100,
       queryPaths: ["status", "description"],

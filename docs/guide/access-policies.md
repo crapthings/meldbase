@@ -163,14 +163,14 @@ authorization depends on more than the document's workspace and owner fields.
 be allowed by a custom `RPCAuthorizer`.
 
 For read visibility based on memberships, roles, sharing links, or another
-collection, use a Go `Authorizer` or a Worker publication declared with
-`publish()`. Those components return the same bounded row constraint, field
+collection, use a Go `Authorizer` or a Worker read policy declared with
+`readPolicy()`. Those components return the same bounded row constraint, field
 projection, and result limit that the Go server intersects with the manifest
 policy. If such a policy depends on other data, commit
-`invalidatePublication()` with the membership or role change so existing
+`invalidateReadPolicy()` with the membership or role change so existing
 subscriptions resynchronize before stale visibility can continue.
 
-A Worker publication (and `QueryPolicyResolver`) is deliberately **read-only**:
+A Worker read policy (and `QueryPolicyResolver`) is deliberately **read-only**:
 it governs HTTP queries and subscriptions, never generic inserts, updates, or
 deletes. For a role- or membership-dependent write, use a full Go `Authorizer`,
 or set the collection to `rpc_only` and expose a named RPC method with its own

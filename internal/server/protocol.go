@@ -53,8 +53,8 @@ func workerProtocolDescriptor() protocolDescriptor {
 	return protocolDescriptor{
 		Versions: []int{protocolVersion},
 		Capabilities: []string{
-			"cancel", "publication.policy", "rpc", "rpc.transactional",
-			"transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
+			"cancel", "read_policy", "rpc", "rpc.transactional",
+			"transaction.compiled_update", "transaction.invalidate_read_policy", "transaction.point_operations",
 		},
 	}
 }

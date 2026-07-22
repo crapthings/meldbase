@@ -71,7 +71,7 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	hub, err := NewWorkerHub(WorkerHubConfig{
-		Authenticator: authenticator, PublicationCollections: []string{"items"}, PolicyGenerationStore: policyStore,
+		Authenticator: authenticator, ReadPolicyCollections: []string{"items"}, PolicyGenerationStore: policyStore,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +167,7 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 	defer query.Body.Close()
 	if query.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(query.Body)
-		t.Fatalf("publication query status=%d body=%s", query.StatusCode, body)
+		t.Fatalf("read-policy query status=%d body=%s", query.StatusCode, body)
 	}
 	var result struct {
 		Documents []json.RawMessage `json:"documents"`
@@ -176,11 +176,11 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(result.Documents) != 2 {
-		t.Fatalf("publication response=%s", result.Documents)
+		t.Fatalf("read-policy response=%s", result.Documents)
 	}
 	documents := string(result.Documents[0]) + string(result.Documents[1])
 	if !strings.Contains(documents, `"created"`) || !strings.Contains(documents, `"committed"`) || strings.Contains(documents, `"workspace"`) {
-		t.Fatalf("publication response=%s", result.Documents)
+		t.Fatalf("read-policy response=%s", result.Documents)
 	}
 	if !strings.Contains(output.String(), "ready") {
 		t.Fatalf("server SDK worker did not complete startup\n%s", output.String())
@@ -345,7 +345,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 	}
 	authenticator, _ := NewWorkerTokenAuthenticator(testWorkerToken)
 	hub, err := NewWorkerHub(WorkerHubConfig{
-		Authenticator: authenticator, PublicationCollections: []string{"orders"}, PolicyGenerationStore: policyStore,
+		Authenticator: authenticator, ReadPolicyCollections: []string{"orders"}, PolicyGenerationStore: policyStore,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -359,7 +359,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 			{"name": "orders.create", "mode": "transactional"},
 			{"name": "orders.invalidate", "mode": "transactional"},
 		},
-		"publications": []map[string]any{{
+		"readPolicies": []map[string]any{{
 			"collection": "orders", "version": "orders-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",
 		}},
@@ -368,7 +368,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 	}
 	readMap(t, workerContext, worker)
 	hub.mu.RLock()
-	initialPublication := hub.publications["orders"].publication
+	initialReadPolicy := hub.readPolicies["orders"].readPolicy
 	hub.mu.RUnlock()
 	store, err := NewDurableRPCIdempotencyStore(db)
 	if err != nil {
@@ -436,7 +436,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 		}
 		if err := writeSocketJSON(workerContext, worker, map[string]any{
 			"v": protocolVersion, "type": "tx_op", "callId": callID, "opId": "invalidate-1",
-			"operation": "invalidate_publication", "collection": "orders",
+			"operation": "invalidate_read_policy", "collection": "orders",
 		}); err != nil {
 			workerDone <- err
 			return
@@ -461,17 +461,17 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 		t.Fatalf("atomic worker state=%+v", stats)
 	}
 	select {
-	case <-initialPublication.lease.Done():
+	case <-initialReadPolicy.lease.Done():
 	case <-time.After(time.Second):
 		t.Fatal("committed policy invalidation did not revoke the old lease")
 	}
 	hub.mu.RLock()
-	committedPublication := hub.publications["orders"].publication
+	committedReadPolicy := hub.readPolicies["orders"].readPolicy
 	hub.mu.RUnlock()
-	if committedPublication.policyVersion == initialPublication.policyVersion || committedPublication.generation == [16]byte{} || !committedPublication.lease.Valid() {
-		t.Fatalf("committed publication=%+v initial=%+v", committedPublication, initialPublication)
+	if committedReadPolicy.policyVersion == initialReadPolicy.policyVersion || committedReadPolicy.generation == [16]byte{} || !committedReadPolicy.lease.Valid() {
+		t.Fatalf("committed read policy=%+v initial=%+v", committedReadPolicy, initialReadPolicy)
 	}
-	if durableGeneration, exists, err := policyStore.LoadPolicyGeneration(context.Background(), "orders"); err != nil || !exists || durableGeneration != committedPublication.generation {
+	if durableGeneration, exists, err := policyStore.LoadPolicyGeneration(context.Background(), "orders"); err != nil || !exists || durableGeneration != committedReadPolicy.generation {
 		t.Fatalf("durable generation=%x exists=%v err=%v", durableGeneration, exists, err)
 	}
 	if document, err := db.Collection("orders").FindOne(context.Background(), meldbase.Filter{}); err != nil || !document["status"].Equal(meldbase.String("confirmed")) {
@@ -497,7 +497,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 		}
 		if err := writeSocketJSON(workerContext, worker, map[string]any{
 			"v": protocolVersion, "type": "tx_op", "callId": callID, "opId": "invalidate-only-1",
-			"operation": "invalidate_publication", "collection": "orders",
+			"operation": "invalidate_read_policy", "collection": "orders",
 		}); err != nil {
 			invalidOnlyDone <- err
 			return
@@ -516,7 +516,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertRPCError(t, postIdempotentRPC(t, api.URL, "orders.invalidate", invalidOnlyKey, []any{}), http.StatusBadRequest, "rpc_transaction_requires_write")
-	if generation, exists, err := policyStore.LoadPolicyGeneration(context.Background(), "orders"); err != nil || !exists || generation != committedPublication.generation {
+	if generation, exists, err := policyStore.LoadPolicyGeneration(context.Background(), "orders"); err != nil || !exists || generation != committedReadPolicy.generation {
 		t.Fatalf("invalid-only generation=%x exists=%v err=%v", generation, exists, err)
 	}
 	if stats := hub.Stats(); stats.CallsStarted != 2 || stats.PolicyInvalidations != 1 || stats.TransactionOps != 5 {
@@ -571,12 +571,12 @@ func TestWorkerTransactionUpdateRejectsAmbiguousAndMalformedFrames(t *testing.T)
 	}
 }
 
-func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) {
+func TestWorkerReadPolicyNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) {
 	authenticator, err := NewWorkerTokenAuthenticator(testWorkerToken)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, PublicationCollections: []string{"items"}})
+	hub, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, ReadPolicyCollections: []string{"items"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -584,8 +584,8 @@ func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) 
 	defer control.Close()
 	worker, workerContext := dialTestWorker(t, control.URL)
 	if err := writeSocketJSON(workerContext, worker, map[string]any{
-		"v": protocolVersion, "type": "register", "workerId": "publication-worker", "methods": []any{},
-		"publications": []map[string]any{{
+		"v": protocolVersion, "type": "register", "workerId": "read-policy-worker", "methods": []any{},
+		"readPolicies": []map[string]any{{
 			"collection": "items", "version": "items-v1", "maxResults": 1,
 			"queryPaths": []string{"title"}, "resultFields": []string{"title"},
 		}},
@@ -644,21 +644,21 @@ func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) 
 		t.Fatal(err)
 	}
 	if len(body.Documents) != 1 || strings.Contains(string(body.Documents[0]), `"rank"`) || !strings.Contains(string(body.Documents[0]), `"visible"`) {
-		t.Fatalf("publication documents=%s", body.Documents)
+		t.Fatalf("read-policy documents=%s", body.Documents)
 	}
 	if err := <-workerDone; err != nil {
 		t.Fatal(err)
 	}
 	hub.mu.RLock()
-	lease := hub.publications["items"].publication.lease
+	lease := hub.readPolicies["items"].readPolicy.lease
 	hub.mu.RUnlock()
-	if err := worker.Close(websocket.StatusNormalClosure, "disconnect publication"); err != nil {
+	if err := worker.Close(websocket.StatusNormalClosure, "disconnect read policy"); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-lease.Done():
 	case <-time.After(time.Second):
-		t.Fatal("publication lease was not revoked on worker disconnect")
+		t.Fatal("read-policy lease was not revoked on worker disconnect")
 	}
 	denied, _ := http.NewRequest(http.MethodPost, api.URL+"/v1/collections/items/query", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}}}`))
 	denied.Header.Set("authorization", "Bearer valid")
@@ -671,21 +671,21 @@ func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) 
 		t.Fatalf("managed query after worker disconnect status=%d", deniedResponse.StatusCode)
 	}
 	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", WorkspaceID: "mine"}, "items", meldbase.QuerySpec{}); !found || !errors.Is(err, ErrForbidden) {
-		t.Fatalf("disconnected managed publication found=%v err=%v", found, err)
+		t.Fatalf("disconnected managed read policy found=%v err=%v", found, err)
 	}
 	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", WorkspaceID: "mine"}, "other", meldbase.QuerySpec{}); found || err != nil {
-		t.Fatalf("unmanaged publication found=%v err=%v", found, err)
+		t.Fatalf("unmanaged read policy found=%v err=%v", found, err)
 	}
 	stats := hub.Stats()
-	if stats.PolicyEvaluations != 1 || stats.PolicySucceeded != 1 || stats.RegisteredPublications != 0 {
-		t.Fatalf("publication stats=%+v", stats)
+	if stats.PolicyEvaluations != 1 || stats.PolicySucceeded != 1 || stats.RegisteredReadPolicies != 0 {
+		t.Fatalf("read-policy stats=%+v", stats)
 	}
 }
 
-func TestWorkerPublicationEvaluationHasIndependentDeadline(t *testing.T) {
+func TestWorkerReadPolicyEvaluationHasIndependentDeadline(t *testing.T) {
 	authenticator, _ := NewWorkerTokenAuthenticator(testWorkerToken)
 	hub, err := NewWorkerHub(WorkerHubConfig{
-		Authenticator: authenticator, PublicationCollections: []string{"items"}, PolicyEvaluationTimeout: 20 * time.Millisecond,
+		Authenticator: authenticator, ReadPolicyCollections: []string{"items"}, PolicyEvaluationTimeout: 20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -696,7 +696,7 @@ func TestWorkerPublicationEvaluationHasIndependentDeadline(t *testing.T) {
 	defer worker.CloseNow()
 	if err := writeSocketJSON(workerContext, worker, map[string]any{
 		"v": protocolVersion, "type": "register", "workerId": "slow-policy-worker", "methods": []any{},
-		"publications": []map[string]any{{
+		"readPolicies": []map[string]any{{
 			"collection": "items", "version": "items-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",
 		}},
@@ -724,9 +724,9 @@ func TestWorkerPublicationEvaluationHasIndependentDeadline(t *testing.T) {
 	}
 }
 
-func TestWorkerPublicationDisconnectRevokesCompositeRealtimePolicy(t *testing.T) {
+func TestWorkerReadPolicyDisconnectRevokesCompositeRealtimePolicy(t *testing.T) {
 	authenticator, _ := NewWorkerTokenAuthenticator(testWorkerToken)
-	hub, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, PublicationCollections: []string{"items"}})
+	hub, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, ReadPolicyCollections: []string{"items"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,7 +735,7 @@ func TestWorkerPublicationDisconnectRevokesCompositeRealtimePolicy(t *testing.T)
 	worker, workerContext := dialTestWorker(t, control.URL)
 	if err := writeSocketJSON(workerContext, worker, map[string]any{
 		"v": protocolVersion, "type": "register", "workerId": "realtime-policy-worker", "methods": []any{},
-		"publications": []map[string]any{{
+		"readPolicies": []map[string]any{{
 			"collection": "items", "version": "items-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",
 		}},
@@ -785,12 +785,12 @@ func TestWorkerPublicationDisconnectRevokesCompositeRealtimePolicy(t *testing.T)
 		t.Fatal(err)
 	}
 	if initial := readMap(t, ctx, connection); initial["type"] != "snapshot" {
-		t.Fatalf("initial publication snapshot=%+v", initial)
+		t.Fatalf("initial read-policy snapshot=%+v", initial)
 	}
 	if err := <-workerDone; err != nil {
 		t.Fatal(err)
 	}
-	if err := worker.Close(websocket.StatusNormalClosure, "revoke publication"); err != nil {
+	if err := worker.Close(websocket.StatusNormalClosure, "revoke read policy"); err != nil {
 		t.Fatal(err)
 	}
 	if message := readMap(t, ctx, connection); message["type"] != "resync_required" || message["requestId"] != "worker-policy" {
@@ -835,15 +835,15 @@ func TestWorkerHubRejectsUnauthenticatedBrowserAndConflictingRegistration(t *tes
 	}
 }
 
-func TestWorkerHubRejectsUndeclaredPublicationAuthority(t *testing.T) {
+func TestWorkerHubRejectsUndeclaredReadPolicyAuthority(t *testing.T) {
 	authenticator, _ := NewWorkerTokenAuthenticator(testWorkerToken)
-	if _, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, PublicationCollections: []string{"bad/name"}}); err == nil {
-		t.Fatal("invalid managed publication collection was accepted")
+	if _, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, ReadPolicyCollections: []string{"bad/name"}}); err == nil {
+		t.Fatal("invalid managed read-policy collection was accepted")
 	}
-	if _, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, PublicationCollections: []string{"items", "items"}}); err == nil {
-		t.Fatal("duplicate managed publication collection was accepted")
+	if _, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, ReadPolicyCollections: []string{"items", "items"}}); err == nil {
+		t.Fatal("duplicate managed read-policy collection was accepted")
 	}
-	hub, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, PublicationCollections: []string{"items"}})
+	hub, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, ReadPolicyCollections: []string{"items"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -853,7 +853,7 @@ func TestWorkerHubRejectsUndeclaredPublicationAuthority(t *testing.T) {
 	defer connection.CloseNow()
 	if err := writeSocketJSON(ctx, connection, map[string]any{
 		"v": protocolVersion, "type": "register", "workerId": "authority-escalation", "methods": []any{},
-		"publications": []map[string]any{{
+		"readPolicies": []map[string]any{{
 			"collection": "secrets", "version": "secrets-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",
 		}},
@@ -861,7 +861,7 @@ func TestWorkerHubRejectsUndeclaredPublicationAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := connection.Read(ctx); err == nil {
-		t.Fatal("worker registered an undeclared publication authority")
+		t.Fatal("worker registered an undeclared read-policy authority")
 	}
 }
 

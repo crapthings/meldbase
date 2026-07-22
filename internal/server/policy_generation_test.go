@@ -46,7 +46,7 @@ func TestDurablePolicyGenerationStoreSurvivesReopen(t *testing.T) {
 	}
 	authenticator, _ := NewWorkerTokenAuthenticator(testWorkerToken)
 	hub, err := NewWorkerHub(WorkerHubConfig{
-		Authenticator: authenticator, PublicationCollections: []string{"orders"}, PolicyGenerationStore: store,
+		Authenticator: authenticator, ReadPolicyCollections: []string{"orders"}, PolicyGenerationStore: store,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestDurablePolicyGenerationStoreSurvivesReopen(t *testing.T) {
 	defer worker.CloseNow()
 	if err := writeSocketJSON(ctx, worker, map[string]any{
 		"v": protocolVersion, "type": "register", "workerId": "reopened-policy-worker", "methods": []any{},
-		"publications": []map[string]any{{
+		"readPolicies": []map[string]any{{
 			"collection": "orders", "version": "orders-v1", "maxResults": 10,
 			"queryPaths": "*", "resultFields": "*",
 		}},
@@ -66,9 +66,9 @@ func TestDurablePolicyGenerationStoreSurvivesReopen(t *testing.T) {
 	}
 	readMap(t, ctx, worker)
 	hub.mu.RLock()
-	loaded := hub.publications["orders"].publication
+	loaded := hub.readPolicies["orders"].readPolicy
 	hub.mu.RUnlock()
 	if loaded.generation != generation || loaded.lease == nil || !loaded.lease.Valid() {
-		t.Fatalf("registered persisted publication=%+v", loaded)
+		t.Fatalf("registered persisted read policy=%+v", loaded)
 	}
 }

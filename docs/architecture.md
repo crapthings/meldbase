@@ -45,7 +45,7 @@ Handlers may not hide external side effects inside this contract.
 
 Server JavaScript uses a separate trusted worker process and a language-neutral
 WebSocket control protocol. A private worker hub dynamically resolves methods
-and data-only query publications; it cannot bypass client RPC authorization or
+and data-only query read policies; it cannot bypass client RPC authorization or
 publish documents directly. Go predeclares every worker-managed collection,
 intersects Worker constraints with the local Authorizer and owns projection,
 visibility overlays and disconnect revocation. Transaction point operations
@@ -62,7 +62,7 @@ reactive delivery, or commit hot paths.
 Authorization semantics that depend on another collection use an explicit
 commit-ordered invalidation, not a best-effort WebSocket event. The business
 write, RPC terminal and random policy generation are published under one
-Catalog/meta root. Only after durability does Go rotate the Worker publication
+Catalog/meta root. Only after durability does Go rotate the Worker read-policy
 lease,
 and it does so before publishing the business ChangeBatch. Existing subscribers
 therefore resync before observing output under stale visibility; restart reloads
@@ -354,9 +354,9 @@ These rules preserve a small core surface as the product evolves:
   update/delete policy algebra. Do not add modes for roles, approvals, billing,
   sharing or membership: use an application `Authorizer` or a named RPC.
 - **Dynamic policy is a narrowing layer, never a second write engine.** Worker
-  publications and `QueryPolicyResolver` may narrow reads and subscriptions.
+  read policies and `QueryPolicyResolver` may narrow reads and subscriptions.
   Role-dependent writes use a Go `Authorizer` or an explicitly authorized RPC;
-  they must not be inferred from a Worker publication.
+  they must not be inferred from a Worker read policy.
 - **Transport does not create business semantics.** HTTP and realtime consume
   the same typed query, mutation, policy and RPC contracts. A transport-specific
   convenience API must not create a second authorization, retry or consistency

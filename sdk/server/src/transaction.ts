@@ -18,7 +18,7 @@ export class RemoteWriteTransaction implements WriteTransaction {
   #nextOperation = 1;
   #pending: { readonly opId: string; readonly deferred: Deferred<Value> } | undefined;
   #closed?: Error;
-  readonly #invalidatedPublications = new Set<string>();
+  readonly #invalidatedReadPolicies = new Set<string>();
 
   constructor(callId: string, send: (value: unknown) => void) {
     this.#callId = callId;
@@ -50,13 +50,13 @@ export class RemoteWriteTransaction implements WriteTransaction {
     await this.#operation("delete", collection, id);
   }
 
-  async invalidatePublication(collection: string): Promise<void> {
-    if (this.#invalidatedPublications.has(collection)) throw new Error("Publication was already invalidated in this transaction");
-    this.#invalidatedPublications.add(collection);
+  async invalidateReadPolicy(collection: string): Promise<void> {
+    if (this.#invalidatedReadPolicies.has(collection)) throw new Error("Read policy was already invalidated in this transaction");
+    this.#invalidatedReadPolicies.add(collection);
     try {
-      await this.#operation("invalidate_publication", collection);
+      await this.#operation("invalidate_read_policy", collection);
     } catch (error) {
-      this.#invalidatedPublications.delete(collection);
+      this.#invalidatedReadPolicies.delete(collection);
       throw error;
     }
   }

@@ -44,8 +44,8 @@ it; they do not create a competing identity, query, or authorization model.
    together.
 5. Internal storage mechanics may be more detailed than product language, but
    must be labelled as operational concepts rather than business features. In
-   particular, qualify `Worker publication` and `storage publication`; they are
-   different concepts.
+   particular, distinguish a Worker read policy from storage publication; they
+   are different concepts.
 
 ## Data model
 
@@ -104,15 +104,15 @@ it; they do not create a competing identity, query, or authorization model.
 | **Collection access manifest** | The strict JSON file that declares collection access policies and an optional RPC allowlist. | `CollectionAccessManifest` is parsed and validated at startup; it contains no executable callbacks and only narrows the server's authority model. |
 | **Authorizer** | Application/server code that decides whether an actor may perform a requested operation. | Go `Authorizer` handles query, insert, update, and delete admission; `RPCAuthorizer` admits named RPC. Authorization is server-side and re-evaluated per request. |
 | **Read policy** | The restriction that determines which rows, fields, query paths, and result count an authorized caller may read. | Go `QueryPolicy`, `QueryPolicyResolver`, and `QueryPolicyLease` represent the effective read policy. It only narrows visibility; it never grants generic writes or returns documents directly. |
-| **Worker publication** | A Worker-owned declaration of dynamic read visibility for one pre-approved collection. | `publish(options, handler)` creates it. It supplies only a bounded constraint and static field/result limits; it does not publish documents, emit an event, or authorize writes. |
-| **Read-policy invalidation** | A deliberate re-authorization when visibility depends on data outside the collection being read. | A transactional Worker call uses `invalidatePublication(collection)` after the related business change. It revokes the Worker publication's policy lease so affected subscriptions resync instead of continuing under stale visibility. |
+| **Worker read policy** | A Worker-owned declaration of dynamic read visibility for one pre-approved collection. | `readPolicy(options, handler)` creates it. It supplies only a bounded constraint and static field/result limits; it does not publish documents, emit an event, or authorize writes. |
+| **Read-policy invalidation** | A deliberate re-authorization when visibility depends on data outside the collection being read. | A transactional Worker RPC uses `invalidateReadPolicy(collection)` after the related business change. It revokes the Worker read policy's lease so affected subscriptions resync instead of continuing under stale visibility. |
 
 ## Application extension boundary
 
 | Term | Product and business meaning | Engineering contract |
 | --- | --- | --- |
-| **RPC** | A named application business operation. | `client.call()` invokes a named RPC over HTTP by default or realtime when selected. A Go method map or a trusted Worker may implement it. RPC is not synonymous with Worker. |
-| **Transactional RPC** | A named business operation whose Meldbase point mutations commit atomically with its terminal result. | The handler receives a `WriteTransaction`. It must not charge cards, send email, call another service, or rely on automatic retries within that transaction. |
+| **RPC** | A named application business operation. | `client.call()` invokes a named RPC over HTTP by default or realtime when selected. A Go method map or a trusted Worker may implement it. A normal RPC is non-atomic: Meldbase does not join external effects or writes reached outside its transaction contract to its terminal result. RPC is not synonymous with Worker. |
+| **Transactional RPC** | A named business operation whose Meldbase point mutations commit atomically with its terminal result. | A Go handler receives a `WriteTransaction`; a Worker handler is declared with `rpc.transactional`. It must not charge cards, send email, call another service, or rely on automatic retries within that transaction. |
 | **Idempotency key** | The caller-supplied identity for one logical RPC attempt across explicit retries. | It is distinct from a request ID and from every token. When durable idempotency is configured, completed terminals replay and interrupted work becomes outcome-unknown rather than being silently rerun. |
 | **Worker** | A separately authenticated, trusted application process that can implement RPC handlers and dynamic read policies. | `MeldbaseWorker` connects to the private Worker control endpoint. It is not browser code, an end-user identity, or a database replica. |
 | **Worker ID** | A logical identifier for one Worker registration. | `workerId` scopes control-plane registration and replacement. It is separate from the Worker credential and from the per-call actor. |
@@ -143,7 +143,7 @@ it; they do not create a competing identity, query, or authorization model.
 | **Primary** | The deployment-designated database currently allowed to accept ordinary writes. | Meldbase does not elect a primary. A deployment may use a primary write fence to prove that authority before each write. |
 | **Follower** | A read-only database target that applies ordered replication changes from a primary. | `OpenFollower` rejects ordinary writes; `Follower.Apply` accepts only the next committed token. Browser realtime is not replication. |
 | **Replication** | Trusted server-to-server bootstrap and ordered commit-tail delivery. | It has a separate protocol and authentication boundary from browser realtime. A durable change consumer checkpoint provides source progress. |
-| **Storage publication** | The durable step that makes one storage change visible as the new database state. | COW pages, catalog roots, Meta, index builds, and private control records may participate. This is distinct from a Worker publication. |
+| **Storage publication** | The durable step that makes one storage change visible as the new database state. | COW pages, catalog roots, Meta, index builds, and private control records may participate. This is distinct from a Worker read policy. |
 | **Primary write fence** | External evidence that this database is currently authorized to accept the next write. | The core validates it at the durable commit boundary. It is not leader election or a claim of automatic high availability. |
 | **Rollback anchor** | External retained evidence that prevents accepting a database rolled back behind an acknowledged state. | It binds database identity, commit sequence, and generation. It is an advanced deployment control, not an application authorization feature. |
 
@@ -159,7 +159,7 @@ questions in the pull request or commit description:
    docs use the same name and field meaning?
 4. Could this be mistaken for an existing term—especially local vs remote
    collection, subscription vs consumer, workspace vs workspace ID, resume
-   token vs commit token, or Worker publication vs storage publication? If so,
+   token vs commit token, or Worker read policy vs storage publication? If so,
    qualify or rename it.
 5. Does the term affect authorization, durability, retry safety, or recovery?
    If it does, update the relevant contract tests and operational documentation

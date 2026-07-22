@@ -3,14 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { compileQuery, compileUpdate, MELDBASE_PROTOCOL_VERSION } from "@meldbase/client";
-import { MeldbaseError, MeldbaseWorker, MeldbaseWorkerProtocolError, publish, rpc, transactional } from "./worker.js";
+import { MeldbaseError, MeldbaseWorker, MeldbaseWorkerProtocolError, readPolicy, rpc } from "./worker.js";
 import type { WorkerSocket, WorkerSocketFactory } from "./worker.js";
 
 const WORKER_PROTOCOL = Object.freeze({
   versions: [1],
   capabilities: [
-    "cancel", "publication.policy", "rpc", "rpc.transactional",
-    "transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
+    "cancel", "read_policy", "rpc", "rpc.transactional",
+    "transaction.compiled_update", "transaction.invalidate_read_policy", "transaction.point_operations",
   ],
 });
 
@@ -73,8 +73,8 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
   assert.equal(contract.workerProtocol.version, MELDBASE_PROTOCOL_VERSION);
   assert.equal(contract.workerProtocol.capabilityHeader, "capabilities-v1");
   assert.deepEqual(contract.workerProtocol.capabilities, [
-    "cancel", "publication.policy", "rpc", "rpc.transactional",
-    "transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
+    "cancel", "read_policy", "rpc", "rpc.transactional",
+    "transaction.compiled_update", "transaction.invalidate_read_policy", "transaction.point_operations",
   ]);
   assert.deepEqual(contract.workerProtocol.nestedShapes, [
     { name: "actor", required: ["id", "workspaceId"], optional: [] },
@@ -92,7 +92,7 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
     { type: "error", required: ["callId", "error", "type", "v"], optional: [] },
     { type: "policy", required: ["callId", "constraint", "type", "v"], optional: [] },
     { type: "policy_error", required: ["callId", "error", "type", "v"], optional: [] },
-    { type: "register", required: ["methods", "publications", "type", "v", "workerId"], optional: [] },
+    { type: "register", required: ["methods", "readPolicies", "type", "v", "workerId"], optional: [] },
     { type: "result", required: ["callId", "result", "type", "v"], optional: [] },
     { type: "tx_op", required: ["callId", "collection", "opId", "operation", "type", "v"], optional: ["document", "id", "mutation"] },
   ]);
@@ -149,9 +149,9 @@ async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSock
 
 test("server worker registers without URL credentials and handles typed RPC", async () => {
   const value = harness({
-    "math.echo": rpc((context, arguments_) => {
+    "math.echo": rpc((context, args) => {
       assert.deepEqual(context.actor, { id: "user-1", workspaceId: "workspace-a" });
-      return arguments_[0]!;
+      return args[0]!;
     }),
     "orders.reject": rpc(() => { throw new MeldbaseError("orders.not_ready", { retryAfter: 60n }); }),
   });
@@ -220,7 +220,7 @@ test("worker capability discovery accepts additive features and rejects missing 
 	await new Promise((resolve) => setTimeout(resolve, 30));
 	assert.equal(incompatible.sockets.length, 1);
 
-	const oldTransactions = harness({ mutate: transactional(async () => null) });
+	const oldTransactions = harness({ mutate: rpc.transactional(async () => null) });
 	const oldTransactionStart = oldTransactions.worker.start();
 	await waitFor(() => oldTransactions.sockets.length === 1);
 	const oldTransactionSocket = oldTransactions.sockets[0]!;
@@ -230,7 +230,7 @@ test("worker capability discovery accepts additive features and rejects missing 
 	oldTransactionSocket.message({
 		v: 1, type: "registered", sessionId: "old-transaction-session", limits: {},
 		protocol: { versions: [1], capabilities: [
-			"cancel", "rpc", "rpc.transactional", "transaction.invalidate_publication", "transaction.point_operations",
+			"cancel", "rpc", "rpc.transactional", "transaction.invalidate_read_policy", "transaction.point_operations",
 		] },
 	});
 	await assert.rejects(oldTransactionStart, (error: unknown) =>
@@ -255,12 +255,12 @@ test("worker capability discovery accepts additive features and rejects missing 
 test("transactional worker serializes point operations and returns one result", async () => {
   const documentID = "00112233445566778899aabbccddeeff";
   const value = harness({
-    "orders.create": transactional(async (_context, _arguments, tx) => {
+    "orders.create": rpc.transactional(async (_context, _args, tx) => {
       const id = await tx.insert("orders", { status: "created" });
       const document = await tx.get("orders", id);
       await tx.replace("orders", id, { status: "confirmed" });
       await tx.update("orders", id, compileUpdate({ $set: { status: "paid" }, $inc: { attempts: 1n } }));
-      await tx.invalidatePublication("orders");
+      await tx.invalidateReadPolicy("orders");
       assert.equal(document.status, "created");
       return id;
     }),
@@ -307,7 +307,7 @@ test("transactional worker serializes point operations and returns one result", 
 
   await waitFor(() => socket.sent.length === 1);
   const invalidation = JSON.parse(socket.sent.shift()!);
-  assert.equal(invalidation.operation, "invalidate_publication");
+  assert.equal(invalidation.operation, "invalidate_read_policy");
   assert.equal(invalidation.collection, "orders");
   assert.equal("id" in invalidation, false);
   socket.message({ v: 1, type: "tx_result", callId: "call-tx", opId: invalidation.opId, result: { t: "null" } });
@@ -347,15 +347,15 @@ test("worker cancellation aborts handler and reconnect re-registers", async () =
   await value.worker.stop();
 });
 
-test("publication returns only a data constraint and static visibility declaration", async () => {
+test("read policy returns only a data constraint and static visibility declaration", async () => {
   const sockets: FakeSocket[] = [];
   const queryPaths = ["status"];
   const worker = new MeldbaseWorker({
     url: "wss://control.example.test/v1/workers",
     token: "worker-control-token-0123456789abcdef",
-    workerId: "publication-worker",
-   publications: {
-      orders: publish({ version: "orders-v1", maxResults: 50, queryPaths, resultFields: ["status", "description"] }, ({ actor, query }) => {
+    workerId: "read-policy-worker",
+   readPolicies: {
+      orders: readPolicy({ version: "orders-v1", maxResults: 50, queryPaths, resultFields: ["status", "description"] }, ({ actor, query }) => {
         assert.equal(query.where.op, "true");
         if (actor.workspaceId === "blocked") return null;
         assert.equal(actor.workspaceId, "workspace-a");
@@ -378,11 +378,11 @@ test("publication returns only a data constraint and static visibility declarati
   await waitFor(() => socket.sent.length === 1);
   const registration = JSON.parse(socket.sent.shift()!);
   assert.deepEqual(registration.methods, []);
-  assert.deepEqual(registration.publications, [{
+  assert.deepEqual(registration.readPolicies, [{
     collection: "orders", version: "orders-v1", maxResults: 50,
     queryPaths: ["status"], resultFields: ["status", "description"],
   }]);
-  socket.message({ v: 1, type: "registered", sessionId: "publication-session", limits: {}, protocol: WORKER_PROTOCOL });
+  socket.message({ v: 1, type: "registered", sessionId: "read-policy-session", limits: {}, protocol: WORKER_PROTOCOL });
   await started;
   socket.message({
     v: 1, type: "authorize_query", callId: "policy-1", collection: "orders",
@@ -409,8 +409,8 @@ test("worker rejects unsafe configuration and protocol frames", async () => {
   assert.throws(() => harness({ ok: rpc(() => null) }, "meldbase://control.example.test/v1/workers"), /cannot include a path/);
   assert.throws(() => harness({ ok: rpc(() => null) }, "meldbase://control.example.test?token=unsafe"), /without credentials/);
   assert.throws(() => new MeldbaseError("Bad-Code"), /Invalid/);
-  assert.throws(() => publish({ version: "bad", maxResults: 0, queryPaths: "*", resultFields: "*" }, () => compileQuery({})), /maxResults/);
-  assert.throws(() => publish({ version: "bad", maxResults: 1, queryPaths: ["bad\0path"], resultFields: "*" }, () => compileQuery({})), /NUL/);
+  assert.throws(() => readPolicy({ version: "bad", maxResults: 0, queryPaths: "*", resultFields: "*" }, () => compileQuery({})), /maxResults/);
+  assert.throws(() => readPolicy({ version: "bad", maxResults: 1, queryPaths: ["bad\0path"], resultFields: "*" }, () => compileQuery({})), /NUL/);
   const value = harness({ ok: rpc(() => null) });
   const errors: Error[] = [];
   const configured = new MeldbaseWorker({

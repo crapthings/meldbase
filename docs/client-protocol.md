@@ -430,6 +430,12 @@ and converts handler panics or arbitrary errors to the non-sensitive
 return `&server.MeldbaseError{Code: "orders.already_paid"}` with a namespaced
 code and optional safe `Data`; raw error text is never serialized.
 
+A normal RPC is not a Meldbase transaction. A Go handler can still reach other
+application capabilities through its closure, but any database write or
+external effect performed that way is outside the atomicity contract for the
+RPC terminal. Use a transactional RPC for a business operation whose Meldbase
+point writes must commit with its result.
+
 Application and server failures use the matching `type: "error"` envelope with
 the same request ID. HTTP connection cancellation cancels the handler context.
 The WebSocket server accepts the identical `call` envelope and a strict

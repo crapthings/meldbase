@@ -88,7 +88,7 @@ function startDevelopmentServer(): Promise<RunningServer> {
 
 function startWorkerDevelopmentServer(): Promise<RunningServer> {
   return startServer(async (directory) => ({
-    args: ["serve", "--db", `${directory}/app.meld`, "--addr", "127.0.0.1:0", "--dev-no-auth", "--worker-addr", "127.0.0.1:0", "--worker-publications", "items"],
+    args: ["serve", "--db", `${directory}/app.meld`, "--addr", "127.0.0.1:0", "--dev-no-auth", "--worker-addr", "127.0.0.1:0", "--worker-read-policies", "items"],
     env: { MELDBASE_WORKER_TOKEN: workerToken },
   }));
 }

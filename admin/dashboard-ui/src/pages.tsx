@@ -38,8 +38,9 @@ export function RealtimePage() {
 
 export function TransportPage() {
   const latest = useLatest();
-  const server = latest?.server;
-  return <><PageTitle eyebrow="Server boundary" title="Transport & workers" detail="Aggregate HTTP, RPC, realtime and private worker state. No actors, workspace values, method names or application payloads are exposed here." /><section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(260px,.6fr)]"><DetailPanel eyebrow="RPC" title="Request transport" badge={`${count(valueAt(server, "rpcActive"))} active`} rows={transportRows(latest)} /><div className="space-y-3"><MetricCard label="Realtime connections" value={count(valueAt(server, "realtimeConnections"))} detail="Current public socket connections" tone="sky" /><MetricCard label="Worker connections" value={count(valueAt(server, "workerConnections"))} detail="Private control-plane workers" tone="violet" /><MetricCard label="Protocol failures" value={count(valueAt(server, "workerProtocolFailures"))} detail="Observed worker protocol errors" tone="amber" /></div></section></>;
+  const server = object(latest?.server);
+  const worker = object(server.worker);
+  return <><PageTitle eyebrow="Server boundary" title="Transport & workers" detail="Aggregate HTTP, RPC, realtime and private worker state. No actors, workspace values, method names or application payloads are exposed here." /><section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(260px,.6fr)]"><DetailPanel eyebrow="RPC" title="Request transport" badge={`${count(valueAt(server, "rpcActive"))} active`} rows={transportRows(latest)} /><div className="space-y-3"><MetricCard label="Realtime connections" value={count(valueAt(server, "activeConnections"))} detail="Current public socket connections" tone="sky" /><MetricCard label="Worker connections" value={count(valueAt(worker, "connectedWorkers"))} detail="Private control-plane workers" tone="violet" /><MetricCard label="Protocol failures" value={count(valueAt(worker, "protocolFailures"))} detail="Observed worker protocol errors" tone="amber" /></div></section></>;
 }
 
 export function DiagnosticsPage() {

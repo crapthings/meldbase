@@ -1,12 +1,12 @@
 # @meldbase/server
 
-Trusted Node.js worker SDK for Meldbase RPC methods, transactional point writes,
-and data-only publication policies. The worker runs outside the Go database
+Trusted Node.js worker SDK for Meldbase RPC methods, `rpc.transactional` point writes,
+and data-only read policies. The worker runs outside the Go database
 process and connects to a private authenticated control listener. The package is
 an alpha preview.
 
 ```ts
-import { MeldbaseWorker, publish, rpc } from "@meldbase/server";
+import { MeldbaseWorker, readPolicy, rpc } from "@meldbase/server";
 import WebSocket from "ws";
 
 const worker = new MeldbaseWorker({
@@ -17,8 +17,8 @@ const worker = new MeldbaseWorker({
   methods: {
     "health.echo": rpc((_context, [value]) => value ?? null),
   },
- publications: {
-    todos: publish({
+ readPolicies: {
+    todos: readPolicy({
       version: "owner-v1",
       maxResults: 100,
       queryPaths: ["done"],
@@ -51,6 +51,6 @@ examples. See `docs/server-js-sdk.md` for protocol and transaction semantics.
 The package remains one installable SDK. Its source is split by runtime
 responsibility: `worker.ts` owns the connection lifecycle, `transaction.ts`
 bridges transactional operations, `protocol.ts` validates capability discovery,
-and `definitions.ts` owns public method/publication declarations. These are
+and `definitions.ts` owns public method/read-policy declarations. These are
 implementation modules; consumers should continue importing only from
 `@meldbase/server`.

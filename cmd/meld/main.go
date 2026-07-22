@@ -323,7 +323,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	adminDiagnosticsAll := flags.Bool("admin-diagnostics-all", false, "record every query/commit; short development sessions only")
 	adminMetrics := flags.Bool("admin-metrics", false, "serve authenticated Prometheus metrics on the admin listener")
 	workerAddress := flags.String("worker-addr", "", "optional loopback control address for server JavaScript workers")
-	workerPublications := flags.String("worker-publications", "", "comma-separated collections whose query visibility is owned by the worker")
+	workerReadPolicies := flags.String("worker-read-policies", "", "comma-separated collections whose query visibility is owned by the worker")
 	rollbackAnchorPath := flags.String("rollback-anchor", "", "independently trusted rollback-anchor file")
 	rollbackAnchorInit := flags.Bool("rollback-anchor-init", false, "explicitly initialize an empty anchor from the current database")
 	rollbackAnchorTimeout := flags.Duration("rollback-anchor-timeout", meldbase.DefaultRollbackAnchorOperationTimeout, "deadline for each rollback-anchor operation")
@@ -406,9 +406,9 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	workerToken := ""
-	publicationCollections := splitCommaList(*workerPublications)
-	if len(publicationCollections) > 0 && *workerAddress == "" {
-		return errors.New("--worker-publications requires --worker-addr")
+	readPolicyCollections := splitCommaList(*workerReadPolicies)
+	if len(readPolicyCollections) > 0 && *workerAddress == "" {
+		return errors.New("--worker-read-policies requires --worker-addr")
 	}
 	if *workerAddress != "" {
 		if !isLoopbackAddress(*workerAddress) {
@@ -498,7 +498,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 			return policyErr
 		}
 		workerHub, err = meldserver.NewWorkerHub(meldserver.WorkerHubConfig{
-			Authenticator: workerAuthenticator, PublicationCollections: publicationCollections,
+			Authenticator: workerAuthenticator, ReadPolicyCollections: readPolicyCollections,
 			PolicyGenerationStore: policyGenerations,
 		})
 		if err != nil {
@@ -514,7 +514,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		rpcTransactionalMethodResolver = workerHub
 	}
 	var queryPolicyResolver meldserver.QueryPolicyResolver
-	if len(publicationCollections) > 0 {
+	if len(readPolicyCollections) > 0 {
 		queryPolicyResolver = workerHub
 	}
 	listener, err := net.Listen("tcp", *address)

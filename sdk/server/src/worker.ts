@@ -7,7 +7,7 @@ import {
 } from "@meldbase/client";
 import type { ProtocolDescriptor, WireValue } from "@meldbase/client";
 
-import { publish, rpc, transactional, validatePublicationOptions } from "./definitions.js";
+import { readPolicy, rpc, validateReadPolicyOptions } from "./definitions.js";
 import { MeldbaseError, MeldbaseWorkerProtocolError } from "./errors.js";
 import { validateWorkerProtocol } from "./protocol.js";
 import {
@@ -25,27 +25,27 @@ import {
 } from "./shared.js";
 import { RemoteWriteTransaction } from "./transaction.js";
 import type {
-  MethodContext,
-  MethodDefinition,
-  PublicationContext,
-  PublicationDefinition,
+  RPCContext,
+  RPCDefinition,
+  ReadPolicyContext,
+  ReadPolicyDefinition,
   WorkerOptions,
   WorkerSocket,
   WorkerState,
 } from "./types.js";
 
-export { publish, rpc, transactional } from "./definitions.js";
+export { readPolicy, rpc } from "./definitions.js";
 export { MeldbaseError, MeldbaseInternalError, MeldbaseWorkerProtocolError } from "./errors.js";
 export type {
-  MethodContext,
-  MethodDefinition,
-  MethodHandler,
+  RPCContext,
+  RPCDefinition,
+  RPCHandler,
   Actor,
-  PublicationContext,
-  PublicationDefinition,
-  PublicationHandler,
-  PublicationOptions,
-  TransactionalMethodHandler,
+  ReadPolicyContext,
+  ReadPolicyDefinition,
+  ReadPolicyHandler,
+  ReadPolicyOptions,
+  TransactionalRPCHandler,
   WorkerOptions,
   WorkerSocket,
   WorkerSocketFactory,
@@ -60,8 +60,8 @@ interface ActiveCall {
 
 export class MeldbaseWorker {
   readonly #options: Required<Pick<WorkerOptions, "reconnectMinMs" | "reconnectMaxMs">> & WorkerOptions;
-  readonly #methods: ReadonlyMap<string, MethodDefinition>;
-  readonly #publications: ReadonlyMap<string, PublicationDefinition>;
+  readonly #methods: ReadonlyMap<string, RPCDefinition>;
+  readonly #readPolicies: ReadonlyMap<string, ReadPolicyDefinition>;
   readonly #stopController = new AbortController();
   #socket: WorkerSocket | undefined;
   #state: WorkerState = "idle";
@@ -77,7 +77,7 @@ export class MeldbaseWorker {
     const url = parseWorkerURL(options.url);
     if (options.token.length < 32 || options.token.length > 4096) throw new TypeError("Worker token must contain between 32 and 4096 bytes");
     if (!WORKER_PATTERN.test(options.workerId)) throw new TypeError("Invalid worker ID");
-    const methods = new Map<string, MethodDefinition>();
+    const methods = new Map<string, RPCDefinition>();
     for (const [name, definition] of Object.entries(options.methods ?? {})) {
       if (!METHOD_PATTERN.test(name) || !definition || (definition.mode !== "rpc" && definition.mode !== "transactional") || typeof definition.handler !== "function") {
         throw new TypeError(`Invalid worker method ${name}`);
@@ -85,18 +85,18 @@ export class MeldbaseWorker {
       methods.set(name, definition);
     }
     if (methods.size > 4096) throw new TypeError("Worker cannot register more than 4096 methods");
-    const publications = new Map<string, PublicationDefinition>();
-    for (const [collection, definition] of Object.entries(options.publications ?? {})) {
-      if (!COLLECTION_PATTERN.test(collection) || !definition || typeof definition.handler !== "function") throw new TypeError(`Invalid worker publication ${collection}`);
-      validatePublicationOptions(definition);
-     publications.set(collection, {
+    const readPolicies = new Map<string, ReadPolicyDefinition>();
+    for (const [collection, definition] of Object.entries(options.readPolicies ?? {})) {
+      if (!COLLECTION_PATTERN.test(collection) || !definition || typeof definition.handler !== "function") throw new TypeError(`Invalid worker read policy ${collection}`);
+      validateReadPolicyOptions(definition);
+     readPolicies.set(collection, {
         ...definition,
         queryPaths: definition.queryPaths === "*" ? "*" : Object.freeze([...definition.queryPaths]),
         resultFields: definition.resultFields === "*" ? "*" : Object.freeze([...definition.resultFields]),
       });
     }
-    if (publications.size > 4096) throw new TypeError("Worker cannot register more than 4096 publications");
-    if (methods.size === 0 && publications.size === 0) throw new TypeError("Worker requires at least one method or publication");
+    if (readPolicies.size > 4096) throw new TypeError("Worker cannot register more than 4096 read policies");
+    if (methods.size === 0 && readPolicies.size === 0) throw new TypeError("Worker requires at least one method or read policy");
     const reconnectMinMs = options.reconnectMinMs ?? 250;
     const reconnectMaxMs = options.reconnectMaxMs ?? 10_000;
     if (!Number.isSafeInteger(reconnectMinMs) || !Number.isSafeInteger(reconnectMaxMs) || reconnectMinMs < 10 || reconnectMaxMs < reconnectMinMs || reconnectMaxMs > 60_000) {
@@ -104,7 +104,7 @@ export class MeldbaseWorker {
     }
     this.#options = { ...options, url, reconnectMinMs, reconnectMaxMs };
     this.#methods = methods;
-    this.#publications = publications;
+    this.#readPolicies = readPolicies;
   }
 
   get state(): WorkerState { return this.#state; }
@@ -189,7 +189,7 @@ export class MeldbaseWorker {
       this.#send({
         v: MELDBASE_PROTOCOL_VERSION, type: "register", workerId: this.#options.workerId,
         methods: [...this.#methods].map(([name, definition]) => ({ name, mode: definition.mode })),
-       publications: [...this.#publications].map(([collection, definition]) => ({
+       readPolicies: [...this.#readPolicies].map(([collection, definition]) => ({
           collection, version: definition.version, maxResults: definition.maxResults,
           queryPaths: definition.queryPaths, resultFields: definition.resultFields,
         })),
@@ -214,7 +214,7 @@ export class MeldbaseWorker {
       case "registered": {
         exactKeys(frame, frame.protocol === undefined ? ["v", "type", "sessionId", "limits"] : ["v", "type", "sessionId", "limits", "protocol"]);
         if (typeof frame.sessionId !== "string" || !record(frame.limits)) throw new Error("Invalid registered frame");
-        const descriptor = validateWorkerProtocol(frame.protocol, this.#methods, this.#publications);
+        const descriptor = validateWorkerProtocol(frame.protocol, this.#methods, this.#readPolicies);
         this.#protocol = descriptor;
         this.#setState("ready");
         this.#ready?.resolve();
@@ -253,9 +253,9 @@ export class MeldbaseWorker {
     }
     const definition = this.#methods.get(frame.method);
     if (!definition || definition.mode !== frame.mode || this.#calls.has(frame.callId)) throw new Error("Invoke does not match registration");
-    const arguments_ = frame.arguments.map((argument) => decodeValue(argument));
+    const args = frame.arguments.map((argument) => decodeValue(argument));
     const controller = new AbortController();
-    const context: MethodContext = {
+    const context: RPCContext = {
       actor: Object.freeze({ id: frame.actor.id, workspaceId: frame.actor.workspaceId }),
       signal: controller.signal,
     };
@@ -265,8 +265,8 @@ export class MeldbaseWorker {
     this.#calls.set(frame.callId, active);
     try {
       const result = definition.mode === "transactional"
-        ? await definition.handler(context, arguments_, active.transaction!)
-        : await definition.handler(context, arguments_);
+        ? await definition.handler(context, args, active.transaction!)
+        : await definition.handler(context, args);
       if (controller.signal.aborted) return;
       this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "result", callId: frame.callId, result: encodeValue(result) });
     } catch (error) {
@@ -287,12 +287,12 @@ export class MeldbaseWorker {
         !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.workspaceId !== "string") {
       throw new Error("Invalid query authorization frame");
     }
-    const definition = this.#publications.get(frame.collection);
+    const definition = this.#readPolicies.get(frame.collection);
     if (!definition || this.#calls.has(frame.callId)) throw new Error("Query authorization does not match registration");
     const query = decodeQuerySpec(frame.query);
     const controller = new AbortController();
     const active: ActiveCall = { controller };
-    const context: PublicationContext = {
+    const context: ReadPolicyContext = {
       collection: frame.collection,
       actor: Object.freeze({ id: frame.actor.id, workspaceId: frame.actor.workspaceId }),
       query,
@@ -307,7 +307,7 @@ export class MeldbaseWorker {
         return;
       }
       if (constraint.sort !== undefined || constraint.skip !== undefined || constraint.limit !== undefined) {
-        throw new Error("Publication constraints cannot sort or paginate");
+        throw new Error("Read-policy constraints cannot sort or paginate");
       }
       const encoded = encodeQuerySpec(constraint);
       decodeQuerySpec(encoded);
