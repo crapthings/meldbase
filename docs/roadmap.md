@@ -1,22 +1,8 @@
 # Roadmap
 
-## Current foundation
-
-Meldbase already has one current durable COW format, typed Go/TypeScript/React
-clients, authenticated HTTP and realtime transport, JWT workspace isolation,
-backup/restore tooling and an embedded operator dashboard. The format and
-deployment model are intentionally allowed to evolve during alpha; there is no
-second runtime path to carry forward.
-
-## Next: a dependable single-node package
-
-- [x] Make the JWT-isolated single-node deployment the documented default,
-  including systemd, secret-file permissions, health probes and reverse-proxy
-  boundaries.
-- [x] Publish an operator runbook for backup retention, restore rehearsal,
-  upgrades and rollback-protection checks.
-- [x] Add a concise documentation index so quick start, storage contract,
-  transport contract and operational guides each have one authoritative home.
+The [current capability audit](mvp-audit) is the source of truth for supported
+alpha behavior and known limits. This page records only future work and the
+evidence required before expanding that claim.
 
 ## Evidence before a production claim
 

@@ -162,74 +162,14 @@ Neither replaces JWT authentication or collection/RPC authorization.
 requires the database to be readable and writable, and returns HTTP 503 after
 a fail-stop durability error.
 
-## 4. Back up and rehearse recovery
+## 4. Prove recovery before production
 
-The physical backup preserves the source database identity and complete
-physical history. It is a recovery artifact, not an independently writable
-clone. The CLI takes the exclusive process lock, so stop the database process
-before this procedure; do not start an original database and one of its
-physical backups/restores at the same time.
+Before serving production traffic—and before every upgrade—follow the
+[backup and upgrade runbook](operations/backup-and-upgrade). It is the sole
+authority for backup commands, retention, recovery rehearsal, and rollback.
 
-Create a backup and retain both the artifact and its JSON receipt together:
-
-```sh
-meld backup \
-  --db /srv/meldbase/data/app.meld \
-  --out /srv/meldbase/backups/app-20260720.meld \
-  --timeout 10m > /srv/meldbase/backups/app-20260720.receipt.json
-```
-
-Restore only to a new, absent path. `meld restore` verifies the receipt's byte
-count, SHA-256, physical shape, identity and complete graph before it makes
-the restored file visible:
-
-```sh
-meld restore \
-  --in /srv/meldbase/backups/app-20260720.meld \
-  --receipt /srv/meldbase/backups/app-20260720.receipt.json \
-  --out /srv/meldbase/rehearsals/app-20260720-restored.meld \
-  --timeout 10m
-meld inspect --db /srv/meldbase/rehearsals/app-20260720-restored.meld --require-compatible
-meld verify --db /srv/meldbase/rehearsals/app-20260720-restored.meld --timeout 10m
-```
-
-For a repeatable offline drill that retains all evidence, use:
-
-```sh
-scripts/single-node-backup-restore-drill.sh \
-  --meld "$(command -v meld)" \
-  --db /srv/meldbase/data/app.meld \
-  --out-dir /srv/meldbase/rehearsals/20260720 \
-  --timeout 10m
-```
-
-The drill verifies source and restored files, and checks that the restore's
-receipt exactly matches the backup receipt. It cannot validate application
-semantics, so run application-level smoke queries against the restored file
-before treating a new schema or release as recoverable. Copy the finished
-artifact and receipt to the off-host backup destination after local
-verification.
-
-## 5. Upgrade and rollback
-
-Treat an upgrade as an offline operation until the target release's compatibility
-has been qualified:
-
-1. Record the deployed binary version and stop the database process cleanly.
-2. Run `meld inspect --db ... --require-compatible` and `meld verify --db ...`.
-3. Create a physical backup, copy its artifact and receipt off-host, and run the
-  restore drill against the exact backup.
-4. Replace the binary, then start it with the existing database path and check
-   `/readyz`, the dashboard and application smoke queries.
-5. If startup or smoke checks fail before a format-changing operation, stop the
-   process and return to the previous binary. Do not assume a newer database
-  file can be opened by an older binary; restore the verified pre-upgrade
-   artifact to a new path when data rollback is required.
-
-Keep the original database file until the new binary has passed the health and
-application checks. Never solve a failed upgrade by overwriting an existing
-database or restore target: all backup and restore commands intentionally
-refuse that operation.
-
-For a routine backup-set layout, retention policy, off-host copy boundary, and
-the full restore/upgrade checklist, use the [backup and upgrade runbook](operations/backup-and-upgrade).
+The non-negotiable boundaries are: stop the database before a physical backup;
+keep the artifact and receipt together in another failure domain; restore only
+to a new, absent path; and run application smoke checks against the restore.
+Never overwrite a database or restore target. A physical backup preserves the
+source identity and history; it is not an independently writable clone.

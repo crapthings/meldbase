@@ -1,4 +1,7 @@
-# Meldbase documentation
+# Meldbase documentation map
+
+Each page below has one job. Link to the page that owns a detail rather than
+copying it into a guide, reference, or design note.
 
 ## Start here
 
@@ -13,7 +16,7 @@
 - [Current alpha capability audit](mvp-audit.md)
 - [Roadmap](roadmap.md)
 
-## Product and storage contracts
+## Product, SDK, and protocol contracts
 
 - [Terminology and semantic boundaries](terminology.md)
 - [Architecture](architecture.md)
@@ -27,7 +30,7 @@
 - [Server worker SDK guide and examples](guide/server-worker-sdk.md)
 - [Server worker protocol](server-js-sdk.md)
 
-## Operations
+## Operations and qualification
 
 - [Observability and embedded dashboard](observability.md)
 - [Release process](releasing.md)
@@ -35,13 +38,24 @@
 - [Rollback-anchor service](rollback-anchor-service.md)
 - [Rollback-anchor formal model](rollback-anchor-formal-model.md)
 
-## Advanced replication and control-plane material
+## Engineering design and advanced controls
 
-- [Core runtime and commit coordination](core-runtime.md)
+- [Core runtime evolution](core-runtime.md)
 - [Commit coordinator](commit-coordinator.md)
 - [Primary write fence](primary-lease.md)
 - [Replication protocol](replication-protocol.md)
 - [Redfish power adapter](redfish-power-adapter.md)
 
-The current contract is described by the storage, protocol and deployment guides
-above. Historical implementation routes are not compatibility commitments.
+## Maintaining this documentation
+
+| Page type | Owns | Must link instead of repeat |
+| --- | --- | --- |
+| Guide | A task-oriented path and working examples. | Wire frames, exhaustive API signatures, and operational runbooks. |
+| Reference | Public API, CLI, HTTP, and protocol contracts. | A second tutorial or an implementation history. |
+| Operations | Repeatable deployment, recovery, and release procedures. | Application design or core storage internals. |
+| Design and qualification | Invariants, implementation decisions, and retained evidence. | A user-facing quick-start claim. |
+
+Before changing a public term, check [terminology](terminology.md). Before
+adding a page, identify its single owner in this map and replace or link any
+existing overlapping material. Historical implementation routes are not
+compatibility commitments.

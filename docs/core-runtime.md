@@ -1,7 +1,8 @@
 # Core runtime evolution
 
-This document defines the next storage/runtime phase for Meldbase. It is an
-engineering contract, not a production-readiness claim.
+This document records cross-cutting runtime direction. It is an engineering
+map, not a public API or production-readiness claim: protocol, SDK, operations,
+and qualification pages own their respective contracts.
 
 ## Current facts
 
@@ -70,45 +71,16 @@ provide investigation data rather than universal thresholds.
 
 ### Phase B — CommitCoordinator
 
-Introduce an internal coordinator only after Phase A produces a baseline. It
-may allow independently accepted synchronous requests to share a persistence
-barrier, but it must preserve a separately durable COW generation and commit
-sequence for each logical request until a new on-disk batch format has its own
-format revision, recovery matrix and qualification evidence.
+The coordinator is an opt-in optimization for independently accepted synchronous
+writes. It may share a persistence barrier only when every logical request
+retains its own durable sequence, recovery behavior, and terminal result.
+`sync` remains the default acknowledgement mode; a future asynchronous mode
+must be explicit and unable to masquerade as durable success.
 
-The initial coordinator contract is:
-
-```text
-validated request -> ordered admission -> COW publication(s) -> durability barrier
-                 -> sequence acknowledgement -> change dispatch
-```
-
-`sync` remains the default and only generally supported acknowledgement mode.
-Any future asynchronous mode must be named explicitly, opt in per operation,
-and be unable to masquerade as durable success.
-
-The concrete storage/recovery constraints are in
-[CommitCoordinator design](commit-coordinator.md). In particular, the current
-two-Meta COW publication cannot safely share barriers by running ordinary
-updates unsynced; the group needs one final COW root and one final Meta publish.
-The current storage primitive and public admission slice prove that shape for
-ordinary InsertMany/filter Update/filter Delete requests and completed public
-point-write transactions. A grouped transaction contains only its frozen changes
-and exact point-read set; group conflict handling never invokes its callback a
-second time. It remains opt-in and excludes transactional RPC terminal records,
-index builds, maintenance and special operations until each has an explicit group
-proof. The admission queue is bounded; ordinary CRUD cancellation after admission
-returns a reconcilable uncertain-outcome error rather than silently inviting a
-duplicate retry. A public write transaction instead waits for its final durable
-outcome, because it has no separate reconciliation handle and must not rerun its
-callback.
-
-The group boundary carries one exact point-read set per logical member. Each
-set is checked against the immediately preceding logical root within the group,
-so stale updates reject the whole candidate rather than publishing a prefix.
-Filter mutation selection and result counts are now admission data; a logical
-group conflict re-evaluates the original request sequentially, rather than
-reusing a stale selection.
+The [CommitCoordinator design](commit-coordinator) is the authority for the
+COW publication shape, recovery matrix, admission/cancellation behavior,
+supported operations, and qualification evidence. It also records the current
+implementation status. Do not restate that detail in this roadmap.
 
 ### Phase C — canonical change-stream boundary
 

@@ -76,30 +76,9 @@ for that later transport. The follower stays queryable/reactive but rejects
 ordinary writes. It applies only the next durable database token, atomically,
 and rejects duplicates or gaps with `ErrReplicaSequence`.
 
-Reconnect tokens identify durable commit positions, not WebSocket messages.
-Authentication and authorization are evaluated both when a subscription starts
-and when it resumes.
+## Browser delivery
 
-A revocable query-policy lease binds all output to the policy version that
-created the effective query. Revocation closes the lease, blocks new delta or
-snapshot publication, waits for in-progress encoding/enqueue operations, removes
-the old server subscription, and emits `resync_required`. Reusing the request ID
-is safe because removal happens before that control frame is published. The
-fresh subscription is authorized from scratch; an old opaque token cannot cross
-a changed policy version.
-
-The server signs each resume position and binds it to the database, actor,
-workspace, collection, canonical policy-constrained query, policy version, and an
-expiry. A replay source must atomically reconstruct the query at N and stream
-N+1 onward. Successful resume sends a `resumed` control frame to bind a new
-server subscription ID while retaining the client's existing documents; it does
-not manufacture a replacement snapshot. The current storage engine uses
-historical CatalogRoots, replay leases and commit images. Invalid, expired,
-context-mismatched, future, retained-out, corrupt or discontinuous history
-returns `resync_required`.
-
-The WebSocket server supports snapshot mode and explicit delta mode.
-In delta mode, field projection/redaction occurs through a connection-local
-visibility overlay. Hidden-only document changes are suppressed and do not
-advance the opaque client token, so later visible changes remain strictly chained
-without exposing internal commit positions.
+Browser subscriptions are a separate transport boundary. Resume tokens,
+policy-lease revocation, snapshot and delta modes, and visibility overlays are
+specified by the [client protocol](client-protocol). This runtime page defines
+the committed-change source that those transport rules consume.

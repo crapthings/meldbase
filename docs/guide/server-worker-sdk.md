@@ -287,6 +287,6 @@ legacy control frame.
 - Keep publication policies narrow, version them when changed, and invalidate
   only when an external collection changes their visibility meaning.
 
-For the complete control-plane contract and Go setup, continue to the
+For the complete control-plane contract and Go hub setup, continue to the
 [server worker protocol](../server-js-sdk). The generated
 [TypeScript API reference](../api/typescript/) is the symbol-level reference.

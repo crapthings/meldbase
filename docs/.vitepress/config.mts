@@ -11,7 +11,7 @@ export default defineConfig({
     logo: "/mark.svg",
     nav: [
       { text: "Guide", link: "/guide/getting-started" },
-      { text: "Concepts", link: "/architecture" },
+      { text: "Concepts", link: "/terminology" },
       { text: "Reference", link: "/reference/" },
       { text: "TypeScript API", link: "/api/typescript/" },
       { text: "Operations", link: "/operations/" },
@@ -45,14 +45,22 @@ export default defineConfig({
       ],
       "/operations/": [
         {
-          text: "Operations",
+          text: "Operate a single node",
           items: [
             { text: "Overview", link: "/operations/" },
             { text: "Single-node deployment", link: "/single-node-deployment" },
             { text: "Backup and upgrade runbook", link: "/operations/backup-and-upgrade" },
             { text: "Observability", link: "/observability" },
-            { text: "Filesystem qualification", link: "/filesystem-qualification" },
             { text: "Release process", link: "/releasing" },
+          ],
+        },
+        {
+          text: "Qualification and advanced controls",
+          items: [
+            { text: "Filesystem qualification", link: "/filesystem-qualification" },
+            { text: "Rollback-anchor service", link: "/rollback-anchor-service" },
+            { text: "Primary write fence", link: "/primary-lease" },
+            { text: "Replication protocol", link: "/replication-protocol" },
           ],
         },
       ],

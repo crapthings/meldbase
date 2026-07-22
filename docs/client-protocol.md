@@ -485,11 +485,9 @@ mutation did not happen. A future server-side JavaScript method SDK must reuse
 this exact contract rather than introduce new semantics. HTTP remains the
 baseline when realtime transport is unnecessary.
 
-## React adapter
+## SDK bindings
 
-`@meldbase/react` accepts the exact `LiveQuery` or `RemoteLiveQuery` returned by
-the native SDK. It uses React's external-store contract and exposes documents,
-sync status, token, and error without recompiling filters. Keep the query object
-stable with `useMemo`; a new object intentionally means a new subscription.
-`initialData` is only for a matching remote SSR/hydration snapshot and is not an
-ongoing prop-driven cache.
+The [client SDK API guide](reference/client-sdk) is the authority for
+TypeScript and React-facing method names, return values, and lifecycle usage.
+It binds those APIs to this wire contract without changing its security or
+resume semantics.

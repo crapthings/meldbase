@@ -222,7 +222,7 @@ registration loads that generation before taking ownership, so a restart cannot
 forget a previously committed invalidation. The generation store must be the
 same durable database used by transactional RPC.
 
-## Current setup
+## Go hub setup
 
 The Go process creates one hub and mounts it on a private listener. The same hub
 is passed to both resolver fields when transactional worker methods are enabled:
@@ -256,44 +256,7 @@ controlMux.Handle("GET /v1/workers", workerHub)
 // Serve controlMux only on a private or mutually authenticated listener.
 ```
 
-The Node worker supplies a WebSocket factory capable of setting an
-`Authorization` header. The SDK never places the credential in the URL:
-
-```ts
-import WebSocket from "ws";
-import { compileQuery } from "@meldbase/client";
-import { MeldbaseWorker, publish, rpc, transactional } from "@meldbase/server";
-
-const worker = new MeldbaseWorker({
-  url: "wss://meldbase-control.internal/v1/workers",
-  token: process.env.MELDBASE_WORKER_TOKEN!,
-  workerId: "orders-worker-1",
-  webSocketFactory: (url, { headers }) => new WebSocket(url, { headers }),
-  methods: {
-    "orders.quote": rpc(async ({ actor, signal }, [orderId]) => {
-      return calculateQuote(actor, orderId, signal);
-    }),
-    "orders.create": transactional(async ({ actor }, [description], tx) => {
-      const id = await tx.insert("orders", { owner: actor.id, description });
-      const order = await tx.get("orders", id);
-      return order;
-    }),
-  },
- publications: {
-    orders: publish({
-      version: "orders-owner-v1",
-      maxResults: 100,
-      queryPaths: ["status", "description"],
-      resultFields: ["owner", "description", "status"],
-    }, ({ actor }) => compileQuery({ owner: actor.id })),
-  },
-});
-
-await worker.start(); // resolves after registration; reconnect continues internally
-```
-
-`MeldbaseError` is the only way to expose a stable application error. Its code
-is a namespaced identifier such as `orders.already_paid`, and it may include
-safe structured data. Other exceptions become internal failures; their messages
-and stacks stay inside the worker process. `stop()` aborts active handlers and
-ends the reconnect loop.
+Use the [server worker SDK guide](guide/server-worker-sdk) for the Node worker
+construction, handlers, `MeldbaseError`, and lifecycle. It connects to this
+private hub through an authorization header rather than placing a credential in
+the URL.
