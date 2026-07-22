@@ -1,7 +1,7 @@
 # CommitCoordinator design
 
 This is the required design before Meldbase enables group commit. It is based on
-the current publication algorithm, not on an assumption that repeated
+the current storage-publication algorithm, not on an assumption that repeated
 `fsync` calls can safely be removed.
 
 ## Safety finding
@@ -64,7 +64,7 @@ never runs user callbacks, RPC handlers or authorization inside its batch.
 - A logical conflict rejects that request without publishing it; earlier
   accepted members may still form a smaller group. I/O, checksum or anchor
   failure is database fail-stop and no later member is acknowledged.
-- Reactive/query publication occurs only after the whole group is durable. The
+- Reactive/query delivery occurs only after the whole group is durable. The
   dispatcher then receives its `ChangeBatch` objects in increasing sequence.
 
 Phase one groups ordinary document mutations only. This includes a completed
@@ -82,7 +82,7 @@ exclusive until each receives its own group proof.
 
 The anchor keeps two independently monotonic coordinates. Commit sequence is
 logical and can advance by the number of group members; generation is physical
-and advances once for the final Meta publication. Anchor backends must not
+and advances once for the final Meta storage publication. Anchor backends must not
 assume a fixed offset between them.
 
 ## Recovery and qualification matrix
@@ -132,7 +132,7 @@ remains a separate release gate.
    coalescing window). A group of two to 256 requests reaches the internal
    group publisher; one request uses the established single-commit path.
    Logical duplicate/unique/index/resource conflicts reject the speculative
-   group before publication and fall back in admission order to the exact
+group before storage publication and fall back in admission order to the exact
    single-request semantics, so one bad request cannot reject its valid peers.
    I/O, checksum and durability errors remain fail-stop. Cancellation before
    admission returns the Context error. Cancellation after admission returns
@@ -155,7 +155,7 @@ remains a separate release gate.
    `DocumentPrecondition` read set per logical member. Storage validates each
    set against that member's preceding in-group CatalogRoot. Tests prove that
    independent updates/deletes group successfully, while two members based on
-   the same stale document reject as a whole with no prefix publication. A
+the same stale document reject as a whole with no prefix storage publication. A
    filter mutation takes its storage snapshot, selected before images, result
    count and read set during admission. If the speculative group has a logical
    conflict, the writer re-evaluates each original filter in admission order

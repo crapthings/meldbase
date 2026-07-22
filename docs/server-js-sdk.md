@@ -4,7 +4,7 @@ The server JavaScript SDK runs in a separate trusted Node.js worker process. It
 does not embed an unrestricted JavaScript runtime inside the Go database
 process. Go remains authoritative for authentication, authorization, resource
 limits, typed-value validation, idempotency, transaction commit and reactive
-publication.
+delivery.
 
 This page specifies the control-plane and security contract. For a
 method-by-method introduction with copy-adaptable TypeScript examples, start
@@ -24,10 +24,11 @@ tokens, idempotency keys and transport request IDs are never forwarded to a
 worker; it receives only the authenticated actor (`id`, `workspaceId`), method
 arguments or canonical requested query, and a hub-generated call ID.
 
-One live worker owns a method name or managed publication collection. Registration conflicts fail closed instead
-of load-balancing nondeterministically. Disconnect atomically removes all of the
-worker's registrations and fails its in-flight calls. A later worker may then
-register the names. Routing always occurs after the normal client
+One live worker owns a method name or the Worker publication for a managed
+collection. Registration conflicts fail closed instead of load-balancing
+nondeterministically. Disconnect atomically removes all of the worker's
+registrations and fails its in-flight calls. A later worker may then register
+the names. Routing always occurs after the normal client
 `RPCAuthorizer` check.
 
 ## Version-one worker frames
@@ -62,9 +63,9 @@ every `registered` frame; an older Hub or an omitted descriptor is rejected:
 
 The descriptor uses the same canonical bounded decoder as the browser SDK.
 Unknown sorted capabilities are forward-additive. The SDK verifies every
-capability required by its registered method/publication modes before becoming
-ready. A missing descriptor, wrong worker protocol version, or missing required
-support is terminal rather than a reconnect loop. The request header is confined
+capability required by its registered methods and Worker-publication modes before
+becoming ready. A missing descriptor, wrong worker protocol version, or missing
+required support is terminal rather than a reconnect loop. The request header is confined
 to the separately authenticated, non-browser control listener and contains no
 worker token or application identity.
 
@@ -135,7 +136,7 @@ point operation at a time:
 Each `tx_op` carries a call-local `opId`; the hub returns one typed `tx_result`
 or stable `tx_error`. Operations are executed against the fixed snapshot and
 isolated overlay in Go. A successful worker result triggers the existing atomic
-business/result publication. A write to a point read or touched by the worker
+business/result storage publication. A write to a point read or touched by the worker
 returns the durable `rpc_transaction_conflict` terminal; disjoint commits remain
 concurrent, and JavaScript is never reinvoked. Point entries and retained
 base/current document values are bounded during execution by the Go-owned
@@ -144,18 +145,18 @@ transaction resource limits.
 and is decoded by Go under the same bounded, data-only mutation grammar used by
 HTTP and local TypeScript collections.
 
-`invalidatePublication` is for the narrower case where a publication's
+`invalidatePublication` is for the narrower case where a Worker publication's
 authorization meaning depends on data outside the collection it queries. For
 example, a transaction that changes an `organization_members` record can
-invalidate the `orders` publication. It stages a new random policy generation
+invalidate the `orders` Worker publication. It stages a new random policy generation
 in the private System tree beside the business mutations and RPC terminal.
 The old policy lease is revoked only after that root is durable and before the
 business ChangeBatch is emitted, so existing subscriptions resync instead of
 continuing under stale visibility. A conflict, handler error or failed commit
 publishes neither the generation nor the lease rotation. The operation may be
-issued at most once per publication in one transaction and must accompany at
+issued at most once per Worker publication in one transaction and must accompany at
 least one business mutation; it is not needed for ordinary changes to documents
-already covered by the publication query. An invalidation-only call completes
+already covered by the Worker publication query. An invalidation-only call completes
 durably with `rpc_transaction_requires_write`; it is never reported as an
 ambiguous outcome.
 
@@ -180,18 +181,19 @@ with worker IDs, method names, actors, workspaces or application error codes.
 Committed policy invalidations have their own total, making unexpected resync
 pressure visible without putting collection names into metrics.
 
-## Data-only publications
+## Worker publications: data-only read policies
 
-Publication ownership is a Go-side trust anchor. `PublicationCollections` must
+Worker publication ownership is a Go-side trust anchor. `PublicationCollections` must
 list every collection whose query visibility is delegated. A Worker cannot add
 a new authority domain by registering an arbitrary name. A managed collection
 with no connected owner fails closed; collections not listed continue through
 the local `Authorizer` alone.
 
-A publication is a read-visibility extension only: it can narrow HTTP queries
-and realtime subscriptions, but cannot authorize generic inserts, updates, or
-deletes. Put role-dependent writes in a Go `Authorizer` or an explicitly
-authorized RPC method.
+A Worker publication is a read-visibility extension only: it can narrow HTTP
+queries and realtime subscriptions, but cannot authorize generic inserts,
+updates, or deletes. Despite its name, it never publishes documents or events.
+Put role-dependent writes in a Go `Authorizer` or an explicitly authorized RPC
+method.
 
 The registration contains the static maximum result count, client-query paths
 and projected result fields. Those declarations are hashed into the policy
@@ -210,7 +212,7 @@ has an independent two-second default deadline (configurable up to 30 seconds)
 and shares the worker's pending-call budget, so a slow policy cannot accumulate
 unbounded subscription starts.
 
-Every registered publication owns a `QueryPolicyLease`. Disconnect first marks
+Every registered Worker publication owns a `QueryPolicyLease`. Disconnect first marks
 that lease revoked and removes the owner. Existing subscriptions stop before
 any new authorized output and request a safe resync; new requests fail closed
 until a worker registers again. Effective-query and policy fingerprints bind

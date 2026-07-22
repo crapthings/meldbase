@@ -34,10 +34,7 @@ export class MeldbaseClientClosedError extends Error {
   }
 }
 
-/**
- * The insert may have reached the server, but the client could not verify its
- * result. Use documentId to reconcile before retrying the same logical write.
- */
+/** A local compatibility failure: the realtime server lacks a required protocol capability. */
 export class MeldbaseProtocolError extends Error {
   readonly required: readonly string[];
   constructor(required: readonly string[]) {

@@ -34,4 +34,4 @@ single-node installation.
 Keep the API and dashboard on loopback until an application-owned TLS boundary
 is configured. Store recovery artifacts in another failure domain. Do not
 overwrite database files or restore targets: Meldbase treats no-overwrite
-publication as a safety property, not a convenience feature.
+storage publication as a safety property, not a convenience feature.

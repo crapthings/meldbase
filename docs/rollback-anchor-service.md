@@ -117,7 +117,7 @@ Before production, exercise the exact hosts, network and storage:
 1. Initialize a disposable database and anchor name through all three members.
 2. Block all traffic to one member. Confirm advances still succeed and endpoint
    failure telemetry increases.
-3. Block a second member. Confirm the next database publication fails closed and
+3. Block a second member. Confirm the next database storage publication fails closed and
    writes become disabled; never treat the operation outcome as known.
 4. Restart the database from its last verified file and restore one member.
    Confirm the anchor read/advance handshake succeeds before writes resume.

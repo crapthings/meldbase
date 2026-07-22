@@ -38,14 +38,14 @@ func runAccessPolicy(args []string, stdout, stderr io.Writer) error {
 		flags := flag.NewFlagSet("access-policy explain", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		file := flags.String("file", "", "collection access manifest JSON file")
-		subject := flags.String("subject", "", "simulated authenticated JWT sub")
-		workspace := flags.String("workspace", "", "simulated authenticated active workspace")
+		actorID := flags.String("actor-id", "", "simulated authenticated actor ID")
+		workspaceID := flags.String("workspace-id", "", "simulated authenticated workspace ID")
 		collection := flags.String("collection", "", "declared collection to explain")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		if *subject == "" || *workspace == "" || *collection == "" {
-			return errors.New("--subject, --workspace, and --collection are required")
+		if *actorID == "" || *workspaceID == "" || *collection == "" {
+			return errors.New("--actor-id, --workspace-id, and --collection are required")
 		}
 		manifest, err := readCollectionAccessManifest(*file)
 		if err != nil {
@@ -53,7 +53,7 @@ func runAccessPolicy(args []string, stdout, stderr io.Writer) error {
 		}
 		for _, rule := range manifest.Collections {
 			if rule.Collection == *collection {
-				return explainCollectionAccess(stdout, manifest, rule, meldserver.Actor{ID: *subject, WorkspaceID: *workspace})
+				return explainCollectionAccess(stdout, manifest, rule, meldserver.Actor{ID: *actorID, WorkspaceID: *workspaceID})
 			}
 		}
 		return fmt.Errorf("collection %q is not declared by the manifest", *collection)

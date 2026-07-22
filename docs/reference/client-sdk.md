@@ -268,6 +268,9 @@ and compiled `QuerySpec` and are the implementation layer used by
 - `MeldbaseClientClosedError` means code attempted new work after `client.close()`.
 - `QueryValidationError` means the SDK rejected an unsafe, malformed, or
   over-limit local query, update, cursor, or wire value before using it.
+- `MeldbaseProtocolError` means the connected realtime server lacks a required
+  capability. These three are local SDK errors: they do not cross the protocol
+  and are not additional remote error kinds.
 
 ## Maintaining this page
 

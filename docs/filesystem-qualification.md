@@ -136,7 +136,7 @@ receipt hashes, start/finish times and a bounded `platformClass`. It does not
 accept operator-entered success booleans. Instead, `trials` contains one
 machine-generated record per destructive event with:
 
-- a unique ID, destructive kind and publication boundary;
+- a unique ID, destructive kind and physical storage-publication boundary;
 - exact old, new and recovered commit sequences;
 - distinct old/new logical-state hashes and the recovered-state hash;
 - a derived `old` or `new` outcome;
@@ -144,7 +144,7 @@ machine-generated record per destructive event with:
 - hashes of the recovered database and that trial's secured artifacts.
 
 Capacity-exhaustion and power-cut evidence must each include at least three
-trials at all five publication boundaries. Process-kill evidence must include
+trials at all five physical storage-publication boundaries. Process-kill evidence must include
 at least twenty real asynchronous kills. Every
 trial must recover exactly its old or new sequence and matching logical state;
 one missing boundary, mismatched outcome, failed lock reacquisition or absent
@@ -192,7 +192,7 @@ identity or operator identity:
 The verifier rejects unknown receipt fields, oversized/non-regular inputs,
 revision drift, legacy/sentinel/custom soaks, incomplete phase totals, mismatched
 volumes, broken hashes, legacy boolean-only destructive records, incomplete
-publication-boundary coverage and inconsistent old/new state. A Level 4 packet
+storage-publication-boundary coverage and inconsistent old/new state. A Level 4 packet
 sets `storageQualified=true` but keeps `productionQualified=false`. It is a
 deterministic index over machine-generated, operator-controlled evidence, not a
 replacement for reviewing the secured test artifacts. The verifier uniquely
@@ -285,7 +285,7 @@ Missing partial evidence, wrong or reused keys, phase reordering/replay, dirty
 or old verifier/agent builds, reused external evidence, changed controller
 ordinals, a re-signed forged result and reuse of the phase anchor configuration
 for concurrency testing all fail closed. The packet is created with
-no-overwrite publication, file sync and parent-directory sync.
+no-overwrite file publication, file sync and parent-directory sync.
 
 ## Real asynchronous process-kill evidence
 
@@ -353,7 +353,7 @@ pass that exact token to the destructive runner:
 ```
 
 The controller runs at least three independent trials at each of the five
-publication boundaries. A repository-internal synchronous hook records the
+physical storage-publication boundaries. A repository-internal synchronous hook records the
 exact reached boundary on the separate control device. The controller then
 uses real `fallocate` allocation down to one filesystem block until the kernel
 returns `ENOSPC`, terminates the boundary-blocked worker with `SIGKILL`, removes
@@ -388,7 +388,7 @@ For each trial, start `destructive-power-prepare` on the disposable volume:
 ```
 
 The command seeds a complete old generation, reaches the selected physical
-publication boundary, writes and syncs a schema-1 marker on the separate
+storage-publication boundary, writes and syncs a schema-1 marker on the separate
 control device, then blocks permanently. An external controller must hash that
 exact marker and perform one of the accepted non-graceful actions:
 
@@ -852,7 +852,7 @@ and capture the still-empty target volume from the exact clean release binary:
 The capture command is Linux-only and repeats the destructive-volume safety
 preflight: the caller must be non-root, the target must be an empty independent
 mount of bounded size, and the control/workspace devices must be separate.
-It hashes host/model identifiers before publication, but it is not TPM remote
+It hashes host/model identifiers before evidence publication, but it is not TPM remote
 attestation and cannot make a compromised qualification host truthful. The
 secured operator record, independent controller evidence and physical campaign
 boundary remain part of the trust model.
@@ -862,7 +862,7 @@ freezes the clean revision, platform class, environment digest, target/control
 volume, controller method, runtime and non-root operator UID. It also copies and
 hashes the exact executing binary into the session directory, then creates a
 fixed 20-step sequence: durability, soak, process-kill, ENOSPC, corruption,
-then three real power interruptions at each of the five publication boundaries.
+then three real power interruptions at each of the five physical storage-publication boundaries.
 Every later session command must run as the same UID from byte-identical code.
 
 On a prepared Linux qualification host, the repository driver runs and
@@ -1042,7 +1042,7 @@ three-per-boundary capacity/power floors; derives all old/new outcomes; and
 stores the exact process, capacity, corruption and power receipt hashes in the
 manifest. Every input and every artifact path referenced by those receipts must
 be present in the exact index; the assembler rehashes the whole directory again
-before publication so files cannot be added or changed during assembly.
+before manifest publication so files cannot be added or changed during assembly.
 `qualification-check --require-level 4` then binds that manifest to the exact
 Level 2 and Level 3 receipts, uniquely locates all original destructive
 receipts by their indexed digests, repeats their offline checks, rebuilds the

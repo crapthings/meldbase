@@ -32,7 +32,7 @@ them beyond that status.
    Never change field names, wire types, optionality or nullability under an
    existing schema version.
 6. If any realtime, RPC, or private worker-control frame grammar changes
-   incompatibly after publication, increment the shared Go and TypeScript
+   incompatibly after storage publication, increment the shared Go and TypeScript
    protocol constants together and add a new shared protocol contract artifact;
    retain `protocol-v1-contract.json`. Capability-only additions must remain
    sorted, bounded and safe for older peers to ignore.
@@ -44,7 +44,7 @@ them beyond that status.
    allowlist, rejects tests and undeclared imports, checks rewritten workspace
    dependency versions, and imports/type-checks the packages from a synthetic
    consumer. Review `pnpm pack --dry-run` in each SDK package as a final human
-   size check before publication.
+   size check before storage publication.
 9. Trigger the storage soak workflow for the intended release revision with the
    `release` profile (minimum four hours, 10,000 documents and 12 reopens).
    Retain its schema-4 receipt and require matching clean source/build revisions,

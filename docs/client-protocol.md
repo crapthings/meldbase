@@ -180,7 +180,7 @@ reduce the document or transaction rather than retry the identical operation.
 
 RPC uses the same `database_unavailable` code when the database rejects work
 before a safe terminal is available. Once an idempotent/transactional RPC may
-have executed but its terminal publication cannot be proven, the stronger
+have executed but its terminal storage publication cannot be proven, the stronger
 `rpc_outcome_unknown` result takes precedence. The client never automatically
 retries either condition, and raw engine or filesystem errors never cross the
 transport boundary.
@@ -474,7 +474,7 @@ are never removed by retention alone. See
 
 Methods registered in Go through `RPCTransactionalMethods` additionally commit
 their supported Meldbase point writes and success result under one root/meta
-publication. They require `idempotencyKey`; a keyless call fails with
+storage publication. They require `idempotencyKey`; a keyless call fails with
 `rpc_idempotency_required`. Optimistic snapshot contention returns the durable,
 replayable `rpc_transaction_conflict` error and never reruns the method. This is
 the same over HTTP and WebSocket and requires no TypeScript wire/API variant.

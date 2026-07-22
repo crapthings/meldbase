@@ -207,9 +207,10 @@ re-run for you.
 
 ## Read visibility: `publish`
 
-`publish(options, handler)` defines how a collection can be read by HTTP
-queries and realtime subscriptions. It is a **read filter**, not a generic
-write permission and not a way to return documents from Node.
+`publish(options, handler)` creates a **Worker publication**: a declaration of
+how one pre-approved collection may be read by HTTP queries and realtime
+subscriptions. It is a **read filter**, not a generic write permission, event
+publisher, or way to return documents from Node.
 
 The handler returns a predicate built with `compileQuery`, or `null` to deny the
 request. It may only narrow what the client requested: sorting, skipping, and
@@ -227,7 +228,7 @@ const publications = {
     maxResults: 100,
     // Fields a browser query is allowed to filter on.
     queryPaths: ["status", "createdAt"],
-    // Fields it may receive from this publication.
+    // Fields it may receive through this Worker publication.
     resultFields: ["workspace", "owner", "description", "status", "createdAt"],
   }, ({ actor }) => {
     if (!actor.id) return null;
@@ -267,7 +268,8 @@ paired with a business write.
 The SDK requires the worker capability descriptor. A missing descriptor, an
 unsupported worker protocol version, or a missing required capability stops the
 worker with `MeldbaseWorkerProtocolError`; it never falls back to an ambiguous
-legacy control frame.
+legacy control frame. This is a local SDK compatibility error, not a
+`MeldbaseError` or `MeldbaseInternalError` result from an application call.
 
 ## Before deploying
 
@@ -284,7 +286,7 @@ legacy control frame.
   handler or Go-side authorizer.
 - Prefer a named `transactional` method for business writes instead of exposing
   broad browser write access.
-- Keep publication policies narrow, version them when changed, and invalidate
+- Keep Worker publications narrow, version them when changed, and invalidate
   only when an external collection changes their visibility meaning.
 
 For the complete control-plane contract and Go hub setup, continue to the

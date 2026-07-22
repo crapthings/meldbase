@@ -20,8 +20,8 @@ row is still visible. Future projection or policy routing may use the metadata
 only with an independently proven visibility contract.
 
 Delivery is ordered per subscriber. Slow consumers are disconnected with a
-resumable error rather than allowed to grow memory without bound. Commit
-publication only appends to a bounded central queue (1,024 batches, 8,192
+resumable error rather than allowed to grow memory without bound. A commit's
+storage publication only appends to a bounded central queue (1,024 batches, 8,192
 logical changes, and 64 MiB of canonical document-image payload) and never
 waits for a client. The downstream shared reactive hub independently applies a
 64 MiB canonical-image limit while it updates or rebuilds views. These byte
@@ -34,7 +34,7 @@ change watchers use their own asynchronous queue: each watcher is capped at
 payload. A watcher that crosses either direct-watcher limit ends with
 `ErrSlowConsumer`; it never delays or rolls back a committed write.
 
-Initial registration and snapshot publication share the database read boundary,
+Initial registration and snapshot delivery share the database read boundary,
 closing the subscribe/snapshot race window: a subscriber receives Snapshot N and
 then only revisions newer than N. If the bounded reactive queue overflows, its
 pending work is discarded and affected collections are explicitly rebuilt from a

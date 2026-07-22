@@ -584,7 +584,7 @@ func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 	var output bytes.Buffer
 	if err := run([]string{
 		"access-policy", "explain", "--file", manifestPath,
-		"--subject", "user-a", "--workspace", "team-a", "--collection", "notes",
+		"--actor-id", "user-a", "--workspace-id", "team-a", "--collection", "notes",
 	}, &output, &output); err != nil {
 		t.Fatal(err)
 	}
@@ -621,7 +621,7 @@ func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 	output.Reset()
 	if err := run([]string{
 		"access-policy", "explain", "--file", manifestPath,
-		"--subject", "user-a", "--workspace", "team-a", "--collection", "payroll",
+		"--actor-id", "user-a", "--workspace-id", "team-a", "--collection", "payroll",
 	}, &output, &output); err != nil {
 		t.Fatal(err)
 	}
@@ -636,6 +636,13 @@ func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 	}
 	if rpcOnly.Query.Allowed || rpcOnly.Insert.Allowed || rpcOnly.Update.Allowed || rpcOnly.Delete.Allowed {
 		t.Fatalf("rpc-only explanation=%s", output.String())
+	}
+
+	if err := run([]string{
+		"access-policy", "explain", "--file", manifestPath,
+		"--subject", "user-a", "--workspace", "team-a", "--collection", "notes",
+	}, &output, &output); err == nil {
+		t.Fatal("legacy subject/workspace flags were accepted")
 	}
 }
 

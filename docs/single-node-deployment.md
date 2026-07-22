@@ -63,7 +63,7 @@ disk.
 
 Before trusting a filesystem, run the built binary's non-destructive durability
 check against the real data directory. It creates and removes an isolated probe
-directory, checks locking, fsync and no-overwrite publication, and emits a
+directory, checks locking, fsync and no-overwrite storage publication, and emits a
 receipt.
 
 ```sh

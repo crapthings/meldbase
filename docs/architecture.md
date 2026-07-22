@@ -57,12 +57,13 @@ bounded compatibility descriptor before application frames begin. Versions and
 capabilities are canonical fixed arrays: unknown capabilities are additive,
 while a missing required capability fails before work is sent. Current clients
 require the descriptor. Discovery runs only on authenticated control/ticket paths and never enters storage,
-reactive publication, or commit hot paths.
+reactive delivery, or commit hot paths.
 
 Authorization semantics that depend on another collection use an explicit
 commit-ordered invalidation, not a best-effort WebSocket event. The business
 write, RPC terminal and random policy generation are published under one
-Catalog/meta root. Only after durability does Go rotate the publication lease,
+Catalog/meta root. Only after durability does Go rotate the Worker publication
+lease,
 and it does so before publishing the business ChangeBatch. Existing subscribers
 therefore resync before observing output under stale visibility; restart reloads
 the generation from the same private System tree.
@@ -111,7 +112,7 @@ Resource admission is also a core contract, not a transport-only defense. Every
 memory and durable write applies the same immutable document-byte,
 transaction-byte and transaction-change limits. Bytes mean the deterministic
 canonical typed encoding, so accounting cannot drift with JSON spelling, Go heap
-layout or compression. Rejection occurs before durable publication and is
+layout or compression. Rejection occurs before durable storage publication and is
 reported through a fixed aggregate counter; it never exposes collection or
 document identity.
 
@@ -120,7 +121,7 @@ canonical encoded bytes. The latter prevents a small number of unusually large
 commits from defeating the count window. The writer evaluates both while the
 business Commit Log tree is mutable, but replay leases cap the deletion
 watermark. Byte accounting is derived from persisted inline/overflow descriptors
-on open and then advanced only after a successful Meta publication.
+on open and then advanced only after a successful Meta storage publication.
 
 Page allocation has a separate physical high-water quota. The allocator
 consumes epoch-safe reusable pages first and checks the quota before increasing
@@ -156,7 +157,7 @@ Each logical write publishes immutable tree pages, a DatabaseRoot and the
 inactive Meta in one COW generation; the Commit Log is part of that same atomic
 root. There is no sidecar WAL, deferred checkpoint or second storage engine.
 
-Public `RunWriteTransaction` uses the same `DocumentTransaction` publication
+Public `RunWriteTransaction` uses the same `DocumentTransaction` storage publication
 primitive as transactional RPC. Its callback reads a pinned immutable root and
 maintains a point overlay without holding the database writer mutex. Commit
 validates an exact point read set inside the same storage write closure that
@@ -165,7 +166,7 @@ expected existence and the hash of its canonical stored body. A related insert,
 update or delete returns `ErrWriteConflict` without retrying callback code;
 intervening commits to disjoint points may serialize before this transaction and
 do not cause false conflicts. Effective mutations across collections,
-Primary/Order/Secondary roots and one Commit Log batch share one Meta publication
+Primary/Order/Secondary roots and one Commit Log batch share one Meta storage publication
 and one reactive token. An index created after the callback snapshot but before
 commit is included when the transaction builds its current Secondary mutations.
 
@@ -206,7 +207,7 @@ formats require offline export/import and are never implicitly migrated.
 
 The current copy-on-write page engine persists primary records, per-collection
 secondary-index catalogs and the
-logical Commit Log under one CatalogRoot publication, then provides exact
+logical Commit Log under one CatalogRoot storage publication, then provides exact
 historical query replay to the server. Opening reads only collection and index
 catalog metadata; it does not scan or decode Primary records. Index candidates
 are checked against their resolved Primary document when read. Explicit
@@ -225,7 +226,7 @@ CreateIndex construction, SnapshotQuery and Reactive View initialization/resync
 all consume pinned storage snapshots. Live CRUD retains only collection/index
 definitions in the process-local catalog.
 
-The compatibility `CreateIndex` path separates snapshot extraction from publication. Key
+The compatibility `CreateIndex` path separates snapshot extraction from storage publication. Key
 extraction runs against a pinned immutable root without holding the database
 writer mutex; if a concurrent commit advances the source sequence, the build
 discards that private result and retries a bounded number of times. The final
@@ -291,7 +292,7 @@ Unsorted COLLSCAN cursors are lazy and own a bounded snapshot pin until
 exhaustion, limit completion, error, context cancellation or explicit `Close`.
 Indexed and sorted plans retain the correct materializing execution path. Manual
 compact-to-new-file and explicit epoch-safe page reuse are available. The
-disk-full publication matrix and configurable large-database churn/reopen/reclaim
+disk-full storage-publication matrix and configurable large-database churn/reopen/reclaim
 soak gate the default path; broader platform durability testing remains release
 work. Page reuse protects both valid meta roots and every
 pinned reader/replay root. Blocking reclamation remains available, while online
@@ -305,7 +306,7 @@ Log. Restart recovery filters the allocator's consumed high-ID suffix by page
 generation; invalid acceleration resets to an empty pool, never to an
 unverified allocation. Historical files are never silently reinterpreted.
 The scheduler defaults to a memory-only O(1) pool installation; physical
-FreeSpace publication is explicit because extent construction and fsync remain
+FreeSpace storage publication is explicit because extent construction and fsync remain
 a writer-lock maintenance step.
 
 Physical backup is separate from logical compaction. `Backup` holds the source
@@ -343,10 +344,10 @@ folders are deliberately avoided.
 Meldbase is intentionally opinionated about where a new capability belongs.
 These rules preserve a small core surface as the product evolves:
 
-- **Identity stays outside the engine.** The server verifies a actor with a
-  subject and active workspace; account records, credentials, roles, membership
-  changes and token issuance remain application concerns. A collection is not
-  made special because it happens to contain users.
+- **Identity stays outside the engine.** The server verifies an actor ID and
+  active workspace ID; account records, credentials, roles, membership changes
+  and token issuance remain application concerns. A collection is not made
+  special because it happens to contain users.
 - **Generic data access stays finite and declarative.** The collection-access
   manifest has collaborative, owner and RPC-only surfaces. A proposed mode is
   valid only when it compiles to the existing server-enforced query/insert/
@@ -355,7 +356,7 @@ These rules preserve a small core surface as the product evolves:
 - **Dynamic policy is a narrowing layer, never a second write engine.** Worker
   publications and `QueryPolicyResolver` may narrow reads and subscriptions.
   Role-dependent writes use a Go `Authorizer` or an explicitly authorized RPC;
-  they must not be inferred from a read publication.
+  they must not be inferred from a Worker publication.
 - **Transport does not create business semantics.** HTTP and realtime consume
   the same typed query, mutation, policy and RPC contracts. A transport-specific
   convenience API must not create a second authorization, retry or consistency

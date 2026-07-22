@@ -34,7 +34,7 @@ grouped-request and caller-outcome-unknown counters. Admin schema version 14,
 Prometheus and OpenTelemetry expose these fixed-cardinality fields; at 50% queue
 pressure database health becomes degraded and at 90% critical. A new queue-full
 rejection is also degraded. Sampling observes this scheduler outside commit
-publication, so exporters never execute on a write's hot path.
+storage publication, so exporters never execute on a write's hot path.
 
 The optional primary-write fence also has a fixed aggregate: configured and
 currently-enforced state plus check/rejection counters. A read-only follower
@@ -488,7 +488,7 @@ with a larger quota.
 
 `BenchmarkStatsSnapshot` and the persistent-index-build snapshot benchmarks are regression gates for
 snapshot cost and allocations. The dedicated-runner sampling gate compares the
-median throughput of the same synthetic publication-lock writer with sampling
+median throughput of the same synthetic storage-publication-lock writer with sampling
 disabled and with `Stats()` called every millisecond—1,000 times the normal admin
 frequency—and rejects more than 5% relative loss. The current three local runs
 measured 0.1–0.3%. If shared atomic counters become measurable on many-core

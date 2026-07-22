@@ -1,5 +1,6 @@
 export { MeldbaseError, MeldbaseInternalError } from "@meldbase/client";
 
+/** A local compatibility failure: the Worker hub lacks a required capability. */
 export class MeldbaseWorkerProtocolError extends Error {
   readonly required: readonly string[];
 

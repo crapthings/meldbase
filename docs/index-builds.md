@@ -28,13 +28,13 @@ Before step 7 the candidate index is unreachable from the authoritative
 catalog. Cancellation, resource rejection, uniqueness failure and optimistic
 conflict publish no index generation. Resource rejection does not enter
 durability fail-stop. A concurrent writer can proceed during steps 2–5; final
-page publication still occupies the single storage writer.
+page storage publication still occupies the single storage writer.
 
 The admin schema exposes active/attempt/completed/failed builds,
 optimistic retries/conflicts, last entry/byte size and last/max duration without
 collection or index-name labels. It separately reports durable unfinished
 builds by phase plus their aggregate entry/byte footprint. Build maintenance
-refreshes an immutable aggregate snapshot after publication; `DB.Stats()` reads
+refreshes an immutable aggregate snapshot after storage publication; `DB.Stats()` reads
 that snapshot atomically in O(1), with no BuildCatalog traversal or allocation.
 
 `BenchmarkStoredDocumentIndexProjection` isolates the scan codec. On the
@@ -43,7 +43,7 @@ looking up one nested scalar measures about 2.94 µs, 5,296 B and 44 allocations
 the validating path projection measures about 341 ns with zero allocations.
 `BenchmarkCreateIndexTenThousandDocuments` is the end-to-end regression target
 covering snapshot extraction, sorting, Primary/Order revalidation, bulk loading,
-Commit Log publication and fsync. Benchmark allocation totals are cumulative
+Commit Log storage publication and fsync. Benchmark allocation totals are cumulative
 work, not a claim about peak resident memory.
 
 ## Persistent background protocol
@@ -167,7 +167,7 @@ err = db.AbortIndexBuild(ctx, id)
 
 `CreateIndexOnline` is the start-and-resume convenience form. These APIs are
 Persistent storage only; memory returns `ErrIndexBuildUnsupported`. A unique-key
-conflict rejects only final publication and leaves the private `ready` build
+conflict rejects only final storage publication and leaves the private `ready` build
 available for inspection or explicit abort.
 
 For automatic progress, start the explicit default-off scheduler:
@@ -212,7 +212,7 @@ but names, paths and workspace identity remain outside default metrics.
 `SortedTreeBuilder` is the leaf/page construction primitive for the synchronous
 path and the initial empty shadow. Scan/catch-up batches incrementally update
 the private COW Secondary tree. An external merge-sort source can later replace
-the synchronous path's in-memory entry sort without changing publication.
+the synchronous path's in-memory entry sort without changing storage publication.
 
 The scheduled storage race soak keeps one shadow build scanning/catching up
 while another goroutine commits indexed updates, readers pin snapshots, online

@@ -114,8 +114,8 @@ window. Reusing a key after that window is a new operation by contract.
 
 The store API is compare-and-set based. `Complete` must match the persisted
 session and claim tokens; a late handler cannot overwrite another record. Result
-encoding and the state transition are one durable publication. A handler result
-is not sent to the client until that publication succeeds. Cancellation after
+encoding and the state transition are one durable storage publication. A handler result
+is not sent to the client until that storage publication succeeds. Cancellation after
 method start is recorded as unknown unless a transaction-aware handler can prove
 that no business effect committed.
 
@@ -168,7 +168,7 @@ handler cannot build an unbounded in-memory overlay before final validation.
 First-party server plumbing may additionally stage bounded private System
 mutations. The JavaScript server SDK uses this for
 `tx.invalidatePublication(collection)`: its policy generation and the
-idempotency terminal share the business commit's Catalog/meta publication. The
+idempotency terminal share the business commit's Catalog/meta storage publication. The
 post-commit lease rotation runs synchronously after durability and before the
 matching ChangeBatch is offered to reactive subscribers. It never runs for a
 handler rollback, CAS mismatch or optimistic conflict. Policy invalidation is a
@@ -183,10 +183,10 @@ The built-in store is below the server package in a private System B+Tree.
 A reserved NUL-prefixed entry in the immutable Catalog B+Tree points to a small
 system-directory record, which points to the System root. This indirection keeps
 the revision-3 `DatabaseRoot` encoding unchanged while making the private root
-part of the same atomic Catalog/meta publication. The reserved entry cannot be
+part of the same atomic Catalog/meta storage publication. The reserved entry cannot be
 created through the public collection API. The tree participates in:
 
-- the same COW root/meta publication and fsync boundary as all state;
+- the same COW root/meta storage publication and fsync boundary as all state;
 - root reachability, reclamation, compaction and corruption validation;
 - the database's single-writer sequence so normal commits and realtime resume
   positions remain contiguous;
@@ -203,7 +203,7 @@ compare-and-set transitions and the database's single-writer sequence. System
 commits advance the global sequence and reactive resume position without
 appearing as public collections, documents, or business changes. Reachability,
 reclamation, compaction, reopen recovery, concurrent claims and each system
-record ENOSPC publication boundary are tested.
+record ENOSPC storage-publication boundary are tested.
 
 Composite business commits can carry up to 256 distinct System mutations,
 including the RPC terminal and durable policy generations. Their disk-full

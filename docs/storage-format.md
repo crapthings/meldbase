@@ -52,7 +52,7 @@ meld import --in /archive/app.jsonl --out /data/app-imported.meld
 ```
 
 `verify` is read-only and performs the complete protected-page and index audit.
-`backup` and `restore` use a no-overwrite publication step and preserve database
+`backup` and `restore` use a no-overwrite storage-publication step and preserve database
 identity; a restored copy should be treated as the same database for rollback
 protection and replication purposes.
 

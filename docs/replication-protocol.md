@@ -35,7 +35,7 @@ than forwarding plaintext and synthesizing peer identity headers.
 2. The receiver passes the authenticated byte stream and the source's
    `BackupResult` receipt to `ImportPhysicalBackup`. The receiver-owned
    byte cap, streaming SHA-256, full offline graph/index audit and no-overwrite
-  publication must all succeed before it opens the result through
+  storage publication must all succeed before it opens the result through
    `OpenFollower` and records `SnapshotToken`. A transport may not treat a
    successful download as a verified bootstrap.
 3. It drains source batches through `SnapshotToken` without applying them, then
@@ -129,7 +129,7 @@ ad-hoc JSON objects. The decoder rejects unknown/duplicate fields, malformed or
 non-canonical identities/base64, oversized frames, invalid document IDs and
 invalid index definitions before data reaches the follower.
 
-Collection creation, completed index publication and document changes are
+Collection creation, completed index storage publication and document changes are
 applied atomically at the target. A source token whose public projection is
 empty becomes a target-private marker so later source tokens remain contiguous.
 This does **not** replicate private RPC/idempotency System records; followers
@@ -179,7 +179,7 @@ unsafe boolean switch.
 `OpenOptions.PrimaryWriteFence` gives a primary process a local fail-closed
 enforcement point for its external controller. Before every business commit
 (including each logical member of a coordinator group, durable index-build
-visibility publication, a standalone private system-record commit, and the
+visibility storage publication, a standalone private system-record commit, and the
 sequence-one private consumer initialization of an empty source), Meldbase passes the
 database identity and exact next source sequence to
 `ValidatePrimaryWrite`. A rejected guard leaves the database/token unchanged

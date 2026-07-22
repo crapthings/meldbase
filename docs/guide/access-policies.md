@@ -60,8 +60,8 @@ Validate or inspect a manifest without opening a database or starting a server:
 meld access-policy validate --file /etc/meldbase/access-policy.json
 meld access-policy explain \
   --file /etc/meldbase/access-policy.json \
-  --subject user_42 \
-  --workspace team_a \
+  --actor-id user_42 \
+  --workspace-id team_a \
   --collection private_notes
 ```
 
@@ -102,7 +102,7 @@ selection mechanism. Those server-owned fields are always immutable on update.
 | Mode | Generic reads and subscriptions | Generic writes | Server-owned fields |
 | --- | --- | --- | --- |
 | `collaborative` | Any verified member of the active workspace | Insert, update, delete inside that workspace | `workspaceId` on insert; immutable afterwards |
-| `owner` | Only the active workspace member whose `ownerField` equals `sub` | Only that same owner may mutate or delete | `workspaceId` and `ownerField` on insert; both immutable afterwards |
+| `owner` | Only the active workspace member whose `ownerField` equals the actor ID | Only that same owner may mutate or delete | `workspaceId` and `ownerField` on insert; both immutable afterwards |
 | `read_only` | Any verified member of the active workspace | Denied | None; use named RPC methods for business writes |
 | `rpc_only` | Denied | Denied | None; expose only explicit application RPC methods if needed |
 
@@ -163,19 +163,19 @@ authorization depends on more than the document's workspace and owner fields.
 be allowed by a custom `RPCAuthorizer`.
 
 For read visibility based on memberships, roles, sharing links, or another
-collection, use a Go `Authorizer` or a server Worker `publish()` policy. Those
-components return the same bounded row constraint, field projection, and result
-limit that the Go server intersects with the manifest policy. If such a policy
-depends on other data, commit `invalidatePublication()` with the membership or
-role change so existing subscriptions resynchronize before stale visibility can
-continue.
+collection, use a Go `Authorizer` or a Worker publication declared with
+`publish()`. Those components return the same bounded row constraint, field
+projection, and result limit that the Go server intersects with the manifest
+policy. If such a policy depends on other data, commit
+`invalidatePublication()` with the membership or role change so existing
+subscriptions resynchronize before stale visibility can continue.
 
-A Worker `publish()` policy (and `QueryPolicyResolver`) is deliberately
-**read-only**: it governs HTTP queries and subscriptions, never generic
-inserts, updates, or deletes. For a role- or membership-dependent write, use a
-full Go `Authorizer`, or set the collection to `rpc_only` and expose a named
-RPC method with its own `RPCAuthorizer`. This keeps a write decision explicit
-instead of accidentally deriving it from read visibility.
+A Worker publication (and `QueryPolicyResolver`) is deliberately **read-only**:
+it governs HTTP queries and subscriptions, never generic inserts, updates, or
+deletes. For a role- or membership-dependent write, use a full Go `Authorizer`,
+or set the collection to `rpc_only` and expose a named RPC method with its own
+`RPCAuthorizer`. This keeps a write decision explicit instead of accidentally
+deriving it from read visibility.
 
 Keep account credentials, password hashes, refresh tokens, and global account
 membership decisions out of generic client collection access. See

@@ -9,7 +9,7 @@ and qualification pages own their respective contracts.
 Meldbase is a single-node copy-on-write engine. Each successful logical mutation
 publishes one new durable generation, advances one monotonically increasing
 commit sequence, appends one typed `CommitBatch`, and only then becomes visible
-to query, reactive, RPC-idempotency and recovery code. The physical publication
+to query, reactive, RPC-idempotency and recovery code. The physical storage publication
 currently has two persistence barriers: staged data/root pages are synced before
 the inactive Meta slot is written and synced.
 
@@ -21,17 +21,17 @@ query delta is a derived, authorized view of one or more commit records.
 
 The database has one serialized write path. Shared reactive views run outside
 that path from a bounded queue. By default, an acknowledged storage write includes
-one physical publication and its rollback-anchor update when configured. An
+one physical storage publication and its rollback-anchor update when configured. An
 explicitly enabled, bounded CommitCoordinator can group ordinary collection
 mutations and completed public point-write transactions into one physical
-final-Meta publication while retaining one ordered logical sequence per request.
+final-Meta storage publication while retaining one ordered logical sequence per request.
 When rollback protection is enabled, the group's final Meta is synchronously
 anchored before any member succeeds.
 
 ## Invariants that must survive every optimization
 
 1. A successful synchronous write is recoverable after process loss and is not
-   acknowledged before its data and Meta publication are durable.
+   acknowledged before its data and Meta storage publication are durable.
 2. Each accepted logical mutation receives exactly one strictly increasing
   commit sequence. Sequence order is the order observed by the Commit Log,
    reactive replay, idempotency records and rollback anchors.
@@ -78,7 +78,7 @@ retains its own durable sequence, recovery behavior, and terminal result.
 must be explicit and unable to masquerade as durable success.
 
 The [CommitCoordinator design](commit-coordinator) is the authority for the
-COW publication shape, recovery matrix, admission/cancellation behavior,
+COW storage-publication shape, recovery matrix, admission/cancellation behavior,
 supported operations, and qualification evidence. It also records the current
 implementation status. Do not restate that detail in this roadmap.
 
@@ -91,7 +91,7 @@ they cannot pin history indefinitely. This phase does not add clustering,
 multi-writer replication, a general-purpose CDC/replication protocol or a
 Mongo-compatible oplog.
 
-The first in-process slice is implemented: after durable publication the commit
+The first in-process slice is implemented: after durable storage publication the commit
 path only admits an immutable `ChangeBatch` to a bounded ordered dispatcher.
 Direct Go watchers are no longer cloned/enqueued under the database writer; a
 new watcher starts strictly after the current commit token, and an overloaded
@@ -109,7 +109,7 @@ safe as an application outbox/CDC primitive, but is deliberately not yet an
 archive image format or follower-replication protocol.
 
 `CreateDurableDatabaseChanges` is the corresponding database-level semantic
-stream. It carries collection creation, completed index publication and document
+stream. It carries collection creation, completed index storage publication and document
 changes in the same ordered token sequence, while private System records remain
 non-observable. `BeginArchive` now joins that stream to a verified physical
 backup without a snapshot/tail gap: it first pins a named checkpoint, then
