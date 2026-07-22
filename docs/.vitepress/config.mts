@@ -36,6 +36,7 @@ export default defineConfig({
           text: "Reference",
           items: [
             { text: "Overview", link: "/reference/" },
+            { text: "Client SDK API guide", link: "/reference/client-sdk" },
             { text: "TypeScript API", link: "/api/typescript/" },
             { text: "CLI and configuration", link: "/reference/cli" },
             { text: "HTTP and realtime", link: "/reference/http" },

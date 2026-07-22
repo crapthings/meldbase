@@ -32,15 +32,17 @@ of identical authority or method sets. Read the [local/remote collection
 boundary](../client-protocol#local-and-remote-collection-boundary) before
 switching an application flow between them.
 
-The generated [TypeScript API reference](/api/typescript/) is published with
-this site from the exact SDK source in each release. Use the
-[server worker SDK guide](../guide/server-worker-sdk) for integration patterns,
-examples, and lifecycle guidance; use the
-[worker protocol](../server-js-sdk) for its control-plane contract.
+Start with the [client SDK API guide](./client-sdk) for user-facing methods,
+purposes, and examples. The generated [TypeScript API reference](/api/typescript/)
+is published with this site from the exact SDK source in each release and is the
+symbol-level reference. Use the [server worker SDK guide](../guide/server-worker-sdk)
+for integration patterns, examples, and lifecycle guidance; use the [worker
+protocol](../server-js-sdk) for its control-plane contract.
 
 ## Transport and CLI
 
 - [HTTP and realtime endpoints](./http)
 - [CLI commands and configuration](./cli)
+- [Client SDK API guide](./client-sdk)
 - [Full versioned client protocol](../client-protocol)
 - [RPC idempotency contract](../rpc-idempotency)

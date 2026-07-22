@@ -20,6 +20,7 @@
 - [Query contract](query.md)
 - [Compound indexes](compound-indexes.md)
 - [Reactive queries and durable changes](reactive.md)
+- [Client SDK API guide](reference/client-sdk.md)
 - [Client HTTP/WebSocket protocol](client-protocol.md)
 - [RPC idempotency](rpc-idempotency.md)
 - [Server worker SDK guide and examples](guide/server-worker-sdk.md)
