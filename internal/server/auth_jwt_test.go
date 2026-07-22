@@ -30,7 +30,7 @@ func TestHS256JWTAuthenticatorVerifiesSignedActiveWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if actor != (Actor{ID: "user-1", TenantID: "team-a"}) {
+	if actor != (Actor{ID: "user-1", WorkspaceID: "team-a"}) {
 		t.Fatalf("actor=%+v", actor)
 	}
 }
@@ -78,7 +78,7 @@ func TestHS256JWTAuthenticatorRequiresIssuerAudienceAndNonReservedWorkspaceClaim
 	}
 }
 
-func TestHS256JWTAuthenticatorMapsConfiguredWorkspaceClaimToActorTenantID(t *testing.T) {
+func TestHS256JWTAuthenticatorMapsConfiguredWorkspaceClaimToActorWorkspaceID(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
 	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{
@@ -93,7 +93,7 @@ func TestHS256JWTAuthenticatorMapsConfiguredWorkspaceClaimToActorTenantID(t *tes
 	request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	actor, err := authenticator.AuthenticateHTTP(request)
-	if err != nil || actor != (Actor{ID: "service-1", TenantID: "org-a"}) {
+	if err != nil || actor != (Actor{ID: "service-1", WorkspaceID: "org-a"}) {
 		t.Fatalf("actor=%+v error=%v", actor, err)
 	}
 }

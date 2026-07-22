@@ -17,11 +17,11 @@ var (
 )
 
 // Actor is the authenticated application identity for one request. ID is the
-// stable user or service identifier; TenantID is the active tenant/workspace
+// stable user or service identifier; WorkspaceID is the active workspace
 // selected by the verified credential.
 type Actor struct {
-	ID       string
-	TenantID string
+	ID          string
+	WorkspaceID string
 }
 
 type Authenticator interface {

@@ -21,7 +21,7 @@ the public client API. A worker connects outbound over `wss`, authenticates with
 a dedicated worker credential and registers a bounded set of method names and
 modes. Browser-originated control connections are rejected. Client bearer
 tokens, idempotency keys and transport request IDs are never forwarded to a
-worker; it receives only the authenticated actor (`id`, `tenantId`), method
+worker; it receives only the authenticated actor (`id`, `workspaceId`), method
 arguments or canonical requested query, and a hub-generated call ID.
 
 One live worker owns a method name or managed publication collection. Registration conflicts fail closed instead
@@ -94,12 +94,12 @@ Worker registration:
 The hub replies with `registered` and an opaque process-session ID. The hub then
 sends `invoke` frames containing `callId`, method, mode, the authenticated
 identity and typed arguments. The SDK exposes that identity to handlers as
-`context.actor` (`id`, `tenantId`). A worker answers with exactly one `result`
+`context.actor` (`id`, `workspaceId`). A worker answers with exactly one `result`
 or stable coded `error`.
 Arbitrary exception text and stack traces never cross back to clients.
 
 `invoke` and `authorize_query` use an exact `actor` object. There is no
-`principal`, `subject`, or `tenant` fallback field in worker protocol v1:
+`principal`, `subject`, or `workspace` fallback field in worker protocol v1:
 
 ```json
 {
@@ -108,7 +108,7 @@ Arbitrary exception text and stack traces never cross back to clients.
   "callId": "hub-generated-id",
   "method": "orders.quote",
   "mode": "rpc",
-  "actor": {"id": "user_42", "tenantId": "team_a"},
+  "actor": {"id": "user_42", "workspaceId": "team_a"},
   "arguments": []
 }
 ```
@@ -176,7 +176,7 @@ connection.
 The hub exports fixed-cardinality totals and gauges only: connected workers,
 registered methods/publications, active calls/policy evaluations, their bounded
 outcomes, protocol failures, bytes and transactional operations. It never labels metrics
-with worker IDs, method names, actors, tenants or application error codes.
+with worker IDs, method names, actors, workspaces or application error codes.
 Committed policy invalidations have their own total, making unexpected resync
 pressure visible without putting collection names into metrics.
 

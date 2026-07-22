@@ -44,7 +44,7 @@ anchored before any member succeeds.
    count and canonical-byte admission limits; a query window does not weaken
    that bound because the view may need off-window members for later ordering.
 5. The raw Commit Log remains private to the engine. Authorization, projection,
-   tenant scoping and opaque resume-token chaining are applied only above it.
+   workspace scoping and opaque resume-token chaining are applied only above it.
 6. Existing files, recovery receipts and protocol-v1 frames remain readable
    throughout this phase.
 

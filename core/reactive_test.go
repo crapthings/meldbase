@@ -72,12 +72,12 @@ func TestReactiveQueryFailsBoundedSlowConsumer(t *testing.T) {
 
 func TestAuthorizationConstraintRunsBeforeCallerPagination(t *testing.T) {
 	documents := []Document{
-		{"_id": String("a"), "tenant": String("other"), "rank": Int(1)},
-		{"_id": String("b"), "tenant": String("mine"), "rank": Int(2)},
+		{"_id": String("a"), "workspace": String("other"), "rank": Int(1)},
+		{"_id": String("b"), "workspace": String("mine"), "rank": Int(2)},
 	}
 	one := 1
 	caller, _ := CompileQuery(Filter{}, QueryOptions{Sort: []SortField{{Path: "rank", Direction: 1}}, Limit: &one})
-	policy, _ := CompileQuery(Filter{"tenant": "mine"}, QueryOptions{})
+	policy, _ := CompileQuery(Filter{"workspace": "mine"}, QueryOptions{})
 	result := caller.Constrain(policy).Execute(documents)
 	if len(result) != 1 {
 		t.Fatalf("result length = %d", len(result))

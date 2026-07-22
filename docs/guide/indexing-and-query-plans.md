@@ -96,7 +96,7 @@ Use this compact release checklist after adding an index:
 3. Open the authenticated embedded dashboard’s **Indexes & planner** view. It
    lists published definitions and shows process-session `IXSCAN`, `COLLSCAN`,
    and `_id` lookup totals without exposing query filters, collection values,
-   tenants, or document data.
+   workspaces, or document data.
 4. Keep the before/after measurement with the deployment change. If a new
    index does not materially reduce examined work on a repeated path, remove
    the proposal before carrying its write cost into production.

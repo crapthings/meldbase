@@ -2,7 +2,7 @@
 
 Meldbase is an experimental developer preview. It has not received an external
 security audit and must not yet be used for production secrets, regulated data,
-or untrusted multi-tenant workloads.
+or untrusted multi-workspace workloads.
 
 ## Reporting a vulnerability
 

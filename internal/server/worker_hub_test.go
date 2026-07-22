@@ -179,7 +179,7 @@ func TestWorkerHubServerSDKEndToEnd(t *testing.T) {
 		t.Fatalf("publication response=%s", result.Documents)
 	}
 	documents := string(result.Documents[0]) + string(result.Documents[1])
-	if !strings.Contains(documents, `"created"`) || !strings.Contains(documents, `"committed"`) || strings.Contains(documents, `"tenant"`) {
+	if !strings.Contains(documents, `"created"`) || !strings.Contains(documents, `"committed"`) || strings.Contains(documents, `"workspace"`) {
 		t.Fatalf("publication response=%s", result.Documents)
 	}
 	if !strings.Contains(output.String(), "ready") {
@@ -614,7 +614,7 @@ func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) 
 	go func() {
 		message := readMap(t, workerContext, worker)
 		actor, _ := message["actor"].(map[string]any)
-		if message["type"] != "authorize_query" || message["collection"] != "items" || actor["tenantId"] != "mine" {
+		if message["type"] != "authorize_query" || message["collection"] != "items" || actor["workspaceId"] != "mine" {
 			workerDone <- io.ErrUnexpectedEOF
 			return
 		}
@@ -670,10 +670,10 @@ func TestWorkerPublicationNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) 
 	if deniedResponse.StatusCode != http.StatusForbidden {
 		t.Fatalf("managed query after worker disconnect status=%d", deniedResponse.StatusCode)
 	}
-	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", TenantID: "mine"}, "items", meldbase.QuerySpec{}); !found || !errors.Is(err, ErrForbidden) {
+	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", WorkspaceID: "mine"}, "items", meldbase.QuerySpec{}); !found || !errors.Is(err, ErrForbidden) {
 		t.Fatalf("disconnected managed publication found=%v err=%v", found, err)
 	}
-	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", TenantID: "mine"}, "other", meldbase.QuerySpec{}); found || err != nil {
+	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", WorkspaceID: "mine"}, "other", meldbase.QuerySpec{}); found || err != nil {
 		t.Fatalf("unmanaged publication found=%v err=%v", found, err)
 	}
 	stats := hub.Stats()

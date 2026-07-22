@@ -95,25 +95,25 @@ func TestOnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 	items := db.Collection("items")
 	first, second, missing := DocumentID{1}, DocumentID{2}, DocumentID{4}
 	if _, err := items.InsertMany(context.Background(), []Document{
-		{"_id": ID(first), "tenant": String("a"), "score": Int(8)},
-		{"_id": ID(second), "tenant": String("a"), "score": Int(9)},
-		{"_id": ID(missing), "tenant": String("a")},
+		{"_id": ID(first), "workspace": String("a"), "score": Int(8)},
+		{"_id": ID(second), "workspace": String("a"), "score": Int(9)},
+		{"_id": ID(missing), "workspace": String("a")},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	fields := []IndexField{{Field: "tenant", Order: 1}, {Field: "score", Order: -1}}
-	id, err := items.StartIndexBuild(context.Background(), "tenant_score", fields, IndexOptions{Unique: true})
+	fields := []IndexField{{Field: "workspace", Order: 1}, {Field: "score", Order: -1}}
+	id, err := items.StartIndexBuild(context.Background(), "workspace_score", fields, IndexOptions{Unique: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	status, err := db.IndexBuild(id)
-	if err != nil || !reflect.DeepEqual(status.Fields, fields) || status.Field != "tenant" {
+	if err != nil || !reflect.DeepEqual(status.Fields, fields) || status.Field != "workspace" {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	if required := db.durability.(*durableStore).file.Meta().RequiredFeatures; required&storage.RequiredFeatureShadowIndexBuilds == 0 || required&storage.RequiredFeatureCompoundIndexes == 0 {
 		t.Fatalf("required features = %#x", required)
 	}
-	third, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "score": Int(7)})
+	third, err := items.InsertOne(context.Background(), Document{"workspace": String("a"), "score": Int(7)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,13 +136,13 @@ func TestOnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	items = db.Collection("items")
-	if got := queryIDs(t, items, Filter{"tenant": "a"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second, missing, third}) {
+	if got := queryIDs(t, items, Filter{"workspace": "a"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second, missing, third}) {
 		t.Fatalf("published prefix IDs = %v", got)
 	}
-	if got := queryIDs(t, items, Filter{"tenant": "a", "score": map[string]any{"$gte": int64(6), "$lt": int64(8)}}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second, third}) {
+	if got := queryIDs(t, items, Filter{"workspace": "a", "score": map[string]any{"$gte": int64(6), "$lt": int64(8)}}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second, third}) {
 		t.Fatalf("published range IDs = %v", got)
 	}
-	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "score": Int(7)}); !errors.Is(err, ErrDuplicateKey) {
+	if _, err := items.InsertOne(context.Background(), Document{"workspace": String("a"), "score": Int(7)}); !errors.Is(err, ErrDuplicateKey) {
 		t.Fatalf("published unique tuple error = %v", err)
 	}
 }

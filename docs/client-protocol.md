@@ -55,7 +55,7 @@ text, JavaScript, regex with unbounded execution, or user callbacks.
 
 For every implemented fetch and subscription, the server applies:
 
-1. authenticated actor and tenant scoping;
+1. authenticated actor and workspace scoping;
 2. collection/action policy;
 3. row predicate injected into the plan (not post-filtered after pagination);
 4. field projection/redaction before serialization;
@@ -76,16 +76,16 @@ Changing an application-side policy object later cannot mutate a live
 projection or bypass the policy lease.
 
 Insert authorization separately validates client-writable fields, then applies
-server-owned fields such as tenant and owner after validation. Client values can
+server-owned fields such as workspace and owner after validation. Client values can
 never override those fields.
 
-The built-in workspace authorizer is the standard multi-tenant policy: the
+The built-in workspace authorizer is the standard multi-workspace policy: the
 authenticated JWT contributes the active `workspace_id`, while a configured
 collection stores a server-owned `workspaceId` field. The handler injects its
 equality constraint into every read and subscription before pagination, sets it
 on insert, and denies any update path at or below that field. A browser SDK may
 therefore query a collection normally; it must not be given a separate,
-client-chosen tenant parameter. Switching workspaces means obtaining a new JWT.
+client-chosen workspace parameter. Switching workspaces means obtaining a new JWT.
 
 Update and delete authorization recompile the data-only mutation on the server,
 apply the server-owned row predicate, validate writable paths, and enforce a
@@ -93,7 +93,7 @@ separate `MaxAffected` bound. That bound is checked while the engine holds its
 write lock; exceeding it rejects the entire mutation without a partial write.
 
 Resume tokens are opaque, expiring HMAC-authenticated values bound to database
-identity, authenticated actor ID and tenant ID, collection, the canonical authorized
+identity, authenticated actor ID and workspace ID, collection, the canonical authorized
 query, policy version, and durable commit position. A token whose history is no
 longer available, whose security context changed, or whose signature is invalid
 yields `resync_required`. A configured replay source reconstructs the exact
@@ -143,7 +143,7 @@ A fail-stop durability error preserves reads from the last committed state, so
 readiness reports `readable: true`, `writable: false` and HTTP 503. A closed DB
 reports both false, while liveness remains 200. Responses contain only schema
 version 1, a fixed `live|ready|not_ready` status and those booleans. They are
-`no-store`, carry no error string, path, engine, identity, sequence, tenant or
+`no-store`, carry no error string, path, engine, identity, sequence, workspace or
 user data, and remain subject to the server's exact Origin policy. Liveness must
 not be used as a readiness probe.
 
@@ -319,7 +319,7 @@ is absent the TypeScript SDK deliberately reconnects with a clean snapshot.
 The current SDK requires the protocol descriptor. A malformed descriptor,
 unsupported version, or missing required capability is terminal and does not
 enter reconnect backoff. Capability discovery is authenticated and contains no method,
-collection, actor, tenant or database identity.
+collection, actor, workspace or database identity.
 
 Delta mode always begins with:
 

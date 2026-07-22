@@ -37,7 +37,7 @@ WebSocket URL.
 | Verified JWT claim | Meldbase handler identity |
 | --- | --- |
 | `sub` | Go `Actor.ID`; TypeScript `context.actor.id` |
-| `workspace_id` (or the configured `--jwt-workspace-claim`) | Go `Actor.TenantID`; TypeScript `context.actor.tenantId` |
+| `workspace_id` (or the configured `--jwt-workspace-claim`) | Go `Actor.WorkspaceID`; TypeScript `context.actor.workspaceId` |
 
 `sub` is a standard JWT claim and remains the identity-provider-facing name.
 The Go and TypeScript contracts use their native field naming above. The
@@ -50,7 +50,7 @@ claim or treat a client-side workspace picker as authorization.
 
 ## What gets isolated
 
-Configure only the collections that hold tenant-scoped data:
+Configure only the collections that hold workspace-scoped data:
 
 ```sh
 meld serve \
@@ -71,7 +71,7 @@ authorizer:
    value; and
 3. rejects updates to `workspaceId` or any of its nested paths.
 
-The client can use ordinary queries. It should not send a tenant selector, and
+The client can use ordinary queries. It should not send a workspace selector, and
 it cannot escape the injected constraint by adding a conflicting filter. The
 same rule applies to realtime snapshots and deltas. The versioned
 [collection access manifest](./access-policies) is the single developer- and

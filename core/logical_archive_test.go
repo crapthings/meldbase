@@ -36,17 +36,17 @@ func TestLogicalArchiveRoundTripPreservesSchemaAndTypedDocuments(t *testing.T) {
 		array[index] = Int(int64(index))
 	}
 	first, err := items.InsertOne(ctx, Document{
-		"tenant": String("a"), "email": String("ada@example.com"), "when": Time(time.UnixMilli(1_719_000_000_123)),
+		"workspace": String("a"), "email": String("ada@example.com"), "when": Time(time.UnixMilli(1_719_000_000_123)),
 		"blob": Binary([]byte{0, 1, 2, 255}), "nested": Object(Document{"active": Bool(true), "array": Array(array...)}),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := items.InsertOne(ctx, Document{"tenant": String("b"), "email": String("bea@example.com"), "score": Float(1.25)})
+	second, err := items.InsertOne(ctx, Document{"workspace": String("b"), "email": String("bea@example.com"), "score": Float(1.25)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := items.CreateIndex(ctx, "tenant_email", []IndexField{{Field: "tenant", Order: 1}, {Field: "email", Order: -1}}, IndexOptions{Unique: true}); err != nil {
+	if err := items.CreateIndex(ctx, "workspace_email", []IndexField{{Field: "workspace", Order: 1}, {Field: "email", Order: -1}}, IndexOptions{Unique: true}); err != nil {
 		t.Fatal(err)
 	}
 	sourceIdentity := source.DatabaseIdentity()
@@ -103,8 +103,8 @@ func TestLogicalArchiveRoundTripPreservesSchemaAndTypedDocuments(t *testing.T) {
 			t.Fatalf("id=%s got=%v want=%v", id, got, want)
 		}
 	}
-	explain, err := destination.Collection("items").Explain(ctx, Filter{"tenant": "a", "email": "ada@example.com"})
-	if err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "tenant_email" {
+	explain, err := destination.Collection("items").Explain(ctx, Filter{"workspace": "a", "email": "ada@example.com"})
+	if err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "workspace_email" {
 		t.Fatalf("explain=%+v err=%v", explain, err)
 	}
 }

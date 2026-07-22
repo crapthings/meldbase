@@ -45,7 +45,7 @@ func TestCompoundIndexRevision3GoldenFixtureOpensAuditsAndAdvances(t *testing.T)
 		TransactionID: fixtureTransactionID(302), CommittedAt: time.Unix(1_700_000_302, 0).UTC(),
 		Mutations: []DocumentMutation{{
 			Collection: "items", DocumentID: first, Operation: DocumentUpdate, Document: []byte("one-advanced"),
-			Indexes: []IndexMutation{{Name: "tenant_score", BeforeKey: []byte("tuple-a"), AfterKey: []byte("tuple-c")}},
+			Indexes: []IndexMutation{{Name: "workspace_score", BeforeKey: []byte("tuple-a"), AfterKey: []byte("tuple-c")}},
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -146,8 +146,8 @@ func buildDeterministicCompoundFixture(t *testing.T) ([]byte, Meta) {
 	}
 	if _, err := file.ApplyCreateIndex(CreateIndexTransaction{
 		TransactionID: fixtureTransactionID(301), CommittedAt: time.Unix(1_700_000_301, 0).UTC(),
-		Collection: "items", Name: "tenant_score", FieldPath: "tenant",
-		Fields: []IndexField{{Path: "tenant", Direction: 1}, {Path: "score", Direction: -1}}, Unique: true,
+		Collection: "items", Name: "workspace_score", FieldPath: "workspace",
+		Fields: []IndexField{{Path: "workspace", Direction: 1}, {Path: "score", Direction: -1}}, Unique: true,
 		Entries: []IndexEntry{{Key: []byte("tuple-a"), DocumentID: first}, {Key: []byte("tuple-b"), DocumentID: second}},
 	}); err != nil {
 		t.Fatal(err)
@@ -176,10 +176,10 @@ func assertCompoundFixture(t *testing.T, file *File) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta, exists, metaErr := snapshot.IndexMeta("items", "tenant_score")
-	entries, scanErr := snapshot.ScanIndex("items", "tenant_score", nil, nil, 0)
+	meta, exists, metaErr := snapshot.IndexMeta("items", "workspace_score")
+	entries, scanErr := snapshot.ScanIndex("items", "workspace_score", nil, nil, 0)
 	closeErr := snapshot.Close()
-	wantFields := []IndexField{{Path: "tenant", Direction: 1}, {Path: "score", Direction: -1}}
+	wantFields := []IndexField{{Path: "workspace", Direction: 1}, {Path: "score", Direction: -1}}
 	if metaErr != nil || !exists || !reflect.DeepEqual(meta.Fields, wantFields) || meta.KeyCodecVersion != indexKeyCodecV3 ||
 		scanErr != nil || closeErr != nil || len(entries) != 2 || string(entries[0].Key) != "tuple-a" || string(entries[1].Key) != "tuple-b" {
 		t.Fatalf("meta=%+v exists=%t entries=%+v errors=%v/%v/%v", meta, exists, entries, metaErr, scanErr, closeErr)

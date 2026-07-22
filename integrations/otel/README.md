@@ -27,7 +27,7 @@ defer adapter.Close()
 
 `SchemaVersion` and `Instruments()` expose the fixed contract. Instrument names
 start with `meldbase.` and have no attributes containing database paths,
-collection/index names, query text, document IDs, errors, actors or tenants.
+collection/index names, query text, document IDs, errors, actors or workspaces.
 Server instruments are simply not observed when the sampler has no server
 source. Values above the OTel API's signed `int64` range saturate monotonically;
 `Adapter.Stats()` reports that condition.

@@ -95,7 +95,7 @@ upgrades.
 | Product data | Typed documents, CRUD, safe filters and updates, compound and unique indexes. |
 | Live UI | Reactive queries with snapshots, ordered deltas, resume tokens, and a React adapter. |
 | Application API | HTTP fetch/mutation endpoints plus ticket-authenticated WebSocket realtime. |
-| Tenant boundary | JWT-derived workspace/owner scoping, optional field limits, and RPC-only collections; clients never choose a trusted tenant. |
+| Workspace boundary | JWT-derived workspace/owner scoping, optional field limits, and RPC-only collections; clients never choose a trusted workspace. |
 | Business logic | Typed RPC, durable idempotency, and an optional authenticated Node.js worker boundary. |
 | Operations | `/livez`, `/readyz`, authenticated metrics/dashboard, inspect, verify, backup, restore, export/import, and restore drills. |
 
@@ -149,7 +149,7 @@ your Go process                    your application boundary
 The embedded core is useful on its own. Add the server only when another
 process, browser, or service needs access. The server does not become your user
 directory: it trusts a verified identity provider, derives an actor and active
-tenant from the token, and constrains configured business collections. The
+workspace from the token, and constrains configured business collections. The
 [collection access guide](docs/guide/access-policies.md) describes the small,
 declarative policy surface and where application business authorization begins.
 
@@ -238,7 +238,8 @@ are the authoritative boundary.
   recovery](docs/single-node-deployment.md), then the [backup and upgrade
   runbook](docs/operations/backup-and-upgrade.md), [observability
   guide](docs/observability.md), and [current capability audit](docs/mvp-audit.md).
-- **Extend Meldbase.** Read the [architecture](docs/architecture.md), [client
+- **Extend Meldbase.** Read the [terminology and semantic boundaries](docs/terminology.md),
+  [architecture](docs/architecture.md), [client
   protocol](docs/client-protocol.md), [server worker SDK
   guide](docs/guide/server-worker-sdk.md), and [CONTRIBUTING.md](CONTRIBUTING.md)
   before changing storage, protocols, or SDKs.

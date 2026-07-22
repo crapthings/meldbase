@@ -46,7 +46,7 @@ func TestRS256JWKSAuthenticatorVerifiesOIDCTokenAndCachesKeySet(t *testing.T) {
 		request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 		request.Header.Set("Authorization", "Bearer "+token)
 		actor, authenticateErr := authenticator.AuthenticateHTTP(request)
-		if authenticateErr != nil || actor != (Actor{ID: "user-1", TenantID: "team-a"}) {
+		if authenticateErr != nil || actor != (Actor{ID: "user-1", WorkspaceID: "team-a"}) {
 			t.Fatalf("actor=%+v error=%v", actor, authenticateErr)
 		}
 	}

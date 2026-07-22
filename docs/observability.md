@@ -41,7 +41,7 @@ currently-enforced state plus check/rejection counters. A read-only follower
 reports a configured but not enforced fence because validated source history
 must not be rechecked as local primary work. A new local rejection degrades the
 database health for the sample window. The counters expose no lease, epoch,
-controller endpoint, database identity, or tenant value. Admin schema version
+controller endpoint, database identity, or workspace value. Admin schema version
 16, Prometheus and OpenTelemetry expose the same four fixed-cardinality fields.
 
 Public optimistic write transactions add a fixed aggregate with current active
@@ -84,7 +84,7 @@ The current storage backend exposes:
   counters.
 
 These values contain no path, collection name, document ID, query literal,
-actor, tenant, authorization value, or document content. `Stats()` is for a
+actor, workspace, authorization value, or document content. `Stats()` is for a
 sampler, not for invocation on every database operation.
 
 The dashboard, Prometheus schema and OpenTelemetry aggregate adapter expose
@@ -173,7 +173,7 @@ counters, bytes, arguments and latency. Optional RPC idempotency adds fixed
 claim, replay, conflict, in-progress, outcome-unknown and store-failure counters;
 transactional RPC adds atomic commit, rollback and successful no-op counters.
 It never exports keys or fingerprints. The sample omits the `server` field when
-no source is configured. It never includes method, actor, tenant, argument,
+no source is configured. It never includes method, actor, workspace, argument,
 result or error strings. The CLI connects this source automatically when its
 admin listener is enabled.
 
@@ -355,7 +355,7 @@ restarts event sequence numbers.
 Events contain only fixed enums and aggregate work: kind, outcome, sanitized
 error class, planner stage, duration, documents examined/returned and mutation
 count. They never contain collection or field names, query AST/literals,
-document IDs/content, original error strings, actors, tenants or credentials.
+document IDs/content, original error strings, actors, workspaces or credentials.
  lazy COLLSCAN events span actual cursor execution through exhaustion, error or
 explicit close; they are not mislabeled as planner-only latency.
 
@@ -394,7 +394,7 @@ Labels are limited to these engine-owned enums:
 - `component="overall|database|durability|storage|realtime|telemetry|transport"`.
 
 Unknown engine strings are mapped to a safe engine family and never serialized.
-There are no path, database, collection, index, query, user, tenant, error-text
+There are no path, database, collection, index, query, user, workspace, error-text
 or document labels. Every unique label combination is therefore statically
 bounded. The endpoint uses the same admin authorizer and exact-origin boundary;
 it is disabled unless `ServeMetrics` or `--admin-metrics` is explicitly set.
@@ -430,7 +430,7 @@ instruments are omitted from a collection when the sampler has no server source.
 OpenTelemetry's stable `db.client.*` convention describes calls as observed by a
 database client; using it for an embedded engine aggregate would describe the
 wrong side. Meldbase therefore uses its own namespace and does not emit query
-text, collection, path, document, actor, tenant or error attributes. The
+text, collection, path, document, actor, workspace or error attributes. The
 core database package and default admin package import neither the OTel API nor
 SDK; only the integration package imports the stable Metrics API.
 

@@ -69,6 +69,7 @@ export default defineConfig({
         {
           text: "Concepts",
           items: [
+            { text: "Terminology and boundaries", link: "/terminology" },
             { text: "Architecture", link: "/architecture" },
             { text: "Storage format", link: "/storage-format" },
             { text: "Query contract", link: "/query" },

@@ -16,7 +16,7 @@ import (
 // HS256JWTAuthenticatorConfig configures a locally verified JWT issuer. It is
 // useful when an identity service signs short-lived access tokens with a shared
 // secret. OIDC/JWKS verification can use the same Actor contract later;
-// callers never supply a tenant separately from the signed token.
+// callers never supply a workspace separately from the signed token.
 type HS256JWTAuthenticatorConfig struct {
 	Secret         []byte
 	Issuer         string
@@ -91,11 +91,11 @@ func (a *HS256JWTAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, 
 		return Actor{}, ErrUnauthenticated
 	}
 	actorID, actorIDOK := claimString(claims, "sub")
-	tenantID, tenantIDOK := claimString(claims, a.workspaceClaim)
-	if !actorIDOK || !tenantIDOK || !validActorPart(actorID) || !validActorPart(tenantID) {
+	workspaceID, workspaceIDOK := claimString(claims, a.workspaceClaim)
+	if !actorIDOK || !workspaceIDOK || !validActorPart(actorID) || !validActorPart(workspaceID) {
 		return Actor{}, ErrUnauthenticated
 	}
-	return Actor{ID: actorID, TenantID: tenantID}, nil
+	return Actor{ID: actorID, WorkspaceID: workspaceID}, nil
 }
 
 func bearerToken(header string) (string, bool) {

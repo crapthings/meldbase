@@ -237,28 +237,28 @@ func TestUniqueCompoundIndexMaintainedAcrossCRUD(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
 	items := db.Collection("items")
-	first, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "slug": String("one")})
+	first, err := items.InsertOne(context.Background(), Document{"workspace": String("a"), "slug": String("one")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "slug": String("two")})
+	second, err := items.InsertOne(context.Background(), Document{"workspace": String("a"), "slug": String("two")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := items.CreateIndex(context.Background(), "tenant_slug", []IndexField{
-		{Field: "tenant", Order: 1}, {Field: "slug", Order: 1},
+	if err := items.CreateIndex(context.Background(), "workspace_slug", []IndexField{
+		{Field: "workspace", Order: 1}, {Field: "slug", Order: 1},
 	}, IndexOptions{Unique: true}); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err := items.InsertOne(context.Background(), Document{"tenant": String("missing-suffix")}); err != nil {
+		if _, err := items.InsertOne(context.Background(), Document{"workspace": String("missing-suffix")}); err != nil {
 			t.Fatalf("partial tuples must not conflict in a unique index: %v", err)
 		}
 	}
-	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("b"), "slug": String("one")}); err != nil {
+	if _, err := items.InsertOne(context.Background(), Document{"workspace": String("b"), "slug": String("one")}); err != nil {
 		t.Fatalf("same suffix in another tuple must be allowed: %v", err)
 	}
-	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "slug": String("one")}); !errors.Is(err, ErrDuplicateKey) {
+	if _, err := items.InsertOne(context.Background(), Document{"workspace": String("a"), "slug": String("one")}); !errors.Is(err, ErrDuplicateKey) {
 		t.Fatalf("duplicate tuple error = %v", err)
 	}
 	if _, err := items.UpdateOne(context.Background(), Filter{"_id": second}, Update{"$set": map[string]any{"slug": "one"}}); !errors.Is(err, ErrDuplicateKey) {
@@ -267,16 +267,16 @@ func TestUniqueCompoundIndexMaintainedAcrossCRUD(t *testing.T) {
 	if _, err := items.UpdateOne(context.Background(), Filter{"_id": second}, Update{"$set": map[string]any{"slug": "three"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := queryIDs(t, items, Filter{"tenant": "a", "slug": "two"}, QueryOptions{}); len(got) != 0 {
+	if got := queryIDs(t, items, Filter{"workspace": "a", "slug": "two"}, QueryOptions{}); len(got) != 0 {
 		t.Fatalf("old tuple remained indexed: %v", got)
 	}
-	if got := queryIDs(t, items, Filter{"tenant": "a", "slug": "three"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second}) {
+	if got := queryIDs(t, items, Filter{"workspace": "a", "slug": "three"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second}) {
 		t.Fatalf("updated tuple IDs = %v", got)
 	}
 	if _, err := items.DeleteOne(context.Background(), Filter{"_id": first}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "slug": String("one")}); err != nil {
+	if _, err := items.InsertOne(context.Background(), Document{"workspace": String("a"), "slug": String("one")}); err != nil {
 		t.Fatalf("deleted tuple was not released: %v", err)
 	}
 }

@@ -16,16 +16,16 @@ const worker = new MeldbaseWorker({
     "sdk.echo": rpc((_context, arguments_) => arguments_[0] ?? null),
     "sdk.reject": rpc(() => { throw new MeldbaseError("orders.already_paid", { retryAfter: 60n }); }),
     "sdk.create": transactional(async ({ actor }, _arguments, transaction) => {
-      const id = await transaction.insert("items", { rank: 7n, tenant: actor.tenantId, title: "created" });
+      const id = await transaction.insert("items", { rank: 7n, workspace: actor.workspaceId, title: "created" });
       return transaction.get("items", id);
     }),
     "sdk.exercise": transactional(async ({ actor }, _arguments, transaction) => {
-      const id = await transaction.insert("items", { rank: 1n, tenant: actor.tenantId, title: "temporary" });
-      await transaction.replace("items", id, { rank: 2n, tenant: actor.tenantId, title: "replaced" });
+      const id = await transaction.insert("items", { rank: 1n, workspace: actor.workspaceId, title: "temporary" });
+      await transaction.replace("items", id, { rank: 2n, workspace: actor.workspaceId, title: "replaced" });
       await transaction.update("items", id, compileUpdate({ $set: { title: "updated" } }));
       const updated = await transaction.get("items", id);
       await transaction.delete("items", id);
-      await transaction.insert("items", { rank: 3n, tenant: actor.tenantId, title: "committed" });
+      await transaction.insert("items", { rank: 3n, workspace: actor.workspaceId, title: "committed" });
       await transaction.invalidatePublication("items");
       return updated;
     }),
@@ -36,7 +36,7 @@ const worker = new MeldbaseWorker({
       maxResults: 10,
       queryPaths: ["title"],
       resultFields: ["rank", "title"],
-    }, ({ actor }) => compileQuery({ tenant: actor.tenantId })),
+    }, ({ actor }) => compileQuery({ workspace: actor.workspaceId })),
   },
 });
 

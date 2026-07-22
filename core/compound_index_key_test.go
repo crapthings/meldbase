@@ -79,7 +79,7 @@ func TestCompoundIndexKeySupportsMixedDirectionsAndRejectsInvalidTuples(t *testi
 }
 
 func TestCompoundPartialIndexKeysRemainInPrefixAndDoNotConflict(t *testing.T) {
-	fields := []IndexField{{Field: "tenant", Order: 1}}
+	fields := []IndexField{{Field: "workspace", Order: 1}}
 	prefix, err := encodeCompoundIndexPrefix([]Value{String("a")}, fields)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestCompoundPartialIndexKeysRemainInPrefixAndDoNotConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	full, err := encodeCompoundIndexKey([]Value{String("a"), Int(1)}, []IndexField{{Field: "tenant", Order: 1}, {Field: "score", Order: 1}})
+	full, err := encodeCompoundIndexKey([]Value{String("a"), Int(1)}, []IndexField{{Field: "workspace", Order: 1}, {Field: "score", Order: 1}})
 	if err != nil || !bytes.HasPrefix(first, prefix) || !bytes.HasPrefix(second, prefix) || !bytes.HasPrefix(full, prefix) ||
 		bytes.Equal(first, second) || bytes.Compare(first, full) >= 0 {
 		t.Fatalf("prefix=%x first=%x second=%x full=%x err=%v", prefix, first, second, full, err)

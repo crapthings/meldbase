@@ -76,7 +76,7 @@ const secondPage = firstPage.nextCursor
 ```
 
 The cursor is bounded and validated against the supplied sort. It is not an
-authorization token: normal collection policy, tenant constraints, field
+authorization token: normal collection policy, workspace constraints, field
 policy, and result limits are applied again to every page request. `after`
 requires `first` and cannot be combined with `skip`; `fetchPage()` likewise
 requires `first`.

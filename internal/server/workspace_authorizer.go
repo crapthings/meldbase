@@ -74,7 +74,7 @@ type WorkspaceAuthorizerConfig struct {
 
 // WorkspaceAuthorizer is a data-only Authorizer for ordinary application
 // collections. It is intentionally not a user or membership store; an external
-// identity provider supplies Actor.TenantID from the active workspace claim.
+// identity provider supplies Actor.WorkspaceID from the active workspace claim.
 type WorkspaceAuthorizer struct {
 	collections    map[string]workspaceCollectionAccess
 	rpcMethods     map[string]struct{}
@@ -194,7 +194,7 @@ func (a *WorkspaceAuthorizer) AuthorizeInsert(_ context.Context, actor Actor, co
 	if rule.Mode == CollectionAccessReadOnly {
 		return InsertPolicy{}, ErrForbidden
 	}
-	setFields := meldbase.Document{a.workspaceField: meldbase.String(actor.TenantID)}
+	setFields := meldbase.Document{a.workspaceField: meldbase.String(actor.WorkspaceID)}
 	if rule.Mode == CollectionAccessOwner {
 		setFields[rule.OwnerField] = meldbase.String(actor.ID)
 	}
@@ -254,7 +254,7 @@ func (a *WorkspaceAuthorizer) AuthorizeDelete(ctx context.Context, actor Actor, 
 // verified workspace actor. The allowlist deliberately grants no role or
 // record-level authority; those decisions remain in the named RPC handler.
 func (a *WorkspaceAuthorizer) AuthorizeRPC(_ context.Context, actor Actor, method string) error {
-	if actor.ID == "" || actor.TenantID == "" {
+	if actor.ID == "" || actor.WorkspaceID == "" {
 		return ErrForbidden
 	}
 	if _, allowed := a.rpcMethods[method]; !allowed {
@@ -264,7 +264,7 @@ func (a *WorkspaceAuthorizer) AuthorizeRPC(_ context.Context, actor Actor, metho
 }
 
 func (a *WorkspaceAuthorizer) constraint(actor Actor, rule workspaceCollectionAccess) (meldbase.QuerySpec, error) {
-	filter := meldbase.Filter{a.workspaceField: actor.TenantID}
+	filter := meldbase.Filter{a.workspaceField: actor.WorkspaceID}
 	if rule.Mode == CollectionAccessOwner {
 		filter[rule.OwnerField] = actor.ID
 	}
@@ -272,7 +272,7 @@ func (a *WorkspaceAuthorizer) constraint(actor Actor, rule workspaceCollectionAc
 }
 
 func (a *WorkspaceAuthorizer) allow(actor Actor, collection string) (workspaceCollectionAccess, error) {
-	if actor.ID == "" || actor.TenantID == "" {
+	if actor.ID == "" || actor.WorkspaceID == "" {
 		return workspaceCollectionAccess{}, ErrForbidden
 	}
 	rule, ok := a.collections[collection]

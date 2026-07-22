@@ -31,7 +31,7 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 	methods := map[string]RPCMethod{
 		"math.add": func(_ context.Context, actor Actor, arguments []meldbase.Value) (meldbase.Value, error) {
 			calls.Add(1)
-			if actor.TenantID != "mine" || len(arguments) != 2 {
+			if actor.WorkspaceID != "mine" || len(arguments) != 2 {
 				return meldbase.Value{}, errors.New("bad invocation")
 			}
 			left, leftOK := arguments[0].Int64()

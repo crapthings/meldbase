@@ -58,8 +58,8 @@ func TestIndexBuildMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 func TestCompoundIndexBuildMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 	created := time.UnixMilli(1_700_000_000_000).UTC()
 	meta := IndexBuildMeta{
-		BuildID: [16]byte{1}, CollectionID: 7, Collection: "items", Name: "tenant_score", FieldPath: "tenant",
-		Fields: []IndexField{{Path: "tenant", Direction: 1}, {Path: "score", Direction: -1}},
+		BuildID: [16]byte{1}, CollectionID: 7, Collection: "items", Name: "workspace_score", FieldPath: "workspace",
+		Fields: []IndexField{{Path: "workspace", Direction: 1}, {Path: "score", Direction: -1}},
 		Phase:  IndexBuildScan, SourceSequence: 9, SourceCatalogRoot: 20, ShadowRoot: 21,
 		AppliedSequence: 9, CreatedAt: created, UpdatedAt: created,
 	}

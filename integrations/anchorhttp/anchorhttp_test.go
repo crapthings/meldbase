@@ -246,7 +246,7 @@ func TestConfigurationRejectsUnsafeMembershipAndPaths(t *testing.T) {
 	if _, err := NewHandler(HandlerOptions{Directory: filepath.Join(t.TempDir(), "missing"), ClusterID: testClusterID, Members: []string{"member-config"}, MemberID: "member-config", Keys: map[string][]byte{testKeyID: testSharedKey}}); err == nil {
 		t.Fatal("missing server directory accepted")
 	}
-	for _, name := range []string{"", ".", "..", "../escape", "tenant/name", "name?query"} {
+	for _, name := range []string{"", ".", "..", "../escape", "workspace/name", "name?query"} {
 		if validAnchorName(name) {
 			t.Fatalf("unsafe anchor name %q accepted", name)
 		}

@@ -725,7 +725,7 @@ func usesEphemeralPort(address string) bool {
 type devAccess struct{}
 
 func (devAccess) AuthenticateHTTP(*http.Request) (meldserver.Actor, error) {
-	return meldserver.Actor{ID: "development", TenantID: "development"}, nil
+	return meldserver.Actor{ID: "development", WorkspaceID: "development"}, nil
 }
 func (devAccess) AuthorizeQuery(context.Context, meldserver.Actor, string, meldbase.QuerySpec) (meldserver.QueryPolicy, error) {
 	return meldserver.QueryPolicy{PolicyVersion: "development-v1", MaxResults: meldbase.DefaultQueryLimits.MaxLimit, AllowAllQueryPaths: true, AllowAllAggregateFields: true, AllowAllResultFields: true}, nil

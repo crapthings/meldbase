@@ -95,40 +95,40 @@ func TestOpenPersistsCompoundIndexCRUDAndPlanner(t *testing.T) {
 	items := db.Collection("items")
 	first, second, other, missing := DocumentID{1}, DocumentID{2}, DocumentID{3}, DocumentID{4}
 	if _, err := items.InsertMany(context.Background(), []Document{
-		{"_id": ID(first), "tenant": String("a"), "score": Int(8)},
-		{"_id": ID(second), "tenant": String("a"), "score": Int(9)},
-		{"_id": ID(other), "tenant": String("b"), "score": Int(8)},
-		{"_id": ID(missing), "tenant": String("a")},
+		{"_id": ID(first), "workspace": String("a"), "score": Int(8)},
+		{"_id": ID(second), "workspace": String("a"), "score": Int(9)},
+		{"_id": ID(other), "workspace": String("b"), "score": Int(8)},
+		{"_id": ID(missing), "workspace": String("a")},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	fields := []IndexField{{Field: "tenant", Order: 1}, {Field: "score", Order: -1}}
-	if err := items.CreateIndex(context.Background(), "tenant_score", fields, IndexOptions{Unique: true}); err != nil {
+	fields := []IndexField{{Field: "workspace", Order: 1}, {Field: "score", Order: -1}}
+	if err := items.CreateIndex(context.Background(), "workspace_score", fields, IndexOptions{Unique: true}); err != nil {
 		t.Fatal(err)
 	}
 	if db.durability.(*durableStore).file.Meta().RequiredFeatures&storage.RequiredFeatureCompoundIndexes == 0 {
 		t.Fatal("compound index did not negotiate its required storage feature")
 	}
-	if got := queryIDs(t, items, Filter{"tenant": "a"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{first, second, missing}) {
+	if got := queryIDs(t, items, Filter{"workspace": "a"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{first, second, missing}) {
 		t.Fatalf("prefix query IDs = %v", got)
 	}
-	if explain, err := items.Explain(context.Background(), Filter{"tenant": "a"}); err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "tenant_score" {
+	if explain, err := items.Explain(context.Background(), Filter{"workspace": "a"}); err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "workspace_score" {
 		t.Fatalf("explain=%+v err=%v", explain, err)
 	}
-	if got := queryIDs(t, items, Filter{"tenant": "a", "score": map[string]any{"$gt": int64(8), "$lte": int64(9)}}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second}) {
+	if got := queryIDs(t, items, Filter{"workspace": "a", "score": map[string]any{"$gt": int64(8), "$lte": int64(9)}}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second}) {
 		t.Fatalf("descending range IDs = %v", got)
 	}
-	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "score": Int(8)}); !errors.Is(err, ErrDuplicateKey) {
+	if _, err := items.InsertOne(context.Background(), Document{"workspace": String("a"), "score": Int(8)}); !errors.Is(err, ErrDuplicateKey) {
 		t.Fatalf("duplicate tuple error = %v", err)
 	}
-	partial, err := items.InsertOne(context.Background(), Document{"tenant": String("a")})
+	partial, err := items.InsertOne(context.Background(), Document{"workspace": String("a")})
 	if err != nil {
 		t.Fatalf("second partial tuple conflicted: %v", err)
 	}
 	if _, err := items.UpdateOne(context.Background(), Filter{"_id": second}, Update{"$set": map[string]any{"score": int64(7)}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := queryIDs(t, items, Filter{"tenant": "a", "score": int64(9)}, QueryOptions{}); len(got) != 0 {
+	if got := queryIDs(t, items, Filter{"workspace": "a", "score": int64(9)}, QueryOptions{}); len(got) != 0 {
 		t.Fatalf("old tuple remained after update: %v", got)
 	}
 	if err := db.Close(); err != nil {
@@ -141,27 +141,27 @@ func TestOpenPersistsCompoundIndexCRUDAndPlanner(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
 	items = reopened.Collection("items")
-	if got := queryIDs(t, items, Filter{"tenant": "a"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{first, second, missing, partial}) {
+	if got := queryIDs(t, items, Filter{"workspace": "a"}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{first, second, missing, partial}) {
 		t.Fatalf("reopened prefix IDs = %v", got)
 	}
-	if got := queryIDs(t, items, Filter{"tenant": "a", "score": int64(7)}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second}) {
+	if got := queryIDs(t, items, Filter{"workspace": "a", "score": int64(7)}, QueryOptions{}); !reflect.DeepEqual(got, []DocumentID{second}) {
 		t.Fatalf("reopened tuple IDs = %v", got)
 	}
 	snapshot, err := reopened.durability.(*durableStore).file.OpenSnapshot()
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta, exists, err := snapshot.IndexMeta("items", "tenant_score")
+	meta, exists, err := snapshot.IndexMeta("items", "workspace_score")
 	_ = snapshot.Close()
-	if err != nil || !exists || meta.FieldPath != "tenant" || !meta.Unique || !reflect.DeepEqual(meta.Fields, []storage.IndexField{
-		{Path: "tenant", Direction: 1}, {Path: "score", Direction: -1},
+	if err != nil || !exists || meta.FieldPath != "workspace" || !meta.Unique || !reflect.DeepEqual(meta.Fields, []storage.IndexField{
+		{Path: "workspace", Direction: 1}, {Path: "score", Direction: -1},
 	}) {
 		t.Fatalf("compound index meta=%+v exists=%t err=%v", meta, exists, err)
 	}
 	if _, err := items.DeleteOne(context.Background(), Filter{"_id": first}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := items.InsertOne(context.Background(), Document{"tenant": String("a"), "score": Int(8)}); err != nil {
+	if _, err := items.InsertOne(context.Background(), Document{"workspace": String("a"), "score": Int(8)}); err != nil {
 		t.Fatalf("deleted tuple was not released after reopen: %v", err)
 	}
 }

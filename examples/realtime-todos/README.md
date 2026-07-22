@@ -26,7 +26,7 @@ subscription update both views. Set `VITE_MELDBASE_URL` when the API is not at
 For a server configured with JWT workspace isolation, provide an access token
 issued for the active workspace. The example forwards it as a Bearer token to
 both HTTP and the realtime-ticket request; it never sends a client-selected
-workspace or tenant value:
+workspace value:
 
 ```sh
 VITE_MELDBASE_URL=https://api.example.test \

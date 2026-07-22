@@ -6,7 +6,7 @@ import (
 )
 
 // ServerStats is a fixed-cardinality process-session snapshot. It deliberately
-// contains no method, actor, tenant, argument, result or error text.
+// contains no method, actor, workspace, argument, result or error text.
 type ServerStats struct {
 	CapturedAt                time.Time      `json:"capturedAt"`
 	StartedAt                 time.Time      `json:"startedAt"`

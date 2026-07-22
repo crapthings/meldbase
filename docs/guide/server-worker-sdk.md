@@ -62,7 +62,7 @@ const worker = new MeldbaseWorker({
       return {
         message,
         id: actor.id,
-        tenantId: actor.tenantId,
+        workspaceId: actor.workspaceId,
       };
     }),
   },
@@ -99,7 +99,7 @@ typed data.
 write transaction. It receives:
 
 - `context.actor.id` — the authenticated application identity;
-- `context.actor.tenantId` — the authenticated tenant/workspace identifier;
+- `context.actor.workspaceId` — the authenticated active-workspace identifier;
 - `context.signal` — aborted when the client call is canceled or the worker
   connection ends;
 - `arguments_` — the typed values sent to the method.
@@ -114,7 +114,7 @@ an external side effect did not happen.
   const sku = requiredString(arguments_, 0);
   const quote = await pricingService.quote({
     accountID: actor.id,
-    tenantID: actor.tenantId,
+    workspaceID: actor.workspaceId,
     sku,
     signal,
   });
@@ -165,7 +165,7 @@ const methods = {
     const description = requiredString(arguments_, 0);
 
     const id = await tx.insert("orders", {
-      tenant: actor.tenantId,
+      workspace: actor.workspaceId,
       owner: actor.id,
       description,
       status: "draft",
@@ -184,7 +184,7 @@ const methods = {
     const id = requiredString(arguments_, 0);
     const order = await tx.get("orders", id);
 
-    if (order.owner !== actor.id || order.tenant !== actor.tenantId) {
+    if (order.owner !== actor.id || order.workspace !== actor.workspaceId) {
       throw new MeldbaseError("orders.not_owner");
     }
     if (order.status !== "submitted") {
@@ -228,11 +228,11 @@ const publications = {
     // Fields a browser query is allowed to filter on.
     queryPaths: ["status", "createdAt"],
     // Fields it may receive from this publication.
-    resultFields: ["tenant", "owner", "description", "status", "createdAt"],
+    resultFields: ["workspace", "owner", "description", "status", "createdAt"],
   }, ({ actor }) => {
     if (!actor.id) return null;
     return compileQuery({
-      tenant: actor.tenantId,
+      workspace: actor.workspaceId,
       owner: actor.id,
     });
   }),

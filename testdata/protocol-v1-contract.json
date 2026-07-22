@@ -31,7 +31,7 @@
         "name": "actor",
         "required": [
           "id",
-          "tenantId"
+          "workspaceId"
         ],
         "optional": []
       },

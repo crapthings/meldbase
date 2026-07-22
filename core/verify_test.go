@@ -77,15 +77,15 @@ func TestVerifyFileAuditsCompoundAndPartialIndexContents(t *testing.T) {
 	}
 	items := db.Collection("items")
 	if _, err := items.InsertMany(context.Background(), []Document{
-		{"tenant": String("a"), "score": Int(1)},
-		{"tenant": String("a")},
-		{"tenant": String("a")},
+		{"workspace": String("a"), "score": Int(1)},
+		{"workspace": String("a")},
+		{"workspace": String("a")},
 		{"score": Int(2)},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := items.CreateIndex(context.Background(), "tenant_score", []IndexField{
-		{Field: "tenant", Order: 1}, {Field: "score", Order: -1},
+	if err := items.CreateIndex(context.Background(), "workspace_score", []IndexField{
+		{Field: "workspace", Order: 1}, {Field: "score", Order: -1},
 	}, IndexOptions{Unique: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,9 +106,9 @@ func TestVerifyFileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 	}
 	ids := [][16]byte{{1}, {2}, {3}}
 	documents := []Document{
-		{"_id": ID(DocumentID(ids[0])), "tenant": String("a"), "score": Int(3)},
-		{"_id": ID(DocumentID(ids[1])), "tenant": String("a")},
-		{"_id": ID(DocumentID(ids[2])), "tenant": String("b"), "score": Int(1)},
+		{"_id": ID(DocumentID(ids[0])), "workspace": String("a"), "score": Int(3)},
+		{"_id": ID(DocumentID(ids[1])), "workspace": String("a")},
+		{"_id": ID(DocumentID(ids[2])), "workspace": String("b"), "score": Int(1)},
 	}
 	encoded := make([][]byte, len(documents))
 	for index := range documents {
@@ -125,8 +125,8 @@ func TestVerifyFileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	fields := []IndexField{{Field: "tenant", Order: 1}, {Field: "score", Order: -1}}
-	definition := newIndexDefinition("tenant_score", fields, false)
+	fields := []IndexField{{Field: "workspace", Order: 1}, {Field: "score", Order: -1}}
+	definition := newIndexDefinition("workspace_score", fields, false)
 	keys := make([][]byte, len(documents))
 	for index := range documents {
 		keys[index], _, err = projectedIndexBuildKey(encoded[index], definition, DocumentID(ids[index]))
@@ -137,7 +137,7 @@ func TestVerifyFileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 	buildID := [16]byte{9}
 	if _, err := file.BeginIndexBuild(storage.BeginIndexBuildTransaction{
 		BuildID: buildID, Collection: "items", Name: definition.Name,
-		Fields: []storage.IndexField{{Path: "tenant", Direction: 1}, {Path: "score", Direction: -1}},
+		Fields: []storage.IndexField{{Path: "workspace", Direction: 1}, {Path: "score", Direction: -1}},
 	}); err != nil {
 		t.Fatal(err)
 	}

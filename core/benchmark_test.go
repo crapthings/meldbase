@@ -70,13 +70,13 @@ func BenchmarkCompoundIndexPointQuery(b *testing.B) {
 	collection := db.Collection("items")
 	documents := make([]Document, 10_000)
 	for index := range documents {
-		documents[index] = Document{"tenant": Int(int64(index % 100)), "score": Int(int64(index)), "payload": String("small")}
+		documents[index] = Document{"workspace": Int(int64(index % 100)), "score": Int(int64(index)), "payload": String("small")}
 	}
 	if _, err := collection.InsertMany(context.Background(), documents); err != nil {
 		b.Fatal(err)
 	}
-	if err := collection.CreateIndex(context.Background(), "tenant_score", []IndexField{
-		{Field: "tenant", Order: 1}, {Field: "score", Order: -1},
+	if err := collection.CreateIndex(context.Background(), "workspace_score", []IndexField{
+		{Field: "workspace", Order: 1}, {Field: "score", Order: -1},
 	}, IndexOptions{Unique: true}); err != nil {
 		b.Fatal(err)
 	}
@@ -84,15 +84,15 @@ func BenchmarkCompoundIndexPointQuery(b *testing.B) {
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
 		target := int64(index % 10_000)
-		if _, err := collection.FindOne(context.Background(), Filter{"tenant": target % 100, "score": target}); err != nil {
+		if _, err := collection.FindOne(context.Background(), Filter{"workspace": target % 100, "score": target}); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func BenchmarkCompoundIndexKeyEncoding(b *testing.B) {
-	values := []Value{String("tenant-a"), Int(42), Time(time.UnixMilli(1_700_000_000_000))}
-	fields := []IndexField{{Field: "tenant", Order: 1}, {Field: "score", Order: -1}, {Field: "createdAt", Order: -1}}
+	values := []Value{String("workspace-a"), Int(42), Time(time.UnixMilli(1_700_000_000_000))}
+	fields := []IndexField{{Field: "workspace", Order: 1}, {Field: "score", Order: -1}, {Field: "createdAt", Order: -1}}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

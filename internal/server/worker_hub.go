@@ -687,8 +687,8 @@ func (worker *workerConnection) invoke(ctx context.Context, method, mode string,
 	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || (mode == "transactional") != (tx != nil) {
 		return meldbase.Value{}, errors.New("worker invocation unavailable")
 	}
-	if actor.ID == "" || len(actor.ID) > 4096 || len(actor.TenantID) > 4096 ||
-		!utf8.ValidString(actor.ID) || !utf8.ValidString(actor.TenantID) {
+	if actor.ID == "" || len(actor.ID) > 4096 || len(actor.WorkspaceID) > 4096 ||
+		!utf8.ValidString(actor.ID) || !utf8.ValidString(actor.WorkspaceID) {
 		return meldbase.Value{}, errors.New("worker actor identity is invalid")
 	}
 	callToken, err := randomToken16()
@@ -729,7 +729,7 @@ func (worker *workerConnection) invoke(ctx context.Context, method, mode string,
 	defer worker.hub.stats.callsActive.Add(^uint64(0))
 	if err := worker.send(ctx, map[string]any{
 		"v": protocolVersion, "type": "invoke", "callId": callID, "method": method, "mode": mode,
-		"actor": map[string]any{"id": actor.ID, "tenantId": actor.TenantID}, "arguments": wireArguments,
+		"actor": map[string]any{"id": actor.ID, "workspaceId": actor.WorkspaceID}, "arguments": wireArguments,
 	}); err != nil {
 		worker.hub.stats.callsFailed.Add(1)
 		return meldbase.Value{}, err
@@ -756,8 +756,8 @@ func (worker *workerConnection) invoke(ctx context.Context, method, mode string,
 
 func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, query meldbase.QuerySpec, publication workerPublication) (QueryPolicy, error) {
 	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || publication.lease == nil ||
-		actor.ID == "" || len(actor.ID) > 4096 || len(actor.TenantID) > 4096 ||
-		!utf8.ValidString(actor.ID) || !utf8.ValidString(actor.TenantID) {
+		actor.ID == "" || len(actor.ID) > 4096 || len(actor.WorkspaceID) > 4096 ||
+		!utf8.ValidString(actor.ID) || !utf8.ValidString(actor.WorkspaceID) {
 		return QueryPolicy{}, errors.New("worker policy invocation unavailable")
 	}
 	encodedQuery, err := meldbase.MarshalQuerySpecJSON(query)
@@ -796,7 +796,7 @@ func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, q
 	defer worker.hub.stats.policyActive.Add(^uint64(0))
 	if err := worker.send(evaluationContext, map[string]any{
 		"v": protocolVersion, "type": "authorize_query", "callId": callID, "collection": publication.collection,
-		"actor": map[string]any{"id": actor.ID, "tenantId": actor.TenantID},
+		"actor": map[string]any{"id": actor.ID, "workspaceId": actor.WorkspaceID},
 		"query": json.RawMessage(encodedQuery),
 	}); err != nil {
 		worker.hub.stats.policyFailed.Add(1)

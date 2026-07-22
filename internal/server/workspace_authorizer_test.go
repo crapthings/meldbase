@@ -28,10 +28,10 @@ func newWorkspaceTestAuthenticator(t *testing.T, secret []byte, now time.Time) *
 	return authenticator
 }
 
-func signedWorkspaceJWT(t *testing.T, secret []byte, actorID, tenantID string, now time.Time) string {
+func signedWorkspaceJWT(t *testing.T, secret []byte, actorID, workspaceID string, now time.Time) string {
 	t.Helper()
 	return signedHS256JWT(t, secret, map[string]any{
-		"iss": workspaceTestJWTIssuer, "aud": workspaceTestJWTAudience, "sub": actorID, "workspace_id": tenantID, "exp": now.Add(time.Minute).Unix(),
+		"iss": workspaceTestJWTIssuer, "aud": workspaceTestJWTAudience, "sub": actorID, "workspace_id": workspaceID, "exp": now.Add(time.Minute).Unix(),
 	})
 }
 
@@ -278,7 +278,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 		t.Fatalf("manifest config=%+v err=%v", config, err)
 	}
 	authorizer, err := NewWorkspaceAuthorizer(config)
-	if err != nil || authorizer.AuthorizeRPC(context.Background(), Actor{ID: "user", TenantID: "team"}, "incidents.declare") != nil || authorizer.AuthorizeRPC(context.Background(), Actor{ID: "user", TenantID: "team"}, "incidents.resolve") == nil {
+	if err != nil || authorizer.AuthorizeRPC(context.Background(), Actor{ID: "user", WorkspaceID: "team"}, "incidents.declare") != nil || authorizer.AuthorizeRPC(context.Background(), Actor{ID: "user", WorkspaceID: "team"}, "incidents.resolve") == nil {
 		t.Fatalf("RPC allowlist authorizer=%v", err)
 	}
 	for _, input := range []string{
@@ -308,7 +308,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err := emptyFields.AuthorizeQuery(context.Background(), Actor{ID: "user", TenantID: "team"}, "empty", meldbase.QuerySpec{})
+	policy, err := emptyFields.AuthorizeQuery(context.Background(), Actor{ID: "user", WorkspaceID: "team"}, "empty", meldbase.QuerySpec{})
 	if err != nil || policy.AllowAllResultFields || len(policy.AllowedResultFields) != 0 || policy.AllowAllAggregateFields || len(policy.AllowedAggregateFields) != 0 {
 		t.Fatalf("explicit empty result fields policy=%+v err=%v", policy, err)
 	}
@@ -322,7 +322,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err = aggregateFields.AuthorizeQuery(context.Background(), Actor{ID: "user", TenantID: "team"}, "aggregate", meldbase.QuerySpec{})
+	policy, err = aggregateFields.AuthorizeQuery(context.Background(), Actor{ID: "user", WorkspaceID: "team"}, "aggregate", meldbase.QuerySpec{})
 	if err != nil || policy.AllowAllAggregateFields || len(policy.AllowedAggregateFields) != 1 {
 		t.Fatalf("explicit aggregate fields policy=%+v err=%v", policy, err)
 	}
@@ -433,7 +433,7 @@ func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T
 type workspaceRPCAllowlist struct{}
 
 func (workspaceRPCAllowlist) AuthorizeRPC(_ context.Context, actor Actor, method string) error {
-	if actor.ID != "user-a" || actor.TenantID != "team-a" || method != "workspace.echo" {
+	if actor.ID != "user-a" || actor.WorkspaceID != "team-a" || method != "workspace.echo" {
 		return ErrForbidden
 	}
 	return nil
@@ -467,7 +467,7 @@ func TestJWTWorkspaceActorIsForwardedToTrustedWorkerRPC(t *testing.T) {
 	go func() {
 		invoke := readMap(t, workerContext, worker)
 		actor, _ := invoke["actor"].(map[string]any)
-		if invoke["type"] != "invoke" || actor["id"] != "user-a" || actor["tenantId"] != "team-a" {
+		if invoke["type"] != "invoke" || actor["id"] != "user-a" || actor["workspaceId"] != "team-a" {
 			workerDone <- context.Canceled
 			return
 		}

@@ -169,8 +169,8 @@ func TestIndexMetaCodecRejectsReservedAndInvalidValues(t *testing.T) {
 
 func TestCompoundIndexMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 	meta := IndexMeta{
-		Name: "tenant_score", FieldPath: "tenant",
-		Fields: []IndexField{{Path: "tenant", Direction: 1}, {Path: "score", Direction: -1}},
+		Name: "workspace_score", FieldPath: "workspace",
+		Fields: []IndexField{{Path: "workspace", Direction: 1}, {Path: "score", Direction: -1}},
 		Unique: true, Root: 2, CreatedSequence: 1, UpdatedSequence: 2,
 	}
 	encoded, err := encodeIndexMeta(meta)
@@ -196,7 +196,7 @@ func TestCompoundIndexMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 		})
 	}
 	duplicate := meta
-	duplicate.Fields = []IndexField{{Path: "tenant", Direction: 1}, {Path: "tenant", Direction: -1}}
+	duplicate.Fields = []IndexField{{Path: "workspace", Direction: 1}, {Path: "workspace", Direction: -1}}
 	if _, err := encodeIndexMeta(duplicate); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("duplicate field error = %v", err)
 	}

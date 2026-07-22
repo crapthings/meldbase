@@ -25,7 +25,7 @@ func (testAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, error) 
 	if request.Header.Get("authorization") != "Bearer valid" {
 		return Actor{}, ErrUnauthenticated
 	}
-	return Actor{ID: "user-1", TenantID: "mine"}, nil
+	return Actor{ID: "user-1", WorkspaceID: "mine"}, nil
 }
 
 type testAuthorizer struct{}
@@ -40,7 +40,7 @@ func (aggregateOnlyFieldAuthorizer) AuthorizeQuery(ctx context.Context, actor Ac
 	if err != nil {
 		return QueryPolicy{}, err
 	}
-	policy.AllowedAggregateFields = map[string]struct{}{"tenant": {}}
+	policy.AllowedAggregateFields = map[string]struct{}{"workspace": {}}
 	return policy, nil
 }
 
@@ -73,7 +73,7 @@ func (testAuthorizer) AuthorizeQuery(_ context.Context, actor Actor, collection 
 	if collection != "items" || actor.ID != "user-1" {
 		return QueryPolicy{}, ErrForbidden
 	}
-	constraint, err := meldbase.CompileQuery(meldbase.Filter{"tenant": actor.TenantID}, meldbase.QueryOptions{})
+	constraint, err := meldbase.CompileQuery(meldbase.Filter{"workspace": actor.WorkspaceID}, meldbase.QueryOptions{})
 	if err != nil {
 		return QueryPolicy{}, err
 	}
@@ -89,7 +89,7 @@ func (testAuthorizer) AuthorizeInsert(_ context.Context, actor Actor, collection
 	if collection != "items" || actor.ID != "user-1" {
 		return InsertPolicy{}, ErrForbidden
 	}
-	return InsertPolicy{AllowedInputFields: map[string]struct{}{"rank": {}, "title": {}}, SetFields: meldbase.Document{"tenant": meldbase.String(actor.TenantID)}, AllowedResultFields: map[string]struct{}{"rank": {}, "title": {}}}, nil
+	return InsertPolicy{AllowedInputFields: map[string]struct{}{"rank": {}, "title": {}}, SetFields: meldbase.Document{"workspace": meldbase.String(actor.WorkspaceID)}, AllowedResultFields: map[string]struct{}{"rank": {}, "title": {}}}, nil
 }
 
 func (testAuthorizer) AuthorizeUpdate(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec, _ meldbase.MutationSpec) (UpdatePolicy, error) {
@@ -138,8 +138,8 @@ func TestHTTPQueryAppliesRowPolicyBeforeLimitAndRedactsFields(t *testing.T) {
 	if id != mineID {
 		t.Fatalf("id = %s, want %s", id, mineID)
 	}
-	if _, leaked := document["tenant"]; leaked {
-		t.Fatal("tenant field leaked through projection")
+	if _, leaked := document["workspace"]; leaked {
+		t.Fatal("workspace field leaked through projection")
 	}
 	if title, _ := document["title"].StringValue(); title != "visible" {
 		t.Fatalf("title = %q", title)
@@ -155,7 +155,7 @@ func TestHTTPQueryAppliesRowPolicyBeforeLimitAndRedactsFields(t *testing.T) {
 		t.Fatalf("unauthorized status = %d", unauthorizedResponse.StatusCode)
 	}
 
-	forbiddenQuery := `{"version":1,"query":{"version":1,"where":{"op":"exists","path":"tenant","value":true}}}`
+	forbiddenQuery := `{"version":1,"query":{"version":1,"where":{"op":"exists","path":"workspace","value":true}}}`
 	forbidden, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/collections/items/query", strings.NewReader(forbiddenQuery))
 	forbidden.Header.Set("authorization", "Bearer valid")
 	forbiddenResponse, err := http.DefaultClient.Do(forbidden)
@@ -172,7 +172,7 @@ func TestHTTPQueryAppliesRowPolicyBeforeLimitAndRedactsFields(t *testing.T) {
 func TestHTTPCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 	db, _, server := newTestServer(t)
 	collection := db.Collection("items")
-	if err := collection.CreateIndex(context.Background(), "by_tenant", []meldbase.IndexField{{Field: "tenant", Order: 1}}, meldbase.IndexOptions{}); err != nil {
+	if err := collection.CreateIndex(context.Background(), "by_workspace", []meldbase.IndexField{{Field: "workspace", Order: 1}}, meldbase.IndexOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	insertServerDocument(t, collection, "other", 1, "hidden")
@@ -207,7 +207,7 @@ func TestHTTPCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 func TestHTTPGroupCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 	db, _, server := newTestServer(t)
 	collection := db.Collection("items")
-	if err := collection.CreateIndex(context.Background(), "by_tenant", []meldbase.IndexField{{Field: "tenant", Order: 1}}, meldbase.IndexOptions{}); err != nil {
+	if err := collection.CreateIndex(context.Background(), "by_workspace", []meldbase.IndexField{{Field: "workspace", Order: 1}}, meldbase.IndexOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	insertServerDocument(t, collection, "other", 0, "hidden")
@@ -248,7 +248,7 @@ func TestHTTPGroupCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 		}
 	}
 
-	forbidden, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/collections/items/group-count", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}},"groupBy":"tenant"}`))
+	forbidden, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/collections/items/group-count", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}},"groupBy":"workspace"}`))
 	forbidden.Header.Set("authorization", "Bearer valid")
 	forbiddenResponse, err := http.DefaultClient.Do(forbidden)
 	if err != nil {
@@ -261,7 +261,7 @@ func TestHTTPGroupCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 
 	_, _, aggregateOnlyServer := newTestServerWithAuthorizer(t, aggregateOnlyFieldAuthorizer{})
 	defer aggregateOnlyServer.Close()
-	aggregateOnly, _ := http.NewRequest(http.MethodPost, aggregateOnlyServer.URL+"/v1/collections/items/group-count", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}},"groupBy":"tenant"}`))
+	aggregateOnly, _ := http.NewRequest(http.MethodPost, aggregateOnlyServer.URL+"/v1/collections/items/group-count", strings.NewReader(`{"version":1,"query":{"version":1,"where":{"op":"true"}},"groupBy":"workspace"}`))
 	aggregateOnly.Header.Set("authorization", "Bearer valid")
 	aggregateOnlyResponse, err := http.DefaultClient.Do(aggregateOnly)
 	if err != nil {
@@ -299,18 +299,18 @@ func TestHTTPInsertAppliesServerOwnedFieldsAndRejectsForbiddenInput(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, leaked := returned["tenant"]; leaked {
-		t.Fatal("server-owned tenant leaked in response")
+	if _, leaked := returned["workspace"]; leaked {
+		t.Fatal("server-owned workspace leaked in response")
 	}
 	stored, err := db.Collection("items").FindOne(context.Background(), meldbase.Filter{"title": "created"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tenant, _ := stored["tenant"].StringValue(); tenant != "mine" {
-		t.Fatalf("tenant = %q", tenant)
+	if workspace, _ := stored["workspace"].StringValue(); workspace != "mine" {
+		t.Fatalf("workspace = %q", workspace)
 	}
 
-	forbiddenDocument := `{"t":"object","v":[["tenant",{"t":"string","v":"other"}],["title",{"t":"string","v":"attack"}]]}`
+	forbiddenDocument := `{"t":"object","v":[["workspace",{"t":"string","v":"other"}],["title",{"t":"string","v":"attack"}]]}`
 	forbidden, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/collections/items/documents", strings.NewReader(`{"version":1,"document":`+forbiddenDocument+`}`))
 	forbidden.Header.Set("authorization", "Bearer valid")
 	forbiddenResponse, err := http.DefaultClient.Do(forbidden)
@@ -345,16 +345,16 @@ func TestHTTPUpdateDeleteApplyRowAndFieldPolicies(t *testing.T) {
 	if updateResult.MatchedCount != 2 || updateResult.ModifiedCount != 2 {
 		t.Fatalf("update = %+v", updateResult)
 	}
-	other, err := collection.FindOne(context.Background(), meldbase.Filter{"tenant": "other"})
+	other, err := collection.FindOne(context.Background(), meldbase.Filter{"workspace": "other"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	title, _ := other["title"].StringValue()
 	if title != "other" {
-		t.Fatalf("cross-tenant update leaked, title = %q", title)
+		t.Fatalf("cross-workspace update leaked, title = %q", title)
 	}
 
-	forbidden := `{"version":1,"operations":[{"op":"set","path":"tenant","value":{"t":"string","v":"other"}}]}`
+	forbidden := `{"version":1,"operations":[{"op":"set","path":"workspace","value":{"t":"string","v":"other"}}]}`
 	response = postMutation(t, server.URL, `{"version":1,"action":"updateMany","query":`+query+`,"update":`+forbidden+`}`)
 	response.Body.Close()
 	if response.StatusCode != http.StatusForbidden {
@@ -824,8 +824,8 @@ func TestRealtimeDeltaModeUsesVisibilityOverlayAndOpaqueTokenChain(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, leaked := initialDocument["tenant"]; leaked {
-		t.Fatal("tenant leaked in delta initial snapshot")
+	if _, leaked := initialDocument["workspace"]; leaked {
+		t.Fatal("workspace leaked in delta initial snapshot")
 	}
 	if _, leaked := initialDocument["secret"]; leaked {
 		t.Fatal("secret leaked in delta initial snapshot")
@@ -863,8 +863,8 @@ func TestRealtimeDeltaModeUsesVisibilityOverlayAndOpaqueTokenChain(t *testing.T)
 	if title, _ := visible["title"].StringValue(); title != "visible-change" {
 		t.Fatalf("visible title = %q", title)
 	}
-	if _, leaked := visible["tenant"]; leaked {
-		t.Fatal("tenant leaked in delta change")
+	if _, leaked := visible["workspace"]; leaked {
+		t.Fatal("workspace leaked in delta change")
 	}
 	if _, leaked := visible["secret"]; leaked {
 		t.Fatal("secret leaked in delta change")
@@ -1136,7 +1136,7 @@ func TestRealtimeResumeAcknowledgesThenReplaysAndSafelyResyncs(t *testing.T) {
 		t.Fatal(err)
 	}
 	source.initial = meldbase.QuerySnapshot{Token: 1, Documents: []meldbase.Document{{
-		"_id": meldbase.ID(id), "tenant": meldbase.String("mine"), "rank": meldbase.Int(1), "title": meldbase.String("one"),
+		"_id": meldbase.ID(id), "workspace": meldbase.String("mine"), "rank": meldbase.Int(1), "title": meldbase.String("one"),
 	}}}
 	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "subscribe", "mode": "delta", "requestId": "resume", "collection": "items", "query": query, "resumeToken": initial.Token}); err != nil {
 		t.Fatal(err)
@@ -1147,7 +1147,7 @@ func TestRealtimeResumeAcknowledgesThenReplaysAndSafelyResyncs(t *testing.T) {
 	}
 	source.deltas <- meldbase.QueryDelta{FromToken: 1, Token: 2, Operations: []meldbase.QueryDeltaOperation{{
 		Kind: meldbase.QueryDeltaChange, DocumentID: id, Document: meldbase.Document{
-			"_id": meldbase.ID(id), "tenant": meldbase.String("mine"), "rank": meldbase.Int(1), "title": meldbase.String("two"),
+			"_id": meldbase.ID(id), "workspace": meldbase.String("mine"), "rank": meldbase.Int(1), "title": meldbase.String("two"),
 		},
 	}}}
 	delta := readMap(t, ctx, connection)
@@ -1192,7 +1192,7 @@ func TestRealtimeResumedSubscriptionHonorsPolicyLeaseRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	source.initial = meldbase.QuerySnapshot{Token: 1, Documents: []meldbase.Document{{
-		"_id": meldbase.ID(id), "tenant": meldbase.String("mine"), "rank": meldbase.Int(1), "title": meldbase.String("one"),
+		"_id": meldbase.ID(id), "workspace": meldbase.String("mine"), "rank": meldbase.Int(1), "title": meldbase.String("one"),
 	}}}
 	if err := writeSocketJSON(ctx, connection, map[string]any{"v": 1, "type": "subscribe", "mode": "delta", "requestId": "resume-policy", "collection": "items", "query": query, "resumeToken": initial.Token}); err != nil {
 		t.Fatal(err)
@@ -1511,9 +1511,9 @@ func newTestServerWithAuthorizer(t *testing.T, authorizer Authorizer) (*meldbase
 	return db, handler, server
 }
 
-func insertServerDocument(t *testing.T, collection *meldbase.Collection, tenant string, rank int64, title string) meldbase.DocumentID {
+func insertServerDocument(t *testing.T, collection *meldbase.Collection, workspace string, rank int64, title string) meldbase.DocumentID {
 	t.Helper()
-	id, err := collection.InsertOne(context.Background(), meldbase.Document{"tenant": meldbase.String(tenant), "rank": meldbase.Int(rank), "title": meldbase.String(title)})
+	id, err := collection.InsertOne(context.Background(), meldbase.Document{"workspace": meldbase.String(workspace), "rank": meldbase.Int(rank), "title": meldbase.String(title)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -130,7 +130,7 @@ func TestWorkerProtocolV1ContractIsCanonical(t *testing.T) {
 		{Type: "tx_op", Required: []string{"callId", "collection", "opId", "operation", "type", "v"}, Optional: []string{"document", "id", "mutation"}},
 	}
 	wantNested := []protocolShapeContract{
-		{Name: "actor", Required: []string{"id", "tenantId"}},
+		{Name: "actor", Required: []string{"id", "workspaceId"}},
 		{Name: "error", Required: []string{"code", "kind"}, Optional: []string{"data"}},
 	}
 	if !equalProtocolFrames(workerContract.HubFrames, wantHub) || !equalProtocolFrames(workerContract.WorkerFrames, wantWorker) || !equalProtocolShapes(workerContract.NestedShapes, wantNested) {

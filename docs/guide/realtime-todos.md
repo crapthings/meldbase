@@ -53,7 +53,7 @@ pnpm --filter @meldbase/example-realtime-todos dev
 
 The server verifies the bearer token for both the HTTP request and the realtime
 ticket exchange. It derives the active workspace from the signed token; the
-example never sends a client-selected tenant. To switch workspaces, obtain a
+example never sends a client-selected workspace. To switch workspaces, obtain a
 new token after your identity service has checked membership, then restart the
 example with it.
 

@@ -77,7 +77,7 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
     "transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
   ]);
   assert.deepEqual(contract.workerProtocol.nestedShapes, [
-    { name: "actor", required: ["id", "tenantId"], optional: [] },
+    { name: "actor", required: ["id", "workspaceId"], optional: [] },
     { name: "error", required: ["code", "kind"], optional: ["data"] },
   ]);
   assert.deepEqual(contract.workerProtocol.hubFrames, [
@@ -150,7 +150,7 @@ async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSock
 test("server worker registers without URL credentials and handles typed RPC", async () => {
   const value = harness({
     "math.echo": rpc((context, arguments_) => {
-      assert.deepEqual(context.actor, { id: "user-1", tenantId: "tenant-a" });
+      assert.deepEqual(context.actor, { id: "user-1", workspaceId: "workspace-a" });
       return arguments_[0]!;
     }),
     "orders.reject": rpc(() => { throw new MeldbaseError("orders.not_ready", { retryAfter: 60n }); }),
@@ -163,7 +163,7 @@ test("server worker registers without URL credentials and handles typed RPC", as
 
   socket.message({
     v: 1, type: "invoke", callId: "call-1", method: "math.echo", mode: "rpc",
-    actor: { id: "user-1", tenantId: "tenant-a" }, arguments: [{ t: "int64", v: "42" }],
+    actor: { id: "user-1", workspaceId: "workspace-a" }, arguments: [{ t: "int64", v: "42" }],
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -172,7 +172,7 @@ test("server worker registers without URL credentials and handles typed RPC", as
 
   socket.message({
     v: 1, type: "invoke", callId: "call-2", method: "orders.reject", mode: "rpc",
-    actor: { id: "user-1", tenantId: "" }, arguments: [],
+    actor: { id: "user-1", workspaceId: "" }, arguments: [],
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -268,7 +268,7 @@ test("transactional worker serializes point operations and returns one result", 
   const socket = await startHarness(value);
   socket.message({
     v: 1, type: "invoke", callId: "call-tx", method: "orders.create", mode: "transactional",
-    actor: { id: "user-1", tenantId: "" }, arguments: [],
+    actor: { id: "user-1", workspaceId: "" }, arguments: [],
   });
 
   await waitFor(() => socket.sent.length === 1);
@@ -330,7 +330,7 @@ test("worker cancellation aborts handler and reconnect re-registers", async () =
   const first = await startHarness(value);
   first.message({
     v: 1, type: "invoke", callId: "slow-call", method: "slow", mode: "rpc",
-    actor: { id: "user-1", tenantId: "" }, arguments: [],
+    actor: { id: "user-1", workspaceId: "" }, arguments: [],
   });
   first.message({ v: 1, type: "cancel", callId: "slow-call" });
   await waitFor(() => aborted);
@@ -357,9 +357,9 @@ test("publication returns only a data constraint and static visibility declarati
    publications: {
       orders: publish({ version: "orders-v1", maxResults: 50, queryPaths, resultFields: ["status", "description"] }, ({ actor, query }) => {
         assert.equal(query.where.op, "true");
-        if (actor.tenantId === "blocked") return null;
-        assert.equal(actor.tenantId, "tenant-a");
-        return compileQuery({ tenant: actor.tenantId });
+        if (actor.workspaceId === "blocked") return null;
+        assert.equal(actor.workspaceId, "workspace-a");
+        return compileQuery({ workspace: actor.workspaceId });
       }),
     },
     webSocketFactory: () => {
@@ -386,16 +386,16 @@ test("publication returns only a data constraint and static visibility declarati
   await started;
   socket.message({
     v: 1, type: "authorize_query", callId: "policy-1", collection: "orders",
-    actor: { id: "user-1", tenantId: "tenant-a" }, query: { version: 1, where: { op: "true" } },
+    actor: { id: "user-1", workspaceId: "workspace-a" }, query: { version: 1, where: { op: "true" } },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
     v: 1, type: "policy", callId: "policy-1",
-    constraint: { version: 1, where: { op: "compare", cmp: "eq", path: "tenant", value: { t: "string", v: "tenant-a" } } },
+    constraint: { version: 1, where: { op: "compare", cmp: "eq", path: "workspace", value: { t: "string", v: "workspace-a" } } },
   });
   socket.message({
     v: 1, type: "authorize_query", callId: "policy-2", collection: "orders",
-    actor: { id: "user-2", tenantId: "blocked" }, query: { version: 1, where: { op: "true" } },
+    actor: { id: "user-2", workspaceId: "blocked" }, query: { version: 1, where: { op: "true" } },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
@@ -437,7 +437,7 @@ test("worker rejects unsafe configuration and protocol frames", async () => {
   await started;
   socket.message({
     v: 1, type: "invoke", callId: "legacy-identity", method: "ok", mode: "rpc",
-    principal: { subject: "user-1", tenant: "team-a" }, arguments: [],
+    principal: { subject: "user-1", workspace: "team-a" }, arguments: [],
   });
   await waitFor(() => errors.length > 0);
   assert.match(errors[0]!.message, /unknown or missing fields|Invalid invoke frame/);

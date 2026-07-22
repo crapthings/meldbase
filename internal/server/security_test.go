@@ -9,7 +9,7 @@ import (
 )
 
 func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
-	constraint, err := meldbase.CompileQuery(meldbase.Filter{"tenant": "mine"}, meldbase.QueryOptions{})
+	constraint, err := meldbase.CompileQuery(meldbase.Filter{"workspace": "mine"}, meldbase.QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
 	queryPaths["secret"] = struct{}{}
 	aggregateFields["secret"] = struct{}{}
 	resultFields["secret"] = struct{}{}
-	constraint, _ = meldbase.CompileQuery(meldbase.Filter{"tenant": "other"}, meldbase.QueryOptions{})
+	constraint, _ = meldbase.CompileQuery(meldbase.Filter{"workspace": "other"}, meldbase.QueryOptions{})
 
 	secretQuery, _ := meldbase.CompileQuery(meldbase.Filter{"secret": "value"}, meldbase.QueryOptions{})
 	if _, err := applyPolicy(secretQuery, frozen); !errors.Is(err, ErrForbidden) {
@@ -35,8 +35,8 @@ func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	documents := effective.Execute([]meldbase.Document{
-		{"tenant": meldbase.String("mine"), "title": meldbase.String("visible")},
-		{"tenant": meldbase.String("other"), "title": meldbase.String("hidden")},
+		{"workspace": meldbase.String("mine"), "title": meldbase.String("visible")},
+		{"workspace": meldbase.String("other"), "title": meldbase.String("hidden")},
 	})
 	if len(documents) != 1 {
 		t.Fatalf("mutated constraint changed frozen policy: %+v", documents)
@@ -53,7 +53,7 @@ func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
 func TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases(t *testing.T) {
 	baseLease, _ := NewQueryPolicyLease("base-lease")
 	workerLease, _ := NewQueryPolicyLease("worker-lease")
-	baseConstraint, _ := meldbase.CompileQuery(meldbase.Filter{"tenant": "mine"}, meldbase.QueryOptions{})
+	baseConstraint, _ := meldbase.CompileQuery(meldbase.Filter{"workspace": "mine"}, meldbase.QueryOptions{})
 	workerConstraint, _ := meldbase.CompileQuery(meldbase.Filter{"state": "open"}, meldbase.QueryOptions{})
 	policy, err := intersectQueryPolicies(QueryPolicy{
 		PolicyVersion: "base-v1", Lease: baseLease, Constraint: &baseConstraint, MaxResults: 100,
@@ -78,9 +78,9 @@ func TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases(t *testing.T) {
 		t.Fatal(err)
 	}
 	visible := effective.Execute([]meldbase.Document{
-		{"tenant": meldbase.String("mine"), "state": meldbase.String("open")},
-		{"tenant": meldbase.String("mine"), "state": meldbase.String("closed")},
-		{"tenant": meldbase.String("other"), "state": meldbase.String("open")},
+		{"workspace": meldbase.String("mine"), "state": meldbase.String("open")},
+		{"workspace": meldbase.String("mine"), "state": meldbase.String("closed")},
+		{"workspace": meldbase.String("other"), "state": meldbase.String("open")},
 	})
 	if len(visible) != 1 {
 		t.Fatalf("intersection visible=%+v", visible)
@@ -96,15 +96,15 @@ func TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases(t *testing.T) {
 func TestFreezeMutationPoliciesOwnMapsAndDocuments(t *testing.T) {
 	input := map[string]struct{}{"title": {}}
 	result := map[string]struct{}{"title": {}}
-	setFields := meldbase.Document{"tenant": meldbase.String("mine")}
+	setFields := meldbase.Document{"workspace": meldbase.String("mine")}
 	insert := freezeInsertPolicy(InsertPolicy{AllowedInputFields: input, AllowedResultFields: result, SetFields: setFields})
 	input["secret"], result["secret"] = struct{}{}, struct{}{}
-	setFields["tenant"] = meldbase.String("other")
+	setFields["workspace"] = meldbase.String("other")
 	if _, allowed := insert.AllowedInputFields["secret"]; allowed {
 		t.Fatal("frozen insert input map changed")
 	}
-	if tenant, _ := insert.SetFields["tenant"].StringValue(); tenant != "mine" {
-		t.Fatalf("frozen server field = %q", tenant)
+	if workspace, _ := insert.SetFields["workspace"].StringValue(); workspace != "mine" {
+		t.Fatalf("frozen server field = %q", workspace)
 	}
 
 	updates := map[string]struct{}{"title": {}}

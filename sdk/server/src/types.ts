@@ -3,7 +3,7 @@ import type { Document, InputDocument, MutationSpec, QuerySpec, Value } from "@m
 /** The authenticated application identity for the current call. */
 export interface Actor {
   readonly id: string;
-  readonly tenantId: string;
+  readonly workspaceId: string;
 }
 
 export interface MethodContext {

@@ -3,7 +3,7 @@
 Meldbase gives a browser or mobile client access to a **data API**, not to a
 database file or an administrator credential. Every request first verifies a
 JWT, then maps `sub` to `actor.id` and its active workspace claim to
-`actor.tenantId`.
+`actor.workspaceId`.
 The client may request a query, but it never chooses a trusted workspace,
 owner, result projection, or generic write permission.
 
@@ -94,7 +94,7 @@ entries are bounded, unique, and validated at startup.
 | `updatePaths` | update | Only these document paths may be changed. |
 
 The server still accepts and overwrites declared `workspaceId` / `ownerId`
-input values so a client cannot turn a field whitelist into a tenant or owner
+input values so a client cannot turn a field whitelist into a workspace or owner
 selection mechanism. Those server-owned fields are always immutable on update.
 
 ## Stable modes

@@ -15,6 +15,7 @@
 
 ## Product and storage contracts
 
+- [Terminology and semantic boundaries](terminology.md)
 - [Architecture](architecture.md)
 - [Storage format](storage-format.md)
 - [Query contract](query.md)

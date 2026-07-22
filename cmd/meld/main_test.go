@@ -159,7 +159,7 @@ func TestIndexBuildCommandStartListResumeLifecycle(t *testing.T) {
 	}
 	items := db.Collection("items")
 	for value := int64(1); value <= 3; value++ {
-		if _, err := items.InsertOne(context.Background(), meldbase.Document{"value": meldbase.Int(value), "tenant": meldbase.String("a")}); err != nil {
+		if _, err := items.InsertOne(context.Background(), meldbase.Document{"value": meldbase.Int(value), "workspace": meldbase.String("a")}); err != nil {
 			_ = db.Close()
 			t.Fatal(err)
 		}
@@ -169,13 +169,13 @@ func TestIndexBuildCommandStartListResumeLifecycle(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"index-build", "start", "--db", path, "--collection", "items", "--name", "by_value", "--field", "value:-1", "--field", "tenant:1", "--unique"}, &stdout, &stderr); err != nil {
+	if err := run([]string{"index-build", "start", "--db", path, "--collection", "items", "--name", "by_value", "--field", "value:-1", "--field", "workspace:1", "--unique"}, &stdout, &stderr); err != nil {
 		t.Fatalf("start=%v stderr=%s", err, stderr.String())
 	}
 	var started indexBuildCommandResult
 	if err := json.Unmarshal(stdout.Bytes(), &started); err != nil || started.SchemaVersion != 1 || started.Action != "start" ||
 		started.BuildID == nil || started.Build == nil || started.Build.ID != *started.BuildID || started.Build.Phase != meldbase.IndexBuildPhaseScan ||
-		!reflect.DeepEqual(started.Build.Fields, []meldbase.IndexField{{Field: "value", Order: -1}, {Field: "tenant", Order: 1}}) {
+		!reflect.DeepEqual(started.Build.Fields, []meldbase.IndexField{{Field: "value", Order: -1}, {Field: "workspace", Order: 1}}) {
 		t.Fatalf("started=%+v err=%v output=%s", started, err, stdout.String())
 	}
 

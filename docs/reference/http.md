@@ -30,7 +30,7 @@ not expose database paths or internal error text.
 
 When workspace isolation is enabled, the server intersects reads, updates,
 deletes, and subscriptions with the verified token workspace. It writes the
-server-owned workspace field on inserts. Clients never send a trusted tenant
+server-owned workspace field on inserts. Clients never send a trusted workspace
 selector.
 
 ## Authentication

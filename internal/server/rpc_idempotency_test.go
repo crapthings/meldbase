@@ -277,13 +277,13 @@ func TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed(t *testing.T) {
 	key := "abcdefghijklmnopqrstuv"
 	session := [16]byte{1}
 	envelope := rpcCallEnvelope{Method: "echo", IdempotencyKey: &key}
-	left, err := newRPCIdempotencyClaim(Actor{TenantID: "ab", ID: "c"}, envelope, []meldbase.Value{
+	left, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "ab", ID: "c"}, envelope, []meldbase.Value{
 		meldbase.Object(meldbase.Document{"b": meldbase.Int(2), "a": meldbase.Int(1)}),
 	}, session, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	right, err := newRPCIdempotencyClaim(Actor{TenantID: "ab", ID: "c"}, envelope, []meldbase.Value{
+	right, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "ab", ID: "c"}, envelope, []meldbase.Value{
 		meldbase.Object(meldbase.Document{"a": meldbase.Int(1), "b": meldbase.Int(2)}),
 	}, session, time.Hour)
 	if err != nil {
@@ -292,7 +292,7 @@ func TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed(t *testing.T) {
 	if left.Fingerprint != right.Fingerprint || left.ScopeHash != right.ScopeHash || left.KeyHash != right.KeyHash {
 		t.Fatal("canonical equivalent claims produced different hashes")
 	}
-	otherScope, err := newRPCIdempotencyClaim(Actor{TenantID: "a", ID: "bc"}, envelope, []meldbase.Value{
+	otherScope, err := newRPCIdempotencyClaim(Actor{WorkspaceID: "a", ID: "bc"}, envelope, []meldbase.Value{
 		meldbase.Object(meldbase.Document{"a": meldbase.Int(1), "b": meldbase.Int(2)}),
 	}, session, time.Hour)
 	if err != nil {

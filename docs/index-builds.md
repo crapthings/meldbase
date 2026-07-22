@@ -207,7 +207,7 @@ ascending, for example `--field email --field createdAt:-1`.
 The storage layer exposes begin/append-scan/apply-catch-up/fail/finalize/abort
 primitives over canonical data. The Go database layer owns scheduling,
 deadlines, retry policy and public handles. JS/TS may later expose build status,
-but names, paths and tenant identity remain outside default metrics.
+but names, paths and workspace identity remain outside default metrics.
 
 `SortedTreeBuilder` is the leaf/page construction primitive for the synchronous
 path and the initial empty shadow. Scan/catch-up batches incrementally update

@@ -77,7 +77,7 @@ transport is allowed to silently retry a call. The stable protocol errors are:
 ## Identity and fingerprint
 
 The server derives, rather than accepts, the storage scope. It hashes a
-length-framed encoding of the authenticated actor's `tenantId` and `id`; raw
+length-framed encoding of the authenticated actor's `workspaceId` and `id`; raw
 identity strings are not stored in the idempotency keyspace. Authentication
 adapters must provide non-empty, stable UTF-8 actor values; the server bounds
 both values before hashing them.

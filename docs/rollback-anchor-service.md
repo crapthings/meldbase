@@ -75,7 +75,7 @@ certificate verification.
 
 The JWT settings apply to the database HTTP API, not to the anchor connection.
 The anchor trust plane remains independently authenticated while the database
-server derives tenant scope from verified application tokens.
+server derives workspace scope from verified application tokens.
 
 ## Immutable membership
 

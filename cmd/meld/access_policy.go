@@ -53,7 +53,7 @@ func runAccessPolicy(args []string, stdout, stderr io.Writer) error {
 		}
 		for _, rule := range manifest.Collections {
 			if rule.Collection == *collection {
-				return explainCollectionAccess(stdout, manifest, rule, meldserver.Actor{ID: *subject, TenantID: *workspace})
+				return explainCollectionAccess(stdout, manifest, rule, meldserver.Actor{ID: *subject, WorkspaceID: *workspace})
 			}
 		}
 		return fmt.Errorf("collection %q is not declared by the manifest", *collection)
@@ -98,8 +98,8 @@ type collectionAccessExplanation struct {
 }
 
 type collectionAccessExplanationActor struct {
-	ID       string `json:"id"`
-	TenantID string `json:"tenantId"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspaceId"`
 }
 
 type collectionAccessQueryExplanation struct {
@@ -140,7 +140,7 @@ func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAcc
 	}
 	explanation := collectionAccessExplanation{
 		Version: 1, Collection: rule.Collection, Mode: rule.Mode,
-		Actor: collectionAccessExplanationActor{ID: actor.ID, TenantID: actor.TenantID},
+		Actor: collectionAccessExplanationActor{ID: actor.ID, WorkspaceID: actor.WorkspaceID},
 	}
 	if policy, policyErr := authorizer.AuthorizeQuery(context.Background(), actor, rule.Collection, query); policyErr == nil {
 		constraint, marshalErr := meldbase.MarshalQuerySpecJSON(*policy.Constraint)

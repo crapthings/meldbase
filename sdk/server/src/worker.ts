@@ -248,7 +248,7 @@ export class MeldbaseWorker {
   async #invoke(frame: Record<string, unknown>): Promise<void> {
     exactKeys(frame, ["v", "type", "callId", "method", "mode", "actor", "arguments"]);
     if (typeof frame.callId !== "string" || typeof frame.method !== "string" || (frame.mode !== "rpc" && frame.mode !== "transactional") ||
-        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.tenantId !== "string" || !Array.isArray(frame.arguments)) {
+        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.workspaceId !== "string" || !Array.isArray(frame.arguments)) {
       throw new Error("Invalid invoke frame");
     }
     const definition = this.#methods.get(frame.method);
@@ -256,7 +256,7 @@ export class MeldbaseWorker {
     const arguments_ = frame.arguments.map((argument) => decodeValue(argument));
     const controller = new AbortController();
     const context: MethodContext = {
-      actor: Object.freeze({ id: frame.actor.id, tenantId: frame.actor.tenantId }),
+      actor: Object.freeze({ id: frame.actor.id, workspaceId: frame.actor.workspaceId }),
       signal: controller.signal,
     };
     const active: ActiveCall = definition.mode === "transactional"
@@ -284,7 +284,7 @@ export class MeldbaseWorker {
   async #authorizeQuery(frame: Record<string, unknown>): Promise<void> {
     exactKeys(frame, ["v", "type", "callId", "collection", "actor", "query"]);
     if (typeof frame.callId !== "string" || typeof frame.collection !== "string" ||
-        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.tenantId !== "string") {
+        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.workspaceId !== "string") {
       throw new Error("Invalid query authorization frame");
     }
     const definition = this.#publications.get(frame.collection);
@@ -294,7 +294,7 @@ export class MeldbaseWorker {
     const active: ActiveCall = { controller };
     const context: PublicationContext = {
       collection: frame.collection,
-      actor: Object.freeze({ id: frame.actor.id, tenantId: frame.actor.tenantId }),
+      actor: Object.freeze({ id: frame.actor.id, workspaceId: frame.actor.workspaceId }),
       query,
       signal: controller.signal,
     };

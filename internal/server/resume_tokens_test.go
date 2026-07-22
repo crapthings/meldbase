@@ -15,7 +15,7 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	service.now = func() time.Time { return now }
 	database := [16]byte{1, 2, 3}
-	actor := Actor{ID: "user-1", TenantID: "tenant-1"}
+	actor := Actor{ID: "user-1", WorkspaceID: "workspace-1"}
 	query, err := meldbase.CompileQuery(meldbase.Filter{"rank": map[string]any{"$gte": int64(2)}}, meldbase.QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -38,8 +38,8 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 		policy     string
 	}{
 		{"database", [16]byte{9}, actor, "items", query, "policy-v1"},
-		{"subject", database, Actor{ID: "user-2", TenantID: "tenant-1"}, "items", query, "policy-v1"},
-		{"tenant", database, Actor{ID: "user-1", TenantID: "tenant-2"}, "items", query, "policy-v1"},
+		{"subject", database, Actor{ID: "user-2", WorkspaceID: "workspace-1"}, "items", query, "policy-v1"},
+		{"workspace", database, Actor{ID: "user-1", WorkspaceID: "workspace-2"}, "items", query, "policy-v1"},
 		{"collection", database, actor, "other", query, "policy-v1"},
 		{"query", database, actor, "items", otherQuery, "policy-v1"},
 		{"policy", database, actor, "items", query, "policy-store"},
@@ -60,7 +60,7 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 func TestResumeTokenRejectsNonCanonicalBase64URLAliases(t *testing.T) {
 	service := newResumeTokenService([]byte("0123456789abcdef0123456789abcdef"), time.Minute)
 	database := [16]byte{1, 2, 3}
-	actor := Actor{ID: "user-1", TenantID: "tenant-1"}
+	actor := Actor{ID: "user-1", WorkspaceID: "workspace-1"}
 	query, err := meldbase.CompileQuery(meldbase.Filter{}, meldbase.QueryOptions{})
 	if err != nil {
 		t.Fatal(err)

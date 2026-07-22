@@ -108,11 +108,11 @@ func (a *RS256JWKSAuthenticator) AuthenticateHTTP(request *http.Request) (Actor,
 		return Actor{}, ErrUnauthenticated
 	}
 	actorID, actorIDOK := claimString(claims, "sub")
-	tenantID, tenantIDOK := claimString(claims, a.workspaceClaim)
-	if !actorIDOK || !tenantIDOK || !validActorPart(actorID) || !validActorPart(tenantID) {
+	workspaceID, workspaceIDOK := claimString(claims, a.workspaceClaim)
+	if !actorIDOK || !workspaceIDOK || !validActorPart(actorID) || !validActorPart(workspaceID) {
 		return Actor{}, ErrUnauthenticated
 	}
-	return Actor{ID: actorID, TenantID: tenantID}, nil
+	return Actor{ID: actorID, WorkspaceID: workspaceID}, nil
 }
 
 func splitJWT(token string) []string {

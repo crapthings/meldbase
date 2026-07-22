@@ -48,7 +48,7 @@ test("TypeScript and Go share the immutable realtime protocol v1 contract", asyn
     "transaction.compiled_update", "transaction.invalidate_publication", "transaction.point_operations",
   ]);
   assert.deepEqual(contract.workerProtocol.nestedShapes, [
-    { name: "actor", required: ["id", "tenantId"], optional: [] },
+    { name: "actor", required: ["id", "workspaceId"], optional: [] },
     { name: "error", required: ["code", "kind"], optional: ["data"] },
   ]);
   assert.deepEqual(contract.fixedErrorCodes, [
