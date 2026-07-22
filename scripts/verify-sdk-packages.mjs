@@ -159,11 +159,11 @@ function verifyTypeScriptConsumer() {
   writeFileSync(join(consumer, "smoke.ts"), `
     import type { Document, RemoteLiveQuery } from "@meldbase/client";
     import { LocalCollection } from "@meldbase/client/local";
-    import { rpc, type MethodDefinition } from "@meldbase/server";
+    import { rpc, type RPCDefinition } from "@meldbase/server";
     import { useLiveQuery, type LiveQueryResult } from "@meldbase/react";
     const collection = new LocalCollection<Document>();
     const result: LiveQueryResult<Document> = useLiveQuery(collection.find());
-    const method: MethodDefinition = rpc((_context, values) => values[0] ?? null);
+    const method: RPCDefinition = rpc((_context, values) => values[0] ?? null);
     declare const remote: RemoteLiveQuery<Document>;
     useLiveQuery(remote);
     void result; void method;
