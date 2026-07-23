@@ -2,17 +2,19 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
 import test from "node:test";
 import { promisify } from "node:util";
-import WebSocket from "ws";
 import { MeldbaseClient, MeldbaseError } from "./index.js";
 import type { Document, WebSocketLike } from "./index.js";
 
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
 const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+const NodeWebSocket = require("ws") as new (url: string) => WebSocketLike;
 const productionSecret = "0123456789abcdef0123456789abcdef";
 const workerToken = "0123456789abcdef0123456789abcdef";
 
@@ -218,7 +220,7 @@ test(
     const server = await startDevelopmentServer();
     const client = new MeldbaseClient({
       baseUrl: server.baseURL,
-      webSocketFactory: (url) => new WebSocket(url) as unknown as WebSocketLike,
+      webSocketFactory: (url) => new NodeWebSocket(url),
     });
     try {
       const todos = client.collection<Document>("todos");
@@ -299,7 +301,7 @@ test(
     let worker: RunningWorker | undefined;
     const client = new MeldbaseClient({
       baseUrl: server.baseURL,
-      webSocketFactory: (url) => new WebSocket(url) as unknown as WebSocketLike,
+      webSocketFactory: (url) => new NodeWebSocket(url),
     });
     try {
       worker = await startSDKWorker(server);
@@ -345,12 +347,12 @@ test(
     const clientA = new MeldbaseClient({
       baseUrl: server.baseURL,
       accessToken: () => signedProductionJWT("team-a"),
-      webSocketFactory: (url) => new WebSocket(url) as unknown as WebSocketLike,
+      webSocketFactory: (url) => new NodeWebSocket(url),
     });
     const clientB = new MeldbaseClient({
       baseUrl: server.baseURL,
       accessToken: () => signedProductionJWT("team-b"),
-      webSocketFactory: (url) => new WebSocket(url) as unknown as WebSocketLike,
+      webSocketFactory: (url) => new NodeWebSocket(url),
     });
     try {
       const todosA = clientA.collection<Document>("todos");
