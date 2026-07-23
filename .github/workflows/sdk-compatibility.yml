@@ -50,6 +50,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
+          version: 10.34.5
           run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -72,6 +73,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
+          version: 10.34.5
           run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -86,6 +88,7 @@ jobs:
       - name: Type-check and test SDK packages
         run: |
           pnpm --filter @meldbase/client check
+          pnpm --filter @meldbase/client build
           pnpm --filter @meldbase/worker check
           pnpm --filter @meldbase/react check
           pnpm test

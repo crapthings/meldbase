@@ -6,7 +6,7 @@
     "type": "git",
     "url": "https://github.com/crapthings/meldbase.git"
   },
-  "packageManager": "pnpm@11.10.0",
+  "packageManager": "pnpm@10.34.5",
   "scripts": {
     "check": "pnpm run docs:build && pnpm run check:dashboard && pnpm --filter @meldbase/client check && pnpm --filter @meldbase/client build && pnpm --filter @meldbase/worker check && pnpm --filter @meldbase/worker build && pnpm --filter @meldbase/react check && pnpm --filter @meldbase/react build && pnpm --filter @meldbase/example-realtime-todos check",
     "build:dashboard": "pnpm --filter @meldbase/admin-dashboard build",
