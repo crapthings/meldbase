@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 type anchorHistoryStubExecutor struct {

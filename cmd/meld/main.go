@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/crapthings/meldbase"
 	"github.com/crapthings/meldbase/admin"
-	"github.com/crapthings/meldbase/core"
 	meldserver "github.com/crapthings/meldbase/server"
 )
 

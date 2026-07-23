@@ -4,7 +4,7 @@
 package server
 
 import (
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 	internal "github.com/crapthings/meldbase/internal/server"
 )
 

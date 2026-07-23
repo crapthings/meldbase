@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 var errInvalidResumeToken = errors.New("meldbase server: invalid resume token")

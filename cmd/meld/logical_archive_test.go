@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 func TestLogicalArchiveCommandsExportAndImport(t *testing.T) {

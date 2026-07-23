@@ -19,7 +19,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 const testWorkerToken = "worker-control-token-0123456789abcdef"

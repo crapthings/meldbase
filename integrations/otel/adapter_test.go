@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crapthings/meldbase"
 	"github.com/crapthings/meldbase/admin"
-	"github.com/crapthings/meldbase/core"
 	meldserver "github.com/crapthings/meldbase/server"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"

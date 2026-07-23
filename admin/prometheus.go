@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 const PrometheusContentType = "text/plain; version=0.0.4; charset=utf-8"

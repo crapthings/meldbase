@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 // ErrPrimaryRuntimeConfiguration reports an unsafe primary runtime assembly.

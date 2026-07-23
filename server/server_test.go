@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 	"github.com/crapthings/meldbase/server"
 )
 

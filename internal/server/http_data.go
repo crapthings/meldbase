@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 // insert, mutate, and query implement the generic data API. Their only

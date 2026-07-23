@@ -30,7 +30,7 @@ layer—not a hosted MongoDB clone, an ORM, or a distributed database to operate
 ### Embed it in Go
 
 ```sh
-go get github.com/crapthings/meldbase/core@latest
+go get github.com/crapthings/meldbase@latest
 ```
 
 ```go
@@ -40,7 +40,7 @@ import (
     "context"
     "log"
 
-    meldbase "github.com/crapthings/meldbase/core"
+    "github.com/crapthings/meldbase"
 )
 
 func main() {

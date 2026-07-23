@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 func TestQueryPolicyLeaseRevocationLinearizesWithAuthorizedWork(t *testing.T) {

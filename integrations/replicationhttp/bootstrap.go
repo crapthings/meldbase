@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 	"github.com/crapthings/meldbase/integrations/replicationauth"
 )
 

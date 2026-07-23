@@ -1,7 +1,7 @@
 package admin
 
 import (
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 	meldserver "github.com/crapthings/meldbase/server"
 )
 

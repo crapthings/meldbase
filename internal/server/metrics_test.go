@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 func TestServerStatsSnapshotIsAllocationFreeAndContainsNoDynamicDimensions(t *testing.T) {

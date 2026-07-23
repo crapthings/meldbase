@@ -1,6 +1,6 @@
 package server
 
-import "github.com/crapthings/meldbase/core"
+import "github.com/crapthings/meldbase"
 
 type visibilityNode struct {
 	id             meldbase.DocumentID

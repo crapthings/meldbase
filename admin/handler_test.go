@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 const testAdminToken = "0123456789abcdef0123456789abcdef"

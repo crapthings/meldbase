@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 type Authorizer func(*http.Request) bool

@@ -15,7 +15,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 	"github.com/crapthings/meldbase/integrations/anchorhttp"
 	"github.com/crapthings/meldbase/internal/qualification"
 )

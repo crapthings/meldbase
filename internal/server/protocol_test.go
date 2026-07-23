@@ -10,7 +10,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/crapthings/meldbase/core"
+	"github.com/crapthings/meldbase"
 )
 
 type protocolV1Contract struct {
