@@ -23,15 +23,38 @@ func openWithCommitCoordinator(t *testing.T, options CommitCoordinatorOptions) *
 	return db
 }
 
+func waitForCoordinatorPending(t *testing.T, coordinator *commitCoordinator, want int, description string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		coordinator.mu.Lock()
+		pending := len(coordinator.queue)
+		coordinator.mu.Unlock()
+		if pending >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: pending=%d want at least %d", description, pending, want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestCommitCoordinatorGroupsPublicInsertMany(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond})
 	coordinator := db.commitCoordinator
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
+	var releaseOnce sync.Once
+	releaseCoalescing := func() { releaseOnce.Do(func() { close(release) }) }
 	coordinator.testBeforeCoalesce = func() {
 		once.Do(func() { close(entered) })
 		<-release
 	}
+	defer func() {
+		releaseCoalescing()
+		coordinator.testBeforeCoalesce = nil
+	}()
 	initialGeneration := coordinator.store.file.Meta().Generation
 	firstID, secondID := DocumentID{1}, DocumentID{2}
 	first := make(chan error, 1)
@@ -49,7 +72,8 @@ func TestCommitCoordinatorGroupsPublicInsertMany(t *testing.T) {
 		_, err := db.Collection("items").InsertOne(context.Background(), Document{"_id": ID(secondID), "n": Int(2)})
 		second <- err
 	}()
-	close(release)
+	waitForCoordinatorPending(t, coordinator, 1, "second insert was not admitted")
+	releaseCoalescing()
 	for _, result := range []<-chan error{first, second} {
 		select {
 		case err := <-result:
@@ -82,11 +106,16 @@ func TestCommitCoordinatorGroupsIndependentPublicWriteTransactions(t *testing.T)
 	coordinator := db.commitCoordinator
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
+	var releaseOnce sync.Once
+	releaseCoalescing := func() { releaseOnce.Do(func() { close(release) }) }
 	coordinator.testBeforeCoalesce = func() {
 		once.Do(func() { close(entered) })
 		<-release
 	}
-	defer func() { coordinator.testBeforeCoalesce = nil }()
+	defer func() {
+		releaseCoalescing()
+		coordinator.testBeforeCoalesce = nil
+	}()
 	initialGeneration := coordinator.store.file.Meta().Generation
 	firstID, secondID := DocumentID{12: 1}, DocumentID{12: 2}
 	first := make(chan error, 1)
@@ -108,7 +137,8 @@ func TestCommitCoordinatorGroupsIndependentPublicWriteTransactions(t *testing.T)
 			return err
 		})
 	}()
-	close(release)
+	waitForCoordinatorPending(t, coordinator, 1, "second transaction was not admitted")
+	releaseCoalescing()
 	for _, result := range []<-chan error{first, second} {
 		select {
 		case err := <-result:
@@ -145,11 +175,16 @@ func TestCommitCoordinatorGroupsRangeFencedWriteTransactions(t *testing.T) {
 	coordinator := db.commitCoordinator
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
+	var releaseOnce sync.Once
+	releaseCoalescing := func() { releaseOnce.Do(func() { close(release) }) }
 	coordinator.testBeforeCoalesce = func() {
 		once.Do(func() { close(entered) })
 		<-release
 	}
-	defer func() { coordinator.testBeforeCoalesce = nil }()
+	defer func() {
+		releaseCoalescing()
+		coordinator.testBeforeCoalesce = nil
+	}()
 	firstID, secondID := DocumentID{12: 11}, DocumentID{12: 12}
 	first, second := make(chan error, 1), make(chan error, 1)
 	go func() {
@@ -175,7 +210,8 @@ func TestCommitCoordinatorGroupsRangeFencedWriteTransactions(t *testing.T) {
 			return err
 		})
 	}()
-	close(release)
+	waitForCoordinatorPending(t, coordinator, 1, "second range transaction was not admitted")
+	releaseCoalescing()
 	for _, result := range []<-chan error{first, second} {
 		select {
 		case err := <-result:
