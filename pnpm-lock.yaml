@@ -121,6 +121,9 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
 
   sdk/react:
     devDependencies:

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
 import test from "node:test";
 import { promisify } from "node:util";
+import WebSocket from "ws";
 import { MeldbaseClient, MeldbaseError } from "./index.js";
 import type { Document, WebSocketLike } from "./index.js";
 
