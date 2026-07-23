@@ -1,15 +1,25 @@
-import type { DeleteResult, Document, Filter, InputDocument, MutationResult, QuerySpec, Update, Value } from "./types.js";
+import type {
+  DeleteResult,
+  Document,
+  Filter,
+  InputDocument,
+  InsertDocument,
+  MutationResult,
+  QuerySpec,
+  Update,
+  Value,
+} from "./types.js";
 import type { FindOneOptions, QueryOptions } from "./query.js";
 import { assertDocumentID, cloneDocument, cloneValue, newDocumentID, valueEquals } from "./safe-value.js";
 import { compileQuery, executeQuery, matches } from "./query.js";
 import { applyMutation, compileUpdate } from "./mutation.js";
-import { pageCursorFor, type PageResult } from './cursor.js';
+import { pageCursorFor, type PageResult } from "./cursor.js";
 import type { SnapshotListener, Unsubscribe } from "./observer.js";
 
 export type { SnapshotListener, Unsubscribe } from "./observer.js";
 
-export class LiveQuery<T extends Document> {
-	readonly mode = "local" as const;
+class LiveQuery<T extends Document> {
+  readonly mode = "local" as const;
   readonly spec: QuerySpec;
   readonly #source: LocalCollection<T>;
   readonly #seekPagination: boolean;
@@ -26,7 +36,8 @@ export class LiveQuery<T extends Document> {
 
   fetchPage(): PageResult<T> {
     if (!this.#seekPagination) throw new Error("fetchPage requires a query created with first");
-    const documents = this.fetch(); const last = documents.at(-1);
+    const documents = this.fetch();
+    const last = documents.at(-1);
     return { documents, ...(last && this.spec.sort ? { nextCursor: pageCursorFor(last, this.spec.sort) } : {}) };
   }
 
@@ -43,6 +54,10 @@ export class LiveQuery<T extends Document> {
   }
 }
 
+// Queries are created by LocalCollection.find(). Export their structural type
+// without exposing an implementation constructor on the local entry point.
+export type { LiveQuery };
+
 export class LocalCollection<T extends Document = Document> {
   readonly #documents = new Map<string, T>();
   readonly #listeners = new Set<() => void>();
@@ -50,7 +65,9 @@ export class LocalCollection<T extends Document = Document> {
   #changed = false;
 
   constructor(initial: readonly T[] = []) {
-    this.batch(() => { for (const document of initial) this.insert(document); });
+    this.batch(() => {
+      for (const document of initial) this.insert(document);
+    });
   }
 
   insert(document: T): void {
@@ -61,7 +78,7 @@ export class LocalCollection<T extends Document = Document> {
     this.markChanged();
   }
 
-  insertOne(document: InputDocument): T {
+  insertOne<U extends InputDocument>(document: InsertDocument<T, U>): T {
     const fields = cloneValue(document as { readonly [key: string]: Value }) as Record<string, Value>;
     if (fields._id === undefined) fields._id = newDocumentID();
     const copy = cloneDocument(fields as T);
@@ -93,14 +110,24 @@ export class LocalCollection<T extends Document = Document> {
     return documents[0];
   }
 
-  updateOne(filter: Filter, update: Update): MutationResult { return this.updateMatching(filter, update, true); }
-  updateMany(filter: Filter, update: Update): MutationResult { return this.updateMatching(filter, update, false); }
-  deleteOne(filter: Filter): DeleteResult { return this.deleteMatching(filter, true); }
-  deleteMany(filter: Filter): DeleteResult { return this.deleteMatching(filter, false); }
+  updateOne(filter: Filter, update: Update): MutationResult {
+    return this.updateMatching(filter, update, true);
+  }
+  updateMany(filter: Filter, update: Update): MutationResult {
+    return this.updateMatching(filter, update, false);
+  }
+  deleteOne(filter: Filter): DeleteResult {
+    return this.deleteMatching(filter, true);
+  }
+  deleteMany(filter: Filter): DeleteResult {
+    return this.deleteMatching(filter, false);
+  }
 
   batch(action: () => void): void {
     this.#batchDepth += 1;
-    try { action(); } finally {
+    try {
+      action();
+    } finally {
       this.#batchDepth -= 1;
       if (this.#batchDepth === 0 && this.#changed) this.flushChange();
     }
@@ -112,23 +139,38 @@ export class LocalCollection<T extends Document = Document> {
 
   onChange(listener: () => void): Unsubscribe {
     this.#listeners.add(listener);
-    return () => { this.#listeners.delete(listener); };
+    return () => {
+      this.#listeners.delete(listener);
+    };
   }
 
   private updateMatching(filter: Filter, update: Update, one: boolean): MutationResult {
-    const query = compileQuery(filter); const mutation = compileUpdate(update); const staged: T[] = []; let matchedCount = 0;
+    const query = compileQuery(filter);
+    const mutation = compileUpdate(update);
+    const staged: T[] = [];
+    let matchedCount = 0;
     for (const document of this.queryCandidates(query)) {
       if (!matches(document, query.where) || (one && matchedCount > 0)) continue;
-      matchedCount += 1; const after = applyMutation(document, mutation); if (!valueEquals(document, after)) staged.push(after);
+      matchedCount += 1;
+      const after = applyMutation(document, mutation);
+      if (!valueEquals(document, after)) staged.push(after);
     }
-    this.batch(() => { for (const document of staged) this.upsert(document); });
+    this.batch(() => {
+      for (const document of staged) this.upsert(document);
+    });
     return { matchedCount, modifiedCount: staged.length };
   }
 
   private deleteMatching(filter: Filter, one: boolean): DeleteResult {
-    const query = compileQuery(filter); const ids: string[] = [];
-    for (const document of this.queryCandidates(query)) { if (matches(document, query.where) && (!one || ids.length === 0)) ids.push(document._id); }
-    this.batch(() => { for (const id of ids) this.remove(id); }); return { deletedCount: ids.length };
+    const query = compileQuery(filter);
+    const ids: string[] = [];
+    for (const document of this.queryCandidates(query)) {
+      if (matches(document, query.where) && (!one || ids.length === 0)) ids.push(document._id);
+    }
+    this.batch(() => {
+      for (const id of ids) this.remove(id);
+    });
+    return { deletedCount: ids.length };
   }
 
   private queryCandidates(spec: QuerySpec): Iterable<T> {
@@ -154,7 +196,12 @@ export class LocalCollection<T extends Document = Document> {
 // additional condition or contradictory _id comparison preserves exact query
 // semantics while avoiding a collection scan.
 function requiredDocumentID(expression: QuerySpec["where"]): string | undefined {
-  if (expression.op === "compare" && expression.cmp === "eq" && expression.path === "_id" && typeof expression.value === "string") {
+  if (
+    expression.op === "compare" &&
+    expression.cmp === "eq" &&
+    expression.path === "_id" &&
+    typeof expression.value === "string"
+  ) {
     return expression.value;
   }
   if (expression.op !== "and") return undefined;
@@ -164,7 +211,6 @@ function requiredDocumentID(expression: QuerySpec["where"]): string | undefined 
   }
   return undefined;
 }
-
 
 function cloneSnapshot<T extends Document>(documents: readonly T[]): T[] {
   return documents.map(cloneDocument);

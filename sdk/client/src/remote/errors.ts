@@ -6,8 +6,12 @@ export type MeldbaseErrorData = Readonly<Record<string, Value>>;
 export class MeldbaseError extends Error {
   readonly data?: MeldbaseErrorData;
 
-  constructor(readonly code: string, data?: MeldbaseErrorData) {
-    if (!/^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})+$/.test(code)) throw new TypeError("Invalid Meldbase business error code");
+  constructor(
+    readonly code: string,
+    data?: MeldbaseErrorData,
+  ) {
+    if (!/^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})+$/.test(code))
+      throw new TypeError("Invalid Meldbase business error code");
     super(`Meldbase operation failed: ${code}`);
     this.name = "MeldbaseError";
     if (data !== undefined) this.data = data;
@@ -18,7 +22,12 @@ export class MeldbaseError extends Error {
 export class MeldbaseInternalError extends Error {
   readonly cause: unknown;
 
-  constructor(readonly code: string, readonly status = 0, readonly operation = "operation", cause?: unknown) {
+  constructor(
+    readonly code: string,
+    readonly status = 0,
+    readonly operation = "operation",
+    cause?: unknown,
+  ) {
     if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) throw new TypeError("Invalid Meldbase internal error code");
     super(`Meldbase ${operation} failed: ${code}`);
     this.name = "MeldbaseInternalError";

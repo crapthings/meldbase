@@ -24,11 +24,17 @@
     "./types": {
       "types": "./dist/types.d.ts",
       "default": "./dist/types.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "default": "./dist/internal.js"
     }
   },
   "files": [
     "dist/index.js",
     "dist/index.d.ts",
+    "dist/internal.js",
+    "dist/internal.d.ts",
     "dist/cursor.js",
     "dist/cursor.d.ts",
     "dist/local.js",
@@ -54,7 +60,9 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --test dist/**/*.test.js"
+    "prepack": "pnpm run build",
+    "test": "pnpm run build && node --test dist/**/*.test.js",
+    "coverage": "pnpm run build && c8 --all --include \"dist/**/*.js\" --exclude \"dist/**/*.test.js\" --exclude \"dist/**/*.typecheck.js\" --check-coverage --statements 80 --branches 75 --functions 80 --lines 80 node --test dist/**/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

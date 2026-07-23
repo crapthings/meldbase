@@ -1,6 +1,5 @@
 import WebSocket from "ws";
 
-import { compileQuery, compileUpdate } from "@meldbase/client";
 import { MeldbaseError, MeldbaseWorker, readPolicy, rpc } from "../dist/index.js";
 
 const url = process.env.MELDBASE_WORKER_URL;
@@ -22,7 +21,10 @@ const worker = new MeldbaseWorker({
     "sdk.exercise": rpc.transactional(async ({ actor }, _input, transaction) => {
       const id = await transaction.insert("items", { rank: 1n, workspace: actor.workspaceId, title: "temporary" });
       await transaction.replace("items", id, { rank: 2n, workspace: actor.workspaceId, title: "replaced" });
-      await transaction.update("items", id, compileUpdate({ $set: { title: "updated" } }));
+      await transaction.update("items", id, {
+        version: 1,
+        operations: [{ op: "set", path: "title", value: "updated" }],
+      });
       const updated = await transaction.get("items", id);
       await transaction.delete("items", id);
       await transaction.insert("items", { rank: 3n, workspace: actor.workspaceId, title: "committed" });
@@ -36,7 +38,10 @@ const worker = new MeldbaseWorker({
       maxResults: 10,
       queryPaths: ["title"],
       resultFields: ["rank", "title"],
-    }, ({ actor }) => compileQuery({ workspace: actor.workspaceId })),
+    }, ({ actor }) => ({
+      version: 1,
+      where: { op: "compare", cmp: "eq", path: "workspace", value: actor.workspaceId },
+    })),
   },
 });
 

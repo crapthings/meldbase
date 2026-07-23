@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+coverage-*/
+docs/.vitepress/
+docs/public/api/
+local-playground/

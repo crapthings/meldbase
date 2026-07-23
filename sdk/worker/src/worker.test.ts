@@ -2,16 +2,30 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { compileQuery, compileUpdate, MELDBASE_PROTOCOL_VERSION } from "@meldbase/client";
+import { compileQuery, compileUpdate, MELDBASE_PROTOCOL_VERSION } from "@meldbase/client/internal";
 import { MeldbaseError, MeldbaseWorker, MeldbaseWorkerProtocolError, readPolicy, rpc } from "./worker.js";
+import { MAX_WORKER_FRAME_BYTES, parseJSONRecord } from "./shared.js";
+import { RemoteWriteTransaction } from "./transaction.js";
 import type { WorkerSocket, WorkerSocketFactory } from "./worker.js";
 
 const WORKER_PROTOCOL = Object.freeze({
   versions: [1],
   capabilities: [
-    "cancel", "read_policy", "rpc", "rpc.transactional",
-    "transaction.compiled_update", "transaction.invalidate_read_policy", "transaction.point_operations",
+    "cancel",
+    "read_policy",
+    "rpc",
+    "rpc.transactional",
+    "transaction.compiled_update",
+    "transaction.invalidate_read_policy",
+    "transaction.point_operations",
   ],
+});
+
+const WORKER_LIMITS = Object.freeze({
+  maxPendingCalls: 64,
+  maxOperationsPerCall: 256,
+  maxReadPoliciesPerWorker: 128,
+  policyEvaluationTimeoutMs: 2_000,
 });
 
 class FakeSocket implements WorkerSocket {
@@ -32,7 +46,7 @@ class FakeSocket implements WorkerSocket {
 
   addEventListener(type: string, listener: (event: any) => void): void {
     let listeners = this.listeners.get(type);
-    if (!listeners) this.listeners.set(type, listeners = new Set());
+    if (!listeners) this.listeners.set(type, (listeners = new Set()));
     listeners.add(listener);
   }
 
@@ -40,13 +54,17 @@ class FakeSocket implements WorkerSocket {
     this.listeners.get(type)?.delete(listener);
   }
 
- open(): void {
+  open(): void {
     this.readyState = 1;
     this.emit("open", {});
   }
 
   message(value: unknown): void {
-    this.emit("message", { data: JSON.stringify(value) });
+    this.messageText(JSON.stringify(value));
+  }
+
+  messageText(value: string): void {
+    this.emit("message", { data: value });
   }
 
   emit(type: string, event: any): void {
@@ -63,9 +81,21 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
       readonly version: number;
       readonly capabilityHeader: string;
       readonly capabilities: readonly string[];
-      readonly nestedShapes: readonly { readonly name: string; readonly required: readonly string[]; readonly optional: readonly string[] }[];
-      readonly hubFrames: readonly { readonly type: string; readonly required: readonly string[]; readonly optional: readonly string[] }[];
-      readonly workerFrames: readonly { readonly type: string; readonly required: readonly string[]; readonly optional: readonly string[] }[];
+      readonly nestedShapes: readonly {
+        readonly name: string;
+        readonly required: readonly string[];
+        readonly optional: readonly string[];
+      }[];
+      readonly hubFrames: readonly {
+        readonly type: string;
+        readonly required: readonly string[];
+        readonly optional: readonly string[];
+      }[];
+      readonly workerFrames: readonly {
+        readonly type: string;
+        readonly required: readonly string[];
+        readonly optional: readonly string[];
+      }[];
     };
   };
   assert.equal(contract.formatVersion, 1);
@@ -73,12 +103,22 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
   assert.equal(contract.workerProtocol.version, MELDBASE_PROTOCOL_VERSION);
   assert.equal(contract.workerProtocol.capabilityHeader, "capabilities-v1");
   assert.deepEqual(contract.workerProtocol.capabilities, [
-    "cancel", "read_policy", "rpc", "rpc.transactional",
-    "transaction.compiled_update", "transaction.invalidate_read_policy", "transaction.point_operations",
+    "cancel",
+    "read_policy",
+    "rpc",
+    "rpc.transactional",
+    "transaction.compiled_update",
+    "transaction.invalidate_read_policy",
+    "transaction.point_operations",
   ]);
   assert.deepEqual(contract.workerProtocol.nestedShapes, [
     { name: "actor", required: ["id", "workspaceId"], optional: [] },
     { name: "error", required: ["code", "kind"], optional: ["data"] },
+    {
+      name: "limits",
+      required: ["maxOperationsPerCall", "maxPendingCalls", "maxReadPoliciesPerWorker", "policyEvaluationTimeoutMs"],
+      optional: [],
+    },
   ]);
   assert.deepEqual(contract.workerProtocol.hubFrames, [
     { type: "authorize_query", required: ["actor", "callId", "collection", "query", "type", "v"], optional: [] },
@@ -94,13 +134,18 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
     { type: "policy_error", required: ["callId", "error", "type", "v"], optional: [] },
     { type: "register", required: ["methods", "readPolicies", "type", "v", "workerId"], optional: [] },
     { type: "result", required: ["callId", "result", "type", "v"], optional: [] },
-    { type: "tx_op", required: ["callId", "collection", "opId", "operation", "type", "v"], optional: ["document", "id", "mutation"] },
+    {
+      type: "tx_op",
+      required: ["callId", "collection", "opId", "operation", "type", "v"],
+      optional: ["document", "id", "mutation"],
+    },
   ]);
 });
 
 function harness(
   methods: NonNullable<ConstructorParameters<typeof MeldbaseWorker>[0]["methods"]>,
   url = "wss://control.example.test/v1/workers",
+  onError?: (error: Error) => void,
 ) {
   const sockets: FakeSocket[] = [];
   const factoryCalls: Array<{ url: string; headers: Readonly<Record<string, string>> }> = [];
@@ -120,6 +165,7 @@ function harness(
     reconnectMinMs: 10,
     reconnectMaxMs: 20,
     onStateChange: (state) => states.push(state),
+    ...(onError ? { onError } : {}),
   });
   return { worker, sockets, factoryCalls, states };
 }
@@ -129,6 +175,58 @@ test("Worker resolves the secure Meldbase authority URL", async () => {
   await startHarness(value);
   assert.equal(value.factoryCalls[0]!.url, "wss://control.example.test:9443/v1/workers");
   await value.worker.stop();
+});
+
+test("worker validates UTF-8 token bytes and canonical non-zero document IDs", async () => {
+  const options = {
+    url: "wss://control.example.test/v1/workers",
+    token: "€".repeat(16),
+    workerId: "unicode-token-worker",
+    methods: { ok: rpc(() => null) },
+    webSocketFactory: () => new FakeSocket(),
+  } as const;
+  assert.doesNotThrow(() => new MeldbaseWorker(options));
+  assert.throws(() => new MeldbaseWorker({ ...options, token: "😀".repeat(1025) }), /between 32 and 4096 bytes/);
+
+  const sent: unknown[] = [];
+  const transaction = new RemoteWriteTransaction("call-1", (frame) => sent.push(frame));
+  await assert.rejects(transaction.get("orders", "00000000000000000000000000000000"), /Invalid document ID/);
+  assert.deepEqual(sent, []);
+});
+
+test("worker parses only bounded, strict JSON frames", () => {
+  assert.throws(() => parseJSONRecord('{"v":1,"v":1}'), /Malformed worker JSON/);
+  assert.throws(() => parseJSONRecord('{"value":"\\uD800"}'), /Malformed worker JSON/);
+  assert.throws(() => parseJSONRecord(" ".repeat(MAX_WORKER_FRAME_BYTES + 1)), /safety limit/);
+});
+
+test("worker closes the session when server registration limits are invalid", async () => {
+  const invalidLimits: readonly unknown[] = [
+    {},
+    { ...WORKER_LIMITS, maxPendingCalls: 0 },
+    { ...WORKER_LIMITS, maxOperationsPerCall: 4097 },
+    { ...WORKER_LIMITS, maxReadPoliciesPerWorker: 1.5 },
+    { ...WORKER_LIMITS, policyEvaluationTimeoutMs: 30_001 },
+    { ...WORKER_LIMITS, futureLimit: 1 },
+  ];
+
+  for (const limits of invalidLimits) {
+    const errors: Error[] = [];
+    const value = harness({ ok: rpc(() => null) }, "wss://control.example.test/v1/workers", (error) =>
+      errors.push(error),
+    );
+    const started = value.worker.start();
+    void started.catch(() => undefined);
+    await waitFor(() => value.sockets.length === 1);
+    const socket = value.sockets[0]!;
+    socket.open();
+    await waitFor(() => socket.sent.length === 1);
+    socket.sent.shift();
+    socket.message({ v: 1, type: "registered", sessionId: "session", limits, protocol: WORKER_PROTOCOL });
+    await waitFor(() => socket.readyState === 3 && errors.length > 0);
+    assert.match(errors[0]!.message, /registration limit|unknown or missing fields/);
+    await value.worker.stop();
+  }
 });
 
 async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSocket> {
@@ -142,7 +240,13 @@ async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSock
   assert.equal(registration.type, "register");
   assert.equal(registration.workerId, "orders-worker");
   assert.equal(Array.isArray(registration.methods) && registration.methods.length > 0, true);
-  socket.message({ v: 1, type: "registered", sessionId: "session-1", limits: { maxPendingCalls: 64, maxOperationsPerCall: 256 }, protocol: WORKER_PROTOCOL });
+  socket.message({
+    v: 1,
+    type: "registered",
+    sessionId: "session-1",
+    limits: WORKER_LIMITS,
+    protocol: WORKER_PROTOCOL,
+  });
   await started;
   return socket;
 }
@@ -153,103 +257,163 @@ test("Worker registers without URL credentials and handles typed RPC", async () 
       assert.deepEqual(context.actor, { id: "user-1", workspaceId: "workspace-a" });
       return input;
     }),
-    "orders.reject": rpc(() => { throw new MeldbaseError("orders.not_ready", { retryAfter: 60n }); }),
+    "orders.reject": rpc(() => {
+      throw new MeldbaseError("orders.not_ready", { retryAfter: 60n });
+    }),
   });
   const socket = await startHarness(value);
   assert.equal(value.factoryCalls[0]!.url, "wss://control.example.test/v1/workers");
   assert.equal(value.factoryCalls[0]!.headers.authorization, "Bearer worker-control-token-0123456789abcdef");
-	assert.equal(value.factoryCalls[0]!.headers["meldbase-protocol"], "capabilities-v1");
+  assert.equal(value.factoryCalls[0]!.headers["meldbase-protocol"], "capabilities-v1");
   assert.equal(value.factoryCalls[0]!.url.includes("token"), false);
 
   socket.message({
-    v: 1, type: "invoke", callId: "call-1", method: "math.echo", mode: "rpc",
-    actor: { id: "user-1", workspaceId: "workspace-a" }, input: { t: "int64", v: "42" },
+    v: 1,
+    type: "invoke",
+    callId: "call-1",
+    method: "math.echo",
+    mode: "rpc",
+    actor: { id: "user-1", workspaceId: "workspace-a" },
+    input: { t: "int64", v: "42" },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
-    v: 1, type: "result", callId: "call-1", result: { t: "int64", v: "42" },
+    v: 1,
+    type: "result",
+    callId: "call-1",
+    result: { t: "int64", v: "42" },
   });
 
   socket.message({
-    v: 1, type: "invoke", callId: "call-2", method: "orders.reject", mode: "rpc",
-    actor: { id: "user-1", workspaceId: "" }, input: { t: "null" },
+    v: 1,
+    type: "invoke",
+    callId: "call-2",
+    method: "orders.reject",
+    mode: "rpc",
+    actor: { id: "user-1", workspaceId: "" },
+    input: { t: "null" },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
-    v: 1, type: "error", callId: "call-2", error: {
-      kind: "business", code: "orders.not_ready", data: { t: "object", v: [["retryAfter", { t: "int64", v: "60" }]] },
+    v: 1,
+    type: "error",
+    callId: "call-2",
+    error: {
+      kind: "business",
+      code: "orders.not_ready",
+      data: { t: "object", v: [["retryAfter", { t: "int64", v: "60" }]] },
     },
+  });
+  socket.message({
+    v: 1,
+    type: "invoke",
+    callId: "call-3",
+    method: "math.echo",
+    mode: "rpc",
+    actor: { id: "user-1", workspaceId: "workspace-a" },
+    input: { t: "id", v: "00000000000000000000000000000002" },
+  });
+  await waitFor(() => socket.sent.length === 1);
+  assert.deepEqual(JSON.parse(socket.sent.shift()!), {
+    v: 1,
+    type: "result",
+    callId: "call-3",
+    result: { t: "id", v: "00000000000000000000000000000002" },
   });
   await value.worker.stop();
   assert.equal(value.worker.state, "stopped");
 });
 
 test("worker capability discovery accepts additive features and rejects missing required support once", async () => {
-	const compatible = harness({ echo: rpc(() => "ok") });
-	const started = compatible.worker.start();
-	await waitFor(() => compatible.sockets.length === 1);
-	const socket = compatible.sockets[0]!;
-	socket.open();
-	await waitFor(() => socket.sent.length === 1);
-	socket.sent.shift();
-	socket.message({
-		v: 1, type: "registered", sessionId: "capability-session", limits: {},
-		protocol: { versions: [1, 2], capabilities: ["cancel", "rpc", "rpc.future_extension"] },
-	});
-	await started;
-	assert.deepEqual(compatible.worker.protocol, {
-		versions: [1, 2], capabilities: ["cancel", "rpc", "rpc.future_extension"],
-	});
-	await compatible.worker.stop();
+  const compatible = harness({ echo: rpc(() => "ok") });
+  const started = compatible.worker.start();
+  await waitFor(() => compatible.sockets.length === 1);
+  const socket = compatible.sockets[0]!;
+  socket.open();
+  await waitFor(() => socket.sent.length === 1);
+  socket.sent.shift();
+  socket.message({
+    v: 1,
+    type: "registered",
+    sessionId: "capability-session",
+    limits: WORKER_LIMITS,
+    protocol: { versions: [1, 2], capabilities: ["cancel", "rpc", "rpc.future_extension"] },
+  });
+  await started;
+  assert.deepEqual(compatible.worker.protocol, {
+    versions: [1, 2],
+    capabilities: ["cancel", "rpc", "rpc.future_extension"],
+  });
+  await compatible.worker.stop();
 
-	const incompatible = harness({ echo: rpc(() => "ok") });
-	const rejected = incompatible.worker.start();
-	await waitFor(() => incompatible.sockets.length === 1);
-	const missing = incompatible.sockets[0]!;
-	missing.open();
-	await waitFor(() => missing.sent.length === 1);
-	missing.sent.shift();
-	missing.message({
-		v: 1, type: "registered", sessionId: "missing-session", limits: {},
-		protocol: { versions: [1], capabilities: ["cancel"] },
-	});
-	await assert.rejects(rejected, (error: unknown) =>
-		error instanceof MeldbaseWorkerProtocolError && error.required.length === 1 && error.required[0] === "rpc",
-	);
-	await waitFor(() => incompatible.worker.state === "stopped");
-	await new Promise((resolve) => setTimeout(resolve, 30));
-	assert.equal(incompatible.sockets.length, 1);
+  const incompatible = harness({ echo: rpc(() => "ok") });
+  const rejected = incompatible.worker.start();
+  await waitFor(() => incompatible.sockets.length === 1);
+  const missing = incompatible.sockets[0]!;
+  missing.open();
+  await waitFor(() => missing.sent.length === 1);
+  missing.sent.shift();
+  missing.message({
+    v: 1,
+    type: "registered",
+    sessionId: "missing-session",
+    limits: WORKER_LIMITS,
+    protocol: { versions: [1], capabilities: ["cancel"] },
+  });
+  await assert.rejects(
+    rejected,
+    (error: unknown) =>
+      error instanceof MeldbaseWorkerProtocolError && error.required.length === 1 && error.required[0] === "rpc",
+  );
+  await waitFor(() => incompatible.worker.state === "stopped");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(incompatible.sockets.length, 1);
 
-	const oldTransactions = harness({ mutate: rpc.transactional(async () => null) });
-	const oldTransactionStart = oldTransactions.worker.start();
-	await waitFor(() => oldTransactions.sockets.length === 1);
-	const oldTransactionSocket = oldTransactions.sockets[0]!;
-	oldTransactionSocket.open();
-	await waitFor(() => oldTransactionSocket.sent.length === 1);
-	oldTransactionSocket.sent.shift();
-	oldTransactionSocket.message({
-		v: 1, type: "registered", sessionId: "old-transaction-session", limits: {},
-		protocol: { versions: [1], capabilities: [
-			"cancel", "rpc", "rpc.transactional", "transaction.invalidate_read_policy", "transaction.point_operations",
-		] },
-	});
-	await assert.rejects(oldTransactionStart, (error: unknown) =>
-		error instanceof MeldbaseWorkerProtocolError && error.required.length === 1 && error.required[0] === "transaction.compiled_update",
-	);
-	await waitFor(() => oldTransactions.worker.state === "stopped");
+  const oldTransactions = harness({ mutate: rpc.transactional(async () => null) });
+  const oldTransactionStart = oldTransactions.worker.start();
+  await waitFor(() => oldTransactions.sockets.length === 1);
+  const oldTransactionSocket = oldTransactions.sockets[0]!;
+  oldTransactionSocket.open();
+  await waitFor(() => oldTransactionSocket.sent.length === 1);
+  oldTransactionSocket.sent.shift();
+  oldTransactionSocket.message({
+    v: 1,
+    type: "registered",
+    sessionId: "old-transaction-session",
+    limits: WORKER_LIMITS,
+    protocol: {
+      versions: [1],
+      capabilities: [
+        "cancel",
+        "rpc",
+        "rpc.transactional",
+        "transaction.invalidate_read_policy",
+        "transaction.point_operations",
+      ],
+    },
+  });
+  await assert.rejects(
+    oldTransactionStart,
+    (error: unknown) =>
+      error instanceof MeldbaseWorkerProtocolError &&
+      error.required.length === 1 &&
+      error.required[0] === "transaction.compiled_update",
+  );
+  await waitFor(() => oldTransactions.worker.state === "stopped");
 
-	const downgrade = harness({ echo: rpc(() => "ok") });
-	const downgradeStart = downgrade.worker.start();
-	await waitFor(() => downgrade.sockets.length === 1);
-	const legacy = downgrade.sockets[0]!;
-	legacy.open();
-	await waitFor(() => legacy.sent.length === 1);
-	legacy.sent.shift();
-	legacy.message({ v: 1, type: "registered", sessionId: "legacy-session", limits: {} });
-	await assert.rejects(downgradeStart, (error: unknown) =>
-		error instanceof MeldbaseWorkerProtocolError && error.required[0] === "protocol.discovery",
-	);
-	await waitFor(() => downgrade.worker.state === "stopped");
+  const downgrade = harness({ echo: rpc(() => "ok") });
+  const downgradeStart = downgrade.worker.start();
+  await waitFor(() => downgrade.sockets.length === 1);
+  const legacy = downgrade.sockets[0]!;
+  legacy.open();
+  await waitFor(() => legacy.sent.length === 1);
+  legacy.sent.shift();
+  legacy.message({ v: 1, type: "registered", sessionId: "legacy-session", limits: WORKER_LIMITS });
+  await assert.rejects(
+    downgradeStart,
+    (error: unknown) => error instanceof MeldbaseWorkerProtocolError && error.required[0] === "protocol.discovery",
+  );
+  await waitFor(() => downgrade.worker.state === "stopped");
 });
 
 test("transactional worker serializes point operations and returns one result", async () => {
@@ -267,8 +431,13 @@ test("transactional worker serializes point operations and returns one result", 
   });
   const socket = await startHarness(value);
   socket.message({
-    v: 1, type: "invoke", callId: "call-tx", method: "orders.create", mode: "transactional",
-    actor: { id: "user-1", workspaceId: "" }, input: { t: "null" },
+    v: 1,
+    type: "invoke",
+    callId: "call-tx",
+    method: "orders.create",
+    mode: "transactional",
+    actor: { id: "user-1", workspaceId: "" },
+    input: { t: "null" },
   });
 
   await waitFor(() => socket.sent.length === 1);
@@ -283,8 +452,17 @@ test("transactional worker serializes point operations and returns one result", 
   assert.equal(get.operation, "get");
   assert.equal(get.id, documentID);
   socket.message({
-    v: 1, type: "tx_result", callId: "call-tx", opId: get.opId,
-    result: { t: "object", v: [["_id", { t: "id", v: documentID }], ["status", { t: "string", v: "created" }]] },
+    v: 1,
+    type: "tx_result",
+    callId: "call-tx",
+    opId: get.opId,
+    result: {
+      t: "object",
+      v: [
+        ["_id", { t: "id", v: documentID }],
+        ["status", { t: "string", v: "created" }],
+      ],
+    },
   });
 
   await waitFor(() => socket.sent.length === 1);
@@ -314,8 +492,50 @@ test("transactional worker serializes point operations and returns one result", 
 
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
-    v: 1, type: "result", callId: "call-tx", result: { t: "string", v: documentID },
+    v: 1,
+    type: "result",
+    callId: "call-tx",
+    result: { t: "string", v: documentID },
   });
+  await value.worker.stop();
+});
+
+test("malformed transaction results reject the pending operation before the worker closes", async () => {
+  let observed: unknown;
+  const value = harness({
+    "orders.bad-result": rpc.transactional(async (_context, _input, tx) => {
+      try {
+        await tx.insert("orders", { status: "created" });
+      } catch (error) {
+        observed = error;
+        throw error;
+      }
+      return null;
+    }),
+  });
+  const socket = await startHarness(value);
+  socket.message({
+    v: 1,
+    type: "invoke",
+    callId: "bad-tx",
+    method: "orders.bad-result",
+    mode: "transactional",
+    actor: { id: "user-1", workspaceId: "" },
+    input: { t: "null" },
+  });
+  await waitFor(() => socket.sent.length === 1);
+  const operation = JSON.parse(socket.sent.shift()!);
+  assert.equal(operation.type, "tx_op");
+  socket.message({
+    v: 1,
+    type: "tx_result",
+    callId: "bad-tx",
+    opId: operation.opId,
+    result: { t: "number", v: null },
+  });
+  await waitFor(() => observed !== undefined);
+  assert.match((observed as Error).message, /Malformed wire value/);
+  await waitFor(() => socket.readyState === 3);
   await value.worker.stop();
 });
 
@@ -323,14 +543,28 @@ test("worker cancellation aborts handler and reconnect re-registers", async () =
   let aborted = false;
   const value = harness({
     slow: rpc(async ({ signal }) => {
-      await new Promise<void>((resolve) => signal.addEventListener("abort", () => { aborted = true; resolve(); }, { once: true }));
+      await new Promise<void>((resolve) =>
+        signal.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            resolve();
+          },
+          { once: true },
+        ),
+      );
       return "late";
     }),
   });
   const first = await startHarness(value);
   first.message({
-    v: 1, type: "invoke", callId: "slow-call", method: "slow", mode: "rpc",
-    actor: { id: "user-1", workspaceId: "" }, input: { t: "null" },
+    v: 1,
+    type: "invoke",
+    callId: "slow-call",
+    method: "slow",
+    mode: "rpc",
+    actor: { id: "user-1", workspaceId: "" },
+    input: { t: "null" },
   });
   first.message({ v: 1, type: "cancel", callId: "slow-call" });
   await waitFor(() => aborted);
@@ -342,7 +576,13 @@ test("worker cancellation aborts handler and reconnect re-registers", async () =
   await waitFor(() => second.sent.length === 1);
   const registration = JSON.parse(second.sent.shift()!);
   assert.equal(registration.type, "register");
-  second.message({ v: 1, type: "registered", sessionId: "session-2", limits: { maxPendingCalls: 64, maxOperationsPerCall: 256 }, protocol: WORKER_PROTOCOL });
+  second.message({
+    v: 1,
+    type: "registered",
+    sessionId: "session-2",
+    limits: WORKER_LIMITS,
+    protocol: WORKER_PROTOCOL,
+  });
   await waitFor(() => value.worker.state === "ready");
   await value.worker.stop();
 });
@@ -354,13 +594,16 @@ test("read policy returns only a data constraint and static visibility declarati
     url: "wss://control.example.test/v1/workers",
     token: "worker-control-token-0123456789abcdef",
     workerId: "read-policy-worker",
-   readPolicies: {
-      orders: readPolicy({ version: "orders-v1", maxResults: 50, queryPaths, resultFields: ["status", "description"] }, ({ actor, query }) => {
-        assert.equal(query.where.op, "true");
-        if (actor.workspaceId === "blocked") return null;
-        assert.equal(actor.workspaceId, "workspace-a");
-        return compileQuery({ workspace: actor.workspaceId });
-      }),
+    readPolicies: {
+      orders: readPolicy(
+        { version: "orders-v1", maxResults: 50, queryPaths, resultFields: ["status", "description"] },
+        ({ actor, query }) => {
+          assert.equal(query.where.op, "true");
+          if (actor.workspaceId === "blocked") return null;
+          assert.equal(actor.workspaceId, "workspace-a");
+          return compileQuery({ workspace: actor.workspaceId });
+        },
+      ),
     },
     webSocketFactory: () => {
       const socket = new FakeSocket();
@@ -378,39 +621,81 @@ test("read policy returns only a data constraint and static visibility declarati
   await waitFor(() => socket.sent.length === 1);
   const registration = JSON.parse(socket.sent.shift()!);
   assert.deepEqual(registration.methods, []);
-  assert.deepEqual(registration.readPolicies, [{
-    collection: "orders", version: "orders-v1", maxResults: 50,
-    queryPaths: ["status"], resultFields: ["status", "description"],
-  }]);
-  socket.message({ v: 1, type: "registered", sessionId: "read-policy-session", limits: {}, protocol: WORKER_PROTOCOL });
+  assert.deepEqual(registration.readPolicies, [
+    {
+      collection: "orders",
+      version: "orders-v1",
+      maxResults: 50,
+      queryPaths: ["status"],
+      resultFields: ["status", "description"],
+    },
+  ]);
+  socket.message({
+    v: 1,
+    type: "registered",
+    sessionId: "read-policy-session",
+    limits: WORKER_LIMITS,
+    protocol: WORKER_PROTOCOL,
+  });
   await started;
   socket.message({
-    v: 1, type: "authorize_query", callId: "policy-1", collection: "orders",
-    actor: { id: "user-1", workspaceId: "workspace-a" }, query: { version: 1, where: { op: "true" } },
+    v: 1,
+    type: "authorize_query",
+    callId: "policy-1",
+    collection: "orders",
+    actor: { id: "user-1", workspaceId: "workspace-a" },
+    query: { version: 1, where: { op: "true" } },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
-    v: 1, type: "policy", callId: "policy-1",
-    constraint: { version: 1, where: { op: "compare", cmp: "eq", path: "workspace", value: { t: "string", v: "workspace-a" } } },
+    v: 1,
+    type: "policy",
+    callId: "policy-1",
+    constraint: {
+      version: 1,
+      where: { op: "compare", cmp: "eq", path: "workspace", value: { t: "string", v: "workspace-a" } },
+    },
   });
   socket.message({
-    v: 1, type: "authorize_query", callId: "policy-2", collection: "orders",
-    actor: { id: "user-2", workspaceId: "blocked" }, query: { version: 1, where: { op: "true" } },
+    v: 1,
+    type: "authorize_query",
+    callId: "policy-2",
+    collection: "orders",
+    actor: { id: "user-2", workspaceId: "blocked" },
+    query: { version: 1, where: { op: "true" } },
   });
   await waitFor(() => socket.sent.length === 1);
   assert.deepEqual(JSON.parse(socket.sent.shift()!), {
-    v: 1, type: "policy_error", callId: "policy-2", error: { kind: "internal", code: "forbidden" },
+    v: 1,
+    type: "policy_error",
+    callId: "policy-2",
+    error: { kind: "internal", code: "forbidden" },
   });
   await worker.stop();
 });
 
 test("worker rejects unsafe configuration and protocol frames", async () => {
   assert.throws(() => harness({ "bad/name": rpc(() => null) }), /Invalid worker method/);
-  assert.throws(() => harness({ ok: rpc(() => null) }, "meldbase://control.example.test/v1/workers"), /cannot include a path/);
-  assert.throws(() => harness({ ok: rpc(() => null) }, "meldbase://control.example.test?token=unsafe"), /without credentials/);
+  assert.throws(
+    () => harness({ ok: rpc(() => null) }, "meldbase://control.example.test/v1/workers"),
+    /cannot include a path/,
+  );
+  assert.throws(
+    () => harness({ ok: rpc(() => null) }, "meldbase://control.example.test?token=unsafe"),
+    /without credentials/,
+  );
   assert.throws(() => new MeldbaseError("Bad-Code"), /Invalid/);
-  assert.throws(() => readPolicy({ version: "bad", maxResults: 0, queryPaths: "*", resultFields: "*" }, () => compileQuery({})), /maxResults/);
-  assert.throws(() => readPolicy({ version: "bad", maxResults: 1, queryPaths: ["bad\0path"], resultFields: "*" }, () => compileQuery({})), /NUL/);
+  assert.throws(
+    () => readPolicy({ version: "bad", maxResults: 0, queryPaths: "*", resultFields: "*" }, () => compileQuery({})),
+    /maxResults/,
+  );
+  assert.throws(
+    () =>
+      readPolicy({ version: "bad", maxResults: 1, queryPaths: ["bad\0path"], resultFields: "*" }, () =>
+        compileQuery({}),
+      ),
+    /NUL/,
+  );
   const value = harness({ ok: rpc(() => null) });
   const errors: Error[] = [];
   const configured = new MeldbaseWorker({
@@ -433,11 +718,16 @@ test("worker rejects unsafe configuration and protocol frames", async () => {
   socket.open();
   await waitFor(() => socket.sent.length === 1);
   socket.sent.shift();
-  socket.message({ v: 1, type: "registered", sessionId: "session", limits: {}, protocol: WORKER_PROTOCOL });
+  socket.message({ v: 1, type: "registered", sessionId: "session", limits: WORKER_LIMITS, protocol: WORKER_PROTOCOL });
   await started;
   socket.message({
-    v: 1, type: "invoke", callId: "legacy-identity", method: "ok", mode: "rpc",
-    principal: { subject: "user-1", workspace: "team-a" }, input: { t: "null" },
+    v: 1,
+    type: "invoke",
+    callId: "legacy-identity",
+    method: "ok",
+    mode: "rpc",
+    actor: { id: "user-1", workspaceId: "team-a", principal: "must-not-be-ignored" },
+    input: { t: "null" },
   });
   await waitFor(() => errors.length > 0);
   assert.match(errors[0]!.message, /unknown or missing fields|Invalid invoke frame/);

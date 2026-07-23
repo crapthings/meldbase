@@ -12,6 +12,9 @@ hero:
     - theme: brand
       text: TypeScript API
       link: /api/typescript/
+    - theme: brand
+      text: SDK guide
+      link: /sdk
     - theme: alt
       text: View the source
       link: https://github.com/crapthings/meldbase

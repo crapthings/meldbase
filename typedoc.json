@@ -1,11 +1,8 @@
 {
   "$schema": "https://typedoc.org/schema.json",
-  "entryPoints": [
-    "sdk/client",
-    "sdk/react",
-    "sdk/worker"
-  ],
-  "entryPointStrategy": "packages",
+  "entryPoints": ["sdk/client/src/index.ts", "sdk/react/src/index.ts", "sdk/worker/src/index.ts"],
+  "entryPointStrategy": "expand",
+  "tsconfig": "typedoc.tsconfig.json",
   "name": "Meldbase TypeScript API",
   "out": "docs/public/api/typescript",
   "readme": "none",

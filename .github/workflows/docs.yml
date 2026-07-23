@@ -1,4 +1,4 @@
-name: Documentation site
+name: Documentation site (docs-only)
 
 on:
   push:
@@ -7,17 +7,21 @@ on:
       - ".github/workflows/docs.yml"
       - "docs/**"
       - "sdk/**"
+      - "scripts/verify-sdk-api-docs.mjs"
       - "package.json"
       - "pnpm-lock.yaml"
       - "typedoc.json"
+      - "typedoc.tsconfig.json"
   pull_request:
     paths:
       - ".github/workflows/docs.yml"
       - "docs/**"
       - "sdk/**"
+      - "scripts/verify-sdk-api-docs.mjs"
       - "package.json"
       - "pnpm-lock.yaml"
       - "typedoc.json"
+      - "typedoc.tsconfig.json"
   workflow_dispatch:
 
 permissions:
@@ -29,7 +33,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build documentation
+    name: Build documentation and SDK API reference
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7

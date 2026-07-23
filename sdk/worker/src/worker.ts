@@ -4,10 +4,10 @@ import {
   encodeQuerySpec,
   encodeValue,
   MELDBASE_PROTOCOL_VERSION,
-} from "@meldbase/client";
-import type { ProtocolDescriptor, WireValue } from "@meldbase/client";
+} from "@meldbase/client/internal";
+import type { ProtocolDescriptor } from "@meldbase/client";
 
-import { readPolicy, rpc, validateReadPolicyOptions } from "./definitions.js";
+import { validateReadPolicyOptions } from "./definitions.js";
 import { MeldbaseError, MeldbaseWorkerProtocolError } from "./errors.js";
 import { validateWorkerProtocol } from "./protocol.js";
 import {
@@ -21,6 +21,7 @@ import {
   parseJSONRecord,
   parseWorkerURL,
   record,
+  utf8ByteLength,
   WORKER_PATTERN,
 } from "./shared.js";
 import { RemoteWriteTransaction } from "./transaction.js";
@@ -58,6 +59,13 @@ interface ActiveCall {
   readonly transaction?: RemoteWriteTransaction;
 }
 
+const REGISTRATION_LIMIT_KEYS = [
+  "maxPendingCalls",
+  "maxOperationsPerCall",
+  "maxReadPoliciesPerWorker",
+  "policyEvaluationTimeoutMs",
+] as const;
+
 export class MeldbaseWorker {
   readonly #options: Required<Pick<WorkerOptions, "reconnectMinMs" | "reconnectMaxMs">> & WorkerOptions;
   readonly #methods: ReadonlyMap<string, RPCDefinition>;
@@ -73,13 +81,22 @@ export class MeldbaseWorker {
   #fatalError: Error | undefined;
 
   constructor(options: WorkerOptions) {
-    if (!options || typeof options.webSocketFactory !== "function") throw new TypeError("Worker WebSocket factory is required");
+    if (!options || typeof options.webSocketFactory !== "function")
+      throw new TypeError("Worker WebSocket factory is required");
     const url = parseWorkerURL(options.url);
-    if (options.token.length < 32 || options.token.length > 4096) throw new TypeError("Worker token must contain between 32 and 4096 bytes");
-    if (!WORKER_PATTERN.test(options.workerId)) throw new TypeError("Invalid worker ID");
+    const tokenBytes = utf8ByteLength(options.token, "Worker token");
+    if (tokenBytes < 32 || tokenBytes > 4096)
+      throw new TypeError("Worker token must contain between 32 and 4096 bytes");
+    if (typeof options.workerId !== "string" || !WORKER_PATTERN.test(options.workerId))
+      throw new TypeError("Invalid worker ID");
     const methods = new Map<string, RPCDefinition>();
     for (const [name, definition] of Object.entries(options.methods ?? {})) {
-      if (!METHOD_PATTERN.test(name) || !definition || (definition.mode !== "rpc" && definition.mode !== "transactional") || typeof definition.handler !== "function") {
+      if (
+        !METHOD_PATTERN.test(name) ||
+        !definition ||
+        (definition.mode !== "rpc" && definition.mode !== "transactional") ||
+        typeof definition.handler !== "function"
+      ) {
         throw new TypeError(`Invalid worker method ${name}`);
       }
       methods.set(name, definition);
@@ -87,19 +104,27 @@ export class MeldbaseWorker {
     if (methods.size > 4096) throw new TypeError("Worker cannot register more than 4096 methods");
     const readPolicies = new Map<string, ReadPolicyDefinition>();
     for (const [collection, definition] of Object.entries(options.readPolicies ?? {})) {
-      if (!COLLECTION_PATTERN.test(collection) || !definition || typeof definition.handler !== "function") throw new TypeError(`Invalid worker read policy ${collection}`);
+      if (!COLLECTION_PATTERN.test(collection) || !definition || typeof definition.handler !== "function")
+        throw new TypeError(`Invalid worker read policy ${collection}`);
       validateReadPolicyOptions(definition);
-     readPolicies.set(collection, {
+      readPolicies.set(collection, {
         ...definition,
         queryPaths: definition.queryPaths === "*" ? "*" : Object.freeze([...definition.queryPaths]),
         resultFields: definition.resultFields === "*" ? "*" : Object.freeze([...definition.resultFields]),
       });
     }
     if (readPolicies.size > 4096) throw new TypeError("Worker cannot register more than 4096 read policies");
-    if (methods.size === 0 && readPolicies.size === 0) throw new TypeError("Worker requires at least one method or read policy");
+    if (methods.size === 0 && readPolicies.size === 0)
+      throw new TypeError("Worker requires at least one method or read policy");
     const reconnectMinMs = options.reconnectMinMs ?? 250;
     const reconnectMaxMs = options.reconnectMaxMs ?? 10_000;
-    if (!Number.isSafeInteger(reconnectMinMs) || !Number.isSafeInteger(reconnectMaxMs) || reconnectMinMs < 10 || reconnectMaxMs < reconnectMinMs || reconnectMaxMs > 60_000) {
+    if (
+      !Number.isSafeInteger(reconnectMinMs) ||
+      !Number.isSafeInteger(reconnectMaxMs) ||
+      reconnectMinMs < 10 ||
+      reconnectMaxMs < reconnectMinMs ||
+      reconnectMaxMs > 60_000
+    ) {
       throw new TypeError("Invalid worker reconnect bounds");
     }
     this.#options = { ...options, url, reconnectMinMs, reconnectMaxMs };
@@ -107,8 +132,12 @@ export class MeldbaseWorker {
     this.#readPolicies = readPolicies;
   }
 
-  get state(): WorkerState { return this.#state; }
-  get protocol(): ProtocolDescriptor | undefined { return this.#protocol; }
+  get state(): WorkerState {
+    return this.#state;
+  }
+  get protocol(): ProtocolDescriptor | undefined {
+    return this.#protocol;
+  }
 
   async start(): Promise<void> {
     if (this.#state === "stopped") throw new Error("Meldbase worker is stopped");
@@ -187,11 +216,16 @@ export class MeldbaseWorker {
       if (this.#stopController.signal.aborted) return;
       this.#setState("registering");
       this.#send({
-        v: MELDBASE_PROTOCOL_VERSION, type: "register", workerId: this.#options.workerId,
+        v: MELDBASE_PROTOCOL_VERSION,
+        type: "register",
+        workerId: this.#options.workerId,
         methods: [...this.#methods].map(([name, definition]) => ({ name, mode: definition.mode })),
-       readPolicies: [...this.#readPolicies].map(([collection, definition]) => ({
-          collection, version: definition.version, maxResults: definition.maxResults,
-          queryPaths: definition.queryPaths, resultFields: definition.resultFields,
+        readPolicies: [...this.#readPolicies].map(([collection, definition]) => ({
+          collection,
+          version: definition.version,
+          maxResults: definition.maxResults,
+          queryPaths: definition.queryPaths,
+          resultFields: definition.resultFields,
         })),
       });
       await closed.promise;
@@ -209,11 +243,18 @@ export class MeldbaseWorker {
   async #receive(session: number, data: unknown): Promise<void> {
     if (session !== this.#session || typeof data !== "string") throw new Error("Worker frame must be text");
     const frame = parseJSONRecord(data);
-    if (frame.v !== MELDBASE_PROTOCOL_VERSION || typeof frame.type !== "string") throw new Error("Invalid worker frame header");
+    if (frame.v !== MELDBASE_PROTOCOL_VERSION || typeof frame.type !== "string")
+      throw new Error("Invalid worker frame header");
     switch (frame.type) {
       case "registered": {
-        exactKeys(frame, frame.protocol === undefined ? ["v", "type", "sessionId", "limits"] : ["v", "type", "sessionId", "limits", "protocol"]);
-        if (typeof frame.sessionId !== "string" || !record(frame.limits)) throw new Error("Invalid registered frame");
+        exactKeys(
+          frame,
+          frame.protocol === undefined
+            ? ["v", "type", "sessionId", "limits"]
+            : ["v", "type", "sessionId", "limits", "protocol"],
+        );
+        if (typeof frame.sessionId !== "string") throw new Error("Invalid registered frame");
+        validateRegistrationLimits(frame.limits);
         const descriptor = validateWorkerProtocol(frame.protocol, this.#methods, this.#readPolicies);
         this.#protocol = descriptor;
         this.#setState("ready");
@@ -233,8 +274,14 @@ export class MeldbaseWorker {
         return;
       case "tx_result":
       case "tx_error": {
-        exactKeys(frame, frame.type === "tx_result" ? ["v", "type", "callId", "opId", "result"] : ["v", "type", "callId", "opId", "error"]);
-        if (typeof frame.callId !== "string" || typeof frame.opId !== "string") throw new Error("Invalid transaction response");
+        exactKeys(
+          frame,
+          frame.type === "tx_result"
+            ? ["v", "type", "callId", "opId", "result"]
+            : ["v", "type", "callId", "opId", "error"],
+        );
+        if (typeof frame.callId !== "string" || typeof frame.opId !== "string")
+          throw new Error("Invalid transaction response");
         const transaction = this.#calls.get(frame.callId)?.transaction;
         if (!transaction) throw new Error("Transaction response has no active call");
         transaction.receive(frame);
@@ -247,33 +294,42 @@ export class MeldbaseWorker {
 
   async #invoke(frame: Record<string, unknown>): Promise<void> {
     exactKeys(frame, ["v", "type", "callId", "method", "mode", "actor", "input"]);
-    if (typeof frame.callId !== "string" || typeof frame.method !== "string" || (frame.mode !== "rpc" && frame.mode !== "transactional") ||
-        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.workspaceId !== "string" || frame.input === undefined) {
+    if (
+      typeof frame.callId !== "string" ||
+      typeof frame.method !== "string" ||
+      (frame.mode !== "rpc" && frame.mode !== "transactional") ||
+      frame.input === undefined
+    ) {
       throw new Error("Invalid invoke frame");
     }
+    const actor = decodeActor(frame.actor);
     const definition = this.#methods.get(frame.method);
-    if (!definition || definition.mode !== frame.mode || this.#calls.has(frame.callId)) throw new Error("Invoke does not match registration");
+    if (!definition || definition.mode !== frame.mode || this.#calls.has(frame.callId))
+      throw new Error("Invoke does not match registration");
     const input = decodeValue(frame.input);
     const controller = new AbortController();
     const context: RPCContext = {
-      actor: Object.freeze({ id: frame.actor.id, workspaceId: frame.actor.workspaceId }),
+      actor: Object.freeze(actor),
       signal: controller.signal,
     };
-    const active: ActiveCall = definition.mode === "transactional"
-      ? { controller, transaction: new RemoteWriteTransaction(frame.callId, (value) => this.#send(value)) }
-      : { controller };
+    const active: ActiveCall =
+      definition.mode === "transactional"
+        ? { controller, transaction: new RemoteWriteTransaction(frame.callId, (value) => this.#send(value)) }
+        : { controller };
     this.#calls.set(frame.callId, active);
     try {
-      const result = definition.mode === "transactional"
-        ? await definition.handler(context, input, active.transaction!)
-        : await definition.handler(context, input);
+      const result =
+        definition.mode === "transactional"
+          ? await definition.handler(context, input, active.transaction!)
+          : await definition.handler(context, input);
       if (controller.signal.aborted) return;
       this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "result", callId: frame.callId, result: encodeValue(result) });
     } catch (error) {
       if (controller.signal.aborted) return;
-      const payload = error instanceof MeldbaseError
-        ? { kind: "business", code: error.code, ...(error.data ? { data: encodeValue(error.data) } : {}) }
-        : { kind: "internal", code: "internal" };
+      const payload =
+        error instanceof MeldbaseError
+          ? { kind: "business", code: error.code, ...(error.data ? { data: encodeValue(error.data) } : {}) }
+          : { kind: "internal", code: "internal" };
       this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "error", callId: frame.callId, error: payload });
     } finally {
       active.transaction?.close(new Error("Transaction method completed"));
@@ -283,18 +339,19 @@ export class MeldbaseWorker {
 
   async #authorizeQuery(frame: Record<string, unknown>): Promise<void> {
     exactKeys(frame, ["v", "type", "callId", "collection", "actor", "query"]);
-    if (typeof frame.callId !== "string" || typeof frame.collection !== "string" ||
-        !record(frame.actor) || typeof frame.actor.id !== "string" || typeof frame.actor.workspaceId !== "string") {
+    if (typeof frame.callId !== "string" || typeof frame.collection !== "string") {
       throw new Error("Invalid query authorization frame");
     }
+    const actor = decodeActor(frame.actor);
     const definition = this.#readPolicies.get(frame.collection);
-    if (!definition || this.#calls.has(frame.callId)) throw new Error("Query authorization does not match registration");
+    if (!definition || this.#calls.has(frame.callId))
+      throw new Error("Query authorization does not match registration");
     const query = decodeQuerySpec(frame.query);
     const controller = new AbortController();
     const active: ActiveCall = { controller };
     const context: ReadPolicyContext = {
       collection: frame.collection,
-      actor: Object.freeze({ id: frame.actor.id, workspaceId: frame.actor.workspaceId }),
+      actor: Object.freeze(actor),
       query,
       signal: controller.signal,
     };
@@ -303,7 +360,12 @@ export class MeldbaseWorker {
       const constraint = await definition.handler(context);
       if (controller.signal.aborted) return;
       if (constraint === null) {
-        this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "policy_error", callId: frame.callId, error: { kind: "internal", code: "forbidden" } });
+        this.#send({
+          v: MELDBASE_PROTOCOL_VERSION,
+          type: "policy_error",
+          callId: frame.callId,
+          error: { kind: "internal", code: "forbidden" },
+        });
         return;
       }
       if (constraint.sort !== undefined || constraint.skip !== undefined || constraint.limit !== undefined) {
@@ -312,9 +374,14 @@ export class MeldbaseWorker {
       const encoded = encodeQuerySpec(constraint);
       decodeQuerySpec(encoded);
       this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "policy", callId: frame.callId, constraint: encoded });
-    } catch (error) {
+    } catch {
       if (controller.signal.aborted) return;
-      this.#send({ v: MELDBASE_PROTOCOL_VERSION, type: "policy_error", callId: frame.callId, error: { kind: "internal", code: "internal" } });
+      this.#send({
+        v: MELDBASE_PROTOCOL_VERSION,
+        type: "policy_error",
+        callId: frame.callId,
+        error: { kind: "internal", code: "internal" },
+      });
     } finally {
       this.#calls.delete(frame.callId);
     }
@@ -340,5 +407,36 @@ export class MeldbaseWorker {
   }
 }
 
-// Keep the imported wire type part of the generated public declaration graph.
-export type ServerWireValue = WireValue;
+function validateRegistrationLimits(value: unknown): void {
+  if (!record(value)) throw new Error("Invalid worker registration limits");
+  exactKeys(value, REGISTRATION_LIMIT_KEYS);
+  assertBoundedPositiveInteger(value.maxPendingCalls, "maxPendingCalls", 4096);
+  assertBoundedPositiveInteger(value.maxOperationsPerCall, "maxOperationsPerCall", 4096);
+  assertBoundedPositiveInteger(value.maxReadPoliciesPerWorker, "maxReadPoliciesPerWorker", 4096);
+  assertBoundedPositiveInteger(value.policyEvaluationTimeoutMs, "policyEvaluationTimeoutMs", 30_000);
+}
+
+function assertBoundedPositiveInteger(value: unknown, label: string, maximum: number): void {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0 || value > maximum) {
+    throw new Error(`Invalid worker registration limit ${label}`);
+  }
+}
+
+function decodeActor(value: unknown): { readonly id: string; readonly workspaceId: string } {
+  if (!record(value)) throw new Error("Invalid worker actor");
+  exactKeys(value, ["id", "workspaceId"]);
+  if (!isWorkerIdentity(value.id, true) || !isWorkerIdentity(value.workspaceId, false)) {
+    throw new Error("Invalid worker actor");
+  }
+  return { id: value.id, workspaceId: value.workspaceId };
+}
+
+function isWorkerIdentity(value: unknown, required: boolean): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const bytes = utf8ByteLength(value, "worker actor identity");
+    return bytes <= 4096 && (!required || bytes > 0);
+  } catch {
+    return false;
+  }
+}

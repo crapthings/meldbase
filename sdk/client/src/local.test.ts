@@ -9,7 +9,9 @@ const id = (value: number) => value.toString(16).padStart(32, "0");
 test("live query emits initial and changed snapshots, not irrelevant writes", async () => {
   const collection = new LocalCollection<Document>([{ _id: id(1), done: false }]);
   const snapshots: string[][] = [];
-  const unsubscribe = collection.find({ done: false }).subscribe((items) => snapshots.push(items.map((item) => item._id)));
+  const unsubscribe = collection
+    .find({ done: false })
+    .subscribe((items) => snapshots.push(items.map((item) => item._id)));
   collection.insert({ _id: id(2), done: true });
   await tick();
   collection.insert({ _id: id(3), done: false });
@@ -33,7 +35,13 @@ test("batch coalesces observer work and snapshots cannot mutate storage", async 
   });
   await tick();
   assert.deepEqual(sizes, [0, 2]);
-  assert.deepEqual(collection.find().fetch().map((item) => item._id), [id(1), id(2)]);
+  assert.deepEqual(
+    collection
+      .find()
+      .fetch()
+      .map((item) => item._id),
+    [id(1), id(2)],
+  );
 });
 
 test("local insert/update/delete use the same safe mutation semantics", async () => {
@@ -42,7 +50,10 @@ test("local insert/update/delete use the same safe mutation semantics", async ()
   assert.match(inserted._id, /^[0-9a-f]{32}$/);
   const snapshots: number[] = [];
   collection.find().subscribe((items) => snapshots.push(items.length));
-  const updated = collection.updateOne({ _id: inserted._id }, { $inc: { count: 2n }, $set: { "profile.city": "B" }, $pull: { tags: "old" } });
+  const updated = collection.updateOne(
+    { _id: inserted._id },
+    { $inc: { count: 2n }, $set: { "profile.city": "B" }, $pull: { tags: "old" } },
+  );
   await tick();
   assert.deepEqual(updated, { matchedCount: 1, modifiedCount: 1 });
   const found = collection.find({ _id: inserted._id }).fetch()[0] as Document;
@@ -67,8 +78,17 @@ test("local upsert creates or fully replaces one canonical document ID", () => {
 
 test("fetchPage is only available for a seek query", () => {
   const collection = new LocalCollection<Document>([{ _id: id(1), rank: 1 }]);
-  assert.throws(() => collection.find({}, { sort: [{ path: "rank", direction: 1 }], limit: 1 }).fetchPage(), /requires a query created with first/);
-  assert.deepEqual(collection.find({}, { sort: [{ path: "rank", direction: 1 }], first: 1 }).fetchPage().documents.map((document) => document._id), [id(1)]);
+  assert.throws(
+    () => collection.find({}, { sort: [{ path: "rank", direction: 1 }], limit: 1 }).fetchPage(),
+    /requires a query created with first/,
+  );
+  assert.deepEqual(
+    collection
+      .find({}, { sort: [{ path: "rank", direction: 1 }], first: 1 })
+      .fetchPage()
+      .documents.map((document) => document._id),
+    [id(1)],
+  );
 });
 
 test("findOne uses the shared query compiler and returns an isolated document", () => {
@@ -88,9 +108,18 @@ test("primary-key constrained local queries preserve additional predicates and m
     { _id: id(2), status: "closed", title: "second" },
   ]);
 
-  assert.deepEqual(collection.find({ _id: id(1), status: "open" }).fetch().map((document) => document._id), [id(1)]);
+  assert.deepEqual(
+    collection
+      .find({ _id: id(1), status: "open" })
+      .fetch()
+      .map((document) => document._id),
+    [id(1)],
+  );
   assert.deepEqual(collection.find({ _id: id(1), status: "closed" }).fetch(), []);
-  assert.deepEqual(collection.updateOne({ _id: id(1), status: "open" }, { $set: { title: "updated" } }), { matchedCount: 1, modifiedCount: 1 });
+  assert.deepEqual(collection.updateOne({ _id: id(1), status: "open" }, { $set: { title: "updated" } }), {
+    matchedCount: 1,
+    modifiedCount: 1,
+  });
   assert.deepEqual(collection.deleteMany({ _id: id(2), status: "open" }), { deletedCount: 0 });
   assert.equal(collection.findOne({ _id: id(1) })?.title, "updated");
   assert.equal(collection.findOne({ _id: id(2) })?.title, "second");

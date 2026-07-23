@@ -12,16 +12,30 @@
     "build:dashboard": "pnpm --filter @meldbase/admin-dashboard build",
     "check:dashboard": "pnpm --filter @meldbase/admin-dashboard check && pnpm run build:dashboard",
     "test": "pnpm --filter './sdk/*' test && go test ./internal/server -run '^TestWorkerHubWorkerSDKEndToEnd$' -count=1",
-    "pack:check": "pnpm --filter './sdk/*' build && node scripts/verify-sdk-packages.mjs",
+    "pack:check": "node scripts/verify-sdk-packages.mjs",
+    "test:sdk:browser": "node scripts/test-sdk-browser.mjs",
+    "format:sdk": "prettier --write \"sdk/**/*.{ts,tsx,md,json}\" \"docs/sdk*.md\" \"docs/.vitepress/config.mts\" \"scripts/{check-sdk-release-readiness,publish-sdk-beta,test-sdk-browser,verify-sdk-packages,verify-sdk-api-docs}.mjs\" \"examples/realtime-todos/**/*.{ts,tsx,html,json}\" \".github/workflows/{docs,sdk-beta-release,sdk-compatibility}.yml\" \"package.json\" \"pnpm-workspace.yaml\" \"typedoc*.json\" \"eslint.config.mjs\" \".prettierrc.json\"",
+    "format:sdk:check": "prettier --check \"sdk/**/*.{ts,tsx,md,json}\" \"docs/sdk*.md\" \"docs/.vitepress/config.mts\" \"scripts/{check-sdk-release-readiness,publish-sdk-beta,test-sdk-browser,verify-sdk-packages,verify-sdk-api-docs}.mjs\" \"examples/realtime-todos/**/*.{ts,tsx,html,json}\" \".github/workflows/{docs,sdk-beta-release,sdk-compatibility}.yml\" \"package.json\" \"pnpm-workspace.yaml\" \"typedoc*.json\" \"eslint.config.mjs\" \".prettierrc.json\"",
+    "lint:sdk": "eslint \"sdk/**/*.{ts,tsx}\"",
+    "coverage:sdk": "pnpm --filter @meldbase/client run coverage && pnpm --filter @meldbase/worker run coverage && pnpm --filter @meldbase/react run coverage",
+    "release:sdk:checklist": "node scripts/check-sdk-release-readiness.mjs",
+    "quality:sdk": "pnpm format:sdk:check && pnpm lint:sdk && pnpm coverage:sdk && pnpm release:sdk:checklist",
+    "release:sdk:beta": "node scripts/publish-sdk-beta.mjs",
     "build:example": "pnpm --filter @meldbase/example-realtime-todos build",
     "build:docs-sdk": "pnpm --filter @meldbase/client build && pnpm --filter @meldbase/worker build && pnpm --filter @meldbase/react build",
-    "docs:api": "pnpm run build:docs-sdk && typedoc --options typedoc.json",
+    "docs:api": "pnpm run build:docs-sdk && typedoc --options typedoc.json && node scripts/verify-sdk-api-docs.mjs",
     "docs:dev": "pnpm docs:api && vitepress dev docs",
     "docs:build": "pnpm docs:api && vitepress build docs",
     "docs:preview": "vitepress preview docs"
   },
   "devDependencies": {
+    "@eslint/js": "9.25.1",
+    "c8": "10.1.3",
+    "eslint": "9.25.1",
+    "prettier": "3.5.3",
     "typedoc": "0.28.20",
-    "vitepress": "2.0.0-alpha.18"
+    "typescript-eslint": "8.30.1",
+    "vitepress": "2.0.0-alpha.18",
+    "ws": "^8.21.0"
   }
 }

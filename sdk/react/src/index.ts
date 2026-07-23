@@ -45,9 +45,10 @@ class QueryObserver<T extends Document> {
   constructor(query: SupportedLiveQuery<T>, initialData?: readonly T[]) {
     this.#query = query;
     const documents = initialData ?? EMPTY_DOCUMENTS;
-		this.#snapshot = query.mode === "local"
-      ? Object.freeze({ documents: query.fetch(), status: "live" })
-      : Object.freeze({ documents, status: "idle" });
+    this.#snapshot =
+      query.mode === "local"
+        ? Object.freeze({ documents: query.fetch(), status: "live" })
+        : Object.freeze({ documents, status: "idle" });
     this.#serverSnapshot = this.#snapshot;
   }
 
@@ -67,11 +68,10 @@ class QueryObserver<T extends Document> {
   readonly getServerSnapshot = (): LiveQueryResult<T> => this.#serverSnapshot;
 
   #start(): void {
-		if (this.#query.mode === "remote") {
-      this.#stop = this.#query.subscribe(
-        (documents) => this.#publish({ documents, status: "live" }),
-        { onStatus: (status) => this.#status(status) },
-      );
+    if (this.#query.mode === "remote") {
+      this.#stop = this.#query.subscribe((documents) => this.#publish({ documents, status: "live" }), {
+        onStatus: (status) => this.#status(status),
+      });
       return;
     }
     this.#stop = this.#query.subscribe((documents) => this.#publish({ documents, status: "live" }));
@@ -94,8 +94,10 @@ class QueryObserver<T extends Document> {
 }
 
 function sameSnapshot<T extends Document>(left: LiveQueryResult<T>, right: LiveQueryResult<T>): boolean {
-  return left.documents === right.documents
-    && left.status === right.status
-    && left.error === right.error
-    && left.token === right.token;
+  return (
+    left.documents === right.documents &&
+    left.status === right.status &&
+    left.error === right.error &&
+    left.token === right.token
+  );
 }

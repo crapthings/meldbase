@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { encodeDocument, encodeValue, MeldbaseClient, MeldbaseClientClosedError, MeldbaseError, MeldbaseInternalError, MeldbaseProtocolError } from "./index.js";
+import { MeldbaseClient } from "./remote/client.js";
+import {
+  MeldbaseClientClosedError,
+  MeldbaseError,
+  MeldbaseInternalError,
+  MeldbaseProtocolError,
+} from "./remote/errors.js";
+import { documentID, isDocumentIDValue } from "./safe-value.js";
+import { encodeDocument, encodeValue } from "./wire.js";
 import type { Document, SyncState, WebSocketLike } from "./index.js";
 
 class FakeSocket implements WebSocketLike {
@@ -9,22 +17,47 @@ class FakeSocket implements WebSocketLike {
   closed?: { code?: number; reason?: string };
   readonly listeners = new Map<string, Array<(event: Event | MessageEvent) => void>>();
 
-  addEventListener(type: "open" | "close" | "error" | "message", listener: (event: Event | MessageEvent) => void): void {
+  addEventListener(
+    type: "open" | "close" | "error" | "message",
+    listener: (event: Event | MessageEvent) => void,
+  ): void {
     const listeners = this.listeners.get(type) ?? [];
     listeners.push(listener);
     this.listeners.set(type, listeners);
   }
-  send(data: string): void { this.sent.push(data); }
-  close(code?: number, reason?: string): void { this.closed = { ...(code === undefined ? {} : { code }), ...(reason === undefined ? {} : { reason }) }; this.readyState = 3; }
- open(): void { this.readyState = 1; this.emit("open", new Event("open")); }
-  error(): void { this.emit("error", new Event("error")); }
-  disconnect(): void { this.readyState = 3; this.emit("close", new Event("close")); }
-  message(value: unknown): void { this.emit("message", new MessageEvent("message", { data: JSON.stringify(value) })); }
-  private emit(type: string, event: Event | MessageEvent): void { for (const listener of this.listeners.get(type) ?? []) listener(event); }
+  send(data: string): void {
+    this.sent.push(data);
+  }
+  close(code?: number, reason?: string): void {
+    this.closed = { ...(code === undefined ? {} : { code }), ...(reason === undefined ? {} : { reason }) };
+    this.readyState = 3;
+  }
+  open(): void {
+    this.readyState = 1;
+    this.emit("open", new Event("open"));
+  }
+  error(): void {
+    this.emit("error", new Event("error"));
+  }
+  disconnect(): void {
+    this.readyState = 3;
+    this.emit("close", new Event("close"));
+  }
+  message(value: unknown): void {
+    this.emit("message", new MessageEvent("message", { data: JSON.stringify(value) }));
+  }
+  private emit(type: string, event: Event | MessageEvent): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
 }
 
-const settle = async () => { await new Promise<void>((resolve) => setTimeout(resolve, 0)); };
-const currentProtocol = { versions: [1], capabilities: ["query.delta", "query.resume", "rpc", "rpc.cancel", "rpc.idempotency"] };
+const settle = async () => {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+};
+const currentProtocol = {
+  versions: [1],
+  capabilities: ["query.delta", "query.resume", "rpc", "rpc.cancel", "rpc.idempotency"],
+};
 
 test("remote query uses HTTP AST and realtime ticket keeps credentials out of WebSocket URL", async () => {
   const sockets: FakeSocket[] = [];
@@ -32,7 +65,12 @@ test("remote query uses HTTP AST and realtime ticket keeps credentials out of We
   const fetcher: typeof fetch = async (input, init) => {
     const url = String(input);
     requests.push({ url, ...(init ? { init } : {}) });
-    if (url.endsWith("/v1/realtime/tickets")) return Response.json({ url: "wss://db.example/realtime", ticket: "single-use-secret", protocol: currentProtocol });
+    if (url.endsWith("/v1/realtime/tickets"))
+      return Response.json({
+        url: "wss://db.example/realtime",
+        ticket: "single-use-secret",
+        protocol: currentProtocol,
+      });
     if (url.endsWith("/documents")) {
       const body = JSON.parse(init?.body as string) as { document: { v: Array<[string, { t: string; v: string }]> } };
       const id = body.document.v.find(([field]) => field === "_id")?.[1]?.v;
@@ -41,28 +79,49 @@ test("remote query uses HTTP AST and realtime ticket keeps credentials out of We
     }
     if (url.endsWith("/mutations")) {
       const body = JSON.parse(init?.body as string) as { action: string };
-      return body.action.startsWith("update") ? Response.json({ version: 1, matchedCount: 2, modifiedCount: 2 }) : Response.json({ version: 1, deletedCount: 1 });
+      return body.action.startsWith("update")
+        ? Response.json({ version: 1, matchedCount: 2, modifiedCount: 2 })
+        : Response.json({ version: 1, deletedCount: 1 });
     }
-    return Response.json({ version: 1, documents: [encodeDocument({ _id: "00000000000000000000000000000001", done: false })] });
+    return Response.json({
+      version: 1,
+      documents: [encodeDocument({ _id: "00000000000000000000000000000001", done: false })],
+    });
   };
   const client = new MeldbaseClient({
     baseUrl: "https://db.example/",
     accessToken: () => "access-secret",
     fetch: fetcher,
-    webSocketFactory: (url) => { assert.equal(url, "wss://db.example/realtime"); const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    webSocketFactory: (url) => {
+      assert.equal(url, "wss://db.example/realtime");
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
   });
   const query = client.collection<Document>("todos").find({ done: false });
-  assert.deepEqual((await query.fetch()).map((item) => item._id), ["00000000000000000000000000000001"]);
+  assert.deepEqual(
+    (await query.fetch()).map((item) => item._id),
+    ["00000000000000000000000000000001"],
+  );
   const inserted = await client.collection<Document>("todos").insertOne({ title: "created" });
   assert.match(inserted._id, /^[0-9a-f]{32}$/);
   const insertBody = JSON.parse(requests[1]?.init?.body as string) as { document: { v: Array<[string, unknown]> } };
-  assert.equal(insertBody.document.v.some(([field]) => field === "_id"), true);
-  assert.deepEqual(await client.collection("todos").updateMany({ done: false }, { $set: { done: true } }), { matchedCount: 2, modifiedCount: 2 });
+  assert.equal(
+    insertBody.document.v.some(([field]) => field === "_id"),
+    true,
+  );
+  assert.deepEqual(await client.collection("todos").updateMany({ done: false }, { $set: { done: true } }), {
+    matchedCount: 2,
+    modifiedCount: 2,
+  });
   assert.deepEqual(await client.collection("todos").deleteOne({ done: true }), { deletedCount: 1 });
 
   const snapshots: string[][] = [];
   const states: SyncState[] = [];
-  const unsubscribe = query.subscribe((items) => snapshots.push(items.map((item) => item._id)), { onStatus: (status) => states.push(status.state) });
+  const unsubscribe = query.subscribe((items) => snapshots.push(items.map((item) => item._id)), {
+    onStatus: (status) => states.push(status.state),
+  });
   await settle();
   assert.equal(sockets.length, 1);
   const socket = sockets[0] as FakeSocket;
@@ -74,13 +133,23 @@ test("remote query uses HTTP AST and realtime ticket keeps credentials out of We
   assert.equal(subscribe.collection, "todos");
   assert.equal(subscribe.mode, "delta");
   assert.equal(JSON.stringify(subscribe).includes("access-secret"), false);
-  socket.message({ v: 1, type: "snapshot", requestId: subscribe.requestId, subscriptionId: "server-sub", token: "opaque-1", documents: [encodeDocument({ _id: "00000000000000000000000000000002", done: false })] });
+  socket.message({
+    v: 1,
+    type: "snapshot",
+    requestId: subscribe.requestId,
+    subscriptionId: "server-sub",
+    token: "opaque-1",
+    documents: [encodeDocument({ _id: "00000000000000000000000000000002", done: false })],
+  });
   await settle();
   assert.deepEqual(snapshots, [["00000000000000000000000000000002"]]);
   assert.equal(states.at(-1), "live");
   assert.equal(requests[0]?.init?.headers instanceof Headers, false);
   assert.equal((requests[0]?.init?.headers as Record<string, string>).authorization, "Bearer access-secret");
-	assert.equal((requests.at(-1)?.init?.headers as Record<string, string>).accept, "application/vnd.meldbase.realtime-ticket+json; capabilities=1");
+  assert.equal(
+    (requests.at(-1)?.init?.headers as Record<string, string>).accept,
+    "application/vnd.meldbase.realtime-ticket+json; capabilities=1",
+  );
   unsubscribe();
   assert.equal(socket.closed?.reason, "no active work");
   const unsubscribeAgain = query.subscribe(() => {});
@@ -108,7 +177,13 @@ test("remote group count uses a bounded, typed aggregate envelope", async () => 
     },
   });
   const result = await client.collection("todos").groupCount({ done: false }, "status");
-  assert.deepEqual(result, { groups: [{ key: "open", count: 3 }, { key: 7n, count: 1 }], capped: false });
+  assert.deepEqual(result, {
+    groups: [
+      { key: "open", count: 3 },
+      { key: 7n, count: 1 },
+    ],
+    capped: false,
+  });
   assert.equal(requests[0]?.url, "https://db.example/v1/collections/todos/group-count");
   assert.deepEqual(JSON.parse(requests[0]?.init?.body as string), {
     version: 1,
@@ -120,77 +195,105 @@ test("remote group count uses a bounded, typed aggregate envelope", async () => 
 });
 
 test("realtime capability discovery fails closed without reconnect churn", async () => {
-	const sockets: FakeSocket[] = [];
-	const states: Array<{ state: SyncState; error?: Error }> = [];
-	const client = new MeldbaseClient({
-		baseUrl: "https://db.example",
-		fetch: async () => Response.json({
-			url: "wss://db.example/realtime", ticket: "ticket",
-			protocol: { versions: [1], capabilities: ["query.resume", "rpc", "rpc.cancel"] },
-		}),
-		webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
-	});
-	const unsubscribe = client.collection("todos").find().subscribe(() => {}, {
-		onStatus: (status) => states.push(status),
-	});
-	await settle();
-	await settle();
-	assert.equal(sockets.length, 0);
-	assert.equal(states.at(-1)?.state, "error");
-	assert.equal(states.at(-1)?.error instanceof MeldbaseProtocolError, true);
-	assert.deepEqual((states.at(-1)?.error as MeldbaseProtocolError).required, ["query.delta"]);
-	assert.deepEqual(client.realtimeProtocol, {
-		versions: [1], capabilities: ["query.resume", "rpc", "rpc.cancel"],
-	});
-	await settle();
-	assert.equal(sockets.length, 0);
-	unsubscribe();
-	client.close();
+  const sockets: FakeSocket[] = [];
+  const states: Array<{ state: SyncState; error?: Error }> = [];
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () =>
+      Response.json({
+        url: "wss://db.example/realtime",
+        ticket: "ticket",
+        protocol: { versions: [1], capabilities: ["query.resume", "rpc", "rpc.cancel"] },
+      }),
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+  });
+  const unsubscribe = client
+    .collection("todos")
+    .find()
+    .subscribe(() => {}, {
+      onStatus: (status) => states.push(status),
+    });
+  await settle();
+  await settle();
+  assert.equal(sockets.length, 0);
+  assert.equal(states.at(-1)?.state, "error");
+  assert.equal(states.at(-1)?.error instanceof MeldbaseProtocolError, true);
+  assert.deepEqual((states.at(-1)?.error as MeldbaseProtocolError).required, ["query.delta"]);
+  assert.deepEqual(client.realtimeProtocol, {
+    versions: [1],
+    capabilities: ["query.resume", "rpc", "rpc.cancel"],
+  });
+  await settle();
+  assert.equal(sockets.length, 0);
+  unsubscribe();
+  client.close();
 });
 
 test("capabilities are enforced for work added after realtime authentication", async () => {
-	const sockets: FakeSocket[] = [];
-	const client = new MeldbaseClient({
-		baseUrl: "https://db.example",
-		fetch: async () => Response.json({
-			url: "wss://db.example/realtime", ticket: "ticket",
-			protocol: { versions: [1], capabilities: ["query.delta", "query.resume", "rpc", "rpc.cancel"] },
-		}),
-		webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
-	});
-	const unsubscribe = client.collection("todos").find().subscribe(() => {});
-	await settle();
-	const socket = sockets[0]!;
-	socket.open();
-	socket.message({ v: 1, type: "authenticated" });
-	assert.equal(socket.sent.length, 2);
-	await assert.rejects(
-		client.call("orders.create", null, { transport: "realtime", idempotencyKey: "abcdefghijklmnopqrstuv" }),
-		(error: unknown) => error instanceof MeldbaseProtocolError && error.required[0] === "rpc.idempotency",
-	);
-	assert.equal(socket.sent.length, 2);
-	unsubscribe();
-	client.close();
+  const sockets: FakeSocket[] = [];
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () =>
+      Response.json({
+        url: "wss://db.example/realtime",
+        ticket: "ticket",
+        protocol: { versions: [1], capabilities: ["query.delta", "query.resume", "rpc", "rpc.cancel"] },
+      }),
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+  });
+  const unsubscribe = client
+    .collection("todos")
+    .find()
+    .subscribe(() => {});
+  await settle();
+  const socket = sockets[0]!;
+  socket.open();
+  socket.message({ v: 1, type: "authenticated" });
+  assert.equal(socket.sent.length, 2);
+  await assert.rejects(
+    client.call("orders.create", null, { transport: "realtime", idempotencyKey: "abcdefghijklmnopqrstuv" }),
+    (error: unknown) => error instanceof MeldbaseProtocolError && error.required[0] === "rpc.idempotency",
+  );
+  assert.equal(socket.sent.length, 2);
+  unsubscribe();
+  client.close();
 });
 
 test("realtime protocol discovery is required", async () => {
-	const sockets: FakeSocket[] = [];
-	let terminal: Error | undefined;
-	const client = new MeldbaseClient({
-		baseUrl: "https://db.example",
-		fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "legacy-ticket" }),
-		webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
-	});
-	const unsubscribe = client.collection("todos").find().subscribe(() => {}, {
-		onStatus: (status) => { terminal = status.error; },
-	});
-	await settle();
-	await settle();
-	assert.equal(sockets.length, 0);
-	assert.equal(terminal instanceof MeldbaseProtocolError, true);
-	assert.deepEqual((terminal as MeldbaseProtocolError).required, ["protocol.discovery"]);
-	unsubscribe();
-	client.close();
+  const sockets: FakeSocket[] = [];
+  let terminal: Error | undefined;
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "legacy-ticket" }),
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+  });
+  const unsubscribe = client
+    .collection("todos")
+    .find()
+    .subscribe(() => {}, {
+      onStatus: (status) => {
+        terminal = status.error;
+      },
+    });
+  await settle();
+  await settle();
+  assert.equal(sockets.length, 0);
+  assert.equal(terminal instanceof MeldbaseProtocolError, true);
+  assert.deepEqual((terminal as MeldbaseProtocolError).required, ["protocol.discovery"]);
+  unsubscribe();
+  client.close();
 });
 
 test("realtime safety limits must be positive safe integers", () => {
@@ -199,17 +302,67 @@ test("realtime safety limits must be positive safe integers", () => {
     { maxSnapshotDocuments: -1 },
     { maxDeltaOperations: Number.MAX_SAFE_INTEGER + 1 },
   ]) {
-		assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", ...options }), /(positive safe integer|must be boolean)/);
+    assert.throws(
+      () => new MeldbaseClient({ baseUrl: "https://db.example", ...options }),
+      /(positive safe integer|must be boolean)/,
+    );
   }
 });
 
 test("client configuration has explicit URL and reconnect boundaries", () => {
-  for (const baseUrl of ["ftp://db.example", "https://user:pass@db.example", "https://db.example?mode=test", "https://db.example#fragment"]) {
+  for (const baseUrl of [
+    "ftp://db.example",
+    "https://user:pass@db.example",
+    "https://db.example?mode=test",
+    "https://db.example#fragment",
+  ]) {
     assert.throws(() => new MeldbaseClient({ baseUrl }), /baseUrl must be an http\(s\) URL/);
   }
-  assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", allowedRealtimeOrigins: ["https://db.example"] }), /ws\(s\) origins/);
-  assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", reconnect: { minDelayMs: 0 } }), /positive safe integer/);
-  assert.throws(() => new MeldbaseClient({ baseUrl: "https://db.example", reconnect: { minDelayMs: 2, maxDelayMs: 1 } }), /must not exceed/);
+  assert.throws(
+    () => new MeldbaseClient({ baseUrl: "https://db.example", allowedRealtimeOrigins: ["https://db.example"] }),
+    /ws\(s\) origins/,
+  );
+  assert.throws(
+    () => new MeldbaseClient({ baseUrl: "https://db.example", reconnect: { minDelayMs: 0 } }),
+    /positive safe integer/,
+  );
+  assert.throws(
+    () => new MeldbaseClient({ baseUrl: "https://db.example", reconnect: { minDelayMs: 2, maxDelayMs: 1 } }),
+    /must not exceed/,
+  );
+});
+
+test("realtime tickets reject URLs containing userinfo", async () => {
+  for (const url of [
+    "wss://user:password@db.example/realtime",
+    "wss://user@db.example/realtime",
+    "wss://:password@db.example/realtime",
+  ]) {
+    let socketAttempts = 0;
+    let statusError: Error | undefined;
+    const client = new MeldbaseClient({
+      baseUrl: "https://db.example",
+      fetch: async () => Response.json({ url, ticket: "ticket", protocol: currentProtocol }),
+      webSocketFactory: () => {
+        socketAttempts += 1;
+        return new FakeSocket();
+      },
+    });
+    const unsubscribe = client
+      .collection("todos")
+      .find()
+      .subscribe(() => {}, {
+        onStatus: (status) => {
+          statusError = status.error;
+        },
+      });
+    await settle();
+    await settle();
+    assert.match(statusError?.message ?? "", /must not contain credentials/);
+    assert.equal(socketAttempts, 0);
+    unsubscribe();
+    client.close();
+  }
 });
 
 test("HTTP responses are streamed under the byte limit and use exact versioned envelopes", async () => {
@@ -218,14 +371,19 @@ test("HTTP responses are streamed under the byte limit and use exact versioned e
   const oversized = new MeldbaseClient({
     baseUrl: "https://db.example",
     maxInboundBytes: 64,
-    fetch: async () => new Response(new ReadableStream<Uint8Array>({
-      pull(controller) {
-        pulls += 1;
-        controller.enqueue(new TextEncoder().encode("x".repeat(40)));
-        if (pulls === 100) controller.close();
-      },
-      cancel() { canceled = true; },
-    })),
+    fetch: async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulls += 1;
+            controller.enqueue(new TextEncoder().encode("x".repeat(40)));
+            if (pulls === 100) controller.close();
+          },
+          cancel() {
+            canceled = true;
+          },
+        }),
+      ),
   });
   await assert.rejects(oversized.collection("todos").find().fetch(), /Response exceeds safety limit/);
   assert.equal(canceled, true);
@@ -237,13 +395,26 @@ test("HTTP responses are streamed under the byte limit and use exact versioned e
     { operation: "insert", body: { document: encodeDocument({ _id: "00000000000000000000000000000001" }) } },
     { operation: "delete", body: { version: 2, deletedCount: 0 } },
   ] as const) {
-    const client = new MeldbaseClient({ baseUrl: "https://db.example", fetch: async () => Response.json(scenario.body) });
+    const client = new MeldbaseClient({
+      baseUrl: "https://db.example",
+      fetch: async () => Response.json(scenario.body),
+    });
     const collection = client.collection("todos");
-    const operation = scenario.operation === "query" ? collection.find().fetch()
-      : scenario.operation === "insert" ? collection.insertOne({ title: "x" })
-      : collection.deleteOne({});
+    const operation =
+      scenario.operation === "query"
+        ? collection.find().fetch()
+        : scenario.operation === "insert"
+          ? collection.insertOne({ title: "x" })
+          : collection.deleteOne({});
     if (scenario.operation === "insert" || scenario.operation === "delete") {
-      await assert.rejects(operation, (error: unknown) => error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.cause instanceof Error && new RegExp(`Malformed ${scenario.operation} response`).test(error.cause.message));
+      await assert.rejects(
+        operation,
+        (error: unknown) =>
+          error instanceof MeldbaseInternalError &&
+          error.code === "outcome_unknown" &&
+          error.cause instanceof Error &&
+          new RegExp(`Malformed ${scenario.operation} response`).test(error.cause.message),
+      );
     } else {
       await assert.rejects(operation, /Malformed query response/);
     }
@@ -255,11 +426,19 @@ test("HTTP responses are streamed under the byte limit and use exact versioned e
   const invalidTicket = new MeldbaseClient({
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", extra: true }),
-    webSocketFactory: () => { sockets += 1; return new FakeSocket(); },
+    webSocketFactory: () => {
+      sockets += 1;
+      return new FakeSocket();
+    },
   });
-  const unsubscribe = invalidTicket.collection("todos").find().subscribe(() => {}, {
-    onStatus: (status) => { ticketError = status.error; },
-  });
+  const unsubscribe = invalidTicket
+    .collection("todos")
+    .find()
+    .subscribe(() => {}, {
+      onStatus: (status) => {
+        ticketError = status.error;
+      },
+    });
   await settle();
   await settle();
   assert.match(ticketError?.message ?? "", /Malformed realtime ticket response/);
@@ -272,29 +451,55 @@ test("data operations and subscriptions expose stable remote error codes", async
   const sockets: FakeSocket[] = [];
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async (input) => String(input).endsWith("/v1/realtime/tickets")
-      ? Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol })
-      : Response.json({ error: { kind: "internal", code: "database_unavailable" } }, { status: 503 }),
-    webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    fetch: async (input) =>
+      String(input).endsWith("/v1/realtime/tickets")
+        ? Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol })
+        : Response.json({ error: { kind: "internal", code: "database_unavailable" } }, { status: 503 }),
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
   });
-  await assert.rejects(client.collection("todos").find().fetch(), (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "database_unavailable" && error.status === 503 && error.operation === "query",
+  await assert.rejects(
+    client.collection("todos").find().fetch(),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError &&
+      error.code === "database_unavailable" &&
+      error.status === 503 &&
+      error.operation === "query",
   );
-  await assert.rejects(client.collection("todos").insertOne({ title: "x" }), (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "database_unavailable" && error.operation === "insert",
+  await assert.rejects(
+    client.collection("todos").insertOne({ title: "x" }),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError && error.code === "database_unavailable" && error.operation === "insert",
   );
-  await assert.rejects(client.collection("todos").deleteOne({ done: true }), (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "database_unavailable" && error.operation === "mutation",
+  await assert.rejects(
+    client.collection("todos").deleteOne({ done: true }),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError && error.code === "database_unavailable" && error.operation === "mutation",
   );
 
   let subscriptionError: Error | undefined;
-  const unsubscribe = client.collection("todos").find().subscribe(() => {}, { onStatus: (status) => { subscriptionError = status.error; } });
+  const unsubscribe = client
+    .collection("todos")
+    .find()
+    .subscribe(() => {}, {
+      onStatus: (status) => {
+        subscriptionError = status.error;
+      },
+    });
   await settle();
   const socket = sockets[0] as FakeSocket;
   socket.open();
   socket.message({ v: 1, type: "authenticated" });
   const subscribe = JSON.parse(socket.sent[1] as string) as { requestId: string };
-  socket.message({ v: 1, type: "error", requestId: subscribe.requestId, error: { kind: "internal", code: "database_unavailable" } });
+  socket.message({
+    v: 1,
+    type: "error",
+    requestId: subscribe.requestId,
+    error: { kind: "internal", code: "database_unavailable" },
+  });
   await settle();
   assert.equal(subscriptionError instanceof MeldbaseInternalError, true);
   assert.equal((subscriptionError as MeldbaseInternalError).code, "database_unavailable");
@@ -309,11 +514,20 @@ test("remote insert owns its ID before transport and marks an unverifiable resul
     fetch: async (_input, init) => {
       const body = JSON.parse(init?.body as string) as { document: { v: Array<[string, { v: string }]> } };
       suppliedID = body.document.v.find(([field]) => field === "_id")?.[1]?.v;
-      return Response.json({ version: 1, document: encodeDocument({ _id: "00000000000000000000000000000009", title: "wrong" }) }, { status: 201 });
+      return Response.json(
+        { version: 1, document: encodeDocument({ _id: "00000000000000000000000000000009", title: "wrong" }) },
+        { status: 201 },
+      );
     },
   });
-  await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.operation === `insert ${suppliedID}` && error.cause instanceof Error && /changed document ID/.test(error.cause.message),
+  await assert.rejects(
+    client.collection("todos").insertOne({ title: "owned" }),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError &&
+      error.code === "outcome_unknown" &&
+      error.operation === `insert ${suppliedID}` &&
+      error.cause instanceof Error &&
+      /changed document ID/.test(error.cause.message),
   );
   assert.match(suppliedID ?? "", /^[0-9a-f]{32}$/);
   client.close();
@@ -323,10 +537,18 @@ test("remote insert exposes its assigned ID when transport admission is unknown"
   const suppliedID = "00000000000000000000000000000001";
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => { throw new Error("connection lost"); },
+    fetch: async () => {
+      throw new Error("connection lost");
+    },
   });
-  await assert.rejects(client.collection("todos").insertOne({ _id: suppliedID, title: "owned" }), (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.operation === `insert ${suppliedID}` && error.cause instanceof Error && /connection lost/.test(error.cause.message),
+  await assert.rejects(
+    client.collection("todos").insertOne({ _id: suppliedID, title: "owned" }),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError &&
+      error.code === "outcome_unknown" &&
+      error.operation === `insert ${suppliedID}` &&
+      error.cause instanceof Error &&
+      /connection lost/.test(error.cause.message),
   );
   client.close();
 });
@@ -334,13 +556,27 @@ test("remote insert exposes its assigned ID when transport admission is unknown"
 test("HTTP mutations and RPC calls expose an unknown outcome after a transport loss", async () => {
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => { throw new Error("connection lost"); },
+    fetch: async () => {
+      throw new Error("connection lost");
+    },
   });
-  await assert.rejects(client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $inc: { attempts: 1 } }), (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.operation === "updateOne todos" && error.cause instanceof Error && /connection lost/.test(error.cause.message),
+  await assert.rejects(
+    client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $inc: { attempts: 1 } }),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError &&
+      error.code === "outcome_unknown" &&
+      error.operation === "updateOne todos" &&
+      error.cause instanceof Error &&
+      /connection lost/.test(error.cause.message),
   );
-  await assert.rejects(client.call("billing.charge", null), (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && /^RPC [0-9a-f-]{36}$/.test(error.operation) && error.cause instanceof Error && /connection lost/.test(error.cause.message),
+  await assert.rejects(
+    client.call("billing.charge", null),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError &&
+      error.code === "outcome_unknown" &&
+      /^RPC [0-9a-f-]{36}$/.test(error.operation) &&
+      error.cause instanceof Error &&
+      /connection lost/.test(error.cause.message),
   );
   client.close();
 });
@@ -348,89 +584,221 @@ test("HTTP mutations and RPC calls expose an unknown outcome after a transport l
 test("malformed post-dispatch error envelopes leave write outcomes unknown", async () => {
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ error: { kind: "internal", code: "untrusted" }, unexpected: true }, { status: 502 }),
+    fetch: async () =>
+      Response.json({ error: { kind: "internal", code: "untrusted" }, unexpected: true }, { status: 502 }),
   });
   const unknown = (operation: RegExp, message: RegExp) => (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && operation.test(error.operation) && error.cause instanceof Error && message.test(error.cause.message);
-  await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), unknown(/^insert [0-9a-f]{32}$/, /Malformed insert error response/));
-  await assert.rejects(client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $inc: { attempts: 1 } }), unknown(/^updateOne todos$/, /Malformed mutation error response/));
-  await assert.rejects(client.call("billing.charge", null), unknown(/^RPC [0-9a-f-]{36}$/, /Malformed RPC error response/));
+    error instanceof MeldbaseInternalError &&
+    error.code === "outcome_unknown" &&
+    operation.test(error.operation) &&
+    error.cause instanceof Error &&
+    message.test(error.cause.message);
+  await assert.rejects(
+    client.collection("todos").insertOne({ title: "owned" }),
+    unknown(/^insert [0-9a-f]{32}$/, /Malformed insert error response/),
+  );
+  await assert.rejects(
+    client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $inc: { attempts: 1 } }),
+    unknown(/^updateOne todos$/, /Malformed mutation error response/),
+  );
+  await assert.rejects(
+    client.call("billing.charge", null),
+    unknown(/^RPC [0-9a-f-]{36}$/, /Malformed RPC error response/),
+  );
   client.close();
 });
 
 test("pre-dispatch write failures are not reported as unknown results", async () => {
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    accessToken: () => { throw new Error("token refresh failed"); },
-    fetch: async () => { throw new Error("fetch should not run"); },
+    accessToken: () => {
+      throw new Error("token refresh failed");
+    },
+    fetch: async () => {
+      throw new Error("fetch should not run");
+    },
   });
-  await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), (error: unknown) =>
-    error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
+  await assert.rejects(
+    client.collection("todos").insertOne({ title: "owned" }),
+    (error: unknown) =>
+      error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
   );
-  await assert.rejects(client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $set: { title: "updated" } }), (error: unknown) =>
-    error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
+  await assert.rejects(
+    client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $set: { title: "updated" } }),
+    (error: unknown) =>
+      error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
   );
-  await assert.rejects(client.call("billing.charge", null), (error: unknown) =>
-    error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
+  await assert.rejects(
+    client.call("billing.charge", null),
+    (error: unknown) =>
+      error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
   );
   client.close();
 });
 
+test("already-aborted HTTP writes return their signal reason before dispatch", async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  const reason = new Error("caller stopped before dispatch");
+  controller.abort(reason);
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () => {
+      calls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+  const todos = client.collection("todos");
+  await assert.rejects(
+    todos.insertOne({ title: "owned" }, { signal: controller.signal }),
+    (error: unknown) => error === reason,
+  );
+  await assert.rejects(
+    todos.updateOne(
+      { _id: "00000000000000000000000000000001" },
+      { $set: { title: "updated" } },
+      { signal: controller.signal },
+    ),
+    (error: unknown) => error === reason,
+  );
+  await assert.rejects(
+    todos.deleteOne({ _id: "00000000000000000000000000000001" }, { signal: controller.signal }),
+    (error: unknown) => error === reason,
+  );
+  await assert.rejects(
+    client.call("billing.charge", null, { signal: controller.signal }),
+    (error: unknown) => error === reason,
+  );
+  assert.equal(calls, 0);
+  client.close();
+});
+
+test("writes aborted while credentials are loading do not reach fetch", async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  const reason = new Error("caller stopped during token refresh");
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    accessToken: async () => {
+      controller.abort(reason);
+      return "token";
+    },
+    fetch: async () => {
+      calls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+  await assert.rejects(
+    client.collection("todos").insertOne({ title: "owned" }, { signal: controller.signal }),
+    (error: unknown) => error === reason,
+  );
+  assert.equal(calls, 0);
+  client.close();
+});
+
 test("closed clients reject every new operation", async () => {
-  const client = new MeldbaseClient({ baseUrl: "https://db.example", fetch: async () => Response.json({ version: 1, documents: [] }) });
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () => Response.json({ version: 1, documents: [] }),
+  });
   const todos = client.collection("todos");
   client.close();
   assert.throws(() => client.collection("later"), MeldbaseClientClosedError);
   await assert.rejects(todos.find().fetch(), MeldbaseClientClosedError);
   assert.throws(() => todos.find().subscribe(() => {}), MeldbaseClientClosedError);
-	await assert.rejects(client.call("echo", null), MeldbaseClientClosedError);
+  await assert.rejects(client.call("echo", null), MeldbaseClientClosedError);
 });
 
 test("RPC call preserves typed values and returns structured safe errors", async () => {
-	const requests: Array<{ url: string; init?: RequestInit }> = [];
-	let fail = false;
-	const fetcher: typeof fetch = async (input, init) => {
-		requests.push({ url: String(input), ...(init ? { init } : {}) });
-		const call = JSON.parse(init?.body as string) as { requestId: string };
-		if (fail) return Response.json({ v: 1, type: "error", requestId: call.requestId, error: { kind: "business", code: "billing.quota_exceeded", data: encodeValue({ retryAfter: 60n }) } }, { status: 400 });
-		return Response.json({
-			v: 1, type: "result", requestId: call.requestId,
-			result: encodeValue({ total: 9223372036854775807n, at: new Date("2026-07-16T00:00:00.000Z"), bytes: new Uint8Array([0, 255]) }),
-		});
-	};
-	const client = new MeldbaseClient({ baseUrl: "https://db.example", fetch: fetcher, accessToken: () => "secret" });
-	const idempotencyKey = "abcdefghijklmnopqrstuv";
-	const result = await client.call<{ readonly total: bigint; readonly at: Date; readonly bytes: Uint8Array }>(
-		"billing.calculate", { amount: 9223372036854775807n, at: new Date("2026-07-16T00:00:00.000Z"), bytes: new Uint8Array([1, 2]) },
-		{ idempotencyKey },
-	);
-	assert.equal(result.total, 9223372036854775807n);
-	assert.equal(result.at.toISOString(), "2026-07-16T00:00:00.000Z");
-	assert.deepEqual([...result.bytes], [0, 255]);
-	assert.equal(requests[0]?.url, "https://db.example/v1/rpc");
-	const request = requests[0]?.init;
-	assert.equal((request?.headers as Record<string, string>).authorization, "Bearer secret");
-	const callEnvelope = JSON.parse(request?.body as string) as Record<string, unknown>;
-	assert.equal(typeof callEnvelope.requestId, "string");
-	delete callEnvelope.requestId;
-	assert.deepEqual(callEnvelope, {
-		v: 1, type: "call", idempotencyKey, method: "billing.calculate",
-		input: { t: "object", v: [
-			["amount", { t: "int64", v: "9223372036854775807" }],
-			["at", { t: "date", v: "2026-07-16T00:00:00.000Z" }],
-			["bytes", { t: "binary", v: "AQI=" }],
-		] },
-	});
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  let fail = false;
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({ url: String(input), ...(init ? { init } : {}) });
+    const call = JSON.parse(init?.body as string) as { requestId: string };
+    if (fail)
+      return Response.json(
+        {
+          v: 1,
+          type: "error",
+          requestId: call.requestId,
+          error: { kind: "business", code: "billing.quota_exceeded", data: encodeValue({ retryAfter: 60n }) },
+        },
+        { status: 400 },
+      );
+    return Response.json({
+      v: 1,
+      type: "result",
+      requestId: call.requestId,
+      result: encodeValue({
+        total: 9223372036854775807n,
+        at: new Date("2026-07-16T00:00:00.000Z"),
+        bytes: new Uint8Array([0, 255]),
+      }),
+    });
+  };
+  const client = new MeldbaseClient({ baseUrl: "https://db.example", fetch: fetcher, accessToken: () => "secret" });
+  const idempotencyKey = "abcdefghijklmnopqrstuv";
+  const result = await client.call<{ readonly total: bigint; readonly at: Date; readonly bytes: Uint8Array }>(
+    "billing.calculate",
+    { amount: 9223372036854775807n, at: new Date("2026-07-16T00:00:00.000Z"), bytes: new Uint8Array([1, 2]) },
+    { idempotencyKey },
+  );
+  assert.equal(result.total, 9223372036854775807n);
+  assert.equal(result.at.toISOString(), "2026-07-16T00:00:00.000Z");
+  assert.deepEqual([...result.bytes], [0, 255]);
+  assert.equal(requests[0]?.url, "https://db.example/v1/rpc");
+  const request = requests[0]?.init;
+  assert.equal((request?.headers as Record<string, string>).authorization, "Bearer secret");
+  const callEnvelope = JSON.parse(request?.body as string) as Record<string, unknown>;
+  assert.equal(typeof callEnvelope.requestId, "string");
+  delete callEnvelope.requestId;
+  assert.deepEqual(callEnvelope, {
+    v: 1,
+    type: "call",
+    idempotencyKey,
+    method: "billing.calculate",
+    input: {
+      t: "object",
+      v: [
+        ["amount", { t: "int64", v: "9223372036854775807" }],
+        ["at", { t: "date", v: "2026-07-16T00:00:00.000Z" }],
+        ["bytes", { t: "binary", v: "AQI=" }],
+      ],
+    },
+  });
 
-	fail = true;
-	await assert.rejects(client.call("billing.calculate", null), (error: unknown) =>
-		error instanceof MeldbaseError && error.code === "billing.quota_exceeded" && error.data?.retryAfter === 60n,
-	);
-	await assert.rejects(client.call("bad/name", null), /Invalid RPC method name/);
-	await assert.rejects(client.call("billing.calculate", null, { idempotencyKey: "too-short" }), /Invalid RPC idempotency key/);
-	await assert.rejects(client.call("billing.calculate", undefined as never), /Unsupported value type/);
-	await assert.rejects(client.call("billing.calculate", new (class Input {})() as never), /plain object prototype/);
-	client.close();
+  fail = true;
+  await assert.rejects(
+    client.call("billing.calculate", null),
+    (error: unknown) =>
+      error instanceof MeldbaseError && error.code === "billing.quota_exceeded" && error.data?.retryAfter === 60n,
+  );
+  await assert.rejects(client.call("bad/name", null), /Invalid RPC method name/);
+  await assert.rejects(
+    client.call("billing.calculate", null, { idempotencyKey: "too-short" }),
+    /Invalid RPC idempotency key/,
+  );
+  await assert.rejects(client.call("billing.calculate", undefined as never), /Unsupported value type/);
+  await assert.rejects(client.call("billing.calculate", new (class Input {})() as never), /plain object prototype/);
+  client.close();
+});
+
+test("HTTP RPC preserves generic DocumentID values", async () => {
+  const expected = documentID("00000000000000000000000000000002");
+  let requestInput: unknown;
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async (_input, init) => {
+      requestInput = (JSON.parse(init?.body as string) as { input: unknown }).input;
+      const requestId = (JSON.parse(init?.body as string) as { requestId: string }).requestId;
+      return Response.json({ v: 1, type: "result", requestId, result: encodeValue(expected) });
+    },
+  });
+  const result = await client.call("identity.echo", expected);
+  if (!isDocumentIDValue(result)) assert.fail("RPC result lost its DocumentID kind");
+  assert.equal(result.value, expected.value);
+  assert.deepEqual(requestInput, { t: "id", v: expected.value });
+  client.close();
 });
 
 test("RPC call preserves generic internal errors raised before its envelope is decoded", async () => {
@@ -438,8 +806,13 @@ test("RPC call preserves generic internal errors raised before its envelope is d
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ error: { kind: "internal", code: "unauthenticated" } }, { status: 401 }),
   });
-	await assert.rejects(client.call("billing.calculate", null), (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "unauthenticated" && error.status === 401 && error.operation === "RPC",
+  await assert.rejects(
+    client.call("billing.calculate", null),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError &&
+      error.code === "unauthenticated" &&
+      error.status === 401 &&
+      error.operation === "RPC",
   );
   client.close();
 });
@@ -449,9 +822,18 @@ test("realtime ticket errors use the same internal error contract", async () => 
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ error: { kind: "internal", code: "unauthenticated" } }, { status: 401 }),
-    webSocketFactory: () => { throw new Error("socket must not open"); },
+    webSocketFactory: () => {
+      throw new Error("socket must not open");
+    },
   });
-  const unsubscribe = client.collection("todos").find().subscribe(() => {}, { onStatus: (status) => { statusError = status.error; } });
+  const unsubscribe = client
+    .collection("todos")
+    .find()
+    .subscribe(() => {}, {
+      onStatus: (status) => {
+        statusError = status.error;
+      },
+    });
   await settle();
   await settle();
   assert.equal(statusError instanceof MeldbaseInternalError, true);
@@ -462,18 +844,23 @@ test("realtime ticket errors use the same internal error contract", async () => 
 });
 
 test("RPC call propagates AbortSignal and marks malformed success responses unknown", async () => {
-	const controller = new AbortController();
-	const client = new MeldbaseClient({
-		baseUrl: "https://db.example",
-		fetch: async (_input, init) => {
-			assert.equal(init?.signal, controller.signal);
-			return Response.json({ v: 1, type: "result", requestId: "wrong", result: encodeValue("ok"), unexpected: true });
-		},
-	});
-	await assert.rejects(client.call("echo", null, { signal: controller.signal }), (error: unknown) =>
-		error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.cause instanceof Error && /Malformed RPC response/.test(error.cause.message),
-	);
-	client.close();
+  const controller = new AbortController();
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async (_input, init) => {
+      assert.equal(init?.signal, controller.signal);
+      return Response.json({ v: 1, type: "result", requestId: "wrong", result: encodeValue("ok"), unexpected: true });
+    },
+  });
+  await assert.rejects(
+    client.call("echo", null, { signal: controller.signal }),
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError &&
+      error.code === "outcome_unknown" &&
+      error.cause instanceof Error &&
+      /Malformed RPC response/.test(error.cause.message),
+  );
+  client.close();
 });
 
 test("realtime RPC preserves typed values and closes a call-only socket when settled", async () => {
@@ -486,10 +873,16 @@ test("realtime RPC preserves typed values and closes a call-only socket when set
       ticketRequests += 1;
       return Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol });
     },
-    webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
   });
   const pending = client.call<{ readonly total: bigint; readonly bytes: Uint8Array }>(
-    "billing.calculate", 9223372036854775807n, { transport: "realtime", idempotencyKey: "abcdefghijklmnopqrstuv" },
+    "billing.calculate",
+    9223372036854775807n,
+    { transport: "realtime", idempotencyKey: "abcdefghijklmnopqrstuv" },
   );
   await settle();
   assert.equal(ticketRequests, 1);
@@ -501,7 +894,9 @@ test("realtime RPC preserves typed values and closes a call-only socket when set
   assert.equal(call.idempotencyKey, "abcdefghijklmnopqrstuv");
   assert.deepEqual(call.input, { t: "int64", v: "9223372036854775807" });
   socket.message({
-    v: 1, type: "result", requestId: call.requestId,
+    v: 1,
+    type: "result",
+    requestId: call.requestId,
     result: encodeValue({ total: 9223372036854775807n, bytes: new Uint8Array([0, 255]) }),
   });
   const result = await pending;
@@ -516,9 +911,16 @@ test("realtime RPC multiplexes with subscriptions, exposes errors, and sends can
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
-    webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
   });
-  const unsubscribe = client.collection("todos").find().subscribe(() => {});
+  const unsubscribe = client
+    .collection("todos")
+    .find()
+    .subscribe(() => {});
   await settle();
   const socket = sockets[0] as FakeSocket;
   socket.open();
@@ -533,9 +935,15 @@ test("realtime RPC multiplexes with subscriptions, exposes errors, and sends can
 
   const failed = client.call("fail", null, { transport: "realtime" });
   const failedCall = JSON.parse(socket.sent[3] as string) as Record<string, unknown>;
-  socket.message({ v: 1, type: "error", requestId: failedCall.requestId, error: { kind: "business", code: "billing.quota_exceeded" } });
-  await assert.rejects(failed, (error: unknown) =>
-    error instanceof MeldbaseError && error.code === "billing.quota_exceeded",
+  socket.message({
+    v: 1,
+    type: "error",
+    requestId: failedCall.requestId,
+    error: { kind: "business", code: "billing.quota_exceeded" },
+  });
+  await assert.rejects(
+    failed,
+    (error: unknown) => error instanceof MeldbaseError && error.code === "billing.quota_exceeded",
   );
 
   const controller = new AbortController();
@@ -548,7 +956,10 @@ test("realtime RPC multiplexes with subscriptions, exposes errors, and sends can
   assert.equal(sockets.length, 1);
 
   // Work added after authentication is sent immediately on the same socket.
-  const unsubscribeSecond = client.collection("notes").find().subscribe(() => {});
+  const unsubscribeSecond = client
+    .collection("notes")
+    .find()
+    .subscribe(() => {});
   assert.equal((JSON.parse(socket.sent[6] as string) as { collection: string }).collection, "notes");
   unsubscribeSecond();
   unsubscribe();
@@ -561,8 +972,13 @@ test("realtime RPC disconnect reports unknown result and is never automatically 
   let tickets = 0;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++tickets}`, protocol: currentProtocol }),
-    webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    fetch: async () =>
+      Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++tickets}`, protocol: currentProtocol }),
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
     reconnect: { minDelayMs: 1, maxDelayMs: 1 },
   });
   const pending = client.call("charge", 10n, { transport: "realtime" });
@@ -572,8 +988,12 @@ test("realtime RPC disconnect reports unknown result and is never automatically 
   socket.message({ v: 1, type: "authenticated" });
   const call = JSON.parse(socket.sent[1] as string) as { requestId: string };
   socket.disconnect();
-  await assert.rejects(pending, (error: unknown) =>
-    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.operation === `RPC ${call.requestId}`,
+  await assert.rejects(
+    pending,
+    (error: unknown) =>
+      error instanceof MeldbaseInternalError &&
+      error.code === "outcome_unknown" &&
+      error.operation === `RPC ${call.requestId}`,
   );
   await settle();
   await settle();
@@ -587,8 +1007,13 @@ test("realtime RPC socket errors fail pending calls without retrying", async () 
   let tickets = 0;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++tickets}`, protocol: currentProtocol }),
-    webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    fetch: async () =>
+      Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++tickets}`, protocol: currentProtocol }),
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
     reconnect: { minDelayMs: 1, maxDelayMs: 1 },
   });
   const pending = client.call("charge", null, { transport: "realtime" });
@@ -611,7 +1036,10 @@ test("malformed realtime RPC terminal frames fail the shared connection closed",
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
-    webSocketFactory: () => { socket = new FakeSocket(); return socket; },
+    webSocketFactory: () => {
+      socket = new FakeSocket();
+      return socket;
+    },
   });
   const pending = client.call("echo", null, { transport: "realtime" });
   await settle();
@@ -630,13 +1058,19 @@ test("ordered deltas apply strictly and listener mutation cannot corrupt client 
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
-    webSocketFactory: () => { socket = new FakeSocket(); return socket; },
+    webSocketFactory: () => {
+      socket = new FakeSocket();
+      return socket;
+    },
   });
   const snapshots: Document[][] = [];
-  client.collection<Document>("todos").find().subscribe((documents) => {
-   snapshots.push(documents as Document[]);
-    if (snapshots.length === 1) (documents[0] as unknown as Record<string, unknown>).value = "listener-mutated";
-  });
+  client
+    .collection<Document>("todos")
+    .find()
+    .subscribe((documents) => {
+      snapshots.push(documents as Document[]);
+      if (snapshots.length === 1) (documents[0] as unknown as Record<string, unknown>).value = "listener-mutated";
+    });
   await settle();
   const active = socket as unknown as FakeSocket;
   active.open();
@@ -647,12 +1081,25 @@ test("ordered deltas apply strictly and listener mutation cannot corrupt client 
   const id3 = "00000000000000000000000000000003";
   const id4 = "00000000000000000000000000000004";
   active.message({
-    v: 1, type: "snapshot", requestId: subscribe.requestId, subscriptionId: "server", token: "token-1",
-    documents: [encodeDocument({ _id: id1, value: "one" }), encodeDocument({ _id: id2, value: "two" }), encodeDocument({ _id: id3, value: "three" })],
+    v: 1,
+    type: "snapshot",
+    requestId: subscribe.requestId,
+    subscriptionId: "server",
+    token: "token-1",
+    documents: [
+      encodeDocument({ _id: id1, value: "one" }),
+      encodeDocument({ _id: id2, value: "two" }),
+      encodeDocument({ _id: id3, value: "three" }),
+    ],
   });
   await settle();
   active.message({
-    v: 1, type: "delta", requestId: subscribe.requestId, subscriptionId: "server", fromToken: "token-1", token: "token-2",
+    v: 1,
+    type: "delta",
+    requestId: subscribe.requestId,
+    subscriptionId: "server",
+    fromToken: "token-1",
+    token: "token-2",
     operations: [
       { op: "remove", id: id2 },
       { op: "move_before", id: id3, before: id1 },
@@ -661,11 +1108,17 @@ test("ordered deltas apply strictly and listener mutation cannot corrupt client 
     ],
   });
   await settle();
-  assert.deepEqual(snapshots[1]?.map((document) => `${document._id}:${String(document.value)}`), [
-    `${id3}:three`, `${id4}:four`, `${id1}:server-change`,
-  ]);
+  assert.deepEqual(
+    snapshots[1]?.map((document) => `${document._id}:${String(document.value)}`),
+    [`${id3}:three`, `${id4}:four`, `${id1}:server-change`],
+  );
   active.message({
-    v: 1, type: "delta", requestId: subscribe.requestId, subscriptionId: "server", fromToken: "token-2", token: "token-3",
+    v: 1,
+    type: "delta",
+    requestId: subscribe.requestId,
+    subscriptionId: "server",
+    fromToken: "token-2",
+    token: "token-3",
     operations: [{ op: "change", id: id1, document: encodeDocument({ _id: id1, value: "still-safe" }) }],
   });
   await settle();
@@ -678,17 +1131,42 @@ test("delta token mismatch fails the realtime connection closed", async () => {
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
-    webSocketFactory: () => { socket = new FakeSocket(); return socket; },
+    webSocketFactory: () => {
+      socket = new FakeSocket();
+      return socket;
+    },
   });
-  client.collection("todos").find().subscribe(() => {});
+  client
+    .collection("todos")
+    .find()
+    .subscribe(() => {});
   await settle();
   const active = socket as unknown as FakeSocket;
-  active.open(); active.message({ v: 1, type: "authenticated" });
+  active.open();
+  active.message({ v: 1, type: "authenticated" });
   const subscribe = JSON.parse(active.sent[1] as string) as Record<string, unknown>;
-  active.message({ v: 1, type: "snapshot", requestId: subscribe.requestId, subscriptionId: "server", token: "token-1", documents: [] });
   active.message({
-    v: 1, type: "delta", requestId: subscribe.requestId, subscriptionId: "server", fromToken: "wrong-token", token: "token-2",
-    operations: [{ op: "add_before", id: "00000000000000000000000000000001", document: encodeDocument({ _id: "00000000000000000000000000000001" }) }],
+    v: 1,
+    type: "snapshot",
+    requestId: subscribe.requestId,
+    subscriptionId: "server",
+    token: "token-1",
+    documents: [],
+  });
+  active.message({
+    v: 1,
+    type: "delta",
+    requestId: subscribe.requestId,
+    subscriptionId: "server",
+    fromToken: "wrong-token",
+    token: "token-2",
+    operations: [
+      {
+        op: "add_before",
+        id: "00000000000000000000000000000001",
+        document: encodeDocument({ _id: "00000000000000000000000000000001" }),
+      },
+    ],
   });
   await settle();
   assert.equal(active.closed?.code, 1002);
@@ -701,13 +1179,22 @@ test("malformed or oversized deltas fail closed without partial publication", as
   const id3 = "00000000000000000000000000000003";
   const cases: Array<{ name: string; operations: unknown[]; maxDeltaOperations?: number; initial?: Document[] }> = [
     { name: "missing remove target", operations: [{ op: "remove", id: id2 }] },
-    { name: "unknown add anchor", operations: [{ op: "add_before", id: id2, before: id3, document: encodeDocument({ _id: id2 }) }] },
+    {
+      name: "unknown add anchor",
+      operations: [{ op: "add_before", id: id2, before: id3, document: encodeDocument({ _id: id2 }) }],
+    },
     { name: "change ID mismatch", operations: [{ op: "change", id: id1, document: encodeDocument({ _id: id2 }) }] },
     { name: "no-op move", operations: [{ op: "move_before", id: id1 }] },
-    { name: "unknown operation field", operations: [{ op: "change", id: id1, document: encodeDocument({ _id: id1 }), unexpected: true }] },
+    {
+      name: "unknown operation field",
+      operations: [{ op: "change", id: id1, document: encodeDocument({ _id: id1 }), unexpected: true }],
+    },
     {
       name: "operation limit",
-      operations: [{ op: "remove", id: id1 }, { op: "remove", id: id2 }],
+      operations: [
+        { op: "remove", id: id1 },
+        { op: "remove", id: id2 },
+      ],
       maxDeltaOperations: 1,
       initial: [{ _id: id1 }, { _id: id2 }],
     },
@@ -718,23 +1205,41 @@ test("malformed or oversized deltas fail closed without partial publication", as
     let publications = 0;
     const client = new MeldbaseClient({
       baseUrl: "https://db.example",
-      fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
-      webSocketFactory: () => { socket = new FakeSocket(); return socket; },
+      fetch: async () =>
+        Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
+      webSocketFactory: () => {
+        socket = new FakeSocket();
+        return socket;
+      },
       ...(scenario.maxDeltaOperations ? { maxDeltaOperations: scenario.maxDeltaOperations } : {}),
     });
-    client.collection("todos").find().subscribe(() => { publications += 1; });
+    client
+      .collection("todos")
+      .find()
+      .subscribe(() => {
+        publications += 1;
+      });
     await settle();
     const active = socket as unknown as FakeSocket;
     active.open();
     active.message({ v: 1, type: "authenticated" });
     const subscribe = JSON.parse(active.sent[1] as string) as Record<string, unknown>;
     active.message({
-      v: 1, type: "snapshot", requestId: subscribe.requestId, subscriptionId: "server", token: "token-1",
+      v: 1,
+      type: "snapshot",
+      requestId: subscribe.requestId,
+      subscriptionId: "server",
+      token: "token-1",
       documents: (scenario.initial ?? [{ _id: id1 }]).map(encodeDocument),
     });
     await settle();
     active.message({
-      v: 1, type: "delta", requestId: subscribe.requestId, subscriptionId: "server", fromToken: "token-1", token: "token-2",
+      v: 1,
+      type: "delta",
+      requestId: subscribe.requestId,
+      subscriptionId: "server",
+      fromToken: "token-1",
+      token: "token-2",
       operations: scenario.operations,
     });
     await settle();
@@ -749,17 +1254,33 @@ test("malformed or oversized snapshots fail closed", async () => {
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
     fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: "ticket", protocol: currentProtocol }),
-    webSocketFactory: () => { socket = new FakeSocket(); return socket; },
+    webSocketFactory: () => {
+      socket = new FakeSocket();
+      return socket;
+    },
     maxSnapshotDocuments: 1,
   });
   const states: SyncState[] = [];
-  client.collection("todos").find().subscribe(() => {}, { onStatus: (status) => states.push(status.state) });
+  client
+    .collection("todos")
+    .find()
+    .subscribe(() => {}, { onStatus: (status) => states.push(status.state) });
   await settle();
   const active = socket as unknown as FakeSocket;
   active.open();
   active.message({ v: 1, type: "authenticated" });
   const subscribe = JSON.parse(active.sent[1] as string) as Record<string, unknown>;
-  active.message({ v: 1, type: "snapshot", requestId: subscribe.requestId, subscriptionId: "s", token: "t", documents: [encodeDocument({ _id: "00000000000000000000000000000001" }), encodeDocument({ _id: "00000000000000000000000000000002" })] });
+  active.message({
+    v: 1,
+    type: "snapshot",
+    requestId: subscribe.requestId,
+    subscriptionId: "s",
+    token: "t",
+    documents: [
+      encodeDocument({ _id: "00000000000000000000000000000001" }),
+      encodeDocument({ _id: "00000000000000000000000000000002" }),
+    ],
+  });
   await settle();
   assert.equal(states.at(-1), "error");
   assert.equal(active.closed?.code, 1002);
@@ -771,18 +1292,33 @@ test("reconnect presents the last opaque token and cleanly handles resync_requir
   let ticket = 0;
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
-    fetch: async () => Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++ticket}`, protocol: currentProtocol }),
-    webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    fetch: async () =>
+      Response.json({ url: "wss://db.example/realtime", ticket: `ticket-${++ticket}`, protocol: currentProtocol }),
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
     reconnect: { minDelayMs: 1, maxDelayMs: 1 },
   });
   const states: SyncState[] = [];
-  const unsubscribe = client.collection("todos").find({ done: false }).subscribe(() => {}, { onStatus: (status) => states.push(status.state) });
+  const unsubscribe = client
+    .collection("todos")
+    .find({ done: false })
+    .subscribe(() => {}, { onStatus: (status) => states.push(status.state) });
   await settle();
   const first = sockets[0] as FakeSocket;
   first.open();
   first.message({ v: 1, type: "authenticated" });
   const initialSubscribe = JSON.parse(first.sent[1] as string) as Record<string, unknown>;
-  first.message({ v: 1, type: "snapshot", requestId: initialSubscribe.requestId, subscriptionId: "server-1", token: "opaque.signed-token", documents: [] });
+  first.message({
+    v: 1,
+    type: "snapshot",
+    requestId: initialSubscribe.requestId,
+    subscriptionId: "server-1",
+    token: "opaque.signed-token",
+    documents: [],
+  });
   await settle();
 
   first.disconnect();
@@ -800,7 +1336,13 @@ test("reconnect presents the last opaque token and cleanly handles resync_requir
   assert.equal(states.includes("stale"), true);
   assert.equal(states.includes("resyncing"), true);
 
-  second.message({ v: 1, type: "resumed", requestId: resumed.requestId, subscriptionId: "server-2", token: "opaque.signed-token" });
+  second.message({
+    v: 1,
+    type: "resumed",
+    requestId: resumed.requestId,
+    subscriptionId: "server-2",
+    token: "opaque.signed-token",
+  });
   await settle();
   assert.equal(states.at(-1), "live");
 
@@ -813,40 +1355,55 @@ test("reconnect presents the last opaque token and cleanly handles resync_requir
 });
 
 test("discovered server without resume capability reconnects with a clean snapshot", async () => {
-	const sockets: FakeSocket[] = [];
-	let ticket = 0;
-	const client = new MeldbaseClient({
-		baseUrl: "https://db.example",
-		fetch: async () => Response.json({
-			url: "wss://db.example/realtime", ticket: `ticket-${++ticket}`,
-			protocol: {
-				versions: [1],
-				capabilities: ticket === 1
-					? ["query.delta", "query.resume", "rpc", "rpc.cancel"]
-					: ["query.delta", "rpc", "rpc.cancel"],
-			},
-		}),
-		webSocketFactory: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
-		reconnect: { minDelayMs: 1, maxDelayMs: 1 },
-	});
-	const unsubscribe = client.collection("todos").find().subscribe(() => {});
-	await settle();
-	const first = sockets[0]!;
-	first.open();
-	first.message({ v: 1, type: "authenticated" });
-	const initial = JSON.parse(first.sent[1]!) as Record<string, unknown>;
-	first.message({ v: 1, type: "snapshot", requestId: initial.requestId, subscriptionId: "server-1", token: "opaque-1", documents: [] });
-	await settle();
-	first.disconnect();
-	await settle();
-	await settle();
-	const second = sockets[1]!;
-	second.open();
-	second.message({ v: 1, type: "authenticated" });
-	const clean = JSON.parse(second.sent[1]!) as Record<string, unknown>;
-	assert.equal(clean.type, "subscribe");
-	assert.equal("resumeToken" in clean, false);
-	assert.equal(client.realtimeProtocol?.capabilities.includes("query.resume"), false);
-	unsubscribe();
-	client.close();
+  const sockets: FakeSocket[] = [];
+  let ticket = 0;
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () =>
+      Response.json({
+        url: "wss://db.example/realtime",
+        ticket: `ticket-${++ticket}`,
+        protocol: {
+          versions: [1],
+          capabilities:
+            ticket === 1 ? ["query.delta", "query.resume", "rpc", "rpc.cancel"] : ["query.delta", "rpc", "rpc.cancel"],
+        },
+      }),
+    webSocketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+    reconnect: { minDelayMs: 1, maxDelayMs: 1 },
+  });
+  const unsubscribe = client
+    .collection("todos")
+    .find()
+    .subscribe(() => {});
+  await settle();
+  const first = sockets[0]!;
+  first.open();
+  first.message({ v: 1, type: "authenticated" });
+  const initial = JSON.parse(first.sent[1]!) as Record<string, unknown>;
+  first.message({
+    v: 1,
+    type: "snapshot",
+    requestId: initial.requestId,
+    subscriptionId: "server-1",
+    token: "opaque-1",
+    documents: [],
+  });
+  await settle();
+  first.disconnect();
+  await settle();
+  await settle();
+  const second = sockets[1]!;
+  second.open();
+  second.message({ v: 1, type: "authenticated" });
+  const clean = JSON.parse(second.sent[1]!) as Record<string, unknown>;
+  assert.equal(clean.type, "subscribe");
+  assert.equal("resumeToken" in clean, false);
+  assert.equal(client.realtimeProtocol?.capabilities.includes("query.resume"), false);
+  unsubscribe();
+  client.close();
 });

@@ -132,6 +132,7 @@ func TestWorkerProtocolV1ContractIsCanonical(t *testing.T) {
 	wantNested := []protocolShapeContract{
 		{Name: "actor", Required: []string{"id", "workspaceId"}},
 		{Name: "error", Required: []string{"code", "kind"}, Optional: []string{"data"}},
+		{Name: "limits", Required: []string{"maxOperationsPerCall", "maxPendingCalls", "maxReadPoliciesPerWorker", "policyEvaluationTimeoutMs"}},
 	}
 	if !equalProtocolFrames(workerContract.HubFrames, wantHub) || !equalProtocolFrames(workerContract.WorkerFrames, wantWorker) || !equalProtocolShapes(workerContract.NestedShapes, wantNested) {
 		t.Fatalf("worker protocol v1 frame contract drifted: hub=%+v worker=%+v", workerContract.HubFrames, workerContract.WorkerFrames)

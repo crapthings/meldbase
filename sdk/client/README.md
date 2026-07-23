@@ -3,7 +3,7 @@
 Isomorphic TypeScript client for Meldbase. The root entry is the authenticated
 remote client; the explicit `@meldbase/client/local` subpath provides a
 standalone in-memory state collection with the same bounded query grammar. The
-package is an alpha preview.
+package is a beta API: use only the documented entry points below.
 
 ```ts
 import { MeldbaseClient } from "@meldbase/client";
@@ -13,7 +13,12 @@ const client = new MeldbaseClient({
   accessToken: () => sessionToken,
   webSocketFactory: (url) => new WebSocket(url),
 });
-const todos = client.collection("todos");
+type Todo = import("@meldbase/client").Document & {
+  readonly title: string;
+  readonly done: boolean;
+};
+
+const todos = client.collection<Todo>("todos");
 const stop = todos.find({ done: false }).subscribe((documents) => {
   console.log(documents);
 });
@@ -37,6 +42,34 @@ import { LocalCollection } from "@meldbase/client/local";
 
 const drafts = new LocalCollection([{ _id: "00000000000000000000000000000001", done: false }]);
 ```
+
+The supported imports are the root package, `@meldbase/client/local`, and
+`@meldbase/client/types`. `@meldbase/client/internal` exists only so the
+Meldbase-maintained worker package can share protocol code; it is not a stable
+application API.
+
+## Typed inserts
+
+Give a collection its document type before writing. `insertOne` accepts the
+complete document shape except for `_id`, which Meldbase can generate. It does
+not accept a broad `InputDocument` and pretend the returned value has your
+schema.
+
+```ts
+type Todo = import("@meldbase/client").Document & {
+  readonly title: string;
+  readonly done: boolean;
+};
+
+const todos = client.collection<Todo>("todos");
+const todo = await todos.insertOne({ title: "Ship beta", done: false });
+// todo is Todo and has a generated canonical _id.
+```
+
+Use `MeldbaseClient.insertOne()` only for intentionally untyped operations; it
+returns `Document`. `LocalCollection<T>.insertOne()` follows the same typed
+contract. A generic ID-valued field uses `documentID(value)`; the persisted
+document `_id` remains a canonical string.
 
 ## Local and remote are not interchangeable stores
 
@@ -81,12 +114,16 @@ policy, and result limits are applied again to every page request. `after`
 requires `first` and cannot be combined with `skip`; `fetchPage()` likewise
 requires `first`.
 
+`fetchPage()` is the public pagination boundary. Do not manufacture or persist
+cursor payloads yourself: cursor encoding and the wire query AST are internal
+details and can change between beta releases.
+
 ## Policy-capped counts
 
 Use `count` for badges and dashboards when a document list is unnecessary:
 
 ```ts
-const open = await todos.count({ status: 'open' });
+const open = await todos.count({ status: "open" });
 console.log(open.count, open.capped);
 ```
 
@@ -131,5 +168,5 @@ dispatched are reported directly instead of as an unknown outcome.
 The explicit subpaths are `@meldbase/client/local` and
 `@meldbase/client/types`; remote APIs are imported from the root package.
 
-See the repository documentation for the current protocol, security model, and
-alpha compatibility boundary.
+See the [SDK guide](https://crapthings.github.io/meldbase/sdk) for client,
+React, worker, retry, security, pagination, and compatibility guidance.

@@ -48,12 +48,24 @@
         {"t":"object","v":[["_id",{"t":"string","v":"null"}],["value",{"t":"null"}]]},
         {"t":"object","v":[["_id",{"t":"string","v":"boolean"}],["value",{"t":"bool","v":true}]]},
         {"t":"object","v":[["_id",{"t":"string","v":"time"}],["value",{"t":"date","v":"1970-01-01T00:00:00.000Z"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"id-earlier"}],["value",{"t":"id","v":"00000000000000000000000000000001"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"id-later"}],["value",{"t":"id","v":"00000000000000000000000000000002"}]]},
         {"t":"object","v":[["_id",{"t":"string","v":"binary"}],["value",{"t":"binary","v":"AQ=="}]]},
         {"t":"object","v":[["_id",{"t":"string","v":"array"}],["value",{"t":"array","v":[]}]]},
         {"t":"object","v":[["_id",{"t":"string","v":"object"}],["value",{"t":"object","v":[]}]]}
       ],
       "query": {"version":1,"where":{"op":"true"},"sort":[{"path":"value","direction":1}]},
-      "expectedIds": ["null","boolean","number","string-a","string-z","time","binary","array","object"]
+      "expectedIds": ["null","boolean","number","string-a","string-z","time","id-earlier","id-later","binary","array","object"]
+    },
+    {
+      "name": "generic-document-id-value-is-distinct-from-string",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"generic-id"}],["value",{"t":"id","v":"00000000000000000000000000000001"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"plain-string"}],["value",{"t":"string","v":"00000000000000000000000000000001"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"other-id"}],["value",{"t":"id","v":"00000000000000000000000000000002"}]]}
+      ],
+      "query": {"version":1,"where":{"op":"compare","cmp":"eq","path":"value","value":{"t":"id","v":"00000000000000000000000000000001"}}},
+      "expectedIds": ["generic-id"]
     }
   ]
 }

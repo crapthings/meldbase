@@ -17,8 +17,12 @@ export function abortReason(signal: AbortSignal): Error {
   return error;
 }
 
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
 export function validRPCErrorCode(value: unknown): value is string {
-	return typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value);
+  return typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value);
 }
 
 export function validBusinessErrorCode(value: unknown): value is string {
@@ -30,12 +34,18 @@ export type WireError =
   | { readonly kind: "business"; readonly code: string; readonly data?: MeldbaseErrorData };
 
 export function decodeWireError(value: unknown): WireError {
-  if (!record(value) || typeof value.kind !== "string" || typeof value.code !== "string") throw new Error("Malformed Meldbase error");
+  if (!record(value) || typeof value.kind !== "string" || typeof value.code !== "string")
+    throw new Error("Malformed Meldbase error");
   if (value.kind === "internal") {
-    if (!exactKeys(value, ["kind", "code"]) || !validRPCErrorCode(value.code)) throw new Error("Malformed internal Meldbase error");
+    if (!exactKeys(value, ["kind", "code"]) || !validRPCErrorCode(value.code))
+      throw new Error("Malformed internal Meldbase error");
     return { kind: "internal", code: value.code };
   }
-  if (value.kind !== "business" || !validBusinessErrorCode(value.code) || !exactKeys(value, value.data === undefined ? ["kind", "code"] : ["kind", "code", "data"])) {
+  if (
+    value.kind !== "business" ||
+    !validBusinessErrorCode(value.code) ||
+    !exactKeys(value, value.data === undefined ? ["kind", "code"] : ["kind", "code", "data"])
+  ) {
     throw new Error("Malformed business Meldbase error");
   }
   if (value.data === undefined) return { kind: "business", code: value.code };
@@ -58,8 +68,18 @@ export function assertCollectionName(value: string): void {
 
 export function normalizeBaseURL(value: string): string {
   let url: URL;
-  try { url = new URL(value); } catch { throw new Error("baseUrl must be an http(s) URL"); }
-  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password || url.search || url.hash) {
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("baseUrl must be an http(s) URL");
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
     throw new Error("baseUrl must be an http(s) URL without credentials, query, or fragment");
   }
   return url.toString().replace(/\/$/, "");
@@ -67,8 +87,19 @@ export function normalizeBaseURL(value: string): string {
 
 export function normalizeRealtimeOrigin(value: string): string {
   let url: URL;
-  try { url = new URL(value); } catch { throw new Error("allowedRealtimeOrigins must contain ws(s) origins"); }
-  if ((url.protocol !== "ws:" && url.protocol !== "wss:") || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("allowedRealtimeOrigins must contain ws(s) origins");
+  }
+  if (
+    (url.protocol !== "ws:" && url.protocol !== "wss:") ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== "/"
+  ) {
     throw new Error("allowedRealtimeOrigins must contain ws(s) origins");
   }
   return url.origin;
@@ -99,7 +130,11 @@ export function exactKeys(value: Record<string, unknown>, expected: readonly str
 export async function boundedJSON(response: Response, maxBytes: number): Promise<unknown> {
   const declared = response.headers.get("content-length");
   if (declared !== null && (!/^[0-9]+$/.test(declared) || BigInt(declared) > BigInt(maxBytes))) {
-    try { await response.body?.cancel("Response exceeds safety limit"); } catch { /* best-effort transport cancellation */ }
+    try {
+      await response.body?.cancel("Response exceeds safety limit");
+    } catch {
+      /* best-effort transport cancellation */
+    }
     throw new Error("Response exceeds safety limit");
   }
 
@@ -111,7 +146,11 @@ export async function boundedJSON(response: Response, maxBytes: number): Promise
       const { done, value } = await reader.read();
       if (done) break;
       if (value.byteLength > maxBytes - total) {
-        try { await reader.cancel("Response exceeds safety limit"); } catch { /* best-effort transport cancellation */ }
+        try {
+          await reader.cancel("Response exceeds safety limit");
+        } catch {
+          /* best-effort transport cancellation */
+        }
         throw new Error("Response exceeds safety limit");
       }
       chunks.push(value);
@@ -125,6 +164,14 @@ export async function boundedJSON(response: Response, maxBytes: number): Promise
     offset += chunk.byteLength;
   }
   let text: string;
-  try { text = new TextDecoder("utf-8", { fatal: true }).decode(encoded); } catch { throw new Error("Malformed JSON response"); }
-  try { return JSON.parse(text) as unknown; } catch { throw new Error("Malformed JSON response"); }
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(encoded);
+  } catch {
+    throw new Error("Malformed JSON response");
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error("Malformed JSON response");
+  }
 }

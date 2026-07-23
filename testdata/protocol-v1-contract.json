@@ -44,6 +44,16 @@
         "optional": [
           "data"
         ]
+      },
+      {
+        "name": "limits",
+        "required": [
+          "maxOperationsPerCall",
+          "maxPendingCalls",
+          "maxReadPoliciesPerWorker",
+          "policyEvaluationTimeoutMs"
+        ],
+        "optional": []
       }
     ],
     "hubFrames": [

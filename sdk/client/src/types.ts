@@ -1,9 +1,22 @@
+import type { DocumentID } from "./safe-value.js";
+
 // bigint is the lossless JavaScript representation of Meldbase Int64. number
 // maps to Float64; the wire format never silently rounds an integer.
-export type Primitive = null | boolean | number | bigint | string | Date | Uint8Array;
+//
+// DocumentID is distinct from string so a generic ID-valued field retains its
+// `id` wire tag. Persisted document `_id` deliberately remains a string at the
+// ergonomic document boundary.
+export type Primitive = null | boolean | number | bigint | string | Date | Uint8Array | DocumentID;
 export type Value = Primitive | readonly Value[] | { readonly [key: string]: Value };
 export type Document = { readonly _id: string; readonly [key: string]: Value };
 export type InputDocument = { readonly _id?: string; readonly [key: string]: Value | undefined };
+
+// InsertDocument carries the schema of a typed collection through an insert
+// while allowing the SDK to allocate `_id`. `U` is inferred from the supplied
+// value; adding an ID must make it assignable to T. This avoids losing T's
+// required named fields to Document's string index signature.
+export type InsertDocument<T extends Document, U extends InputDocument> = U &
+  (U & { readonly _id: T["_id"] } extends T ? unknown : never);
 
 export type Comparison = {
   readonly $eq?: Value;

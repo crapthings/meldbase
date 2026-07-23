@@ -3,7 +3,7 @@
 Trusted Node.js worker SDK for Meldbase RPC methods, `rpc.transactional` point writes,
 and data-only read policies. The worker runs outside the Go database
 process and connects to a private authenticated control listener. The package is
-an alpha preview.
+a beta API.
 
 ```ts
 import { MeldbaseWorker, readPolicy, rpc } from "@meldbase/worker";
@@ -17,16 +17,19 @@ const worker = new MeldbaseWorker({
   methods: {
     "health.echo": rpc((_context, input) => input),
   },
- readPolicies: {
-    todos: readPolicy({
-      version: "owner-v1",
-      maxResults: 100,
-      queryPaths: ["done"],
-      resultFields: ["owner", "done", "title"],
-    }, ({ actor }) => ({
-      version: 1,
-      where: { op: "compare", cmp: "eq", path: "owner", value: actor.id },
-    })),
+  readPolicies: {
+    todos: readPolicy(
+      {
+        version: "owner-v1",
+        maxResults: 100,
+        queryPaths: ["done"],
+        resultFields: ["owner", "done", "title"],
+      },
+      ({ actor }) => ({
+        version: 1,
+        where: { op: "compare", cmp: "eq", path: "owner", value: actor.id },
+      }),
+    ),
   },
 });
 
@@ -42,6 +45,22 @@ for local development or tests.
 The application supplies its WebSocket implementation; no transport package is
 bundled. Mount the Go worker hub on a private TLS listener and use a dedicated
 worker credential, never a browser or admin token.
+
+`rpc()` is for side-effect-free or idempotently retried application work.
+`rpc.transactional()` is for one request's sequential, atomic point writes via
+the supplied transaction. Await each transaction operation before starting the
+next one. A `MeldbaseError` is an expected business outcome; unexpected errors
+are returned as a Meldbase internal error. Respect `context.signal` and make
+external effects idempotent, because a caller can disconnect after dispatch.
+
+Read policies are allowlists, not filters you should trust from the browser:
+declare only the query paths and result fields a policy needs, then return a
+data-only `QuerySpec` constraint or `null`. Keep worker URLs, tokens, and the
+worker control listener private. The SDK rejects credentials in the URL and
+does not put the token in the URL.
+
+See the [SDK guide](https://crapthings.github.io/meldbase/sdk#worker-rpc-and-read-policies)
+for the operational and compatibility contract.
 
 ## Internal layout
 

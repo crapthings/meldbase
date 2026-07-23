@@ -1,10 +1,43 @@
 import type { Document, QueryLimits, Value } from "./types.js";
-import { QueryValidationError } from "./types.js";
+import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
 
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
 const encoder = new TextEncoder();
 const DOCUMENT_ID_PATTERN = /^[0-9a-f]{32}$/;
 const ZERO_DOCUMENT_ID = "00000000000000000000000000000000";
+// The server applies the value limits below to every typed wire value, not
+// just query operands. Values may be nested more deeply than a query AST, but
+// otherwise the transport cardinality and byte budgets are identical.
+const DEFAULT_TRANSPORT_VALUE_LIMITS: QueryLimits = Object.freeze({
+  ...DEFAULT_QUERY_LIMITS,
+  maxDepth: 64,
+});
+
+// DocumentID represents an ID-valued generic field. It is intentionally
+// separate from string: a canonical-looking string is still a string unless a
+// caller explicitly wraps it, while decoded `t: "id"` values preserve their
+// wire kind. A document's persisted `_id` stays a string for ergonomic APIs.
+export class DocumentID {
+  readonly value: string;
+
+  constructor(value: string) {
+    assertDocumentID(value, "DocumentID");
+    this.value = value;
+    Object.freeze(this);
+  }
+
+  toString(): string {
+    return this.value;
+  }
+}
+
+export function documentID(value: string): DocumentID {
+  return new DocumentID(value);
+}
+
+export function isDocumentIDValue(value: unknown): value is DocumentID {
+  return value instanceof DocumentID;
+}
 
 // newDocumentID creates the portable 128-bit lowercase-hex identity used by
 // both local and remote inserts.
@@ -18,7 +51,8 @@ export function isDocumentID(value: unknown): value is string {
 }
 
 export function assertDocumentID(value: unknown, label = "Document _id"): asserts value is string {
-  if (!isDocumentID(value)) throw new QueryValidationError(`${label} must be a non-zero 32-character lowercase hexadecimal ID`);
+  if (!isDocumentID(value))
+    throw new QueryValidationError(`${label} must be a non-zero 32-character lowercase hexadecimal ID`);
 }
 
 export function assertSafeKey(key: string, label = "field"): void {
@@ -30,7 +64,8 @@ export function assertSafeKey(key: string, label = "field"): void {
 
 export function assertPath(path: string): void {
   assertWellFormedString(path, "field path");
-  if (encoder.encode(path).byteLength > 512 || path.includes("\0")) throw new QueryValidationError("Field path is too long");
+  if (encoder.encode(path).byteLength > 512 || path.includes("\0"))
+    throw new QueryValidationError("Field path is too long");
   const parts = path.split(".");
   if (parts.some((part) => !part || part.startsWith("$") || forbiddenKeys.has(part))) {
     throw new QueryValidationError(`Invalid field path: ${JSON.stringify(path)}`);
@@ -40,9 +75,14 @@ export function assertPath(path: string): void {
 export function cloneValue(value: Value, depth = 0): Value {
   if (depth > 64) throw new QueryValidationError("Document nesting is too deep");
   if (value === null || typeof value === "boolean") return value;
-  if (typeof value === "string") { assertWellFormedString(value, "string"); return value; }
+  if (isDocumentIDValue(value)) return value;
+  if (typeof value === "string") {
+    assertWellFormedString(value, "string");
+    return value;
+  }
   if (typeof value === "bigint") {
-    if (value < -(1n << 63n) || value > (1n << 63n) - 1n) throw new QueryValidationError("bigint is outside Int64 range");
+    if (value < -(1n << 63n) || value > (1n << 63n) - 1n)
+      throw new QueryValidationError("bigint is outside Int64 range");
     return value;
   }
   if (typeof value === "number") {
@@ -73,13 +113,26 @@ export function cloneValue(value: Value, depth = 0): Value {
   throw new QueryValidationError(`Unsupported value type: ${typeof value}`);
 }
 
+// cloneTransportValue is the public-transport boundary for user-supplied
+// values. Cloning first means a hostile or mutable input cannot change between
+// validation and encoding, while the common limits prevent JSON.stringify from
+// turning an unsupported value into a different wire meaning.
+export function cloneTransportValue(value: unknown): Value {
+  const cloned = cloneValue(value as Value);
+  assertTransportValue(cloned);
+  return cloned;
+}
+
 export function assertWellFormedString(value: string, label = "string"): void {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
     if (code < 0xd800 || code > 0xdfff) continue;
     if (code <= 0xdbff && index + 1 < value.length) {
       const next = value.charCodeAt(index + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) { index += 1; continue; }
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        index += 1;
+        continue;
+      }
     }
     throw new QueryValidationError(`Invalid UTF-16 ${label}`);
   }
@@ -98,33 +151,58 @@ export function valueByteLength(value: Value): number {
   if (typeof value === "boolean") return 1;
   if (typeof value === "number") return 8;
   if (typeof value === "bigint") return 8;
+  if (isDocumentIDValue(value)) return 16;
   if (typeof value === "string") return encoder.encode(value).byteLength;
   if (value instanceof Date) return 8;
   if (value instanceof Uint8Array) return value.byteLength;
   if (Array.isArray(value)) return value.reduce((sum, item) => sum + valueByteLength(item), 0);
-  return Object.entries(value).reduce((sum, [key, item]) => sum + encoder.encode(key).byteLength + valueByteLength(item), 0);
+  return Object.entries(value).reduce(
+    (sum, [key, item]) => sum + encoder.encode(key).byteLength + valueByteLength(item),
+    0,
+  );
 }
 
 export function assertQueryValue(value: Value, limits: QueryLimits, depth = 0): void {
-  if (depth > limits.maxDepth) throw new QueryValidationError("Query value nesting is too deep");
+  assertBoundedValue(value, limits, depth, "Query value");
+}
+
+export function assertTransportValue(value: Value): void {
+  assertBoundedValue(value, DEFAULT_TRANSPORT_VALUE_LIMITS, 0, "Value");
+}
+
+function assertBoundedValue(value: Value, limits: QueryLimits, depth: number, label: string): void {
+  if (depth > limits.maxDepth) throw new QueryValidationError(`${label} nesting is too deep`);
   if (Array.isArray(value)) {
-    if (value.length > limits.maxArrayItems) throw new QueryValidationError("Query array has too many items");
-    for (const item of value) assertQueryValue(item, limits, depth + 1);
-  } else if (value !== null && typeof value === "object" && !(value instanceof Date) && !(value instanceof Uint8Array)) {
+    if (value.length > limits.maxArrayItems) throw new QueryValidationError(`${label} array has too many items`);
+    for (const item of value) assertBoundedValue(item, limits, depth + 1, label);
+  } else if (
+    value !== null &&
+    typeof value === "object" &&
+    !isDocumentIDValue(value) &&
+    !(value instanceof Date) &&
+    !(value instanceof Uint8Array)
+  ) {
     const entries = Object.entries(value);
-    if (entries.length > limits.maxArrayItems) throw new QueryValidationError("Query object has too many fields");
+    if (entries.length > limits.maxArrayItems) throw new QueryValidationError(`${label} object has too many fields`);
     for (const [key, item] of entries) {
       assertSafeKey(key);
-      assertQueryValue(item, limits, depth + 1);
+      assertBoundedValue(item, limits, depth + 1, label);
     }
   }
-  if (valueByteLength(value) > limits.maxStringBytes) throw new QueryValidationError("Query value is too large");
+  if (valueByteLength(value) > limits.maxStringBytes) throw new QueryValidationError(`${label} is too large`);
 }
 
 export function getPath(document: Document, path: string): { found: boolean; value?: Value } {
   let current: Value = document;
   for (const part of path.split(".")) {
-    if (current === null || Array.isArray(current) || current instanceof Date || current instanceof Uint8Array || typeof current !== "object") {
+    if (
+      current === null ||
+      Array.isArray(current) ||
+      isDocumentIDValue(current) ||
+      current instanceof Date ||
+      current instanceof Uint8Array ||
+      typeof current !== "object"
+    ) {
       return { found: false };
     }
     if (!Object.prototype.hasOwnProperty.call(current, part)) return { found: false };
@@ -137,7 +215,13 @@ export function getPath(document: Document, path: string): { found: boolean; val
 }
 
 export function valueEquals(left: Value, right: Value): boolean {
-  if ((typeof left === "number" || typeof left === "bigint") && (typeof right === "number" || typeof right === "bigint")) {
+  if (isDocumentIDValue(left) || isDocumentIDValue(right)) {
+    return isDocumentIDValue(left) && isDocumentIDValue(right) && left.value === right.value;
+  }
+  if (
+    (typeof left === "number" || typeof left === "bigint") &&
+    (typeof right === "number" || typeof right === "bigint")
+  ) {
     return compareNumeric(left, right) === 0;
   }
   if (left instanceof Date && right instanceof Date) return left.getTime() === right.getTime();
@@ -147,13 +231,24 @@ export function valueEquals(left: Value, right: Value): boolean {
   if (Array.isArray(left) && Array.isArray(right)) {
     return left.length === right.length && left.every((item, i) => valueEquals(item, right[i] as Value));
   }
-  if (left && right && typeof left === "object" && typeof right === "object" && !Array.isArray(left) && !Array.isArray(right)) {
-    if (left instanceof Date || right instanceof Date || left instanceof Uint8Array || right instanceof Uint8Array) return false;
+  if (
+    left &&
+    right &&
+    typeof left === "object" &&
+    typeof right === "object" &&
+    !Array.isArray(left) &&
+    !Array.isArray(right)
+  ) {
+    if (left instanceof Date || right instanceof Date || left instanceof Uint8Array || right instanceof Uint8Array)
+      return false;
     const leftObject = left as { readonly [key: string]: Value };
     const rightObject = right as { readonly [key: string]: Value };
     const lk = Object.keys(leftObject).sort();
     const rk = Object.keys(rightObject).sort();
-    return lk.length === rk.length && lk.every((key, i) => key === rk[i] && valueEquals(leftObject[key] as Value, rightObject[key] as Value));
+    return (
+      lk.length === rk.length &&
+      lk.every((key, i) => key === rk[i] && valueEquals(leftObject[key] as Value, rightObject[key] as Value))
+    );
   }
   return left === right;
 }
@@ -162,14 +257,19 @@ export function compareValues(left: Value, right: Value): number | undefined {
   const leftRank = scalarRank(left);
   const rightRank = scalarRank(right);
   if (leftRank === undefined || rightRank === undefined) return undefined;
-  if ((typeof left === "number" || typeof left === "bigint") && (typeof right === "number" || typeof right === "bigint")) {
+  if (
+    (typeof left === "number" || typeof left === "bigint") &&
+    (typeof right === "number" || typeof right === "bigint")
+  ) {
     return compareNumeric(left, right);
   }
   if (leftRank !== rightRank) return leftRank < rightRank ? -1 : 1;
   if (left === null && right === null) return 0;
   if (typeof left === "string" && typeof right === "string") return compareUTF8(left, right);
   if (typeof left === "boolean" && typeof right === "boolean") return left === right ? 0 : left ? 1 : -1;
-  if (left instanceof Date && right instanceof Date) return left.getTime() === right.getTime() ? 0 : left < right ? -1 : 1;
+  if (left instanceof Date && right instanceof Date)
+    return left.getTime() === right.getTime() ? 0 : left < right ? -1 : 1;
+  if (isDocumentIDValue(left) && isDocumentIDValue(right)) return compareUTF8(left.value, right.value);
   if (left instanceof Uint8Array && right instanceof Uint8Array) return compareBytes(left, right);
   return undefined;
 }
@@ -190,6 +290,7 @@ function scalarRank(value: Value): number | undefined {
   if (typeof value === "number" || typeof value === "bigint") return 2;
   if (typeof value === "string") return 3;
   if (value instanceof Date) return 4;
+  if (isDocumentIDValue(value)) return 5;
   if (value instanceof Uint8Array) return 6;
   return undefined;
 }

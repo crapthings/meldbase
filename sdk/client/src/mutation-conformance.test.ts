@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { applyMutation, decodeDocument, decodeMutationSpec } from "./index.js";
+import { applyMutation, decodeMutationSpec } from "./mutation.js";
+import { decodeDocument } from "./wire.js";
 
-interface CorpusCase { name: string; document: unknown; mutation: unknown; expected: unknown }
+interface CorpusCase {
+  name: string;
+  document: unknown;
+  mutation: unknown;
+  expected: unknown;
+}
 
 test("TypeScript executes the shared Go/TypeScript mutation corpus", async () => {
   const url = new URL("../../../testdata/mutation-conformance.json", import.meta.url);

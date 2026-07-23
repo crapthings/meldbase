@@ -4,12 +4,13 @@ import {
   encodeInputDocument,
   encodeMutationSpec,
   encodeValue,
+  isDocumentIDValue,
   MELDBASE_PROTOCOL_VERSION,
-} from "@meldbase/client";
+} from "@meldbase/client/internal";
 import type { Document, InputDocument, MutationSpec, Value } from "@meldbase/client";
 
 import { MeldbaseInternalError } from "./errors.js";
-import { COLLECTION_PATTERN, deferred, type Deferred, ERROR_PATTERN, ID_PATTERN, record } from "./shared.js";
+import { COLLECTION_PATTERN, deferred, type Deferred, ERROR_PATTERN, isCanonicalDocumentID, record } from "./shared.js";
 import type { WriteTransaction } from "./types.js";
 
 export class RemoteWriteTransaction implements WriteTransaction {
@@ -32,8 +33,9 @@ export class RemoteWriteTransaction implements WriteTransaction {
 
   async insert(collection: string, document: InputDocument): Promise<string> {
     const value = await this.#operation("insert", collection, undefined, document);
-    if (typeof value !== "string" || !ID_PATTERN.test(value)) throw new Error("Invalid inserted document ID");
-    return value;
+    if (!isDocumentIDValue(value) || !isCanonicalDocumentID(value.value))
+      throw new Error("Invalid inserted document ID");
+    return value.value;
   }
 
   async replace(collection: string, id: string, document: InputDocument): Promise<void> {
@@ -51,7 +53,8 @@ export class RemoteWriteTransaction implements WriteTransaction {
   }
 
   async invalidateReadPolicy(collection: string): Promise<void> {
-    if (this.#invalidatedReadPolicies.has(collection)) throw new Error("Read policy was already invalidated in this transaction");
+    if (this.#invalidatedReadPolicies.has(collection))
+      throw new Error("Read policy was already invalidated in this transaction");
     this.#invalidatedReadPolicies.add(collection);
     try {
       await this.#operation("invalidate_read_policy", collection);
@@ -62,14 +65,28 @@ export class RemoteWriteTransaction implements WriteTransaction {
   }
 
   receive(frame: Record<string, unknown>): void {
-    if (!this.#pending || frame.opId !== this.#pending.opId) throw new Error("Unexpected transaction operation response");
+    if (!this.#pending || frame.opId !== this.#pending.opId)
+      throw new Error("Unexpected transaction operation response");
     const pending = this.#pending;
-    this.#pending = undefined;
     if (frame.type === "tx_result") {
-      pending.deferred.resolve(decodeValue(frame.result));
+      try {
+        const result = decodeValue(frame.result);
+        this.#pending = undefined;
+        pending.deferred.resolve(result);
+      } catch (error) {
+        this.#pending = undefined;
+        pending.deferred.reject(error);
+        throw error;
+      }
       return;
     }
-    if (!record(frame.error) || frame.error.kind !== "internal" || typeof frame.error.code !== "string" || !ERROR_PATTERN.test(frame.error.code)) {
+    this.#pending = undefined;
+    if (
+      !record(frame.error) ||
+      frame.error.kind !== "internal" ||
+      typeof frame.error.code !== "string" ||
+      !ERROR_PATTERN.test(frame.error.code)
+    ) {
       pending.deferred.reject(new Error("Invalid transaction error"));
       return;
     }
@@ -83,17 +100,28 @@ export class RemoteWriteTransaction implements WriteTransaction {
     this.#pending = undefined;
   }
 
-  async #operation(operation: string, collection: string, id?: string, document?: InputDocument, mutation?: MutationSpec): Promise<Value> {
+  async #operation(
+    operation: string,
+    collection: string,
+    id?: string,
+    document?: InputDocument,
+    mutation?: MutationSpec,
+  ): Promise<Value> {
     if (this.#closed) throw this.#closed;
     if (this.#pending) throw new Error("Transactional operations must be awaited sequentially");
     if (!COLLECTION_PATTERN.test(collection)) throw new TypeError("Invalid collection name");
-    if (id !== undefined && !ID_PATTERN.test(id)) throw new TypeError("Invalid document ID");
+    if (id !== undefined && !isCanonicalDocumentID(id)) throw new TypeError("Invalid document ID");
     const opId = `op-${this.#nextOperation++}`;
     const response = deferred<Value>();
     this.#pending = { opId, deferred: response };
     try {
       this.#send({
-        v: MELDBASE_PROTOCOL_VERSION, type: "tx_op", callId: this.#callId, opId, operation, collection,
+        v: MELDBASE_PROTOCOL_VERSION,
+        type: "tx_op",
+        callId: this.#callId,
+        opId,
+        operation,
+        collection,
         ...(id !== undefined ? { id } : {}),
         ...(document !== undefined ? { document: encodeInputDocument(document) } : {}),
         ...(mutation !== undefined ? { mutation: encodeMutationSpec(mutation) } : {}),

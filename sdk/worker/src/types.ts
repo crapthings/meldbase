@@ -30,7 +30,11 @@ export interface WriteTransaction {
 }
 
 export type RPCHandler = (context: RPCContext, input: Value) => Value | Promise<Value>;
-export type TransactionalRPCHandler = (context: RPCContext, input: Value, transaction: WriteTransaction) => Value | Promise<Value>;
+export type TransactionalRPCHandler = (
+  context: RPCContext,
+  input: Value,
+  transaction: WriteTransaction,
+) => Value | Promise<Value>;
 
 export type RPCDefinition =
   | { readonly mode: "rpc"; readonly handler: RPCHandler }
@@ -57,7 +61,10 @@ export interface WorkerSocket {
   removeEventListener(type: "open" | "close" | "error" | "message", listener: (event: any) => void): void;
 }
 
-export type WorkerSocketFactory = (url: string, options: { readonly headers: Readonly<Record<string, string>> }) => WorkerSocket;
+export type WorkerSocketFactory = (
+  url: string,
+  options: { readonly headers: Readonly<Record<string, string>> },
+) => WorkerSocket;
 export type WorkerState = "idle" | "connecting" | "registering" | "ready" | "stopped";
 
 export interface WorkerOptions {

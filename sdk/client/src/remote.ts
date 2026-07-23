@@ -1,7 +1,7 @@
 // Internal facade used by the root client entry. Public consumers import the
 // remote-first root package; local state is available only from ./local.
 export { MeldbaseClient } from "./remote/client.js";
-export { RemoteCollection, RemoteLiveQuery } from "./remote/collection.js";
+export type { RemoteCollection, RemoteLiveQuery } from "./remote/collection.js";
 export {
   MeldbaseClientClosedError,
   MeldbaseError,
