@@ -675,6 +675,10 @@ func TestWorkerReadPolicyNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) {
 	if _, found, err := hub.ResolveQueryPolicy(context.Background(), Actor{ID: "user-1", WorkspaceID: "mine"}, "other", meldbase.QuerySpec{}); found || err != nil {
 		t.Fatalf("unmanaged read policy found=%v err=%v", found, err)
 	}
+	deadline := time.Now().Add(time.Second)
+	for hub.Stats().RegisteredReadPolicies != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	stats := hub.Stats()
 	if stats.PolicyEvaluations != 1 || stats.PolicySucceeded != 1 || stats.RegisteredReadPolicies != 0 {
 		t.Fatalf("read-policy stats=%+v", stats)
