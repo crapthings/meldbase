@@ -17,7 +17,11 @@ func (c *Collection) selectMutationDocumentsLocked(ctx context.Context, query Qu
 		if cap > 0 {
 			selection = selection.Capped(cap)
 		}
-		documents, _, err := c.planStorageLocked(ctx, selection)
+		budget, err := c.db.newQueryBudget(selection)
+		if err != nil {
+			return nil, err
+		}
+		documents, _, err := c.planStorageLocked(ctx, selection, budget)
 		if err != nil {
 			return nil, err
 		}
@@ -34,14 +38,26 @@ func (c *Collection) selectMutationDocumentsLocked(ctx context.Context, query Qu
 	if one && limit > 1 {
 		limit = 1
 	}
+	budget, err := c.db.newQueryBudget(query)
+	if err != nil {
+		return nil, err
+	}
 	documents := make([]Document, 0, limit)
 	for _, id := range data.order {
 		if err := contextError(ctx); err != nil {
 			return nil, err
 		}
 		document, exists := data.documents[id]
+		if exists {
+			if err := budget.document(); err != nil {
+				return nil, err
+			}
+		}
 		if !exists || !query.Match(document) {
 			continue
+		}
+		if err := budget.candidate(document); err != nil {
+			return nil, err
 		}
 		documents = append(documents, document.Clone())
 		if maxAffected > 0 && len(documents) > maxAffected {

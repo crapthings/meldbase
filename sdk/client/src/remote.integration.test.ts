@@ -189,6 +189,29 @@ test("TypeScript remote client interoperates with the live Go HTTP and realtime 
 
     const fetched = await todos.find({ done: false }).fetch();
     assert.deepEqual(fetched.map((document) => document._id).sort(), [first._id, second._id].sort());
+
+    const pages = client.collection<Document>("pages");
+    const pageDocuments = [
+      { _id: "00000000000000000000000000000003" },
+      { _id: "00000000000000000000000000000002", rank: 1 },
+      { _id: "00000000000000000000000000000001" },
+      { _id: "00000000000000000000000000000004", rank: 1 },
+      { _id: "00000000000000000000000000000005", rank: 2 },
+    ];
+    for (const document of pageDocuments) await pages.insertOne(document);
+    const pagedIDs: string[] = [];
+    let after: string | undefined;
+    do {
+      const page = await pages.find({}, { sort: [{ path: "rank", direction: 1 }], first: 2, ...(after ? { after } : {}) }).fetchPage();
+      pagedIDs.push(...page.documents.map((document) => document._id));
+      after = page.nextCursor;
+    } while (after !== undefined && pagedIDs.length < pageDocuments.length);
+    assert.deepEqual(pagedIDs, [
+      "00000000000000000000000000000001", "00000000000000000000000000000003",
+      "00000000000000000000000000000002", "00000000000000000000000000000004",
+      "00000000000000000000000000000005",
+    ]);
+
     assert.deepEqual(await todos.count({ done: false }), { count: 2, capped: false });
     assert.deepEqual(await todos.groupCount({ done: false }, "done"), {
       groups: [{ key: false, count: 2 }], capped: false,

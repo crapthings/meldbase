@@ -1089,7 +1089,7 @@ func engineErrorStatusCode(err error) (int, string) {
 	if errors.Is(err, meldbase.ErrMutationLimit) {
 		status, code = http.StatusConflict, "mutation_limit_exceeded"
 	}
-	if errors.Is(err, meldbase.ErrResourceLimit) {
+	if errors.Is(err, meldbase.ErrResourceLimit) || errors.Is(err, meldbase.ErrQueryBudget) {
 		status, code = http.StatusRequestEntityTooLarge, "resource_limit_exceeded"
 	}
 	if errors.Is(err, meldbase.ErrDuplicateID) || errors.Is(err, meldbase.ErrDuplicateKey) {

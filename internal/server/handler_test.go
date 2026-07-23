@@ -276,6 +276,54 @@ func TestHTTPGroupCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 	}
 }
 
+func TestHTTPAggregatesReportQueryBudgetWithStableCode(t *testing.T) {
+	db, err := meldbase.NewWithOptions(meldbase.DatabaseOptions{ResourceLimits: meldbase.ResourceLimits{MaxQueryDocumentsExamined: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	handler, err := New(Config{
+		DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{},
+		PublicRealtimeURL: "ws://placeholder.invalid/v1/realtime", AllowedHTTPOrigins: []string{"http://localhost:5173"},
+		TicketTTL: time.Minute, ResumeTokenKey: []byte("0123456789abcdef0123456789abcdef"), MaxBodyBytes: 1 << 16,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	items := db.Collection("items")
+	insertServerDocument(t, items, "mine", 1, "one")
+	insertServerDocument(t, items, "mine", 2, "two")
+
+	for _, requestBody := range []struct {
+		path, body string
+	}{
+		{"/v1/collections/items/count", `{"version":1,"query":{"version":1,"where":{"op":"true"}}}`},
+		{"/v1/collections/items/group-count", `{"version":1,"query":{"version":1,"where":{"op":"true"}},"groupBy":"rank"}`},
+	} {
+		request, err := http.NewRequest(http.MethodPost, server.URL+requestBody.path, strings.NewReader(requestBody.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("authorization", "Bearer valid")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		decodeErr := json.NewDecoder(response.Body).Decode(&payload)
+		response.Body.Close()
+		if decodeErr != nil || response.StatusCode != http.StatusRequestEntityTooLarge || payload.Error.Code != "resource_limit_exceeded" {
+			t.Fatalf("%s status=%d code=%q decode=%v", requestBody.path, response.StatusCode, payload.Error.Code, decodeErr)
+		}
+	}
+}
+
 func TestHTTPInsertAppliesServerOwnedFieldsAndRejectsForbiddenInput(t *testing.T) {
 	db, _, server := newTestServer(t)
 	document := `{"t":"object","v":[["rank",{"t":"int64","v":"7"}],["title",{"t":"string","v":"created"}]]}`
@@ -631,6 +679,14 @@ func TestResourceLimitErrorsUseStableTerminalCode(t *testing.T) {
 	status, code = classifyRPCError(meldbase.ErrResourceLimit)
 	if status != http.StatusRequestEntityTooLarge || code != "resource_limit_exceeded" {
 		t.Fatalf("RPC classification = %d %q", status, code)
+	}
+	status, code = engineErrorStatusCode(meldbase.ErrQueryBudget)
+	if status != http.StatusRequestEntityTooLarge || code != "resource_limit_exceeded" {
+		t.Fatalf("query budget engine classification = %d %q", status, code)
+	}
+	status, code = classifyRPCError(meldbase.ErrQueryBudget)
+	if status != http.StatusRequestEntityTooLarge || code != "resource_limit_exceeded" {
+		t.Fatalf("query budget RPC classification = %d %q", status, code)
 	}
 }
 

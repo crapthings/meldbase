@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -51,6 +52,116 @@ func TestIndexedRangeQueriesMatchCollectionScanAcrossRandomData(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestIndexedInAndEligibleOrMatchCollectionScanWithResiduals(t *testing.T) {
+	constructors := map[string]func(*testing.T) *DB{
+		"memory": func(t *testing.T) *DB {
+			return New()
+		},
+		"durable": func(t *testing.T) *DB {
+			db, err := Open(filepath.Join(t.TempDir(), "in-or.meld2"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return db
+		},
+	}
+	for name, construct := range constructors {
+		t.Run(name, func(t *testing.T) {
+			db := construct(t)
+			defer db.Close()
+			items := db.Collection("items")
+			for _, document := range []Document{
+				{"bucket": Int(1), "state": String("active"), "label": String("first")},
+				{"bucket": Int(2), "state": String("active"), "label": String("second")},
+				{"bucket": Int(2), "state": String("held"), "label": String("third")},
+				{"bucket": Int(3), "state": String("hidden"), "label": String("fourth")},
+				{"bucket": Int(1), "state": String("hidden"), "label": String("fifth")},
+			} {
+				if _, err := items.InsertOne(context.Background(), document); err != nil {
+					t.Fatal(err)
+				}
+			}
+			samples := []Filter{
+				{"bucket": map[string]any{"$in": []any{int64(2)}}},
+				{"bucket": map[string]any{"$in": []any{int64(1), int64(3), int64(1)}}, "state": "active"},
+				{"$or": []Filter{{"bucket": int64(1), "state": "active"}, {"bucket": int64(3)}}},
+			}
+			wants := make([][]DocumentID, len(samples))
+			for index, filter := range samples {
+				wants[index] = queryIDs(t, items, filter, QueryOptions{Sort: []SortField{{Path: "label", Direction: 1}}})
+			}
+			if err := items.CreateIndex(context.Background(), "by_bucket_state", []IndexField{{Field: "bucket", Order: 1}, {Field: "state", Order: 1}}, IndexOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			for index, filter := range samples {
+				got := queryIDs(t, items, filter, QueryOptions{Sort: []SortField{{Path: "label", Direction: 1}}})
+				if !reflect.DeepEqual(got, wants[index]) {
+					t.Fatalf("filter=%v got=%v want=%v", filter, got, wants[index])
+				}
+				explain, err := items.Explain(context.Background(), filter)
+				if err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "by_bucket_state" || explain.KeysExamined == 0 {
+					t.Fatalf("filter=%v explain=%+v err=%v", filter, explain, err)
+				}
+			}
+		})
+	}
+}
+
+func TestExplainQueryReportsCompiledOptionsBoundsAndSortCompatibleIndex(t *testing.T) {
+	db := New()
+	defer db.Close()
+	items := db.Collection("items")
+	for _, document := range []Document{
+		{"a": Int(1), "z": Int(3), "other": Int(1)},
+		{"a": Int(1), "z": Int(1), "other": Int(3)},
+		{"a": Int(1), "z": Int(2), "other": Int(2)},
+		{"a": Int(2), "z": Int(0), "other": Int(0)},
+	} {
+		if _, err := items.InsertOne(context.Background(), document); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The non-sort-compatible name comes first lexically. Plan ranking must
+	// still choose by_a_z for the equality prefix plus z ascending order.
+	if err := items.CreateIndex(context.Background(), "by_a_other", []IndexField{{Field: "a", Order: 1}, {Field: "other", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := items.CreateIndex(context.Background(), "by_a_z", []IndexField{{Field: "a", Order: 1}, {Field: "z", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	limit := 2
+	query, err := CompileQuery(Filter{"a": int64(1)}, QueryOptions{Sort: []SortField{{Path: "z", Direction: 1}}, Limit: &limit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	explain, err := items.ExplainQuery(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explain.Stage != "IXSCAN" || explain.IndexName != "by_a_z" || !explain.ResidualPredicate || !explain.SortRequired || !explain.SortIndexCompatible {
+		t.Fatalf("explain=%+v", explain)
+	}
+	if len(explain.Bounds) != 1 || explain.Bounds[0].Path != "a" || len(explain.Bounds[0].Values) != 1 {
+		t.Fatalf("bounds=%+v", explain.Bounds)
+	}
+	value, ok := explain.Bounds[0].Values[0].Int64()
+	if !ok || value != 1 {
+		t.Fatalf("bound value=%v", explain.Bounds[0].Values[0])
+	}
+	if explain.EstimatedDocuments != 3 || explain.EstimatedKeys != 3 || explain.DocumentsExamined != 3 || explain.KeysExamined != 3 {
+		t.Fatalf("scan accounting=%+v", explain)
+	}
+	if explain.CandidatesRetained != 2 || explain.SortBytes <= 0 {
+		t.Fatalf("sort accounting=%+v", explain)
+	}
+	if _, err := items.ExplainWithOptions(context.Background(), Filter{"a": int64(1)}, QueryOptions{Sort: []SortField{{Path: "z", Direction: 1}}, Limit: &limit}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := items.ExplainQuery(context.Background(), QuerySpec{}); !errors.Is(err, ErrInvalidFilter) {
+		t.Fatalf("zero query error=%v", err)
 	}
 }
 

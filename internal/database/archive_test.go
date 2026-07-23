@@ -33,7 +33,12 @@ func TestBeginArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 		_ = backup.Close()
 		t.Fatalf("backup sequence=%d identity=%x source=%x", backup.Stats().CommitSequence, backup.databaseID, db.databaseID)
 	}
-	snapshot, err := backup.Collection("items").SnapshotQuery(context.Background(), QuerySpec{})
+	emptyQuery, err := CompileQuery(Filter{}, QueryOptions{})
+	if err != nil {
+		_ = backup.Close()
+		t.Fatal(err)
+	}
+	snapshot, err := backup.Collection("items").SnapshotQuery(context.Background(), emptyQuery)
 	if err != nil || snapshot.Token != bootstrap.SnapshotToken || len(snapshot.Documents) != 0 {
 		_ = backup.Close()
 		t.Fatalf("backup snapshot=%+v err=%v", snapshot, err)

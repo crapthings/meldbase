@@ -468,7 +468,7 @@ func classifyRPCOutcome(err error) rpcOutcome {
 	if errors.Is(err, errRPCWorkerBusy) {
 		return internalRPCOutcome(http.StatusServiceUnavailable, "worker_busy")
 	}
-	if errors.Is(err, meldbase.ErrResourceLimit) {
+	if errors.Is(err, meldbase.ErrResourceLimit) || errors.Is(err, meldbase.ErrQueryBudget) {
 		return internalRPCOutcome(http.StatusRequestEntityTooLarge, "resource_limit_exceeded")
 	}
 	var business *MeldbaseError

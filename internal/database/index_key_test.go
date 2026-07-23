@@ -38,7 +38,11 @@ func TestIndexNumericBytesMatchLogicalOrderExactly(t *testing.T) {
 }
 
 func TestIndexScalarOrderingAndStringEscaping(t *testing.T) {
-	values := []Value{Null(), Bool(false), Bool(true), Int(0), String(""), String("a"), String("a\x00"), String("aa"), Time(time.UnixMilli(0)), ID(DocumentID{1}), Binary(nil)}
+	values := []Value{
+		Null(), Bool(false), Bool(true), Int(-1), Float(1.5), String(""),
+		String("a"), String("a\x00"), String("aa"), String("\uE000"), String("\U00010000"),
+		Time(time.UnixMilli(0)), ID(DocumentID{1}), Binary(nil), Binary([]byte{0, 1}),
+	}
 	keys := make([][]byte, len(values))
 	for i, value := range values {
 		key, err := encodeIndexKey(value)
@@ -49,6 +53,17 @@ func TestIndexScalarOrderingAndStringEscaping(t *testing.T) {
 	}
 	if !sort.SliceIsSorted(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 }) {
 		t.Fatalf("keys not ordered")
+	}
+	for i := range values {
+		for j := range values {
+			logical, comparable := compareValues(values[i], values[j])
+			if !comparable {
+				t.Fatalf("not comparable: %d %d", i, j)
+			}
+			if encoded := bytes.Compare(keys[i], keys[j]); sign(encoded) != sign(logical) {
+				t.Fatalf("order mismatch i=%d j=%d encoded=%d logical=%d", i, j, encoded, logical)
+			}
+		}
 	}
 }
 func sign(value int) int {

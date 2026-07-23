@@ -50,6 +50,50 @@ func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
 	}
 }
 
+func TestSeekPaginationRequiresSortFieldsInResultProjection(t *testing.T) {
+	query, err := meldbase.DecodeQuerySpecJSON([]byte(`{"version":1,"where":{"op":"true"},"sort":[{"path":"rank","direction":1}],"limit":2,"seek":true}`), meldbase.DefaultQueryLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = applyPolicy(query, QueryPolicy{PolicyVersion: "policy-v1", MaxResults: 10, AllowAllQueryPaths: true, AllowedResultFields: map[string]struct{}{"title": {}}})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("error = %v, want ErrForbidden", err)
+	}
+	projected, err := applyPolicy(query, QueryPolicy{PolicyVersion: "policy-v1", MaxResults: 10, AllowAllQueryPaths: true, AllowedResultFields: map[string]struct{}{"rank": {}}})
+	if err != nil || !projected.UsesSeekPagination() {
+		t.Fatalf("query=%+v err=%v", projected, err)
+	}
+}
+
+func TestQueryPolicySeparatesFilterOperatorsFromSortPaths(t *testing.T) {
+	policy := QueryPolicy{
+		PolicyVersion: "policy-v1", MaxResults: 10,
+		AllowedFilterPaths:     map[string]struct{}{"rank": {}},
+		AllowedFilterOperators: map[string]map[string]struct{}{"rank": {"eq": {}}},
+		AllowedSortPaths:       map[string]struct{}{"title": {}},
+	}
+	equality, _ := meldbase.CompileQuery(meldbase.Filter{"rank": int64(1)}, meldbase.QueryOptions{Sort: []meldbase.SortField{{Path: "title", Direction: 1}}})
+	if _, err := applyPolicy(equality, policy); err != nil {
+		t.Fatalf("equality query denied: %v", err)
+	}
+	rangeQuery, _ := meldbase.CompileQuery(meldbase.Filter{"rank": map[string]any{"$gt": int64(1)}}, meldbase.QueryOptions{})
+	if _, err := applyPolicy(rangeQuery, policy); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("range query error=%v", err)
+	}
+	deniedSort, _ := meldbase.CompileQuery(meldbase.Filter{"rank": int64(1)}, meldbase.QueryOptions{Sort: []meldbase.SortField{{Path: "rank", Direction: 1}}})
+	if _, err := applyPolicy(deniedSort, policy); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("sort query error=%v", err)
+	}
+}
+
+func TestProjectFieldsSupportsNestedAllowedPaths(t *testing.T) {
+	projected := projectFields(meldbase.Document{"_id": meldbase.ID(meldbase.DocumentID{1}), "profile": meldbase.Object(meldbase.Document{"city": meldbase.String("Shanghai"), "secret": meldbase.String("hidden")})}, false, map[string]struct{}{"profile.city": {}})
+	profile, ok := projected["profile"].ObjectValue()
+	if !ok || len(profile) != 1 || !profile["city"].Equal(meldbase.String("Shanghai")) {
+		t.Fatalf("projected = %+v", projected)
+	}
+}
+
 func TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases(t *testing.T) {
 	baseLease, _ := NewQueryPolicyLease("base-lease")
 	workerLease, _ := NewQueryPolicyLease("worker-lease")

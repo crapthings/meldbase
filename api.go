@@ -244,6 +244,10 @@ var ErrInvalidResourceLimits = database.ErrInvalidResourceLimits
 
 var ErrResourceLimit = database.ErrResourceLimit
 
+// ErrQueryBudget reports that one query exceeded an execution-work budget.
+// Callers can use errors.Is to distinguish this from invalid query input.
+var ErrQueryBudget = database.ErrQueryBudget
+
 var ErrIndexBuildUnsupported = database.ErrIndexBuildUnsupported
 
 var ErrIndexBuildNotFound = database.ErrIndexBuildNotFound
@@ -397,6 +401,8 @@ type IndexField = database.IndexField
 type IndexOptions = database.IndexOptions
 
 type ExplainResult = database.ExplainResult
+
+type ExplainBound = database.ExplainBound
 
 // LogicalArchiveResult is the portable, data-only archive receipt. SHA256
 // covers every JSONL record before the final end record; the end record stores
@@ -771,7 +777,17 @@ const DefaultMaxReactiveViewDocuments = database.DefaultMaxReactiveViewDocuments
 
 const DefaultMaxReactiveViewBytes = database.DefaultMaxReactiveViewBytes
 
-// ResourceLimits bounds work admitted by write and index-maintenance APIs. Zero values
+const DefaultMaxQueryDocumentsExamined = database.DefaultMaxQueryDocumentsExamined
+
+const DefaultMaxQueryKeysExamined = database.DefaultMaxQueryKeysExamined
+
+const DefaultMaxQueryCandidates = database.DefaultMaxQueryCandidates
+
+const DefaultMaxQuerySortBytes = database.DefaultMaxQuerySortBytes
+
+const DefaultMaxQuerySkip = database.DefaultMaxQuerySkip
+
+// ResourceLimits bounds work admitted by writes, index maintenance, and query execution. Zero values
 // select production defaults; limits cannot be disabled accidentally. Byte
 // limits use the canonical typed binary representation, independent of Go heap
 // layout, JSON spelling, storage generation, or transport compression.

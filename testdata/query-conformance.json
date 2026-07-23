@@ -29,6 +29,31 @@
       ],
       "query": {"version":1,"where":{"op":"compare","cmp":"gt","path":"n","value":{"t":"number","v":9007199254740992}}},
       "expectedIds": ["a"]
+    },
+    {
+      "name": "utf8-byte-order-is-shared-by-range-filters",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"non-bmp"}],["x",{"t":"string","v":"𐀀"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"bmp"}],["x",{"t":"string","v":""}]]}
+      ],
+      "query": {"version":1,"where":{"op":"compare","cmp":"gt","path":"x","value":{"t":"string","v":""}}},
+      "expectedIds": ["non-bmp"]
+    },
+    {
+      "name": "mixed-value-sort-has-one-transitive-order",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"string-z"}],["value",{"t":"string","v":"z"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"number"}],["value",{"t":"number","v":0}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"string-a"}],["value",{"t":"string","v":"a"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"null"}],["value",{"t":"null"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"boolean"}],["value",{"t":"bool","v":true}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"time"}],["value",{"t":"date","v":"1970-01-01T00:00:00.000Z"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"binary"}],["value",{"t":"binary","v":"AQ=="}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"array"}],["value",{"t":"array","v":[]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"object"}],["value",{"t":"object","v":[]}]]}
+      ],
+      "query": {"version":1,"where":{"op":"true"},"sort":[{"path":"value","direction":1}]},
+      "expectedIds": ["null","boolean","number","string-a","string-z","time","binary","array","object"]
     }
   ]
 }

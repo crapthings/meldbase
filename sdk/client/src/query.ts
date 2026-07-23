@@ -1,7 +1,8 @@
 import type { Comparison, Filter, QueryExpr, QueryLimits, QuerySpec, SortField, Value } from "./types.js";
 import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
-import { assertPath, cloneValue, compareValues, getPath, valueByteLength, valueEquals } from "./safe-value.js";
+import { assertDocumentID, assertPath, assertQueryValue, cloneValue, compareSortValues, compareValues, getPath, valueEquals } from "./safe-value.js";
 import { normalizePageSort, pageFilterAfter } from './cursor.js';
+import { encodeQuerySpec, wireQueryByteLength } from "./wire.js";
 
 const fieldOperators = new Set(["$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists", "$not"]);
 
@@ -61,16 +62,17 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
     addNode(); return { op: "and", args };
   };
 
-  const checkedValue = (raw: unknown): Value => {
+  const checkedValue = (path: string, raw: unknown): Value => {
+    if (path === "_id") assertDocumentID(raw, "_id query value");
     const value = cloneValue(raw as Value);
-    if (valueByteLength(value) > limits.maxStringBytes) throw new QueryValidationError("Query value is too large");
+    assertQueryValue(value, limits);
     return value;
   };
 
   const compileField = (path: string, raw: Value | Comparison, depth: number): QueryExpr[] => {
     if (depth > limits.maxDepth) throw new QueryValidationError("Query nesting is too deep");
     const isOperators = plainObject(raw) && Object.keys(raw).some((key) => key.startsWith("$"));
-    if (!isOperators) { addNode(); return [{ op: "compare", cmp: "eq", path, value: checkedValue(raw) }]; }
+    if (!isOperators) { addNode(); return [{ op: "compare", cmp: "eq", path, value: checkedValue(path, raw) }]; }
     const result: QueryExpr[] = [];
     for (const [operator, operand] of Object.entries(raw as Comparison)) {
       if (!fieldOperators.has(operator)) throw new QueryValidationError(`Unknown field operator: ${operator}`);
@@ -81,13 +83,14 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
         result.push({ op: "exists", path, value: operand });
       } else if (operator === "$in" || operator === "$nin") {
         if (!Array.isArray(operand) || operand.length > limits.maxArrayItems) throw new QueryValidationError(`${operator} expects a bounded array`);
-        result.push({ op: operator.slice(1) as "in" | "nin", path, values: operand.map(checkedValue) });
+        result.push({ op: operator.slice(1) as "in" | "nin", path, values: operand.map((item) => checkedValue(path, item)) });
       } else if (operator === "$not") {
         const nested = compileField(path, operand as Value | Comparison, depth + 1);
+        if (nested.length > 1) addNode();
         const expression: QueryExpr = nested.length === 1 ? nested[0] as QueryExpr : { op: "and", args: nested };
         result.push({ op: "not", arg: expression });
       } else {
-        result.push({ op: "compare", cmp: operator.slice(1) as "eq" | "ne" | "gt" | "gte" | "lt" | "lte", path, value: checkedValue(operand) });
+        result.push({ op: "compare", cmp: operator.slice(1) as "eq" | "ne" | "gt" | "gte" | "lt" | "lte", path, value: checkedValue(path, operand) });
       }
     }
     if (result.length === 0) throw new QueryValidationError("Operator object cannot be empty");
@@ -100,6 +103,7 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
     return { ...field };
   });
   if (sort && sort.length > limits.maxSortFields) throw new QueryValidationError("Too many sort fields");
+  if (sort && new Set(sort.map((field) => field.path)).size !== sort.length) throw new QueryValidationError("Sort paths must be unique");
   if (options.after !== undefined || options.first !== undefined) {
     if (!sort) throw new QueryValidationError("Seek pagination requires sort");
     sort = [...normalizePageSort(sort)];
@@ -110,7 +114,9 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
   if (skip !== undefined && (!Number.isSafeInteger(skip) || skip < 0)) throw new QueryValidationError("skip must be a non-negative integer");
   if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0 || limit > limits.maxLimit)) throw new QueryValidationError("limit is outside the allowed range");
   const scopedFilter = options.after === undefined ? filter : { $and: [filter, pageFilterAfter(options.after, sort as readonly SortField[])] };
-  return { version: 1, where: compileFilter(scopedFilter, 0), ...(sort ? { sort } : {}), ...(skip !== undefined ? { skip } : {}), ...(limit !== undefined ? { limit } : {}) };
+  const spec = { version: 1 as const, where: compileFilter(scopedFilter, 0), ...(sort ? { sort } : {}), ...(skip !== undefined ? { skip } : {}), ...(limit !== undefined ? { limit } : {}), ...(options.first !== undefined ? { seek: true as const } : {}) };
+  if (wireQueryByteLength(encodeQuerySpec(spec)) > limits.maxWireBytes) throw new QueryValidationError("Query exceeds wire size limit");
+  return spec;
 }
 
 export function matches(document: import("./types.js").Document, expression: QueryExpr): boolean {
@@ -153,8 +159,8 @@ export function executeQuery<T extends import("./types.js").Document>(documents:
           if (av.found !== bv.found) return (av.found ? 1 : -1) * field.direction;
           continue;
         }
-        const order = compareValues(av.value as Value, bv.value as Value);
-        if (order !== undefined && order !== 0) return order * field.direction;
+        const order = compareSortValues(av.value as Value, bv.value as Value);
+        if (order !== 0) return order * field.direction;
       }
       return a.position - b.position;
     }).map(({ document }) => document);

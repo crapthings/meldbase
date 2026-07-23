@@ -20,6 +20,7 @@ type wireQuerySpec struct {
 	Sort    []SortField     `json:"sort,omitempty"`
 	Skip    *int            `json:"skip,omitempty"`
 	Limit   *int            `json:"limit,omitempty"`
+	Seek    bool            `json:"seek,omitempty"`
 }
 
 type wireExpr struct {
@@ -61,16 +62,8 @@ func DecodeQuerySpecJSON(data []byte, limits QueryLimits) (QuerySpec, error) {
 	if len(wire.Where) == 0 {
 		return QuerySpec{}, fmt.Errorf("%w: missing where expression", ErrInvalidFilter)
 	}
-	if len(wire.Sort) > limits.MaxSortFields {
-		return QuerySpec{}, fmt.Errorf("%w: too many sort fields", ErrInvalidFilter)
-	}
-	for _, field := range wire.Sort {
-		if err := validatePath(field.Path); err != nil {
-			return QuerySpec{}, err
-		}
-		if field.Direction != 1 && field.Direction != -1 {
-			return QuerySpec{}, fmt.Errorf("%w: invalid sort direction", ErrInvalidFilter)
-		}
+	if err := validateSortFields(wire.Sort, limits); err != nil {
+		return QuerySpec{}, err
 	}
 	skip := 0
 	if wire.Skip != nil {
@@ -87,17 +80,31 @@ func DecodeQuerySpecJSON(data []byte, limits QueryLimits) (QuerySpec, error) {
 		value := *wire.Limit
 		limit = &value
 	}
+	if wire.Seek && (len(wire.Sort) == 0 || limit == nil) {
+		return QuerySpec{}, fmt.Errorf("%w: seek pagination requires sort and limit", ErrInvalidFilter)
+	}
 	decoder := queryDecoder{limits: limits}
 	where, err := decoder.decodeExpr(wire.Where, 0)
 	if err != nil {
 		return QuerySpec{}, err
 	}
-	return QuerySpec{where: where, sort: append([]SortField(nil), wire.Sort...), skip: skip, limit: limit}, nil
+	query := QuerySpec{where: where, sort: append([]SortField(nil), wire.Sort...), skip: skip, limit: limit, seek: wire.Seek}
+	if err := validateQuerySpec(query, limits); err != nil {
+		return QuerySpec{}, err
+	}
+	return query, nil
 }
 
 // MarshalQuerySpecJSON emits the canonical, data-only wire representation used
 // for transport fingerprints and cross-language conformance.
 func MarshalQuerySpecJSON(query QuerySpec) ([]byte, error) {
+	if err := query.Validate(); err != nil {
+		return nil, err
+	}
+	return marshalQuerySpecJSONUnchecked(query)
+}
+
+func marshalQuerySpecJSONUnchecked(query QuerySpec) ([]byte, error) {
 	where, err := encodeQueryExpression(query.where)
 	if err != nil {
 		return nil, err
@@ -111,6 +118,9 @@ func MarshalQuerySpecJSON(query QuerySpec) ([]byte, error) {
 	}
 	if query.limit != nil {
 		wire["limit"] = *query.limit
+	}
+	if query.seek {
+		wire["seek"] = true
 	}
 	return json.Marshal(wire)
 }
@@ -405,7 +415,7 @@ func decodeWireValue(data []byte, limits QueryLimits, depth int) (Value, error) 
 			return Value{}, invalidWire(err)
 		}
 		parsed, err := ParseDocumentID(x)
-		if err != nil {
+		if err != nil || parsed.IsZero() || parsed.String() != x {
 			return Value{}, invalidWire(err)
 		}
 		value = ID(parsed)

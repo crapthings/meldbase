@@ -7,6 +7,9 @@ hero:
   tagline: The previous documentation set has been retired so the next version can start from the current product contract.
   actions:
     - theme: brand
+      text: Query semantics
+      link: /query-semantics
+    - theme: brand
       text: TypeScript API
       link: /api/typescript/
     - theme: alt

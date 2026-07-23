@@ -214,6 +214,58 @@ func TestIncrementalReactiveViewsMatchFullQueryModel(t *testing.T) {
 	}
 }
 
+func TestIncrementalReactiveSortMatchesFullQueryForMixedValues(t *testing.T) {
+	db := New()
+	defer db.Close()
+	collection := db.Collection("items")
+	values := []Value{
+		String("z"), Int(0), String("a"), Null(), Bool(true), Time(time.UnixMilli(0)),
+		ID(DocumentID{1}), Binary([]byte{1}), Array(Int(1)), Object(Document{"x": Int(1)}),
+	}
+	ids := make([]DocumentID, len(values))
+	for index, value := range values {
+		id, err := collection.InsertOne(context.Background(), Document{"value": value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[index] = id
+	}
+	query, err := CompileQuery(Filter{}, QueryOptions{Sort: []SortField{{Path: "value", Direction: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscription, err := collection.SubscribeQuery(context.Background(), query, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	initial := receiveSnapshot(t, subscription.Snapshots)
+	assertSnapshotIDs(t, initial, []DocumentID{ids[3], ids[4], ids[1], ids[2], ids[0], ids[5], ids[6], ids[7], ids[8], ids[9]})
+	assertIncrementalSnapshotMatchesFullQuery(t, collection, query, initial)
+
+	if _, err := collection.InsertOne(context.Background(), Document{"value": String("\uE000")}); err != nil {
+		t.Fatal(err)
+	}
+	afterInsert := receiveSnapshot(t, subscription.Snapshots)
+	assertIncrementalSnapshotMatchesFullQuery(t, collection, query, afterInsert)
+	if _, err := collection.UpdateOne(context.Background(), Filter{"_id": ids[8]}, Update{"$set": map[string]any{"value": "0"}}); err != nil {
+		t.Fatal(err)
+	}
+	afterUpdate := receiveSnapshot(t, subscription.Snapshots)
+	assertIncrementalSnapshotMatchesFullQuery(t, collection, query, afterUpdate)
+}
+
+func assertIncrementalSnapshotMatchesFullQuery(t *testing.T, collection *Collection, query QuerySpec, snapshot QuerySnapshot) {
+	t.Helper()
+	full, err := collection.SnapshotQuery(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Token != full.Token || !documentSlicesEqual(snapshot.Documents, full.Documents) {
+		t.Fatalf("incremental token=%d documents=%+v; full token=%d documents=%+v", snapshot.Token, snapshot.Documents, full.Token, full.Documents)
+	}
+}
+
 func TestReactiveQueueOverflowFallsBackToFullRecompute(t *testing.T) {
 	db := New()
 	defer db.Close()

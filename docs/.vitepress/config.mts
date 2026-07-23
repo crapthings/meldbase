@@ -11,6 +11,7 @@ export default defineConfig({
     logo: "/mark.svg",
     nav: [
       { text: "TypeScript API", link: "/api/typescript/" },
+      { text: "Query semantics", link: "/query-semantics" },
       { text: "GitHub", link: "https://github.com/crapthings/meldbase" },
     ],
     socialLinks: [{ icon: "github", link: "https://github.com/crapthings/meldbase" }],

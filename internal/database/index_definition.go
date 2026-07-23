@@ -175,6 +175,34 @@ func compoundIndexQueryBounds(definition IndexDefinition, expression expr) (star
 	return start, end, true, false
 }
 
+// compoundIndexValueSpans handles a singleton or multi-value equality union
+// on the leading compound component. Each value owns one contiguous prefix
+// span; later conditions remain residual predicates unless the ordinary
+// compound-bound planner can prove a narrower span first.
+func compoundIndexValueSpans(definition IndexDefinition, expression expr) ([]indexScanSpan, bool) {
+	fields := indexDefinitionFields(definition)
+	if !usesCompoundIndexCodec(definition) || len(fields) == 0 {
+		return nil, false
+	}
+	values, ok := indexValuesCandidate(expression, fields[0].Field)
+	if !ok {
+		return nil, false
+	}
+	spans := make([]indexScanSpan, 0, len(values))
+	for _, value := range values {
+		prefix, err := encodeCompoundIndexPrefix([]Value{value}, fields)
+		if err != nil {
+			return nil, false
+		}
+		end := indexKeyPrefixEnd(prefix)
+		if end == nil {
+			return nil, false
+		}
+		spans = append(spans, indexScanSpan{start: prefix, end: end})
+	}
+	return spans, true
+}
+
 // indexQueryScore ranks usable indexes by the constrained left prefix. An
 // equality component contributes two points and one range component contributes
 // one, so a longer compound prefix wins while exact matches beat ranges.
@@ -185,11 +213,16 @@ func indexQueryScore(definition IndexDefinition, expression expr) int {
 	}
 	score := 0
 	for _, field := range fields {
-		if value, found := equalityCandidate(expression, field.Field); found {
-			if _, err := encodeIndexKey(value); err != nil {
-				return 0
+		if values, found := indexValuesCandidate(expression, field.Field); found {
+			if len(values) == 0 {
+				return score + 2
 			}
 			score += 2
+			// A multi-value union is usable for a single-field index but cannot
+			// form one contiguous compound-index prefix.
+			if len(values) != 1 {
+				break
+			}
 			continue
 		}
 		if lower, upper, found := rangeCandidate(expression, field.Field); found {

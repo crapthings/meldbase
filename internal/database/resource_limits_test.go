@@ -145,6 +145,126 @@ func TestResourceLimitsRejectAtomicallyAndAreObservable(t *testing.T) {
 	}
 }
 
+func TestQueryBudgetsApplyToReadsSnapshotsAndMutations(t *testing.T) {
+	constructors := map[string]func(*testing.T) *DB{
+		"memory": func(t *testing.T) *DB {
+			db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{MaxQueryDocumentsExamined: 2}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return db
+		},
+		"durable": func(t *testing.T) *DB {
+			db, err := OpenWithOptions(filepath.Join(t.TempDir(), "query-budget.meld2"), OpenOptions{ResourceLimits: ResourceLimits{MaxQueryDocumentsExamined: 2}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return db
+		},
+	}
+	for name, construct := range constructors {
+		t.Run(name, func(t *testing.T) {
+			db := construct(t)
+			defer db.Close()
+			items := db.Collection("items")
+			if _, err := items.InsertMany(context.Background(), []Document{{"value": Int(1)}, {"value": Int(2)}, {"value": Int(3)}}); err != nil {
+				t.Fatal(err)
+			}
+			cursor, err := items.Find(context.Background(), Filter{}, QueryOptions{})
+			if err == nil {
+				_, err = cursor.All(context.Background())
+			}
+			if !errors.Is(err, ErrQueryBudget) {
+				t.Fatalf("read error=%v", err)
+			}
+			query, err := CompileQuery(Filter{}, QueryOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := items.SnapshotQuery(context.Background(), query); !errors.Is(err, ErrQueryBudget) {
+				t.Fatalf("snapshot error=%v", err)
+			}
+			if _, err := items.UpdateMany(context.Background(), Filter{}, Update{"$set": map[string]any{"changed": true}}); !errors.Is(err, ErrQueryBudget) {
+				t.Fatalf("mutation error=%v", err)
+			}
+			if stats := db.Stats(); stats.Resources.Rejections < 3 {
+				t.Fatalf("resource rejections=%d", stats.Resources.Rejections)
+			}
+		})
+	}
+}
+
+func TestQueryBudgetsBoundIndexKeysSortBytesAndSkip(t *testing.T) {
+	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{
+		MaxQueryKeysExamined: 1, MaxQuerySortBytes: 32, MaxQuerySkip: 1,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	items := db.Collection("items")
+	if _, err := items.InsertMany(context.Background(), []Document{{"n": Int(1), "payload": String("large enough to exceed the sort budget")}, {"n": Int(2), "payload": String("large enough to exceed the sort budget")}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := items.CreateIndex(context.Background(), "by_n", []IndexField{{Field: "n", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := items.Find(context.Background(), Filter{"n": map[string]any{"$gte": int64(1)}}, QueryOptions{}); !errors.Is(err, ErrQueryBudget) {
+		t.Fatalf("index key budget error=%v", err)
+	}
+	if _, err := items.Find(context.Background(), Filter{}, QueryOptions{Sort: []SortField{{Path: "payload", Direction: 1}}}); !errors.Is(err, ErrQueryBudget) {
+		t.Fatalf("sort byte budget error=%v", err)
+	}
+	if _, err := items.Find(context.Background(), Filter{}, QueryOptions{Skip: 2}); !errors.Is(err, ErrQueryBudget) {
+		t.Fatalf("skip budget error=%v", err)
+	}
+}
+
+func TestSortedLimitedQueryUsesBoundedTopKCandidates(t *testing.T) {
+	constructors := map[string]func(*testing.T) *DB{
+		"memory": func(t *testing.T) *DB {
+			db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{MaxQueryCandidates: 2, MaxQueryDocumentsExamined: 10}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return db
+		},
+		"durable": func(t *testing.T) *DB {
+			db, err := OpenWithOptions(filepath.Join(t.TempDir(), "top-k.meld2"), OpenOptions{ResourceLimits: ResourceLimits{MaxQueryCandidates: 2, MaxQueryDocumentsExamined: 10}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return db
+		},
+	}
+	for name, construct := range constructors {
+		t.Run(name, func(t *testing.T) {
+			db := construct(t)
+			defer db.Close()
+			items := db.Collection("items")
+			for _, value := range []int64{5, 1, 4, 0, 2} {
+				if _, err := items.InsertOne(context.Background(), Document{"score": Int(value)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			limit := 2
+			cursor, err := items.Find(context.Background(), Filter{}, QueryOptions{Sort: []SortField{{Path: "score", Direction: 1}}, Limit: &limit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			documents, err := cursor.All(context.Background())
+			if err != nil || len(documents) != 2 {
+				t.Fatalf("documents=%+v err=%v", documents, err)
+			}
+			first, _ := documents[0]["score"].Int64()
+			second, _ := documents[1]["score"].Int64()
+			if first != 0 || second != 1 {
+				t.Fatalf("scores=%d,%d", first, second)
+			}
+		})
+	}
+}
+
 func TestInvalidResourceLimitsFailBeforeOpen(t *testing.T) {
 	invalid := ResourceLimits{MaxDocumentBytes: 128, MaxTransactionBytes: 64}
 	if _, err := NewWithOptions(DatabaseOptions{ResourceLimits: invalid}); !errors.Is(err, ErrInvalidResourceLimits) {

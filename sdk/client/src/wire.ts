@@ -1,6 +1,6 @@
 import type { Document, InputDocument, QueryExpr, QueryLimits, QuerySpec, SortField, Value } from "./types.js";
 import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
-import { assertDocumentID, assertPath, assertSafeKey, cloneDocument, isDocumentID, valueByteLength } from "./safe-value.js";
+import { assertDocumentID, assertPath, assertQueryValue, assertSafeKey, assertWellFormedString, cloneDocument, isDocumentID } from "./safe-value.js";
 
 export type WireValue =
   | { readonly t: "null" }
@@ -28,6 +28,7 @@ export interface WireQuerySpec {
   readonly sort?: readonly SortField[];
   readonly skip?: number;
   readonly limit?: number;
+  readonly seek?: true;
 }
 
 export function encodeValue(value: Value): WireValue {
@@ -49,27 +50,30 @@ export function encodeValue(value: Value): WireValue {
 export function decodeValue(input: unknown, depth = 0): Value {
   if (depth > 64 || !record(input) || typeof input.t !== "string") throw new QueryValidationError("Malformed wire value");
   switch (input.t) {
-    case "null": return null;
-    case "bool": if (typeof input.v === "boolean") return input.v; break;
-    case "number": if (typeof input.v === "number" && Number.isFinite(input.v)) return input.v; break;
+    case "null": onlyKeys(input, ["t"]); return null;
+    case "bool": if (has(input, "v") && typeof input.v === "boolean") { onlyKeys(input, ["t", "v"]); return input.v; } break;
+    case "number": if (has(input, "v") && typeof input.v === "number" && Number.isFinite(input.v)) { onlyKeys(input, ["t", "v"]); return input.v; } break;
     case "int64": {
-      if (typeof input.v !== "string" || input.v === "-0" || !/^-?(0|[1-9][0-9]*)$/.test(input.v)) break;
+      if (!has(input, "v") || typeof input.v !== "string" || input.v === "-0" || !/^-?(0|[1-9][0-9]*)$/.test(input.v)) break;
+      onlyKeys(input, ["t", "v"]);
       const value = BigInt(input.v);
       if (value >= -(1n << 63n) && value <= (1n << 63n) - 1n) return value;
       break;
     }
-    case "string": if (typeof input.v === "string") return input.v; break;
-    case "id": if (typeof input.v === "string" && isDocumentID(input.v)) return input.v; break;
+    case "string": if (has(input, "v") && typeof input.v === "string") { onlyKeys(input, ["t", "v"]); assertWellFormedString(input.v); return input.v; } break;
+    case "id": if (has(input, "v") && typeof input.v === "string" && isDocumentID(input.v)) { onlyKeys(input, ["t", "v"]); return input.v; } break;
     case "date": {
-      if (typeof input.v !== "string") break;
+      if (!has(input, "v") || typeof input.v !== "string") break;
+      onlyKeys(input, ["t", "v"]);
       const date = new Date(input.v);
       if (Number.isFinite(date.getTime()) && date.toISOString() === input.v) return date;
       break;
     }
-    case "binary": if (typeof input.v === "string") return base64ToBytes(input.v); break;
-    case "array": if (Array.isArray(input.v)) return input.v.map((item) => decodeValue(item, depth + 1)); break;
+    case "binary": if (has(input, "v") && typeof input.v === "string") { onlyKeys(input, ["t", "v"]); const bytes = base64ToBytes(input.v); if (bytesToBase64(bytes) === input.v) return bytes; } break;
+    case "array": if (has(input, "v") && Array.isArray(input.v)) { onlyKeys(input, ["t", "v"]); return input.v.map((item) => decodeValue(item, depth + 1)); } break;
     case "object": {
-      if (!Array.isArray(input.v)) break;
+      if (!has(input, "v") || !Array.isArray(input.v)) break;
+      onlyKeys(input, ["t", "v"]);
       const out: Record<string, Value> = Object.create(null) as Record<string, Value>;
       for (const entry of input.v) {
         if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") throw new QueryValidationError("Malformed object entry");
@@ -117,19 +121,23 @@ export function decodeDocument(input: unknown): Document {
 }
 
 export function encodeQuerySpec(spec: QuerySpec): WireQuerySpec {
-  return {
-    version: 1,
+  const encoded = {
+    version: 1 as const,
     where: encodeExpression(spec.where),
     ...(spec.sort ? { sort: spec.sort.map((item) => ({ ...item })) } : {}),
     ...(spec.skip !== undefined ? { skip: spec.skip } : {}),
     ...(spec.limit !== undefined ? { limit: spec.limit } : {}),
+    ...(spec.seek ? { seek: true as const } : {}),
   };
+  if (wireQueryByteLength(encoded) > DEFAULT_QUERY_LIMITS.maxWireBytes) throw new QueryValidationError("Query exceeds wire size limit");
+  return encoded;
 }
 
 export function decodeQuerySpec(input: unknown, overrides: Partial<QueryLimits> = {}): QuerySpec {
   const limits: QueryLimits = { ...DEFAULT_QUERY_LIMITS, ...overrides };
+  if (wireQueryByteLength(input) > limits.maxWireBytes) throw new QueryValidationError("Query exceeds wire size limit");
   if (!record(input)) throw new QueryValidationError("Wire query must be an object");
-  onlyKeys(input, ["version", "where", "sort", "skip", "limit"]);
+  onlyKeys(input, ["version", "where", "sort", "skip", "limit", "seek"]);
   if (input.version !== 1) throw new QueryValidationError("Unsupported query version");
   let nodes = 0;
   const decodeExpression = (raw: unknown, depth: number): QueryExpr => {
@@ -174,10 +182,21 @@ export function decodeQuerySpec(input: unknown, overrides: Partial<QueryLimits> 
       if (raw.direction !== 1 && raw.direction !== -1) throw new QueryValidationError("Invalid sort direction");
       return { path, direction: raw.direction };
     });
+    if (new Set(sort.map((field) => field.path)).size !== sort.length) throw new QueryValidationError("Sort paths must be unique");
   }
   const skip = optionalBoundedInteger(input.skip, 0, Number.MAX_SAFE_INTEGER, "skip");
   const limit = optionalBoundedInteger(input.limit, 0, limits.maxLimit, "limit");
-  return { version: 1, where, ...(sort ? { sort } : {}), ...(skip !== undefined ? { skip } : {}), ...(limit !== undefined ? { limit } : {}) };
+  if (input.seek !== undefined && input.seek !== true) throw new QueryValidationError("seek must be true");
+  if (input.seek === true && (!sort || limit === undefined)) throw new QueryValidationError("seek pagination requires sort and limit");
+  return { version: 1, where, ...(sort ? { sort } : {}), ...(skip !== undefined ? { skip } : {}), ...(limit !== undefined ? { limit } : {}), ...(input.seek === true ? { seek: true } : {}) };
+}
+
+export function wireQueryByteLength(value: unknown): number {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  } catch {
+    throw new QueryValidationError("Query must be JSON-serializable");
+  }
 }
 
 function encodeExpression(expression: QueryExpr): WireQueryExpr {
@@ -192,8 +211,12 @@ function encodeExpression(expression: QueryExpr): WireQueryExpr {
 }
 
 function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
+
+function has(value: Record<string, unknown>, key: string): boolean { return Object.prototype.hasOwnProperty.call(value, key); }
 
 function onlyKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
   const permitted = new Set(allowed);
@@ -207,7 +230,7 @@ function wirePath(value: unknown): string {
 
 function boundedDecodedValue(value: unknown, limits: QueryLimits): Value {
   const decoded = decodeValue(value);
-  if (valueByteLength(decoded) > limits.maxStringBytes) throw new QueryValidationError("Query value is too large");
+  assertQueryValue(decoded, limits);
   return decoded;
 }
 

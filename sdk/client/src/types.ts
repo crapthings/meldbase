@@ -85,9 +85,13 @@ export interface QuerySpec {
   readonly sort?: readonly SortField[];
   readonly skip?: number;
   readonly limit?: number;
+  // An internal transport marker used to make server-side result projection
+  // safe for SDK-managed seek cursors.
+  readonly seek?: true;
 }
 
 export interface QueryLimits {
+  readonly maxWireBytes: number;
   readonly maxDepth: number;
   readonly maxNodes: number;
   readonly maxArrayItems: number;
@@ -97,6 +101,7 @@ export interface QueryLimits {
 }
 
 export const DEFAULT_QUERY_LIMITS: QueryLimits = Object.freeze({
+  maxWireBytes: 1_048_576,
   maxDepth: 16,
   maxNodes: 128,
   maxArrayItems: 256,

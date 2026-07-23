@@ -1314,15 +1314,29 @@ func subscribersOf(view *sharedReactiveView) []*sharedQuerySubscriber {
 	return result
 }
 
-func snapshotQueryUnlocked(db *DB, collection string, query QuerySpec) QuerySnapshot {
-	documents := []Document{}
-	if data := db.collections[collection]; data != nil {
-		documents = make([]Document, 0, len(data.order))
-		for _, id := range data.order {
-			if document, ok := data.documents[id]; ok {
-				documents = append(documents, document)
-			}
+func snapshotQueryBudgetedUnlocked(ctx context.Context, db *DB, collection string, query QuerySpec, budget *queryBudget) (QuerySnapshot, error) {
+	data := db.collections[collection]
+	if data == nil {
+		return QuerySnapshot{Token: db.token}, nil
+	}
+	collector := newQueryCandidateCollector(query)
+	for _, id := range data.order {
+		if err := contextError(ctx); err != nil {
+			return QuerySnapshot{}, err
+		}
+		document, ok := data.documents[id]
+		if !ok {
+			continue
+		}
+		if err := budget.document(); err != nil {
+			return QuerySnapshot{}, err
+		}
+		if !query.Match(document) {
+			continue
+		}
+		if err := retainQueryCandidate(&collector, budget, queryCandidate{document: document, position: data.positions[id]}); err != nil {
+			return QuerySnapshot{}, err
 		}
 	}
-	return QuerySnapshot{Token: db.token, Documents: query.Execute(documents)}
+	return QuerySnapshot{Token: db.token, Documents: collector.Documents()}, nil
 }

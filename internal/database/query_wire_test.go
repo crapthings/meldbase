@@ -75,6 +75,7 @@ func TestDecodeQuerySpecRejectsAmbiguousOrUnsafeInput(t *testing.T) {
 		{"noncanonical int", `{"version":1,"where":{"op":"compare","cmp":"eq","path":"x","value":{"t":"int64","v":"-0"}}}`},
 		{"int overflow", `{"version":1,"where":{"op":"compare","cmp":"eq","path":"x","value":{"t":"int64","v":"9223372036854775808"}}}`},
 		{"noncanonical date", `{"version":1,"where":{"op":"compare","cmp":"eq","path":"x","value":{"t":"date","v":"2026-07-15T00:00:00Z"}}}`},
+		{"duplicate sort path", `{"version":1,"where":{"op":"true"},"sort":[{"path":"rank","direction":1},{"path":"rank","direction":-1}]}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

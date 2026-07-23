@@ -433,10 +433,17 @@ func (c *Collection) Find(ctx context.Context, filter Filter, options ...QueryOp
 }
 
 func (c *Collection) FindQuery(ctx context.Context, query QuerySpec) (*Cursor, error) {
+	if err := query.Validate(); err != nil {
+		return nil, err
+	}
 	if err := contextError(ctx); err != nil {
 		return nil, err
 	}
 	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	budget, err := c.db.newQueryBudget(query)
+	if err != nil {
 		return nil, err
 	}
 	diagnostic := c.db.beginDiagnostic(DiagnosticQuery)
@@ -459,7 +466,7 @@ func (c *Collection) FindQuery(ctx context.Context, query QuerySpec) (*Cursor, e
 				limit = value
 			}
 			cursor := &Cursor{
-				stream: stream, query: query, skip: query.Skip(), remaining: limit,
+				stream: stream, query: query, skip: query.Skip(), remaining: limit, budget: budget,
 				db: c.db, explain: ExplainResult{Stage: "COLLSCAN"}, active: true, diagnostic: diagnostic,
 			}
 			c.db.metrics.activeCursors.Add(1)
@@ -478,7 +485,7 @@ func (c *Collection) FindQuery(ctx context.Context, query QuerySpec) (*Cursor, e
 			return cursor, nil
 		}
 	}
-	documents, explain, err := c.plan(ctx, query)
+	documents, explain, err := c.planWithBudget(ctx, query, budget)
 	if c != nil && c.db != nil {
 		c.db.recordQuery(explain, len(documents), err, diagnostic)
 	}
@@ -534,6 +541,9 @@ func (c *Collection) DeleteManyQueryLimited(ctx context.Context, query QuerySpec
 	return c.deleteQuery(ctx, query, false, maxAffected)
 }
 func (c *Collection) deleteQuery(ctx context.Context, query QuerySpec, one bool, maxAffected int) (DeleteResult, error) {
+	if err := query.Validate(); err != nil {
+		return DeleteResult{}, err
+	}
 	if err := contextError(ctx); err != nil {
 		return DeleteResult{}, err
 	}
@@ -687,6 +697,7 @@ type Cursor struct {
 	position   int
 	stream     queryStorageDocumentIterator
 	query      QuerySpec
+	budget     *queryBudget
 	skip       int
 	remaining  int
 	db         *DB
@@ -724,8 +735,20 @@ func (c *Cursor) Next(ctx context.Context) (Document, bool, error) {
 				return nil, false, err
 			}
 			c.explain.DocumentsExamined++
+			if c.budget != nil {
+				if err := c.budget.document(); err != nil {
+					_ = c.finishLocked(err)
+					return nil, false, err
+				}
+			}
 			if !c.query.Match(candidate.document) {
 				continue
+			}
+			if c.budget != nil {
+				if err := c.budget.candidate(candidate.document); err != nil {
+					_ = c.finishLocked(err)
+					return nil, false, err
+				}
 			}
 			if c.skip > 0 {
 				c.skip--

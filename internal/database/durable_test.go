@@ -86,6 +86,54 @@ func TestOpenPersistsCRUDIndexesOrderAndIdentity(t *testing.T) {
 	}
 }
 
+func TestOpenPreservesMixedValueQueryOrderAfterReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mixed-query-order.meld2")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := db.Collection("items")
+	ids := []DocumentID{{1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}}
+	documents := []Document{
+		{"_id": ID(ids[0]), "value": String("z")},
+		{"_id": ID(ids[1]), "value": Int(0)},
+		{"_id": ID(ids[2]), "value": String("a")},
+		{"_id": ID(ids[3]), "value": Null()},
+		{"_id": ID(ids[4]), "value": Bool(true)},
+		{"_id": ID(ids[5]), "value": Time(time.UnixMilli(0))},
+		{"_id": ID(ids[6]), "value": ID(DocumentID{15: 1})},
+		{"_id": ID(ids[7]), "value": Binary([]byte{1})},
+		{"_id": ID(ids[8]), "value": Array(Int(1))},
+		{"_id": ID(ids[9]), "value": Object(Document{"x": Int(1)})},
+	}
+	if _, err := items.InsertMany(context.Background(), documents); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{}, QueryOptions{Sort: []SortField{{Path: "value", Direction: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query.Execute(documents)
+	wantIDs := make([]DocumentID, len(want))
+	for index, document := range want {
+		wantIDs[index], _ = document.ID()
+	}
+	if got := queryIDs(t, items, Filter{}, QueryOptions{Sort: []SortField{{Path: "value", Direction: 1}}}); !reflect.DeepEqual(got, wantIDs) {
+		t.Fatalf("open query ids = %v, want %v", got, wantIDs)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if got := queryIDs(t, reopened.Collection("items"), Filter{}, QueryOptions{Sort: []SortField{{Path: "value", Direction: 1}}}); !reflect.DeepEqual(got, wantIDs) {
+		t.Fatalf("reopened query ids = %v, want %v", got, wantIDs)
+	}
+}
+
 func TestOpenPersistsCompoundIndexCRUDAndPlanner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compound-store.meld2")
 	db, err := Open(path)

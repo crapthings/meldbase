@@ -60,6 +60,9 @@ func (c *Collection) UpdateManyQueryLimited(ctx context.Context, query QuerySpec
 	return c.updateQuery(ctx, query, mutation, false, maxAffected)
 }
 func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (UpdateResult, error) {
+	if err := query.Validate(); err != nil {
+		return UpdateResult{}, err
+	}
 	if err := contextError(ctx); err != nil {
 		return UpdateResult{}, err
 	}

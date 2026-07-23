@@ -19,16 +19,8 @@ func CompileQuery(filter Filter, options QueryOptions) (QuerySpec, error) {
 	if err != nil {
 		return QuerySpec{}, err
 	}
-	if len(options.Sort) > compiler.limits.MaxSortFields {
-		return QuerySpec{}, fmt.Errorf("%w: too many sort fields", ErrInvalidFilter)
-	}
-	for _, field := range options.Sort {
-		if err := validatePath(field.Path); err != nil {
-			return QuerySpec{}, err
-		}
-		if field.Direction != 1 && field.Direction != -1 {
-			return QuerySpec{}, fmt.Errorf("%w: invalid sort direction", ErrInvalidFilter)
-		}
+	if err := validateSortFields(options.Sort, compiler.limits); err != nil {
+		return QuerySpec{}, err
 	}
 	if options.Skip < 0 {
 		return QuerySpec{}, fmt.Errorf("%w: invalid skip", ErrInvalidFilter)
@@ -41,7 +33,11 @@ func CompileQuery(filter Filter, options QueryOptions) (QuerySpec, error) {
 		value := *options.Limit
 		limit = &value
 	}
-	return QuerySpec{where: where, sort: append([]SortField(nil), options.Sort...), skip: options.Skip, limit: limit}, nil
+	query := QuerySpec{where: where, sort: append([]SortField(nil), options.Sort...), skip: options.Skip, limit: limit}
+	if err := validateQuerySpec(query, compiler.limits); err != nil {
+		return QuerySpec{}, err
+	}
+	return query, nil
 }
 
 type filterCompiler struct {
@@ -227,6 +223,9 @@ func queryValueOf(path string, raw any) (Value, error) {
 			id, err := ParseDocumentID(value)
 			if err != nil {
 				return Value{}, err
+			}
+			if id.IsZero() || id.String() != value {
+				return Value{}, fmt.Errorf("_id must be a non-zero canonical string")
 			}
 			return ID(id), nil
 		case Value:

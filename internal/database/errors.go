@@ -44,6 +44,7 @@ var (
 	ErrRecoveryRequired                  = errors.New("meldbase: startup recovery required by the selected policy")
 	ErrInvalidResourceLimits             = errors.New("meldbase: invalid resource limits")
 	ErrResourceLimit                     = errors.New("meldbase: resource limit exceeded")
+	ErrQueryBudget                       = errors.New("meldbase: query execution budget exceeded")
 	ErrIndexBuildUnsupported             = errors.New("meldbase: resumable index builds require a durable database")
 	ErrIndexBuildNotFound                = errors.New("meldbase: index build not found")
 	ErrIndexBuildExists                  = errors.New("meldbase: index build already exists")

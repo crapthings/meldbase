@@ -41,10 +41,17 @@ func (s *QueryDeltaSubscription) Close() {
 }
 
 func (c *Collection) SnapshotQuery(ctx context.Context, query QuerySpec) (QuerySnapshot, error) {
+	if err := query.Validate(); err != nil {
+		return QuerySnapshot{}, err
+	}
 	if err := contextError(ctx); err != nil {
 		return QuerySnapshot{}, err
 	}
 	if err := c.validate(); err != nil {
+		return QuerySnapshot{}, err
+	}
+	budget, err := c.db.newQueryBudget(query)
+	if err != nil {
 		return QuerySnapshot{}, err
 	}
 	c.db.mu.RLock()
@@ -53,13 +60,13 @@ func (c *Collection) SnapshotQuery(ctx context.Context, query QuerySpec) (QueryS
 		return QuerySnapshot{}, ErrClosed
 	}
 	if c.db.querySource != nil {
-		documents, _, err := c.planStorageLocked(ctx, query)
+		documents, _, err := c.planStorageLocked(ctx, query, budget)
 		if err != nil {
 			return QuerySnapshot{}, err
 		}
 		return QuerySnapshot{Token: c.db.token, Documents: documents}, nil
 	}
-	return snapshotQueryUnlocked(c.db, c.name, query), nil
+	return snapshotQueryBudgetedUnlocked(ctx, c.db, c.name, query, budget)
 }
 
 func (c *Collection) SubscribeQuery(ctx context.Context, query QuerySpec, buffer int) (*QuerySubscription, error) {
@@ -86,6 +93,9 @@ func (c *Collection) subscribeSharedQuery(ctx context.Context, query QuerySpec, 
 		return nil, nil, err
 	}
 	if err := c.validate(); err != nil {
+		return nil, nil, err
+	}
+	if err := query.Validate(); err != nil {
 		return nil, nil, err
 	}
 	canonical, err := MarshalQuerySpecJSON(query)

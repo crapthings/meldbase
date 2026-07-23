@@ -148,8 +148,8 @@ func compareReactiveOrder(query QuerySpec, leftID DocumentID, left reactiveMembe
 		if !leftOK {
 			continue
 		}
-		comparison, comparable := compareValues(leftValue, rightValue)
-		if comparable && comparison != 0 {
+		comparison := compareSortValues(leftValue, rightValue)
+		if comparison != 0 {
 			if field.Direction == -1 {
 				comparison = -comparison
 			}

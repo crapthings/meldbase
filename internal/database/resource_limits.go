@@ -14,22 +14,32 @@ const (
 	DefaultMaxIndexBuildBytes    uint64 = 256 << 20
 	// Reactive views retain matching document versions for incremental ordering
 	// and updates, not merely the page currently emitted to a subscriber.
-	DefaultMaxReactiveViewDocuments uint64 = 10_000
-	DefaultMaxReactiveViewBytes     uint64 = 64 << 20
+	DefaultMaxReactiveViewDocuments  uint64 = 10_000
+	DefaultMaxReactiveViewBytes      uint64 = 64 << 20
+	DefaultMaxQueryDocumentsExamined uint64 = 100_000
+	DefaultMaxQueryKeysExamined      uint64 = 100_000
+	DefaultMaxQueryCandidates        uint64 = 100_000
+	DefaultMaxQuerySortBytes         uint64 = 64 << 20
+	DefaultMaxQuerySkip              uint64 = 100_000
 )
 
-// ResourceLimits bounds work admitted by write and index-maintenance APIs. Zero values
+// ResourceLimits bounds work admitted by writes, index maintenance, and query execution. Zero values
 // select production defaults; limits cannot be disabled accidentally. Byte
 // limits use the canonical typed binary representation, independent of Go heap
 // layout, JSON spelling, storage generation, or transport compression.
 type ResourceLimits struct {
-	MaxDocumentBytes         uint64 `json:"maxDocumentBytes"`
-	MaxTransactionBytes      uint64 `json:"maxTransactionBytes"`
-	MaxTransactionChanges    uint64 `json:"maxTransactionChanges"`
-	MaxIndexBuildEntries     uint64 `json:"maxIndexBuildEntries"`
-	MaxIndexBuildBytes       uint64 `json:"maxIndexBuildBytes"`
-	MaxReactiveViewDocuments uint64 `json:"maxReactiveViewDocuments"`
-	MaxReactiveViewBytes     uint64 `json:"maxReactiveViewBytes"`
+	MaxDocumentBytes          uint64 `json:"maxDocumentBytes"`
+	MaxTransactionBytes       uint64 `json:"maxTransactionBytes"`
+	MaxTransactionChanges     uint64 `json:"maxTransactionChanges"`
+	MaxIndexBuildEntries      uint64 `json:"maxIndexBuildEntries"`
+	MaxIndexBuildBytes        uint64 `json:"maxIndexBuildBytes"`
+	MaxReactiveViewDocuments  uint64 `json:"maxReactiveViewDocuments"`
+	MaxReactiveViewBytes      uint64 `json:"maxReactiveViewBytes"`
+	MaxQueryDocumentsExamined uint64 `json:"maxQueryDocumentsExamined"`
+	MaxQueryKeysExamined      uint64 `json:"maxQueryKeysExamined"`
+	MaxQueryCandidates        uint64 `json:"maxQueryCandidates"`
+	MaxQuerySortBytes         uint64 `json:"maxQuerySortBytes"`
+	MaxQuerySkip              uint64 `json:"maxQuerySkip"`
 }
 
 // DatabaseOptions configures an in-memory database.
@@ -56,6 +66,21 @@ func normalizeResourceLimits(limits ResourceLimits) (ResourceLimits, error) {
 	}
 	if limits.MaxReactiveViewBytes == 0 {
 		limits.MaxReactiveViewBytes = DefaultMaxReactiveViewBytes
+	}
+	if limits.MaxQueryDocumentsExamined == 0 {
+		limits.MaxQueryDocumentsExamined = DefaultMaxQueryDocumentsExamined
+	}
+	if limits.MaxQueryKeysExamined == 0 {
+		limits.MaxQueryKeysExamined = DefaultMaxQueryKeysExamined
+	}
+	if limits.MaxQueryCandidates == 0 {
+		limits.MaxQueryCandidates = DefaultMaxQueryCandidates
+	}
+	if limits.MaxQuerySortBytes == 0 {
+		limits.MaxQuerySortBytes = DefaultMaxQuerySortBytes
+	}
+	if limits.MaxQuerySkip == 0 {
+		limits.MaxQuerySkip = DefaultMaxQuerySkip
 	}
 	if limits.MaxDocumentBytes > maxStoredDocumentBody {
 		return ResourceLimits{}, fmt.Errorf("%w: MaxDocumentBytes exceeds the storage format maximum", ErrInvalidResourceLimits)

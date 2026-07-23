@@ -3,7 +3,10 @@ import { QueryValidationError } from './types.js'
 import { getPath } from './safe-value.js'
 import { decodeValue, encodeValue, type WireValue } from './wire.js'
 
-interface CursorPayload { readonly version: 1, readonly sort: readonly SortField[], readonly values: readonly WireValue[] }
+interface CursorMissing { readonly missing: true }
+type CursorValue = WireValue | CursorMissing
+interface CursorPayload { readonly version: 1, readonly sort: readonly SortField[], readonly values: readonly CursorValue[] }
+interface CursorComponent { readonly found: boolean, readonly value?: Value }
 
 export interface PageResult<T extends Document> { readonly documents: readonly T[], readonly nextCursor?: string }
 
@@ -11,7 +14,8 @@ export function pageCursorFor (document: Document, sort: readonly SortField[]): 
   const normalized = normalizePageSort(sort)
   const values = normalized.map((field) => {
     const found = getPath(document, field.path)
-    if (!found.found) throw new QueryValidationError(`Cannot create cursor: document is missing ${field.path}`)
+    if (!found.found) return { missing: true } satisfies CursorMissing
+    if (!isCursorScalar(found.value as Value)) throw new QueryValidationError(`Cannot create cursor: ${field.path} is not scalar`)
     return encodeValue(found.value as Value)
   })
   return encodeCursor({ version: 1, sort: normalized, values })
@@ -21,25 +25,58 @@ export function pageFilterAfter (cursor: string, sort: readonly SortField[]): Fi
   const normalized = normalizePageSort(sort)
   const payload = decodeCursor(cursor)
   if (!sameSort(payload.sort, normalized) || payload.values.length !== normalized.length) throw new QueryValidationError('Page cursor does not match this query sort')
-  const values = payload.values.map(decodeValue)
+  const values = payload.values.map(decodeCursorValue)
   const branches: Filter[] = []
   for (let index = 0; index < normalized.length; index += 1) {
-    const branch: Record<string, Value | Comparison> = {}
-    for (let previous = 0; previous < index; previous += 1) branch[normalized[previous]!.path] = values[previous]!
     const field = normalized[index]!
-    branch[field.path] = field.direction === 1 ? { $gt: values[index]! } : { $lt: values[index]! }
-    branches.push(branch)
+    const after = afterFilter(field, values[index]!)
+    if (after === undefined) continue
+    const conditions: Filter[] = []
+    for (let previous = 0; previous < index; previous += 1) conditions.push(equalFilter(normalized[previous]!, values[previous]!))
+    conditions.push(after)
+    branches.push(conditions.length === 1 ? conditions[0]! : { $and: conditions })
   }
-  return { $or: branches }
+  if (branches.length === 0) return { $and: [{ _id: { $exists: true } }, { _id: { $exists: false } }] }
+  return branches.length === 1 ? branches[0]! : { $or: branches }
 }
 
 export function normalizePageSort (sort: readonly SortField[]): readonly SortField[] {
   if (!Array.isArray(sort) || sort.length === 0) throw new QueryValidationError('Seek pagination requires at least one sort field')
   const normalized = sort.map((field) => ({ ...field }))
+  const paths = new Set<string>()
+  for (const field of normalized) {
+    if (paths.has(field.path)) throw new QueryValidationError(`Page sort cannot contain ${field.path} more than once`)
+    paths.add(field.path)
+  }
   const ids = normalized.filter((field) => field.path === '_id')
-  if (ids.length > 1) throw new QueryValidationError('Page sort cannot contain _id more than once')
-  if (ids.length === 0) normalized.push({ path: '_id', direction: normalized.at(-1)!.direction })
+  if (ids.length === 0) normalized.push({ path: '_id', direction: 1 })
   return Object.freeze(normalized)
+}
+
+function equalFilter (field: SortField, value: CursorComponent): Filter {
+  return value.found ? { [field.path]: value.value! } : { [field.path]: { $exists: false } }
+}
+
+function afterFilter (field: SortField, value: CursorComponent): Filter | undefined {
+  if (!value.found) return field.direction === 1 ? { [field.path]: { $exists: true } } : undefined
+  const comparison: Comparison = field.direction === 1 ? { $gt: value.value! } : { $lt: value.value! }
+  if (field.direction === 1) return { [field.path]: comparison }
+  return { $or: [{ [field.path]: comparison }, { [field.path]: { $exists: false } }] }
+}
+
+function isCursorScalar (value: Value): boolean {
+  return !Array.isArray(value) && (value === null || typeof value !== 'object' || value instanceof Date || value instanceof Uint8Array)
+}
+
+function decodeCursorValue (value: CursorValue): CursorComponent {
+  if (isCursorMissing(value)) return { found: false }
+  const decoded = decodeValue(value)
+  if (!isCursorScalar(decoded)) throw new QueryValidationError('Malformed page cursor')
+  return { found: true, value: decoded }
+}
+
+function isCursorMissing (value: unknown): value is CursorMissing {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1 && (value as Record<string, unknown>).missing === true
 }
 
 function encodeCursor (payload: CursorPayload): string {
