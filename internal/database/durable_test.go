@@ -1005,6 +1005,18 @@ func TestOpenFindStreamsInsertionOrderCOLLSCANAndReleasesPins(t *testing.T) {
 	if err != nil || len(indexedDocuments) != 3 {
 		t.Fatalf("indexed documents=%d err=%v", len(indexedDocuments), err)
 	}
+	examinedBefore := db.Stats().Queries.DocumentsExamined
+	limited, err := collection.Find(context.Background(), Filter{"group": "same"}, QueryOptions{Limit: &one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedDocuments, err := limited.All(context.Background())
+	if err != nil || len(limitedDocuments) != 1 {
+		t.Fatalf("limited indexed documents=%d err=%v", len(limitedDocuments), err)
+	}
+	if examined := db.Stats().Queries.DocumentsExamined - examinedBefore; examined != 1 {
+		t.Fatalf("exact indexed limit examined=%d want=1", examined)
+	}
 }
 
 type cancelAfterChecksContext struct {

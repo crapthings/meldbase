@@ -220,37 +220,34 @@ func (d *collectionData) validateIndexUpdates(changes []pendingUpdate) error {
 			}
 			continue
 		}
-		owners := make(map[string]DocumentID)
-		for _, id := range d.order {
-			document := d.documents[id]
-			key, found, err := indexDocumentKey(state.definition, document)
-			if err != nil {
-				return ErrInvalidIndex
-			}
-			if !found {
-				continue
-			}
-			owners[string(key)] = id
-		}
+		changedIDs := make(map[DocumentID]struct{}, len(changes))
 		for _, change := range changes {
-			if key, found, err := indexDocumentKey(state.definition, change.before); found {
-				if err != nil {
-					return ErrInvalidIndex
-				}
-				delete(owners, string(key))
-			} else if err != nil {
+			changedIDs[change.id] = struct{}{}
+			if _, _, err := indexDocumentKey(state.definition, change.before); err != nil {
 				return ErrInvalidIndex
 			}
 		}
+		afterOwners := make(map[string]DocumentID, len(changes))
 		for _, change := range changes {
 			if key, found, err := indexDocumentKey(state.definition, change.after); found {
 				if err != nil {
 					return ErrInvalidIndex
 				}
-				if owner, exists := owners[string(key)]; exists && owner != change.id {
+				for _, rawOwner := range state.tree.Get(key) {
+					var owner DocumentID
+					if len(rawOwner) != len(owner) {
+						return ErrDuplicateKey
+					}
+					copy(owner[:], rawOwner)
+					if _, moving := changedIDs[owner]; !moving {
+						return ErrDuplicateKey
+					}
+				}
+				encoded := string(key)
+				if owner, exists := afterOwners[encoded]; exists && owner != change.id {
 					return ErrDuplicateKey
 				}
-				owners[string(key)] = change.id
+				afterOwners[encoded] = change.id
 			} else if err != nil {
 				return ErrInvalidIndex
 			}
@@ -276,6 +273,30 @@ func (d *collectionData) deleteIndexes(id DocumentID, document Document) {
 		}
 		if key, found, err := indexDocumentKey(state.definition, document); found && err == nil {
 			state.tree.Delete(key, id[:])
+		}
+	}
+}
+
+// updateIndexes keeps an unchanged indexed value in place. Rebuilding the
+// same secondary entry is unnecessary secondary-tree work.
+func (d *collectionData) updateIndexes(id DocumentID, before, after Document) {
+	for _, state := range d.indexes {
+		if state.tree == nil {
+			continue
+		}
+		beforeKey, beforeFound, beforeErr := indexDocumentKey(state.definition, before)
+		afterKey, afterFound, afterErr := indexDocumentKey(state.definition, after)
+		if beforeErr != nil || afterErr != nil {
+			continue
+		}
+		if beforeFound && afterFound && bytes.Equal(beforeKey, afterKey) {
+			continue
+		}
+		if beforeFound {
+			state.tree.Delete(beforeKey, id[:])
+		}
+		if afterFound {
+			state.tree.Insert(afterKey, id[:])
 		}
 	}
 }
@@ -376,21 +397,14 @@ func (c *Collection) plan(ctx context.Context, query QuerySpec) ([]Document, Exp
 		if !ok {
 			continue
 		}
-		var start, end []byte
-		var err error
-		if lower != nil {
-			start, err = encodeIndexKey(lower.value)
-			if err != nil {
-				continue
-			}
+		start, end, valid, err := storageIndexBounds(lower, upper)
+		if err != nil {
+			continue
 		}
-		if upper != nil {
-			end, err = encodeIndexKey(upper.value)
-			if err != nil {
-				continue
-			}
+		if !valid {
+			return []Document{}, ExplainResult{Stage: "IXSCAN", IndexName: name}, nil
 		}
-		pairs := state.tree.Scan(start, end, upper == nil || upper.inclusive)
+		pairs := state.tree.Scan(start, end, false)
 		rawIDs := make([][]byte, 0, len(pairs))
 		for _, pair := range pairs {
 			rawIDs = append(rawIDs, pair.Value)
@@ -493,8 +507,8 @@ func (c *Collection) planStorageLocked(ctx context.Context, query QuerySpec) (do
 	})
 	for _, index := range indexes {
 		definition := IndexDefinition{Name: index.Name, Field: index.Field, Order: 1, Unique: index.Unique, Fields: cloneIndexFields(index.Fields)}
-		if start, end, ok, _ := compoundIndexQueryBounds(definition, query.where); ok {
-			return executeStorageIndexQuery(ctx, snapshot, c.name, definition, query, start, end)
+		if start, end, ok, exact := compoundIndexQueryBounds(definition, query.where); ok {
+			return executeStorageIndexQuery(ctx, snapshot, c.name, definition, query, start, end, exact)
 		}
 		if usesCompoundIndexCodec(definition) {
 			continue
@@ -511,7 +525,7 @@ func (c *Collection) planStorageLocked(ctx context.Context, query QuerySpec) (do
 		if end == nil {
 			return nil, ExplainResult{}, ErrCorrupt
 		}
-		return executeStorageIndexQuery(ctx, snapshot, c.name, definition, query, key, end)
+		return executeStorageIndexQuery(ctx, snapshot, c.name, definition, query, key, end, true)
 	}
 	for _, index := range indexes {
 		definition := IndexDefinition{Name: index.Name, Field: index.Field, Order: 1, Unique: index.Unique, Fields: cloneIndexFields(index.Fields)}
@@ -529,7 +543,7 @@ func (c *Collection) planStorageLocked(ctx context.Context, query QuerySpec) (do
 		if !valid {
 			return []Document{}, ExplainResult{Stage: "IXSCAN", IndexName: index.Name}, nil
 		}
-		return executeStorageIndexQuery(ctx, snapshot, c.name, definition, query, start, end)
+		return executeStorageIndexQuery(ctx, snapshot, c.name, definition, query, start, end, false)
 	}
 	iterator, err := snapshot.OpenCollectionIterator(c.name)
 	if err != nil {
@@ -566,7 +580,17 @@ func (c *Collection) planStorageLocked(ctx context.Context, query QuerySpec) (do
 	return query.executeMatched(candidates), ExplainResult{Stage: "COLLSCAN", DocumentsExamined: examined}, nil
 }
 
-func executeStorageIndexQuery(ctx context.Context, snapshot queryStorageSnapshot, collection string, definition IndexDefinition, query QuerySpec, start, end []byte) ([]Document, ExplainResult, error) {
+func executeStorageIndexQuery(ctx context.Context, snapshot queryStorageSnapshot, collection string, definition IndexDefinition, query QuerySpec, start, end []byte, ordered bool) ([]Document, ExplainResult, error) {
+	stopAfter := -1
+	if ordered && len(query.sort) == 0 && query.limit != nil {
+		if *query.limit == 0 {
+			return []Document{}, ExplainResult{Stage: "IXSCAN", IndexName: definition.Name}, nil
+		}
+		maxInt := int(^uint(0) >> 1)
+		if query.skip <= maxInt-*query.limit {
+			stopAfter = query.skip + *query.limit
+		}
+	}
 	iterator, err := snapshot.OpenIndexIterator(collection, definition.Name, start, end, 0)
 	if err != nil {
 		return nil, ExplainResult{}, err
@@ -605,6 +629,9 @@ func executeStorageIndexQuery(ctx context.Context, snapshot queryStorageSnapshot
 		}
 		if query.Match(candidate.document) {
 			candidates = append(candidates, candidate)
+			if stopAfter >= 0 && len(candidates) >= stopAfter {
+				break
+			}
 		}
 	}
 	if err := iterator.Err(); err != nil {

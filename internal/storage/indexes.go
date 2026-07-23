@@ -183,6 +183,21 @@ func prepareIndexMutations(state *collectionWriteState, mutation DocumentMutatio
 func applyIndexMutations(pending []pendingIndexMutation) error {
 	// Remove every old key first so one atomic batch can swap unique values.
 	for _, mutation := range pending {
+		if bytes.Equal(mutation.beforeKey, mutation.afterKey) {
+			if len(mutation.beforeKey) == 0 {
+				continue
+			}
+			key, err := secondaryKey(mutation.beforeKey, mutation.position, mutation.documentID)
+			if err != nil {
+				return err
+			}
+			if _, exists, err := mutation.state.tree.Get(key); err != nil {
+				return err
+			} else if !exists {
+				return ErrCorrupt
+			}
+			continue
+		}
 		if len(mutation.beforeKey) == 0 {
 			continue
 		}
@@ -198,6 +213,9 @@ func applyIndexMutations(pending []pendingIndexMutation) error {
 		mutation.state.changed = true
 	}
 	for _, mutation := range pending {
+		if bytes.Equal(mutation.beforeKey, mutation.afterKey) {
+			continue
+		}
 		if len(mutation.afterKey) == 0 {
 			continue
 		}

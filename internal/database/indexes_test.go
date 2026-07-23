@@ -395,8 +395,16 @@ func TestIndexRangeScanAndExactMixedNumericUniqueness(t *testing.T) {
 	if !reflect.DeepEqual(numbers, []int64{6, 7, 8, 9}) {
 		t.Fatalf("numbers = %v", numbers)
 	}
-	query, _ := CompileQuery(Filter{"n": map[string]any{"$gte": int64(5), "$lt": int64(10)}}, QueryOptions{})
+	query, _ := CompileQuery(Filter{"n": map[string]any{"$gt": int64(5), "$lte": int64(9)}}, QueryOptions{})
 	_, explain, err := values.plan(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explain.Stage != "IXSCAN" || explain.KeysExamined != 4 || explain.DocumentsExamined != 4 {
+		t.Fatalf("exclusive lower bound explain = %+v", explain)
+	}
+	query, _ = CompileQuery(Filter{"n": map[string]any{"$gte": int64(5), "$lt": int64(10)}}, QueryOptions{})
+	_, explain, err = values.plan(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)
 	}

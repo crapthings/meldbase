@@ -153,9 +153,8 @@ func (c *Collection) updateQueryLocked(ctx context.Context, query QuerySpec, mut
 	}
 	if c.db.querySource == nil {
 		for _, change := range changes {
-			data.deleteIndexes(change.id, change.before)
 			data.documents[change.id] = change.after
-			data.insertIndexes(change.id, change.after)
+			data.updateIndexes(change.id, change.before, change.after)
 		}
 	}
 	if len(events) > 0 {
