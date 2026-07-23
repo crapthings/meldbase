@@ -32,8 +32,8 @@ library, server, integrations and commands, so it intentionally lives at the
 repository root rather than below one of those packages.
 
 `internal/database/` implements the root database API. It is intentionally
-private: external modules cannot import it. The root package mirrors its
-approved public declarations via `api_gen.go`. It owns document, collection,
+private: external modules cannot import it. The root package explicitly
+publishes its selected declarations in `api.go`. It owns document, collection,
 query, transaction, subscription, and backup semantics. `internal/storage/`
 owns the physical file format, persistence, and recovery mechanics; keeping
 those names separate prevents a generic `core` or ambiguous `engine` layer.
@@ -57,6 +57,6 @@ those names separate prevents a generic `core` or ambiguous `engine` layer.
 
 ## Guardrails
 
-Run `go generate .` after changing the `internal/database` API. The generated
-root façade is committed, and CI regenerates it and rejects a diff. CI also
-checks every tracked Go source file with `gofmt`.
+The public surface is maintained by hand in `api.go`; exported implementation
+details do not become public automatically. CI checks every Go source file with
+`gofmt`, and public API changes require explicit compatibility tests.

@@ -46,21 +46,34 @@ export class MeldbaseClient {
     if (options.idempotencyKey !== undefined && !validRPCIdempotencyKey(options.idempotencyKey)) throw new Error("Invalid RPC idempotency key");
     if (options.transport === "realtime") return this.#realtime.call<T>(method, safeInput, options.signal, options.idempotencyKey);
     const requestId = crypto.randomUUID();
-    const response = await this.#fetch(`${this.#baseUrl}/v1/rpc`, { method: "POST", headers: await this.headers(), body: JSON.stringify({ v: MELDBASE_PROTOCOL_VERSION, type: "call", requestId, ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}), method, input: encodeValue(safeInput) }), ...(options.signal ? { signal: options.signal } : {}) });
-    const body = await boundedJSON(response, this.#maxInboundBytes);
-    if (!response.ok) {
-      if (record(body) && exactKeys(body, ["v", "type", "requestId", "error"]) && body.v === MELDBASE_PROTOCOL_VERSION && body.type === "error" && body.requestId === requestId) {
-        const error = decodeWireError(body.error);
-        throw error.kind === "business" ? new MeldbaseError(error.code, error.data) : new MeldbaseInternalError(error.code, response.status, "RPC");
-      }
-      if (record(body) && exactKeys(body, ["error"])) {
-        const error = decodeWireError(body.error);
-        if (error.kind === "internal") throw new MeldbaseInternalError(error.code, response.status, "RPC");
-      }
-      throw new Error("Malformed RPC error response");
+    const headers = await this.headers();
+    const body = JSON.stringify({ v: MELDBASE_PROTOCOL_VERSION, type: "call", requestId, ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}), method, input: encodeValue(safeInput) });
+    let response: Response;
+    try {
+      response = await this.#fetch(`${this.#baseUrl}/v1/rpc`, { method: "POST", headers, body, ...(options.signal ? { signal: options.signal } : {}) });
+    } catch (error) {
+      throw new MeldbaseInternalError("outcome_unknown", 0, `RPC ${requestId}`, error);
     }
-    if (!record(body) || !exactKeys(body, ["v", "type", "requestId", "result"]) || body.v !== MELDBASE_PROTOCOL_VERSION || body.type !== "result" || body.requestId !== requestId || body.result === undefined) throw new Error("Malformed RPC response");
-    return decodeValue(body.result) as T;
+    try {
+      if (!response.ok) {
+        const body = await boundedJSON(response, this.#maxInboundBytes);
+        if (record(body) && exactKeys(body, ["v", "type", "requestId", "error"]) && body.v === MELDBASE_PROTOCOL_VERSION && body.type === "error" && body.requestId === requestId) {
+          const error = decodeWireError(body.error);
+          throw error.kind === "business" ? new MeldbaseError(error.code, error.data) : new MeldbaseInternalError(error.code, response.status, "RPC");
+        }
+        if (record(body) && exactKeys(body, ["error"])) {
+          const error = decodeWireError(body.error);
+          if (error.kind === "internal") throw new MeldbaseInternalError(error.code, response.status, "RPC");
+        }
+        throw new Error("Malformed RPC error response");
+      }
+      const body = await boundedJSON(response, this.#maxInboundBytes);
+      if (!record(body) || !exactKeys(body, ["v", "type", "requestId", "result"]) || body.v !== MELDBASE_PROTOCOL_VERSION || body.type !== "result" || body.requestId !== requestId || body.result === undefined) throw new Error("Malformed RPC response");
+      return decodeValue(body.result) as T;
+    } catch (error) {
+      if (error instanceof MeldbaseError || error instanceof MeldbaseInternalError) throw error;
+      throw new MeldbaseInternalError("outcome_unknown", 0, `RPC ${requestId}`, error);
+    }
   }
 
   async fetchQuery<T extends Document>(collection: string, query: QuerySpec, signal?: AbortSignal): Promise<T[]> {
@@ -98,19 +111,37 @@ export class MeldbaseClient {
     const body = JSON.stringify({ version: 1, document: encodeInputDocument(input) }); const headers = await this.headers();
     let response: Response;
     try { response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/documents`, { method: "POST", headers, body, ...(signal ? { signal } : {}) }); } catch (error) { throw new MeldbaseInternalError("outcome_unknown", 0, `insert ${id}`, error); }
-    if (!response.ok) await throwRemoteError(response, this.#maxInboundBytes, "insert");
-    try { const result = await boundedJSON(response, this.#maxInboundBytes); if (!record(result) || !exactKeys(result, ["version", "document"]) || result.version !== 1 || result.document === undefined) throw new Error("Malformed insert response"); const inserted = decodeDocument(result.document) as T; assertDocumentID(inserted._id, "Remote document _id"); if (inserted._id !== id) throw new Error("Insert response changed document ID"); return inserted; } catch (error) { throw new MeldbaseInternalError("outcome_unknown", 0, `insert ${id}`, error); }
+    try {
+      if (!response.ok) await throwRemoteError(response, this.#maxInboundBytes, "insert");
+      const result = await boundedJSON(response, this.#maxInboundBytes); if (!record(result) || !exactKeys(result, ["version", "document"]) || result.version !== 1 || result.document === undefined) throw new Error("Malformed insert response"); const inserted = decodeDocument(result.document) as T; assertDocumentID(inserted._id, "Remote document _id"); if (inserted._id !== id) throw new Error("Insert response changed document ID"); return inserted;
+    } catch (error) {
+      if (error instanceof MeldbaseInternalError) throw error;
+      throw new MeldbaseInternalError("outcome_unknown", 0, `insert ${id}`, error);
+    }
   }
 
   async executeMutation(collection: string, action: "updateOne" | "updateMany" | "deleteOne" | "deleteMany", query: QuerySpec, update?: MutationSpec, signal?: AbortSignal): Promise<MutationResult | DeleteResult> {
     this.assertOpen(); assertCollectionName(collection);
     if (action !== "updateOne" && action !== "updateMany" && action !== "deleteOne" && action !== "deleteMany") throw new Error("Invalid mutation action");
     if ((action.startsWith("update") && update === undefined) || (action.startsWith("delete") && update !== undefined)) throw new Error("Invalid mutation payload");
-    const response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/mutations`, { method: "POST", headers: await this.headers(), body: JSON.stringify({ version: 1, action, query: encodeQuerySpec(query), ...(update ? { update: encodeMutationSpec(update) } : {}) }), ...(signal ? { signal } : {}) });
-    if (!response.ok) await throwRemoteError(response, 64 * 1024, "mutation");
-    const body = await boundedJSON(response, 64 * 1024); if (!record(body)) throw new Error("Malformed mutation response");
-    if (action === "deleteOne" || action === "deleteMany") { if (!exactKeys(body, ["version", "deletedCount"]) || body.version !== 1 || !boundedCount(body.deletedCount)) throw new Error("Malformed delete response"); return { deletedCount: body.deletedCount }; }
-    if (!exactKeys(body, ["version", "matchedCount", "modifiedCount"]) || body.version !== 1 || !boundedCount(body.matchedCount) || !boundedCount(body.modifiedCount) || body.modifiedCount > body.matchedCount) throw new Error("Malformed update response"); return { matchedCount: body.matchedCount, modifiedCount: body.modifiedCount };
+    const headers = await this.headers();
+    const operation = `${action} ${collection}`;
+    const body = JSON.stringify({ version: 1, action, query: encodeQuerySpec(query), ...(update ? { update: encodeMutationSpec(update) } : {}) });
+    let response: Response;
+    try {
+      response = await this.#fetch(`${this.#baseUrl}/v1/collections/${encodeURIComponent(collection)}/mutations`, { method: "POST", headers, body, ...(signal ? { signal } : {}) });
+    } catch (error) {
+      throw new MeldbaseInternalError("outcome_unknown", 0, operation, error);
+    }
+    try {
+      if (!response.ok) await throwRemoteError(response, 64 * 1024, "mutation");
+      const body = await boundedJSON(response, 64 * 1024); if (!record(body)) throw new Error("Malformed mutation response");
+      if (action === "deleteOne" || action === "deleteMany") { if (!exactKeys(body, ["version", "deletedCount"]) || body.version !== 1 || !boundedCount(body.deletedCount)) throw new Error("Malformed delete response"); return { deletedCount: body.deletedCount }; }
+      if (!exactKeys(body, ["version", "matchedCount", "modifiedCount"]) || body.version !== 1 || !boundedCount(body.matchedCount) || !boundedCount(body.modifiedCount) || body.modifiedCount > body.matchedCount) throw new Error("Malformed update response"); return { matchedCount: body.matchedCount, modifiedCount: body.modifiedCount };
+    } catch (error) {
+      if (error instanceof MeldbaseInternalError) throw error;
+      throw new MeldbaseInternalError("outcome_unknown", 0, operation, error);
+    }
   }
 
   subscribe(collection: string, query: QuerySpec, listener: SnapshotListener<Document>, options: SubscribeOptions): Unsubscribe { this.assertOpen(); assertCollectionName(collection); return this.#realtime.subscribe(collection, encodeQuerySpec(query), listener, options.onStatus); }

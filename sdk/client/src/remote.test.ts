@@ -242,10 +242,10 @@ test("HTTP responses are streamed under the byte limit and use exact versioned e
     const operation = scenario.operation === "query" ? collection.find().fetch()
       : scenario.operation === "insert" ? collection.insertOne({ title: "x" })
       : collection.deleteOne({});
-    if (scenario.operation === "insert") {
-      await assert.rejects(operation, (error: unknown) => error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.cause instanceof Error && /Malformed insert response/.test(error.cause.message));
+    if (scenario.operation === "insert" || scenario.operation === "delete") {
+      await assert.rejects(operation, (error: unknown) => error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.cause instanceof Error && new RegExp(`Malformed ${scenario.operation} response`).test(error.cause.message));
     } else {
-      await assert.rejects(operation, /Malformed (query|delete) response/);
+      await assert.rejects(operation, /Malformed query response/);
     }
     client.close();
   }
@@ -331,13 +331,46 @@ test("remote insert exposes its assigned ID when transport admission is unknown"
   client.close();
 });
 
-test("pre-dispatch insert failures are not reported as unknown results", async () => {
+test("HTTP mutations and RPC calls expose an unknown outcome after a transport loss", async () => {
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () => { throw new Error("connection lost"); },
+  });
+  await assert.rejects(client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $inc: { attempts: 1 } }), (error: unknown) =>
+    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.operation === "updateOne todos" && error.cause instanceof Error && /connection lost/.test(error.cause.message),
+  );
+  await assert.rejects(client.call("billing.charge", null), (error: unknown) =>
+    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && /^RPC [0-9a-f-]{36}$/.test(error.operation) && error.cause instanceof Error && /connection lost/.test(error.cause.message),
+  );
+  client.close();
+});
+
+test("malformed post-dispatch error envelopes leave write outcomes unknown", async () => {
+  const client = new MeldbaseClient({
+    baseUrl: "https://db.example",
+    fetch: async () => Response.json({ error: { kind: "internal", code: "untrusted" }, unexpected: true }, { status: 502 }),
+  });
+  const unknown = (operation: RegExp, message: RegExp) => (error: unknown) =>
+    error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && operation.test(error.operation) && error.cause instanceof Error && message.test(error.cause.message);
+  await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), unknown(/^insert [0-9a-f]{32}$/, /Malformed insert error response/));
+  await assert.rejects(client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $inc: { attempts: 1 } }), unknown(/^updateOne todos$/, /Malformed mutation error response/));
+  await assert.rejects(client.call("billing.charge", null), unknown(/^RPC [0-9a-f-]{36}$/, /Malformed RPC error response/));
+  client.close();
+});
+
+test("pre-dispatch write failures are not reported as unknown results", async () => {
   const client = new MeldbaseClient({
     baseUrl: "https://db.example",
     accessToken: () => { throw new Error("token refresh failed"); },
     fetch: async () => { throw new Error("fetch should not run"); },
   });
   await assert.rejects(client.collection("todos").insertOne({ title: "owned" }), (error: unknown) =>
+    error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
+  );
+  await assert.rejects(client.collection("todos").updateOne({ _id: "00000000000000000000000000000001" }, { $set: { title: "updated" } }), (error: unknown) =>
+    error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
+  );
+  await assert.rejects(client.call("billing.charge", null), (error: unknown) =>
     error instanceof Error && !(error instanceof MeldbaseInternalError) && /token refresh failed/.test(error.message),
   );
   client.close();
@@ -428,7 +461,7 @@ test("realtime ticket errors use the same internal error contract", async () => 
   client.close();
 });
 
-test("RPC call propagates AbortSignal and rejects malformed success responses", async () => {
+test("RPC call propagates AbortSignal and marks malformed success responses unknown", async () => {
 	const controller = new AbortController();
 	const client = new MeldbaseClient({
 		baseUrl: "https://db.example",
@@ -437,7 +470,9 @@ test("RPC call propagates AbortSignal and rejects malformed success responses", 
 			return Response.json({ v: 1, type: "result", requestId: "wrong", result: encodeValue("ok"), unexpected: true });
 		},
 	});
-	await assert.rejects(client.call("echo", null, { signal: controller.signal }), /Malformed RPC response/);
+	await assert.rejects(client.call("echo", null, { signal: controller.signal }), (error: unknown) =>
+		error instanceof MeldbaseInternalError && error.code === "outcome_unknown" && error.cause instanceof Error && /Malformed RPC response/.test(error.cause.message),
+	);
 	client.close();
 });
 

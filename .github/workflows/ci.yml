@@ -37,11 +37,8 @@ jobs:
             printf '%s\n' "$unpinned"
             exit 1
           fi
-      - name: Verify public API generation and Go formatting
-        run: |
-          go generate .
-          git diff --exit-code -- api_gen.go
-          test -z "$(find . -name '*.go' -not -path './.git/*' -not -path './node_modules/*' -not -path './local-playground/*' -exec gofmt -l {} +)"
+      - name: Verify Go formatting
+        run: test -z "$(find . -name '*.go' -not -path './.git/*' -not -path './node_modules/*' -not -path './local-playground/*' -exec gofmt -l {} +)"
       - name: Unit and integration tests
         run: go test ./...
       - name: Race detector

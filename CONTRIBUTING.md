@@ -25,7 +25,6 @@ Run these before opening a pull request:
 go test ./...
 go test -race ./...
 go vet ./...
-go generate .
 test -z "$(find . -name '*.go' -not -path './.git/*' -not -path './node_modules/*' -not -path './local-playground/*' -exec gofmt -l {} +)"
 go run ./cmd/meld demo
 pnpm check
@@ -72,6 +71,6 @@ for an operation's optional controls. Expose a typed or sentinel error whenever
 callers need to branch on failure; do not make an error-message string part of a
 public contract.
 
-`api_gen.go` is generated from `internal/database`. Run
-`go generate .` whenever that transition surface changes; CI rejects stale
-generated API code.
+The module-root API is maintained explicitly in `api.go`. Adding an exported
+name to `internal/database` does not make it public; every public declaration
+must be selected, documented, and reviewed in `api.go`.

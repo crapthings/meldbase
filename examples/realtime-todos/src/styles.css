@@ -58,11 +58,13 @@ button { -webkit-tap-highlight-color: transparent; }
 .check { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid #a9b6ad; border-radius: 9px; background: transparent; cursor: pointer; }
 .check span { width: 9px; height: 9px; border-radius: 3px; background: transparent; transition: background .15s; }
 .check:hover span, .check:focus-visible span { background: #4f8a68; }
+.check:disabled { cursor: wait; opacity: .5; }
 .todo-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .todo-copy strong { overflow: hidden; text-overflow: ellipsis; font-size: 15px; font-weight: 600; }
 .todo-copy time { color: #8a938e; font: 400 10px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
 .remove { opacity: 0; border: 0; padding: 7px 0 7px 10px; color: #8b4d49; background: transparent; font: 500 11px ui-monospace, "SFMono-Regular", Consolas, monospace; cursor: pointer; transition: opacity .15s; }
 .todo-list li:hover .remove, .remove:focus-visible { opacity: 1; }
+.remove:disabled { opacity: .5; cursor: wait; }
 
 .empty { padding: 45px 36px 52px; text-align: center; color: #7b857f; }
 .empty span { display: block; color: #b4bdb7; font-size: 64px; font-weight: 600; letter-spacing: -.08em; }

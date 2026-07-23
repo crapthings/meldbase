@@ -118,6 +118,16 @@ or executable source and are validated on both sides of the connection. HTTP
 responses are read through a streaming byte ceiling and decoded only from exact
 versioned envelopes; chunked responses cannot bypass `maxInboundBytes`.
 
+## Write outcomes and retries
+
+A `MeldbaseInternalError` with code `outcome_unknown` means a write may have
+reached the server, but the client could not verify its result—for example after
+a transport loss or a malformed response envelope. Do not blindly retry that
+operation. Reconcile it with application state first, or put non-idempotent
+business work behind a named RPC and retry that RPC with the same
+`idempotencyKey`. Authentication or validation failures before a request is
+dispatched are reported directly instead of as an unknown outcome.
+
 The explicit subpaths are `@meldbase/client/local` and
 `@meldbase/client/types`; remote APIs are imported from the root package.
 

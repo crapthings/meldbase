@@ -51,7 +51,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           <div className="mt-2 flex items-center justify-between"><StatusDot state={connection} /><span className={`rounded-md px-2 py-1 text-xs font-semibold capitalize ${healthTone(health)}`}>{health}</span></div>
           <p className="mt-2 text-xs text-slate-500">{label}</p>
         </div>
-        <button onClick={disconnect} className="mt-4 hidden w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 lg:flex"><Icon name="logout" /> Disconnect</button>
+        <button onClick={disconnect} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"><Icon name="logout" /> Disconnect</button>
       </aside>
       <main className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-7 xl:px-10">
         <header className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">

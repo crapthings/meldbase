@@ -24,10 +24,12 @@ type DashboardState = {
 };
 
 let streamController: AbortController | null = null;
+let connectController: AbortController | null = null;
 let diagnosticController: AbortController | null = null;
 let diagnosticAfter = 0;
 let diagnosticSession = "";
 let diagnosticsPending = false;
+let activeSession = 0;
 const dashboardSessionKey = "meldbase.admin.session.v1";
 
 function clearStoredSession(): void {
@@ -67,13 +69,21 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
   indexes: [],
   indexesStatus: "unavailable",
   async connect(token, rememberSession = get().rememberSession) {
+    const session = ++activeSession;
     streamController?.abort();
+    connectController?.abort();
+    diagnosticController?.abort();
+    diagnosticController = null;
+    diagnosticsPending = false;
+    const controller = new AbortController();
+    connectController = controller;
     set({ connection: "connecting", connectionLabel: "Authenticating", error: "", token, rememberSession });
     try {
       const [history, catalog] = await Promise.all([
-        loadHistory(token),
-        loadIndexCatalog(token).catch(() => null),
+        loadHistory(token, controller.signal),
+        loadIndexCatalog(token, controller.signal).catch(() => null),
       ]);
+      if (controller.signal.aborted || session !== activeSession) return;
       const samples = history.samples.slice(-120);
       const latest = samples.at(-1);
       diagnosticAfter = 0;
@@ -89,8 +99,10 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
         connectionLabel: "Live",
       });
       if (diagnosticsEnabled(latest)) void get().refreshDiagnostics();
-      streamController = new AbortController();
-      void streamStats(token, streamController.signal, (sample) => {
+      const nextStreamController = new AbortController();
+      streamController = nextStreamController;
+      void streamStats(token, nextStreamController.signal, (sample) => {
+        if (session !== activeSession || streamController !== nextStreamController) return;
         const latestState = get();
         const nextSamples = appendSample(latestState.samples, sample);
         const enabled = diagnosticsEnabled(sample);
@@ -100,19 +112,37 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
           diagnosticsStatus: diagnosticStatus(sample),
         });
         if (enabled) void get().refreshDiagnostics();
-      }, (connection, delay) => set({
-        connection,
-        connectionLabel: connection === "live" ? "Live" : `Reconnecting in ${(delay ?? 0) / 1000}s`,
-      }));
+      }, (connection, delay) => {
+        if (session !== activeSession || streamController !== nextStreamController) return;
+        if (connection === "unauthenticated") {
+          nextStreamController.abort();
+          streamController = null;
+          set({ token: "", rememberSession: false, connection: "error", connectionLabel: "Admin token expired", error: "Admin token expired or was revoked. Enter a current token to reconnect." });
+          clearStoredSession();
+          return;
+        }
+        set({
+          connection,
+          connectionLabel: connection === "live" ? "Live" : `Reconnecting in ${(delay ?? 0) / 1000}s`,
+        });
+      }).finally(() => {
+        if (streamController === nextStreamController) streamController = null;
+      });
     } catch (error) {
+      if (controller.signal.aborted || session !== activeSession) return;
       set({ token: "", rememberSession: false, connection: "error", connectionLabel: "Connection failed", error: error instanceof Error ? error.message : "Could not connect" });
       clearStoredSession();
+    } finally {
+      if (connectController === controller) connectController = null;
     }
   },
   disconnect() {
+    activeSession += 1;
+    connectController?.abort();
     streamController?.abort();
     diagnosticController?.abort();
     streamController = null;
+    connectController = null;
     diagnosticController = null;
     diagnosticAfter = 0;
     diagnosticSession = "";
@@ -129,14 +159,16 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
     if (!token || !enabled || diagnosticsPending) return;
     diagnosticsPending = true;
     diagnosticController?.abort();
-    diagnosticController = new AbortController();
+    const controller = new AbortController();
+    diagnosticController = controller;
     try {
       let pages = 0;
       let more = true;
       while (more && pages < 4) {
        pages += 1;
         const requestedAfter = diagnosticAfter;
-        const snapshot = await loadDiagnostics(token, diagnosticAfter, diagnosticController.signal);
+        const snapshot = await loadDiagnostics(token, diagnosticAfter, controller.signal);
+        if (controller.signal.aborted || diagnosticController !== controller || get().token !== token) return;
         if (!snapshot) {
           set({ diagnosticsStatus: "unavailable" });
           return;
@@ -158,9 +190,12 @@ export const useDashboardStore = create<DashboardState>()(persist((set, get) => 
         more = Boolean(snapshot.hasMore && snapshot.events.length > 0);
       }
     } catch {
-      if (!diagnosticController?.signal.aborted) set({ diagnosticsStatus: "temporarily unavailable" });
+      if (!controller.signal.aborted && diagnosticController === controller && get().token === token) set({ diagnosticsStatus: "temporarily unavailable" });
     } finally {
-      diagnosticsPending = false;
+      if (diagnosticController === controller) {
+        diagnosticController = null;
+        diagnosticsPending = false;
+      }
     }
   },
 }), {

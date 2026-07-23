@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { MeldbaseClient } from "@meldbase/client";
 import type { Document } from "@meldbase/client/types";
 import { useLiveQuery } from "@meldbase/react";
@@ -23,6 +23,20 @@ export function App() {
   const [title, setTitle] = useState("");
   const [mutationError, setMutationError] = useState<Error>();
   const [pending, setPending] = useState(false);
+  const pendingTodoIDs = useRef(new Set<string>());
+  const [, setPendingTodoVersion] = useState(0);
+
+  function startTodoMutation(id: string): boolean {
+    if (pendingTodoIDs.current.has(id)) return false;
+    pendingTodoIDs.current.add(id);
+    setPendingTodoVersion((version) => version + 1);
+    return true;
+  }
+
+  function finishTodoMutation(id: string): void {
+    pendingTodoIDs.current.delete(id);
+    setPendingTodoVersion((version) => version + 1);
+  }
 
   async function addTodo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,20 +55,26 @@ export function App() {
   }
 
   async function complete(todo: Todo) {
+    if (!startTodoMutation(todo._id)) return;
     setMutationError(undefined);
     try {
       await todos.updateOne({ _id: todo._id }, { $set: { completed: true } });
     } catch (caught) {
       setMutationError(asError(caught));
+    } finally {
+      finishTodoMutation(todo._id);
     }
   }
 
   async function remove(todo: Todo) {
+    if (!startTodoMutation(todo._id)) return;
     setMutationError(undefined);
     try {
       await todos.deleteOne({ _id: todo._id });
     } catch (caught) {
       setMutationError(asError(caught));
+    } finally {
+      finishTodoMutation(todo._id);
     }
   }
 
@@ -105,15 +125,15 @@ export function App() {
 
         <ul className="todo-list" aria-live="polite">
           {documents.map((todo) => (
-            <li key={todo._id}>
-              <button className="check" onClick={() => void complete(todo)} aria-label={`Complete ${todo.title}`}>
+            <li key={todo._id} aria-busy={pendingTodoIDs.current.has(todo._id)}>
+              <button className="check" onClick={() => void complete(todo)} disabled={pendingTodoIDs.current.has(todo._id)} aria-label={`${pendingTodoIDs.current.has(todo._id) ? "Completing" : "Complete"} ${todo.title}`}>
                 <span />
               </button>
               <div className="todo-copy">
                 <strong>{todo.title}</strong>
                 <time dateTime={todo.createdAt.toISOString()}>{formatTime(todo.createdAt)}</time>
               </div>
-              <button className="remove" onClick={() => void remove(todo)} aria-label={`Delete ${todo.title}`}>Delete</button>
+              <button className="remove" onClick={() => void remove(todo)} disabled={pendingTodoIDs.current.has(todo._id)} aria-label={`${pendingTodoIDs.current.has(todo._id) ? "Deleting" : "Delete"} ${todo.title}`}>{pendingTodoIDs.current.has(todo._id) ? "Working…" : "Delete"}</button>
             </li>
           ))}
         </ul>

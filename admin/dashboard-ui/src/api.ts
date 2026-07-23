@@ -8,9 +8,9 @@ async function authorized(path: string, token: string, signal?: AbortSignal): Pr
   });
 }
 
-export async function loadHistory(token: string): Promise<HistoryResponse> {
-  const response = await authorized("/v1/stats/history", token);
-  if (!response.ok) throw new Error(response.status === 401 ? "Invalid admin token" : `Admin API returned ${response.status}`);
+export async function loadHistory(token: string, signal?: AbortSignal): Promise<HistoryResponse> {
+  const response = await authorized("/v1/stats/history", token, signal);
+  if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? "Invalid admin token" : `Admin API returned ${response.status}`);
   const history = await response.json() as HistoryResponse;
   if (!Array.isArray(history.samples)) throw new Error("Invalid admin response");
   return history;
@@ -62,7 +62,7 @@ export async function streamStats(
   token: string,
   signal: AbortSignal,
   onSample: (sample: AdminSample) => void,
-  onState: (state: "live" | "retrying", retryDelay?: number) => void,
+  onState: (state: "live" | "retrying" | "unauthenticated", retryDelay?: number) => void,
 ): Promise<void> {
   let retryDelay = 500;
   while (!signal.aborted) {
@@ -72,6 +72,10 @@ export async function streamStats(
         cache: "no-store",
         signal,
       });
+      if (response.status === 401 || response.status === 403) {
+        onState("unauthenticated");
+        return;
+      }
       if (!response.ok || !response.body) throw new Error(`Stream returned ${response.status}`);
       onState("live");
       retryDelay = 500;
