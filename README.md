@@ -247,6 +247,9 @@ fault-injection evidence, along with its safety boundaries. The supported
 systemd template, probes, configuration, scheduled backups, and safe
 upgrade/rollback path.
 
+[ROADMAP.md](ROADMAP.md) is the evidence-oriented readiness checklist. It does
+not expand the supported single-node alpha boundary.
+
 ## Documentation
 
 The documentation is being rebuilt around the current product contract. The
