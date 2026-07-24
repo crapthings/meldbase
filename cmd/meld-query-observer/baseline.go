@@ -32,16 +32,18 @@ type stableObservationReportSet struct {
 }
 
 type stableReportConfig struct {
-	Backend        string                  `json:"backend"`
-	Profile        string                  `json:"profile"`
-	Documents      int                     `json:"documents"`
-	Iterations     int                     `json:"iterations"`
-	Warmup         int                     `json:"warmup"`
-	PayloadBytes   int                     `json:"payloadBytes"`
-	Scenarios      []string                `json:"scenarios"`
-	MatrixOverlaps []int                   `json:"matrixOverlaps,omitempty"`
-	MatrixLimits   []string                `json:"matrixLimits,omitempty"`
-	Limits         meldbase.ResourceLimits `json:"limits"`
+	Backend               string                  `json:"backend"`
+	Profile               string                  `json:"profile"`
+	Documents             int                     `json:"documents"`
+	Iterations            int                     `json:"iterations"`
+	Warmup                int                     `json:"warmup"`
+	PayloadBytes          int                     `json:"payloadBytes"`
+	ArrayItems            int                     `json:"arrayItems"`
+	ArrayDuplicatePercent int                     `json:"arrayDuplicatePercent"`
+	Scenarios             []string                `json:"scenarios"`
+	MatrixOverlaps        []int                   `json:"matrixOverlaps,omitempty"`
+	MatrixLimits          []string                `json:"matrixLimits,omitempty"`
+	Limits                meldbase.ResourceLimits `json:"limits"`
 }
 
 type stableScenarioObservation struct {
@@ -64,16 +66,18 @@ func makeStableObservationReport(report observationReport) stableObservationRepo
 		SchemaVersion: report.SchemaVersion,
 		Format:        "stable",
 		Config: stableReportConfig{
-			Backend:        report.Config.Backend,
-			Profile:        report.Config.Profile,
-			Documents:      report.Config.Documents,
-			Iterations:     report.Config.Iterations,
-			Warmup:         report.Config.Warmup,
-			PayloadBytes:   report.Config.PayloadBytes,
-			Scenarios:      append([]string(nil), report.Config.Scenarios...),
-			MatrixOverlaps: append([]int(nil), report.Config.MatrixOverlaps...),
-			MatrixLimits:   append([]string(nil), report.Config.MatrixLimits...),
-			Limits:         report.Config.Limits,
+			Backend:               report.Config.Backend,
+			Profile:               report.Config.Profile,
+			Documents:             report.Config.Documents,
+			Iterations:            report.Config.Iterations,
+			Warmup:                report.Config.Warmup,
+			PayloadBytes:          report.Config.PayloadBytes,
+			ArrayItems:            report.Config.ArrayItems,
+			ArrayDuplicatePercent: report.Config.ArrayDuplicatePercent,
+			Scenarios:             append([]string(nil), report.Config.Scenarios...),
+			MatrixOverlaps:        append([]int(nil), report.Config.MatrixOverlaps...),
+			MatrixLimits:          append([]string(nil), report.Config.MatrixLimits...),
+			Limits:                report.Config.Limits,
 		},
 		Scenarios:      make([]stableScenarioObservation, len(report.Scenarios)),
 		MeasuredTotals: report.MeasuredTotals,

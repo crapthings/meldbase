@@ -51,15 +51,17 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 
 func parseObserverConfig(args []string, stderr io.Writer) (observerConfig, error) {
 	config := observerConfig{
-		Backend:      "memory",
-		Profile:      standardProfile,
-		Documents:    8_192,
-		Iterations:   10,
-		Warmup:       1,
-		PayloadBytes: 128,
-		Scenarios:    "all",
-		Format:       "table",
-		Timeout:      3 * time.Minute,
+		Backend:               "memory",
+		Profile:               standardProfile,
+		Documents:             8_192,
+		Iterations:            10,
+		Warmup:                1,
+		PayloadBytes:          128,
+		ArrayItems:            16,
+		ArrayDuplicatePercent: 25,
+		Scenarios:             "all",
+		Format:                "table",
+		Timeout:               3 * time.Minute,
 	}
 	matrixOverlaps := "0,10,25,50"
 	matrixLimits := "1,10,100,none"
@@ -72,6 +74,8 @@ func parseObserverConfig(args []string, stderr io.Writer) (observerConfig, error
 	flags.IntVar(&config.Iterations, "iterations", config.Iterations, "measured Find executions per scenario")
 	flags.IntVar(&config.Warmup, "warmup", config.Warmup, "unmeasured Find executions per scenario")
 	flags.IntVar(&config.PayloadBytes, "payload-bytes", config.PayloadBytes, "synthetic payload bytes per document")
+	flags.IntVar(&config.ArrayItems, "array-items", config.ArrayItems, "array elements per synthetic document for array predicate scenarios")
+	flags.IntVar(&config.ArrayDuplicatePercent, "array-duplicate-percent", config.ArrayDuplicatePercent, "repeated values in synthetic arrays, from 0 through 90")
 	flags.StringVar(&config.Scenarios, "scenarios", config.Scenarios, "all or a comma-separated scenario list")
 	flags.StringVar(&matrixOverlaps, "overlaps", matrixOverlaps, "matrix duplicate percentages, from 0 through 50")
 	flags.StringVar(&matrixLimits, "limits", matrixLimits, "matrix limits as positive integers or none")
@@ -109,6 +113,12 @@ func parseObserverConfig(args []string, stderr io.Writer) (observerConfig, error
 	}
 	if config.PayloadBytes < 0 || config.PayloadBytes > 1<<20 {
 		return observerConfig{}, fmt.Errorf("-payload-bytes must be between 0 and 1048576")
+	}
+	if config.ArrayItems < 1 || config.ArrayItems > 4_096 {
+		return observerConfig{}, fmt.Errorf("-array-items must be between 1 and 4096")
+	}
+	if config.ArrayDuplicatePercent < 0 || config.ArrayDuplicatePercent > 90 {
+		return observerConfig{}, fmt.Errorf("-array-duplicate-percent must be between 0 and 90")
 	}
 	if config.Format != "table" && config.Format != "json" && config.Format != "json-stable" {
 		return observerConfig{}, fmt.Errorf("-format must be table, json, or json-stable")
@@ -193,26 +203,28 @@ func writeTableReports(output io.Writer, reports []observationReport) error {
 func writeTableReport(output io.Writer, report observationReport) error {
 	if _, err := fmt.Fprintf(
 		output,
-		"Meldbase query observer\nbackend=%s profile=%s documents=%d iterations=%d warmup=%d setup=%s\nExplain is a separate execution; measured counters exclude Explain and warm-up.\n\n",
+		"Meldbase query observer\nbackend=%s profile=%s documents=%d iterations=%d warmup=%d arrayItems=%d arrayDuplicatePercent=%d setup=%s\nExplain is a separate execution; measured counters exclude Explain and warm-up.\n\n",
 		report.Config.Backend,
 		report.Config.Profile,
 		report.Config.Documents,
 		report.Config.Iterations,
 		report.Config.Warmup,
+		report.Config.ArrayItems,
+		report.Config.ArrayDuplicatePercent,
 		formatDurationMillis(report.SetupMillis),
 	); err != nil {
 		return err
 	}
 
 	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "EXPLAIN\tPLAN\tKEYS\tUNIQUE\tDUP%\tDOCS\tDOC/KEEP\tKEY/UNIQ\tRETAINED\tSORT\tPEAK BUDGET\tEARLY STOP\tADVICE"); err != nil {
+	if _, err := fmt.Fprintln(writer, "EXPLAIN\tPLAN\tKEYS\tUNIQUE\tDUP%\tDOCS\tSTEPS\tSTEP/DOC\tDOC/KEEP\tKEY/UNIQ\tRETAINED\tSORT\tPEAK BUDGET\tEARLY STOP\tADVICE"); err != nil {
 		return err
 	}
 	for _, observation := range report.Scenarios {
 		explain := observation.Explain
 		if _, err := fmt.Fprintf(
 			writer,
-			"%s\t%s/%s\t%d\t%d\t%.1f\t%d\t%.2f\t%.2f\t%d\t%s\t%s\t%s\t%s\n",
+			"%s\t%s/%s\t%d\t%d\t%.1f\t%d\t%d\t%.2f\t%.2f\t%.2f\t%d\t%s\t%s\t%s\t%s\n",
 			observation.Name,
 			emptyAs(explain.Stage, "UNKNOWN"),
 			emptyAs(explain.PlanReason, "not_planned"),
@@ -220,6 +232,8 @@ func writeTableReport(output io.Writer, report observationReport) error {
 			explain.UniqueCandidateIDs,
 			observation.Ratios.DuplicateCandidatePercent,
 			explain.DocumentsExamined,
+			explain.Budget.PredicateStepsUsed,
+			observation.Ratios.PredicateStepsPerDocument,
 			observation.Ratios.DocumentsPerRetained,
 			observation.Ratios.KeysPerUniqueCandidate,
 			explain.CandidatesRetained,
@@ -280,14 +294,14 @@ func writeTableReport(output io.Writer, report observationReport) error {
 		return err
 	}
 	writer = tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "SCENARIO\tRUNS\tFAILED\tAVG LATENCY\tAVG RETURNED\tKEYS/RUN\tDOCS/RUN\tDUP/RUN\tSORT/RUN\tPRESSURE\tREJECTIONS"); err != nil {
+	if _, err := fmt.Fprintln(writer, "SCENARIO\tRUNS\tFAILED\tAVG LATENCY\tAVG RETURNED\tKEYS/RUN\tDOCS/RUN\tSTEPS/RUN\tDUP/RUN\tSORT/RUN\tPRESSURE\tREJECTIONS"); err != nil {
 		return err
 	}
 	for _, observation := range report.Scenarios {
 		runs := float64(max(1, observation.RunsAttempted))
 		if _, err := fmt.Fprintf(
 			writer,
-			"%s\t%d\t%d\t%s\t%.1f\t%.1f\t%.1f\t%.1f\t%s\t%d\t%d\n",
+			"%s\t%d\t%d\t%s\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\t%s\t%d\t%d\n",
 			observation.Name,
 			observation.RunsAttempted,
 			observation.RunsFailed,
@@ -295,6 +309,7 @@ func writeTableReport(output io.Writer, report observationReport) error {
 			observation.AverageReturned,
 			float64(observation.Measured.KeysExamined)/runs,
 			float64(observation.Measured.DocumentsExamined)/runs,
+			float64(observation.Measured.PredicateSteps)/runs,
 			float64(observation.Measured.DuplicateCandidateIDs)/runs,
 			formatBytes(uint64(float64(observation.Measured.SortBytes)/runs)),
 			observation.Measured.BudgetPressureEvents,
@@ -310,13 +325,14 @@ func writeTableReport(output io.Writer, report observationReport) error {
 	totals := report.MeasuredTotals
 	_, err := fmt.Fprintf(
 		output,
-		"\nMeasured totals: queries=%d failed=%d collscans=%d indexscans=%d keys=%d documents=%d duplicates=%d sort=%s earlyStops=%d pressure=%d rejections=%d\n",
+		"\nMeasured totals: queries=%d failed=%d collscans=%d indexscans=%d keys=%d documents=%d predicateSteps=%d duplicates=%d sort=%s earlyStops=%d pressure=%d rejections=%d\n",
 		totals.Total,
 		totals.Failed,
 		totals.CollectionScans,
 		totals.IndexScans,
 		totals.KeysExamined,
 		totals.DocumentsExamined,
+		totals.PredicateSteps,
 		totals.DuplicateCandidateIDs,
 		formatBytes(totals.SortBytes),
 		totals.EarlyStops,

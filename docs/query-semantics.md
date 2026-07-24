@@ -265,6 +265,13 @@ go run ./cmd/meld-query-observer \
 go run ./cmd/meld-query-observer \
   -scenarios overlapping-or \
   -max-query-keys 1000
+
+# Measure array-predicate work with longer, more repetitive arrays.
+go run ./cmd/meld-query-observer \
+  -backend both \
+  -scenarios array-all-miss,array-elem-scalar,array-elem-object \
+  -array-items 128 \
+  -array-duplicate-percent 75
 ```
 
 The fixed scenarios isolate different execution properties:
@@ -278,6 +285,9 @@ The fixed scenarios isolate different execution properties:
 | `collection-scan` | Full document scan and conservative filter-index advice |
 | `and-separate-indexes` | One selected index, residual amplification, and conservative compound-index advice |
 | `and-compound-index` | A compound-index control with the same workspace/status selectivity shape |
+| `array-all-miss` | `$all` residual work when a required value is absent after indexed admission |
+| `array-elem-scalar` | Scalar `$elemMatch` work with the qualifying element at the array tail |
+| `array-elem-object` | Object `$elemMatch` work that preserves the same-element constraint |
 
 The optional `matrix` profile creates two equally sized indexed branches and
 controls their intersection. Its default `-overlaps 0,10,25,50` values target
@@ -303,8 +313,11 @@ being regenerated automatically.
 A key/unique-candidate ratio above one shows read amplification; the
 document/retained-candidate ratio exposes residual-filter amplification;
 duplicate percentage isolates union overlap; the peak budget percentage shows
-the dimension nearest rejection. Pressure events begin at 80% of a configured
-query budget.
+the dimension nearest rejection. The array scenarios additionally report
+predicate steps, predicate-steps/document, and predicate-steps/retained
+candidate. `-array-items` (1–4096) and
+`-array-duplicate-percent` (0–90) control their deterministic data shape.
+Pressure events begin at 80% of a configured query budget.
 
 The durable mode uses a temporary database and removes it after the run. Passing
 `-database PATH` retains a newly generated database for inspection, but the

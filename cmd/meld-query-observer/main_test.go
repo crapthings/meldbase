@@ -32,8 +32,9 @@ func TestObserveRepresentativeQuerySignals(t *testing.T) {
 			if report.Config.Limits.MaxQueryKeysExamined != meldbase.DefaultMaxQueryKeysExamined {
 				t.Fatalf("normalized limits=%+v", report.Config.Limits)
 			}
-			if report.MeasuredTotals.Total != 7 || report.MeasuredTotals.Failed != 0 ||
-				report.MeasuredTotals.CollectionScans != 1 || report.MeasuredTotals.IndexScans != 6 {
+			if report.MeasuredTotals.Total != 10 || report.MeasuredTotals.Failed != 0 ||
+				report.MeasuredTotals.CollectionScans != 1 || report.MeasuredTotals.IndexScans != 9 ||
+				report.MeasuredTotals.PredicateSteps == 0 {
 				t.Fatalf("measured totals=%+v", report.MeasuredTotals)
 			}
 
@@ -94,6 +95,23 @@ func TestObserveRepresentativeQuerySignals(t *testing.T) {
 				hasAdvice(compound.Explain.Advice, "consider_compound_index") {
 				t.Fatalf("and-compound-index=%+v", compound)
 			}
+
+			all := observations["array-all-miss"]
+			if all.Family != "array-all" || all.Explain.Stage != "IXSCAN" || !all.Explain.ResidualPredicate ||
+				all.ReturnedTotal != 0 || all.Explain.Budget.PredicateStepsUsed <= uint64(all.Explain.DocumentsExamined) ||
+				all.Ratios.PredicateStepsPerDocument <= 16 {
+				t.Fatalf("array-all-miss=%+v", all)
+			}
+			scalar := observations["array-elem-scalar"]
+			object := observations["array-elem-object"]
+			for _, arrayObservation := range []scenarioObservation{scalar, object} {
+				if arrayObservation.Family != "array-elem-match" || arrayObservation.Explain.Stage != "IXSCAN" ||
+					!arrayObservation.Explain.ResidualPredicate || arrayObservation.ReturnedTotal == 0 ||
+					arrayObservation.Explain.Budget.PredicateStepsUsed <= uint64(arrayObservation.Explain.DocumentsExamined) ||
+					arrayObservation.Ratios.PredicateStepsPerDocument <= 16 {
+					t.Fatalf("array scenario=%+v", arrayObservation)
+				}
+			}
 		})
 	}
 }
@@ -132,6 +150,44 @@ func TestObserveRetainsBudgetRejectionEvidence(t *testing.T) {
 		bytes.Contains(stableJSON, []byte(`"executionError":`)) ||
 		bytes.Contains(stableJSON, []byte("index keys examined exceed")) {
 		t.Fatalf("stable rejection leaked or lost error evidence: %s", stableJSON)
+	}
+}
+
+func TestArrayObserverScenariosScalePredicateWorkAcrossBackends(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, backend := range []string{"memory", "durable"} {
+		t.Run(backend, func(t *testing.T) {
+			short, err := observe(ctx, observerConfig{
+				Backend: backend, Documents: 128, Iterations: 1, Warmup: 0, PayloadBytes: 0,
+				ArrayItems: 4, ArrayDuplicatePercent: 0, Scenarios: "array-all-miss,array-elem-scalar,array-elem-object",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			long, err := observe(ctx, observerConfig{
+				Backend: backend, Documents: 128, Iterations: 1, Warmup: 0, PayloadBytes: 0,
+				ArrayItems: 32, ArrayDuplicatePercent: 75, Scenarios: "array-all-miss,array-elem-scalar,array-elem-object",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if short.Config.ArrayItems != 4 || long.Config.ArrayItems != 32 ||
+				short.Config.ArrayDuplicatePercent != 0 || long.Config.ArrayDuplicatePercent != 75 {
+				t.Fatalf("array config short=%+v long=%+v", short.Config, long.Config)
+			}
+			shortByName, longByName := observationsByName(short), observationsByName(long)
+			for _, name := range []string{"array-all-miss", "array-elem-scalar", "array-elem-object"} {
+				before, after := shortByName[name], longByName[name]
+				if before.Parameters == nil || after.Parameters == nil || before.Parameters.ArrayItems == nil || after.Parameters.ArrayItems == nil ||
+					*before.Parameters.ArrayItems != 4 || *after.Parameters.ArrayItems != 32 ||
+					after.Explain.DocumentsExamined != before.Explain.DocumentsExamined ||
+					after.Explain.Budget.PredicateStepsUsed <= before.Explain.Budget.PredicateStepsUsed ||
+					after.Measured.PredicateSteps <= before.Measured.PredicateSteps {
+					t.Fatalf("%s short=%+v long=%+v", name, before, after)
+				}
+			}
+		})
 	}
 }
 
@@ -329,6 +385,12 @@ func TestParseObserverConfigRejectsUnsafeOrInvalidInputs(t *testing.T) {
 	}
 	if _, err := parseObserverConfig([]string{"-format", "csv"}, &diagnostics); err == nil {
 		t.Fatal("accepted an unsupported format")
+	}
+	if _, err := parseObserverConfig([]string{"-array-items", "0"}, &diagnostics); err == nil {
+		t.Fatal("accepted zero array items")
+	}
+	if _, err := parseObserverConfig([]string{"-array-duplicate-percent", "91"}, &diagnostics); err == nil {
+		t.Fatal("accepted array duplication above 90 percent")
 	}
 	if _, err := parseObserverConfig([]string{"-profile", "matrix", "-overlaps", "0,51"}, &diagnostics); err == nil {
 		t.Fatal("accepted an overlap above 50 percent")

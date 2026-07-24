@@ -27,34 +27,38 @@ var (
 )
 
 type observerConfig struct {
-	Backend        string
-	DatabasePath   string
-	Profile        string
-	Documents      int
-	Iterations     int
-	Warmup         int
-	PayloadBytes   int
-	Scenarios      string
-	MatrixOverlaps []int
-	MatrixLimits   []string
-	Format         string
-	Timeout        time.Duration
-	Limits         meldbase.ResourceLimits
+	Backend               string
+	DatabasePath          string
+	Profile               string
+	Documents             int
+	Iterations            int
+	Warmup                int
+	PayloadBytes          int
+	ArrayItems            int
+	ArrayDuplicatePercent int
+	Scenarios             string
+	MatrixOverlaps        []int
+	MatrixLimits          []string
+	Format                string
+	Timeout               time.Duration
+	Limits                meldbase.ResourceLimits
 }
 
 type reportConfig struct {
-	Backend          string                  `json:"backend"`
-	DatabasePath     string                  `json:"databasePath,omitempty"`
-	DatabaseRetained bool                    `json:"databaseRetained"`
-	Profile          string                  `json:"profile"`
-	Documents        int                     `json:"documents"`
-	Iterations       int                     `json:"iterations"`
-	Warmup           int                     `json:"warmup"`
-	PayloadBytes     int                     `json:"payloadBytes"`
-	Scenarios        []string                `json:"scenarios"`
-	MatrixOverlaps   []int                   `json:"matrixOverlaps,omitempty"`
-	MatrixLimits     []string                `json:"matrixLimits,omitempty"`
-	Limits           meldbase.ResourceLimits `json:"limits"`
+	Backend               string                  `json:"backend"`
+	DatabasePath          string                  `json:"databasePath,omitempty"`
+	DatabaseRetained      bool                    `json:"databaseRetained"`
+	Profile               string                  `json:"profile"`
+	Documents             int                     `json:"documents"`
+	Iterations            int                     `json:"iterations"`
+	Warmup                int                     `json:"warmup"`
+	PayloadBytes          int                     `json:"payloadBytes"`
+	ArrayItems            int                     `json:"arrayItems"`
+	ArrayDuplicatePercent int                     `json:"arrayDuplicatePercent"`
+	Scenarios             []string                `json:"scenarios"`
+	MatrixOverlaps        []int                   `json:"matrixOverlaps,omitempty"`
+	MatrixLimits          []string                `json:"matrixLimits,omitempty"`
+	Limits                meldbase.ResourceLimits `json:"limits"`
 }
 
 type observationReport struct {
@@ -91,6 +95,8 @@ type explainRatios struct {
 	KeysPerDocumentExamined   float64 `json:"keysPerDocumentExamined"`
 	DocumentsPerRetained      float64 `json:"documentsPerRetainedCandidate"`
 	DuplicateCandidatePercent float64 `json:"duplicateCandidatePercent"`
+	PredicateStepsPerDocument float64 `json:"predicateStepsPerDocumentExamined"`
+	PredicateStepsPerRetained float64 `json:"predicateStepsPerRetainedCandidate"`
 	PeakBudgetResource        string  `json:"peakBudgetResource,omitempty"`
 	PeakBudgetUtilizationPct  float64 `json:"peakBudgetUtilizationPercent"`
 }
@@ -131,9 +137,11 @@ type observerIndex struct {
 }
 
 type scenarioParameters struct {
-	TargetOverlapPercent *int   `json:"targetOverlapPercent,omitempty"`
-	Limit                *int   `json:"limit,omitempty"`
-	LimitMode            string `json:"limitMode,omitempty"`
+	TargetOverlapPercent  *int   `json:"targetOverlapPercent,omitempty"`
+	Limit                 *int   `json:"limit,omitempty"`
+	LimitMode             string `json:"limitMode,omitempty"`
+	ArrayItems            *int   `json:"arrayItems,omitempty"`
+	ArrayDuplicatePercent *int   `json:"arrayDuplicatePercent,omitempty"`
 }
 
 type observerDatabase struct {
@@ -146,7 +154,11 @@ func observe(ctx context.Context, config observerConfig) (report observationRepo
 	profile := normalizedObserverProfile(config.Profile)
 	matrixOverlaps := normalizedMatrixOverlaps(config.MatrixOverlaps)
 	matrixLimits := normalizedMatrixLimits(config.MatrixLimits)
-	allScenarios, err := buildConfiguredObserverScenarios(config.Documents, profile, matrixOverlaps, matrixLimits)
+	arrayItems := config.ArrayItems
+	if arrayItems == 0 {
+		arrayItems = 16
+	}
+	allScenarios, err := buildConfiguredObserverScenarios(config.Documents, profile, matrixOverlaps, matrixLimits, arrayItems, config.ArrayDuplicatePercent)
 	if err != nil {
 		return observationReport{}, err
 	}
@@ -167,7 +179,7 @@ func observe(ctx context.Context, config observerConfig) (report observationRepo
 
 	setupStarted := time.Now()
 	collection := handle.db.Collection(observerCollection)
-	if err := seedObserverCollection(ctx, collection, config.Documents, config.PayloadBytes, profile, matrixOverlaps); err != nil {
+	if err := seedObserverCollection(ctx, collection, config.Documents, config.PayloadBytes, profile, matrixOverlaps, arrayItems, config.ArrayDuplicatePercent); err != nil {
 		return observationReport{}, fmt.Errorf("seed observer collection: %w", err)
 	}
 	if err := createObserverIndexes(ctx, collection, profile, matrixOverlaps); err != nil {
@@ -178,16 +190,18 @@ func observe(ctx context.Context, config observerConfig) (report observationRepo
 	report = observationReport{
 		SchemaVersion: reportSchemaVersion,
 		Config: reportConfig{
-			Backend:          config.Backend,
-			DatabasePath:     handle.retainedPath,
-			DatabaseRetained: handle.retainedPath != "",
-			Profile:          profile,
-			Documents:        config.Documents,
-			Iterations:       config.Iterations,
-			Warmup:           config.Warmup,
-			PayloadBytes:     config.PayloadBytes,
-			Scenarios:        make([]string, 0, len(scenarios)),
-			Limits:           handle.db.ResourceLimits(),
+			Backend:               config.Backend,
+			DatabasePath:          handle.retainedPath,
+			DatabaseRetained:      handle.retainedPath != "",
+			Profile:               profile,
+			Documents:             config.Documents,
+			Iterations:            config.Iterations,
+			Warmup:                config.Warmup,
+			PayloadBytes:          config.PayloadBytes,
+			ArrayItems:            arrayItems,
+			ArrayDuplicatePercent: config.ArrayDuplicatePercent,
+			Scenarios:             make([]string, 0, len(scenarios)),
+			Limits:                handle.db.ResourceLimits(),
 		},
 		SetupMillis: setupMillis,
 		Scenarios:   make([]scenarioObservation, 0, len(scenarios)),
@@ -283,6 +297,7 @@ func seedObserverCollection(
 	documentCount, payloadBytes int,
 	profile string,
 	matrixOverlaps []int,
+	arrayItems, arrayDuplicatePercent int,
 ) error {
 	const batchSize = 512
 	payload := meldbase.String(strings.Repeat("x", payloadBytes))
@@ -323,6 +338,10 @@ func seedObserverCollection(
 				document["workspaceId"] = meldbase.String(fmt.Sprintf("workspace-%02d", index%8))
 				document["status"] = meldbase.String(status)
 				document["compoundStatus"] = meldbase.String(status)
+				tags, scores, parts := observerArrayPredicateValues(index, arrayItems, arrayDuplicatePercent)
+				document["arrayTags"] = tags
+				document["arrayScores"] = scores
+				document["arrayParts"] = parts
 			}
 			documents = append(documents, document)
 		}
@@ -331,6 +350,31 @@ func seedObserverCollection(
 		}
 	}
 	return nil
+}
+
+func observerArrayPredicateValues(index, items, duplicatePercent int) (meldbase.Value, meldbase.Value, meldbase.Value) {
+	unique := max(1, items*(100-duplicatePercent)/100)
+	tags := make([]meldbase.Value, 0, items)
+	scores := make([]meldbase.Value, 0, items)
+	parts := make([]meldbase.Value, 0, items)
+	for offset := 0; offset < items; offset++ {
+		tags = append(tags, meldbase.String(fmt.Sprintf("tag-%02d", (index+offset%unique)%64)))
+		score := int64((index + offset) % 64)
+		kind := "other"
+		rank := int64(1)
+		if offset == items-1 {
+			if index%4 == 0 {
+				score, kind, rank = 85, "target", 7
+			} else if index%4 == 1 {
+				kind, rank = "target", 1
+			} else {
+				rank = 7
+			}
+		}
+		scores = append(scores, meldbase.Int(score))
+		parts = append(parts, meldbase.Object(meldbase.Document{"kind": meldbase.String(kind), "rank": meldbase.Int(rank)}))
+	}
+	return meldbase.Array(tags...), meldbase.Array(scores...), meldbase.Array(parts...)
 }
 
 func createObserverIndexes(ctx context.Context, collection *meldbase.Collection, profile string, matrixOverlaps []int) error {
@@ -368,10 +412,10 @@ func singleObserverIndex(name, field string) observerIndex {
 	return observerIndex{name: name, fields: []meldbase.IndexField{{Field: field, Order: 1}}}
 }
 
-func buildConfiguredObserverScenarios(documentCount int, profile string, matrixOverlaps []int, matrixLimits []string) ([]observerScenario, error) {
+func buildConfiguredObserverScenarios(documentCount int, profile string, matrixOverlaps []int, matrixLimits []string, arrayItems, arrayDuplicatePercent int) ([]observerScenario, error) {
 	switch profile {
 	case standardProfile:
-		return buildObserverScenarios(documentCount)
+		return buildObserverScenarios(documentCount, arrayItems, arrayDuplicatePercent)
 	case matrixProfile:
 		if err := validateMatrixOverlaps(matrixOverlaps); err != nil {
 			return nil, err
@@ -385,7 +429,7 @@ func buildConfiguredObserverScenarios(documentCount int, profile string, matrixO
 	}
 }
 
-func buildObserverScenarios(documentCount int) ([]observerScenario, error) {
+func buildObserverScenarios(documentCount, arrayItems, arrayDuplicatePercent int) ([]observerScenario, error) {
 	window := min(20, max(1, documentCount/(observerBucketCount*2)))
 	halfBuckets := make([]any, observerBucketCount/2)
 	for index := range halfBuckets {
@@ -436,6 +480,21 @@ func buildObserverScenarios(documentCount int) ([]observerScenario, error) {
 		{
 			name: "and-compound-index", family: "and-access", intent: "the same selectivity shape constrained by a compound index",
 			filter: meldbase.Filter{"workspaceId": "workspace-01", "compoundStatus": "open"},
+		},
+		{
+			name: "array-all-miss", family: "array-all", intent: "indexed admission followed by a $all residual that scans every array element before rejecting",
+			parameters: scenarioParameters{ArrayItems: intPointer(arrayItems), ArrayDuplicatePercent: intPointer(arrayDuplicatePercent)},
+			filter:     meldbase.Filter{"state": "active", "arrayTags": map[string]any{"$all": []any{"tag-not-present", "tag-00", "tag-not-present"}}},
+		},
+		{
+			name: "array-elem-scalar", family: "array-elem-match", intent: "indexed admission followed by scalar $elemMatch with its qualifying value at the array tail",
+			parameters: scenarioParameters{ArrayItems: intPointer(arrayItems), ArrayDuplicatePercent: intPointer(arrayDuplicatePercent)},
+			filter:     meldbase.Filter{"state": "active", "arrayScores": map[string]any{"$elemMatch": map[string]any{"$gte": int64(80), "$lt": int64(90)}}},
+		},
+		{
+			name: "array-elem-object", family: "array-elem-match", intent: "indexed admission followed by object $elemMatch that proves conditions share one array element",
+			parameters: scenarioParameters{ArrayItems: intPointer(arrayItems), ArrayDuplicatePercent: intPointer(arrayDuplicatePercent)},
+			filter:     meldbase.Filter{"state": "active", "arrayParts": map[string]any{"$elemMatch": map[string]any{"kind": "target", "rank": map[string]any{"$gte": int64(5)}}}},
 		},
 	}
 
@@ -601,6 +660,8 @@ func calculateExplainRatios(explain meldbase.ExplainResult) explainRatios {
 		KeysPerDocumentExamined:   divideInt64(explain.KeysExamined, explain.DocumentsExamined),
 		DocumentsPerRetained:      divideInt64(explain.DocumentsExamined, int64(explain.CandidatesRetained)),
 		DuplicateCandidatePercent: percentInt64(explain.DuplicateCandidateIDs, explain.CandidateIDs),
+		PredicateStepsPerDocument: divideUint64ByInt64(explain.Budget.PredicateStepsUsed, explain.DocumentsExamined),
+		PredicateStepsPerRetained: divideUint64(explain.Budget.PredicateStepsUsed, explain.CandidatesRetained),
 	}
 	budgets := []struct {
 		name        string
@@ -611,6 +672,7 @@ func calculateExplainRatios(explain meldbase.ExplainResult) explainRatios {
 		{name: "candidates", used: explain.Budget.CandidatesUsed, limit: explain.Budget.CandidatesLimit},
 		{name: "sort_bytes", used: explain.Budget.SortBytesUsed, limit: explain.Budget.SortBytesLimit},
 		{name: "skip", used: explain.Budget.SkipUsed, limit: explain.Budget.SkipLimit},
+		{name: "predicate_steps", used: explain.Budget.PredicateStepsUsed, limit: explain.Budget.PredicateStepsLimit},
 	}
 	for _, budget := range budgets {
 		utilization := percentUint64(budget.used, budget.limit)
@@ -689,6 +751,20 @@ func counterDelta(before, after uint64) uint64 {
 }
 
 func divideInt64(numerator, denominator int64) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
+}
+
+func divideUint64(numerator, denominator uint64) float64 {
+	if denominator == 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
+}
+
+func divideUint64ByInt64(numerator uint64, denominator int64) float64 {
 	if denominator <= 0 {
 		return 0
 	}
@@ -832,7 +908,7 @@ func matrixRightMember(index, documentCount, overlapPercent int) bool {
 }
 
 func cloneScenarioParameters(parameters scenarioParameters) *scenarioParameters {
-	if parameters.TargetOverlapPercent == nil && parameters.Limit == nil && parameters.LimitMode == "" {
+	if parameters.TargetOverlapPercent == nil && parameters.Limit == nil && parameters.LimitMode == "" && parameters.ArrayItems == nil && parameters.ArrayDuplicatePercent == nil {
 		return nil
 	}
 	clone := parameters
@@ -843,6 +919,14 @@ func cloneScenarioParameters(parameters scenarioParameters) *scenarioParameters 
 	if parameters.Limit != nil {
 		value := *parameters.Limit
 		clone.Limit = &value
+	}
+	if parameters.ArrayItems != nil {
+		value := *parameters.ArrayItems
+		clone.ArrayItems = &value
+	}
+	if parameters.ArrayDuplicatePercent != nil {
+		value := *parameters.ArrayDuplicatePercent
+		clone.ArrayDuplicatePercent = &value
 	}
 	return &clone
 }

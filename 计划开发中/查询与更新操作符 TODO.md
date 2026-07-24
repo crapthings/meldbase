@@ -2,7 +2,7 @@
 
 > 目标是借鉴 MongoDB 的开发者习惯，但保持 Meldbase 自己的语义、安全边界和跨 Go / TypeScript / 服务端的一致性。
 >
-> 2026-07-24 状态：现有基线已完成独立审计；`$size` 和 `$type` 已贯通 Go、TypeScript、wire、授权、memory/durable、Update/Delete、实时查询和共享 conformance。predicate-work budget 已覆盖执行、Explain、指标和 observer；`$elemMatch` / `$all` 可在此保护上继续推进。
+> 2026-07-24 状态：现有基线已完成独立审计；`$size`、`$type`、`$all` 和 `$elemMatch` 已贯通 Go、TypeScript、wire、授权、memory/durable、Update/Delete、实时查询和共享 conformance。predicate-work budget 已覆盖执行、Explain、指标和 observer；observer 现可用数组长度与重复率对比 `$all` / `$elemMatch` 的谓词工作放大。
 
 ## 设计原则
 
