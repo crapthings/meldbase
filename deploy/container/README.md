@@ -13,6 +13,17 @@ docker build --tag meldbase:local .
 docker run --rm meldbase:local --help
 ```
 
+## Published alpha images
+
+Tagged alpha releases publish `linux/amd64` and `linux/arm64` images to
+`ghcr.io/crapthings/meldbase`. A tag such as `v0.1.0-alpha.13` produces that
+version tag and an immutable `sha-<12-character-commit>` tag. Alpha releases
+do not update `latest`; deployments should use a version tag and record its
+resolved digest. The release workflow attaches an OCI SBOM and keyless
+GitHub/Sigstore build provenance attestation. Verify a pulled image with
+`gh attestation verify "oci://<resolved-image-digest>" --repo
+crapthings/meldbase` before admission.
+
 For a local, disposable smoke test, map the container process to your host
 user so that the mounted state directory has deliberate ownership:
 

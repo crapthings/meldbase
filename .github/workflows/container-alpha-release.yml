@@ -1,0 +1,112 @@
+name: Container alpha release
+
+on:
+  push:
+    tags:
+      - "v0.*-alpha.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-alpha-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Build and smoke test container
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Build local smoke image
+        run: docker build --tag "meldbase-smoke:${GITHUB_SHA}" .
+      - name: Run read-only durable smoke test
+        run: |
+          set -euo pipefail
+          mkdir -p container-smoke-data
+          docker run --detach --name meldbase-container-smoke \
+            --user "$(id -u):$(id -g)" \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --publish 127.0.0.1:18080:8080 \
+            --volume "$PWD/container-smoke-data:/var/lib/meldbase" \
+            "meldbase-smoke:${GITHUB_SHA}" serve \
+              --db /var/lib/meldbase/app.meld \
+              --addr 0.0.0.0:8080 \
+              --dev-no-auth
+          cleanup() {
+            docker logs meldbase-container-smoke || true
+            docker rm --force meldbase-container-smoke || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/livez; then
+              break
+            fi
+            sleep 1
+            if [ "$attempt" = 20 ]; then
+              exit 1
+            fi
+          done
+          curl --fail --silent --show-error http://127.0.0.1:18080/readyz
+
+  publish:
+    name: Publish GHCR alpha image
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - id: image
+        name: Derive immutable image names
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v0\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          {
+            printf 'name=%s\n' "$image"
+            printf 'version=%s\n' "$GITHUB_REF_NAME"
+            printf 'sha_tag=sha-%s\n' "${GITHUB_SHA:0:12}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Log in to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - id: build
+        name: Build and publish multi-architecture image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+          IMAGE_SHA_TAG: ${{ steps.image.outputs.sha_tag }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${IMAGE_VERSION}" \
+            --metadata-file image-metadata.json \
+            --tag "${IMAGE_NAME}:${IMAGE_VERSION}" \
+            --tag "${IMAGE_NAME}:${IMAGE_SHA_TAG}" \
+            --push .
+          digest=$(jq -r '."containerimage.digest"' image-metadata.json)
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Attest container build provenance
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

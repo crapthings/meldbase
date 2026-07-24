@@ -13,6 +13,32 @@ docker build --tag meldbase:local .
 docker run --rm meldbase:local --help
 ```
 
+## Published alpha images
+
+Tagged alpha releases publish a multi-architecture (`linux/amd64` and
+`linux/arm64`) image to `ghcr.io/crapthings/meldbase`. An alpha tag such as
+`v0.1.0-alpha.13` produces exactly that version tag and a second immutable
+`sha-<12-character-commit>` tag. Alpha releases deliberately do **not** update
+`latest`; deploy the version tag, and record the resolved digest for a real
+deployment.
+
+The release workflow first performs the read-only durable smoke test below,
+then attaches an OCI SBOM, build provenance, and a keyless GitHub/Sigstore
+attestation. After pulling an image, resolve and verify its provenance before
+admitting it to an environment:
+
+```sh
+image=ghcr.io/crapthings/meldbase:v0.1.0-alpha.13
+docker pull "$image"
+digest=$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')
+gh attestation verify "oci://$digest" --repo crapthings/meldbase
+```
+
+`gh attestation verify` confirms the signed build identity and repository; it
+does not replace the operator's review of the alpha support boundary or
+workload qualification. Package visibility is configured in GitHub Packages,
+not by a client-side Docker command.
+
 For a local, disposable smoke test, map the container process to your host
 user so that the mounted state directory has deliberate ownership:
 
