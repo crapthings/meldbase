@@ -47,6 +47,7 @@ type Rates struct {
 	DocumentsExaminedPerSecond float64 `json:"documentsExaminedPerSecond"`
 	DocumentsReturnedPerSecond float64 `json:"documentsReturnedPerSecond"`
 	KeysExaminedPerSecond      float64 `json:"keysExaminedPerSecond"`
+	PredicateStepsPerSecond    float64 `json:"predicateStepsPerSecond"`
 	PublishedChangesPerSecond  float64 `json:"publishedChangesPerSecond"`
 	DeltaDeliveriesPerSecond   float64 `json:"deltaDeliveriesPerSecond"`
 	WALBytesPerSecond          float64 `json:"walBytesPerSecond"`
@@ -283,6 +284,7 @@ func deriveRates(previous, current meldbase.DBStats) Rates {
 	rates.DocumentsExaminedPerSecond, _ = delta(previous.Queries.DocumentsExamined, current.Queries.DocumentsExamined)
 	rates.DocumentsReturnedPerSecond, _ = delta(previous.Queries.DocumentsReturned, current.Queries.DocumentsReturned)
 	rates.KeysExaminedPerSecond, _ = delta(previous.Queries.KeysExamined, current.Queries.KeysExamined)
+	rates.PredicateStepsPerSecond, _ = delta(previous.Queries.PredicateSteps, current.Queries.PredicateSteps)
 	rates.PublishedChangesPerSecond, _ = delta(previous.Realtime.PublishedChanges, current.Realtime.PublishedChanges)
 	rates.DeltaDeliveriesPerSecond, _ = delta(previous.Realtime.DeltaDeliveries, current.Realtime.DeltaDeliveries)
 	rates.PageCacheHitRatio = hitRatio(current.Storage.PageCache.Hits, current.Storage.PageCache.Misses)

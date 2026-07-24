@@ -111,6 +111,7 @@ func MarshalPrometheus(sample Sample) []byte {
 	writePrometheusFamily(&output, "meldbase_query_documents_examined_total", "Documents examined by completed public queries.", "counter", counterUint(stats.Queries.DocumentsExamined))
 	writePrometheusFamily(&output, "meldbase_query_documents_returned_total", "Documents returned by completed public queries.", "counter", counterUint(stats.Queries.DocumentsReturned))
 	writePrometheusFamily(&output, "meldbase_query_keys_examined_total", "Physical primary or secondary index keys admitted by public query budgets, including failed queries.", "counter", counterUint(stats.Queries.KeysExamined))
+	writePrometheusFamily(&output, "meldbase_query_predicate_steps_total", "Residual predicate steps completed by public queries, including failed queries.", "counter", counterUint(stats.Queries.PredicateSteps))
 	writePrometheusFamily(&output, "meldbase_query_candidate_ids_total", "Index candidate document IDs processed by public query deduplication.", "counter", counterUint(stats.Queries.CandidateIDs))
 	writePrometheusFamily(&output, "meldbase_query_unique_candidate_ids_total", "Unique index candidate document IDs processed by public queries.", "counter", counterUint(stats.Queries.UniqueCandidateIDs))
 	writePrometheusFamily(&output, "meldbase_query_duplicate_candidate_ids_total", "Duplicate index candidate document IDs discarded by public queries.", "counter", counterUint(stats.Queries.DuplicateCandidateIDs))

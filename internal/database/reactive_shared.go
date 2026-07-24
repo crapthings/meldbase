@@ -421,6 +421,10 @@ func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken ui
 	positions := make(map[DocumentID]uint64)
 	positionOwners := make(map[uint64]DocumentID)
 	entries := make([][]reactiveTreeEntry, len(queries))
+	budgets := make([]*queryBudget, len(queries))
+	for index, query := range queries {
+		budgets[index] = newPredicateBudget(query, limits)
+	}
 	memberCounts := make([]uint64, len(queries))
 	memberBytes := make([]uint64, len(queries))
 	var next uint64
@@ -444,7 +448,11 @@ func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken ui
 		var documentBytes uint64
 		documentBytesKnown := false
 		for index, query := range queries {
-			if query.Match(record.Decoded) {
+			matched, err := query.matchWithBudget(record.Decoded, budgets[index])
+			if err != nil {
+				return nil, finish(err)
+			}
+			if matched {
 				if !documentBytesKnown {
 					documentBytes, err = canonicalDocumentSize(record.Decoded)
 					if err != nil {
@@ -479,6 +487,7 @@ func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken ui
 
 func buildReactiveViewState(query QuerySpec, data *collectionData, order *reactiveCollectionOrder, seed maphash.Seed, token uint64, limits ResourceLimits) (*reactiveViewState, error) {
 	entries := make([]reactiveTreeEntry, 0)
+	budget := newPredicateBudget(query, limits)
 	var memberCount, memberBytes uint64
 	order.mu.RLock()
 	defer order.mu.RUnlock()
@@ -492,7 +501,11 @@ func buildReactiveViewState(query QuerySpec, data *collectionData, order *reacti
 			if !exists {
 				return nil, ErrCorrupt
 			}
-			if query.Match(document) {
+			matched, err := query.matchWithBudget(document, budget)
+			if err != nil {
+				return nil, err
+			}
+			if matched {
 				size, err := canonicalDocumentSize(document)
 				if err != nil {
 					return nil, err
@@ -823,14 +836,29 @@ func transitionReactiveViewState(current *reactiveViewState, query QuerySpec, or
 	}
 	byID, ordered := current.byID, current.ordered
 	memberCount, memberBytes := current.memberCount, current.memberBytes
+	budget := newPredicateBudget(query, limits)
 	mutated := false
 	for _, change := range changes {
 		if change.Operation == CreateIndexOperation {
 			continue
 		}
 		member, wasMember := reactiveIDGet(byID, change.DocumentID)
-		beforeMatches := change.Before != nil && query.Match(*change.Before)
-		afterMatches := change.After != nil && query.Match(*change.After)
+		beforeMatches := false
+		if change.Before != nil {
+			matched, err := query.matchWithBudget(*change.Before, budget)
+			if err != nil {
+				return nil, false, err
+			}
+			beforeMatches = matched
+		}
+		afterMatches := false
+		if change.After != nil {
+			matched, err := query.matchWithBudget(*change.After, budget)
+			if err != nil {
+				return nil, false, err
+			}
+			afterMatches = matched
+		}
 		if beforeMatches != wasMember {
 			return nil, false, nil
 		}
@@ -1331,7 +1359,11 @@ func snapshotQueryBudgetedUnlocked(ctx context.Context, db *DB, collection strin
 		if err := budget.document(); err != nil {
 			return QuerySnapshot{}, err
 		}
-		if !query.Match(document) {
+		matched, err := query.matchWithBudget(document, budget)
+		if err != nil {
+			return QuerySnapshot{}, err
+		}
+		if !matched {
 			continue
 		}
 		if err := retainQueryCandidate(&collector, budget, queryCandidate{document: document, position: data.positions[id]}); err != nil {

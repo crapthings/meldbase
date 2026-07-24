@@ -21,6 +21,10 @@ const (
 	DefaultMaxQueryCandidates        uint64 = 100_000
 	DefaultMaxQuerySortBytes         uint64 = 64 << 20
 	DefaultMaxQuerySkip              uint64 = 100_000
+	// Predicate steps account for residual expression visits and data-dependent
+	// comparisons such as scalar membership within stored arrays. It bounds
+	// CPU work that document/key scan limits alone cannot see.
+	DefaultMaxQueryPredicateSteps uint64 = 10_000_000
 )
 
 // ResourceLimits bounds work admitted by writes, index maintenance, and query execution. Zero values
@@ -40,6 +44,7 @@ type ResourceLimits struct {
 	MaxQueryCandidates        uint64 `json:"maxQueryCandidates"`
 	MaxQuerySortBytes         uint64 `json:"maxQuerySortBytes"`
 	MaxQuerySkip              uint64 `json:"maxQuerySkip"`
+	MaxQueryPredicateSteps    uint64 `json:"maxQueryPredicateSteps"`
 }
 
 // DatabaseOptions configures an in-memory database.
@@ -81,6 +86,9 @@ func normalizeResourceLimits(limits ResourceLimits) (ResourceLimits, error) {
 	}
 	if limits.MaxQuerySkip == 0 {
 		limits.MaxQuerySkip = DefaultMaxQuerySkip
+	}
+	if limits.MaxQueryPredicateSteps == 0 {
+		limits.MaxQueryPredicateSteps = DefaultMaxQueryPredicateSteps
 	}
 	if limits.MaxDocumentBytes > maxStoredDocumentBody {
 		return ResourceLimits{}, fmt.Errorf("%w: MaxDocumentBytes exceeds the storage format maximum", ErrInvalidResourceLimits)

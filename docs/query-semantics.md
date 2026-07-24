@@ -17,6 +17,49 @@ A missing path is distinct from a stored `null`.
 - `_id` predicates accept only a non-zero, lower-case, 32-character hexadecimal
   document ID. The wire form uses the separate `id` value tag.
 
+## Array length and exact value types
+
+`$size` matches only an array whose direct element count equals the requested
+size. Its operand must be an integer from zero through JavaScript's maximum
+safe integer. Missing paths, `null`, objects, strings, and other non-array
+values do not match; an empty array matches size zero.
+
+`$type` matches a present value's exact Meldbase type. The supported names are
+`null`, `boolean`, `int64`, `float64`, `string`, `date`, `id`, `binary`,
+`array`, and `object`. A non-empty array of names is an OR and is normalized to
+canonical order with duplicates removed. Meldbase deliberately has no
+ambiguous `number` alias; use `["int64", "float64"]` when both numeric kinds
+are intended. A missing path has no type, so it does not match `$type` (and,
+consequently, does match a direct `$not` of that predicate).
+
+Both operators are constant-work residual predicates for each decoded
+document. An indexed sibling in the same `$and` can still provide the candidate
+source, but `$size` and `$type` do not claim an ordinary B-tree access path or
+produce B-tree index advice themselves. Document admission and rechecking
+remain charged to the normal query budgets.
+
+## Array containment
+
+`$all` matches only a present array containing every requested value. Query
+values are structurally compared to individual array elements: `null`, arrays,
+and objects are valid values, while a missing path or non-array never matches.
+The operand must be a non-empty bounded array; duplicate query values are
+removed in first-occurrence order, so they never require repeated stored
+elements. `$all` is a residual predicate and charges a predicate step for each
+required value and examined array element. An indexed sibling in the same
+`$and` may provide candidates, but `$all` itself has no B-tree access path or
+multi-index intersection behavior.
+
+`$elemMatch` matches only a present array with at least one qualifying
+element. An operand whose keys are field names is object mode: its nested
+filter is evaluated against each object element independently. An operand
+whose keys are operators is scalar mode, supporting comparisons, `$in`,
+`$nin`, `$and`, `$or`, and `$not` against each element. The two styles cannot
+be mixed, and an empty operand is rejected. This prevents conditions from
+being satisfied by different elements of one array. Missing paths, non-arrays,
+and incompatible element kinds do not match. Like `$all`, `$elemMatch` is a
+predicate-budgeted residual predicate with no standalone B-tree access path.
+
 ## Comparisons and sorting
 
 Range predicates (`$gt`, `$gte`, `$lt`, `$lte`) apply to scalar values only.
@@ -86,12 +129,16 @@ planner chooses a collection scan, a primary-key lookup, or a secondary index.
 | `MaxQueryCandidates` | 100,000 | Retained candidates needed to produce the requested window |
 | `MaxQuerySortBytes` | 64 MiB | Canonical bytes of retained sorted candidates |
 | `MaxQuerySkip` | 100,000 | Requested offset before execution begins |
+| `MaxQueryPredicateSteps` | 10,000,000 | Residual expression visits and data-dependent array comparisons |
 
 An execution overrun returns `ErrQueryBudget` (which also satisfies normal
 query-error handling through `errors.Is`). Each rejected request increments the
 database resource-limit rejection metric. When `limit` is set, scan plans keep
 only the best `skip + limit` candidates; they still evaluate every required
 predicate unless the selected index has a proven insertion-order early-stop.
+`Explain.Budget` reports predicate-step use, pressure, and any
+`predicate_steps` rejection; the fixed-cardinality query metrics and optional
+diagnostics expose the same completed work without recording query values.
 
 ## Authorization and indexes
 

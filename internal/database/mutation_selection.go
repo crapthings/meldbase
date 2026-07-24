@@ -53,7 +53,14 @@ func (c *Collection) selectMutationDocumentsLocked(ctx context.Context, query Qu
 				return nil, err
 			}
 		}
-		if !exists || !query.Match(document) {
+		if !exists {
+			continue
+		}
+		matched, err := query.matchWithBudget(document, budget)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
 			continue
 		}
 		if err := budget.candidate(document); err != nil {

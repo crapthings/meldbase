@@ -6,16 +6,25 @@ import "fmt"
 // lazy cursors, aggregate reads, and mutation selection. It is deliberately
 // independent of the selected plan so an added index cannot weaken admission.
 type queryBudget struct {
-	db         *DB
-	query      QuerySpec
-	limits     ResourceLimits
-	documents  uint64
-	keys       uint64
-	candidates uint64
-	sortBytes  uint64
-	rejected   bool
-	exceeded   string
-	detailed   bool
+	db             *DB
+	query          QuerySpec
+	limits         ResourceLimits
+	documents      uint64
+	keys           uint64
+	candidates     uint64
+	sortBytes      uint64
+	predicateSteps uint64
+	rejected       bool
+	exceeded       string
+	detailed       bool
+}
+
+// newPredicateBudget is used by reactive rebuild and replay paths which do not
+// execute a public query span. It intentionally accounts only expression work:
+// those paths have their own retained-view admission limits and must still be
+// protected from data-dependent predicate loops.
+func newPredicateBudget(query QuerySpec, limits ResourceLimits) *queryBudget {
+	return &queryBudget{query: query, limits: limits}
 }
 
 func (db *DB) newQueryBudget(query QuerySpec) (*queryBudget, error) {
@@ -42,6 +51,14 @@ func (b *queryBudget) key() error {
 		return b.reject("keys", "index keys examined exceed limit %d", b.limits.MaxQueryKeysExamined)
 	}
 	b.keys++
+	return nil
+}
+
+func (b *queryBudget) predicate() error {
+	if b.predicateSteps >= b.limits.MaxQueryPredicateSteps {
+		return b.reject("predicate_steps", "predicate steps exceed limit %d", b.limits.MaxQueryPredicateSteps)
+	}
+	b.predicateSteps++
 	return nil
 }
 

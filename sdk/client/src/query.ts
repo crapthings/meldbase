@@ -1,4 +1,12 @@
-import type { Comparison, Filter, QueryExpr, QueryLimits, QuerySpec, SortField, Value } from "./types.js";
+import type {
+  Comparison,
+  Filter,
+  QueryExpr,
+  QueryLimits,
+  QuerySpec,
+  SortField,
+  Value,
+} from "./types.js";
 import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
 import {
   assertDocumentID,
@@ -8,12 +16,29 @@ import {
   compareSortValues,
   compareValues,
   getPath,
+  normalizeQueryTypes,
+  queryTypeNameOf,
   valueEquals,
 } from "./safe-value.js";
 import { normalizePageSort, pageFilterAfter } from "./cursor.js";
 import { encodeQuerySpec, wireQueryByteLength } from "./wire.js";
 
-const fieldOperators = new Set(["$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists", "$not"]);
+const fieldOperators = new Set([
+  "$eq",
+  "$ne",
+  "$gt",
+  "$gte",
+  "$lt",
+  "$lte",
+  "$in",
+  "$nin",
+  "$exists",
+  "$size",
+  "$type",
+  "$all",
+  "$elemMatch",
+  "$not",
+]);
 
 export interface QueryOptions {
   readonly sort?: readonly SortField[];
@@ -88,6 +113,32 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
     return value;
   };
 
+  const compileElement = (path: string, raw: unknown, depth: number): import("./types.js").ElementQueryExpr => {
+    if (depth > limits.maxDepth || !plainObject(raw) || Object.keys(raw).length === 0)
+      throw new QueryValidationError("scalar $elemMatch expects a non-empty object");
+    const args: import("./types.js").ElementQueryExpr[] = [];
+    for (const [operator, operand] of Object.entries(raw)) {
+      if (operand === undefined) throw new QueryValidationError(`Missing operand for ${operator}`);
+      addNode();
+      if (operator === "$and" || operator === "$or") {
+        if (!Array.isArray(operand) || operand.length === 0 || operand.length > limits.maxArrayItems)
+          throw new QueryValidationError(`${operator} expects a non-empty bounded condition array`);
+        args.push({ op: operator.slice(1) as "and" | "or", args: operand.map((item) => compileElement(path, item, depth + 1)) });
+      } else if (operator === "$not") {
+        args.push({ op: "not", arg: compileElement(path, operand, depth + 1) });
+      } else if (operator === "$in" || operator === "$nin") {
+        if (!Array.isArray(operand) || operand.length > limits.maxArrayItems)
+          throw new QueryValidationError(`${operator} expects a bounded array`);
+        args.push({ op: operator.slice(1) as "in" | "nin", values: operand.map((item) => checkedValue(path, item)) });
+      } else if (operator === "$eq" || operator === "$ne" || operator === "$gt" || operator === "$gte" || operator === "$lt" || operator === "$lte") {
+        args.push({ op: "compare", cmp: operator.slice(1) as "eq" | "ne" | "gt" | "gte" | "lt" | "lte", value: checkedValue(path, operand) });
+      } else {
+        throw new QueryValidationError(`Unsupported scalar $elemMatch operator: ${operator}`);
+      }
+    }
+    return args.length === 1 ? args[0] as import("./types.js").ElementQueryExpr : { op: "and", args };
+  };
+
   const compileField = (path: string, raw: Value | Comparison, depth: number): QueryExpr[] => {
     if (depth > limits.maxDepth) throw new QueryValidationError("Query nesting is too deep");
     const isOperators = plainObject(raw) && Object.keys(raw).some((key) => key.startsWith("$"));
@@ -103,6 +154,27 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
       if (operator === "$exists") {
         if (typeof operand !== "boolean") throw new QueryValidationError("$exists expects a boolean");
         result.push({ op: "exists", path, value: operand });
+      } else if (operator === "$size") {
+        if (typeof operand !== "number" || !Number.isSafeInteger(operand) || operand < 0)
+          throw new QueryValidationError("$size expects a non-negative safe integer");
+        result.push({ op: "size", path, size: operand });
+      } else if (operator === "$type") {
+        result.push({ op: "type", path, types: normalizeQueryTypes(operand, limits.maxArrayItems) });
+      } else if (operator === "$all") {
+        if (!Array.isArray(operand) || operand.length === 0 || operand.length > limits.maxArrayItems)
+          throw new QueryValidationError("$all expects a non-empty bounded array");
+        result.push({ op: "all", path, values: dedupeValues(operand.map((item) => checkedValue(path, item))) });
+      } else if (operator === "$elemMatch") {
+        if (!plainObject(operand) || Object.keys(operand).length === 0)
+          throw new QueryValidationError("$elemMatch expects a non-empty object");
+        const scalar = Object.keys(operand).some((key) => key.startsWith("$"));
+        if (scalar) {
+          if (Object.keys(operand).some((key) => !key.startsWith("$")))
+            throw new QueryValidationError("scalar $elemMatch cannot mix field keys and operators");
+          result.push({ op: "elem_match", path, mode: "scalar", arg: compileElement(path, operand, depth + 1) });
+        } else {
+          result.push({ op: "elem_match", path, mode: "object", arg: compileFilter(operand as Filter, depth + 1) });
+        }
       } else if (operator === "$in" || operator === "$nin") {
         if (!Array.isArray(operand) || operand.length > limits.maxArrayItems)
           throw new QueryValidationError(`${operator} expects a bounded array`);
@@ -179,6 +251,32 @@ export function matches(document: import("./types.js").Document, expression: Que
       return !matches(document, expression.arg);
     case "exists":
       return getPath(document, expression.path).found === expression.value;
+    case "size": {
+      const found = getPath(document, expression.path);
+      return found.found && Array.isArray(found.value) && found.value.length === expression.size;
+    }
+    case "type": {
+      const found = getPath(document, expression.path);
+      return (
+        found.found &&
+        expression.types.includes(queryTypeNameOf(found.value as Value, expression.path))
+      );
+    }
+    case "all": {
+      const found = getPath(document, expression.path);
+      return found.found && Array.isArray(found.value) && expression.values.every((candidate) =>
+        (found.value as readonly Value[]).some((item) => valueEquals(item, candidate)),
+      );
+    }
+    case "elem_match": {
+      const found = getPath(document, expression.path);
+      if (!found.found || !Array.isArray(found.value)) return false;
+      return (found.value as readonly Value[]).some((item) =>
+        expression.mode === "scalar"
+          ? matchesElement(item, expression.arg)
+          : plainObject(item) && matches(item as import("./types.js").Document, expression.arg),
+      );
+    }
     case "in":
     case "nin": {
       const found = getPath(document, expression.path);
@@ -227,6 +325,33 @@ export function executeQuery<T extends import("./types.js").Document>(documents:
 function fieldEquals(field: Value, candidate: Value): boolean {
   if (Array.isArray(field) && !Array.isArray(candidate)) return field.some((item) => valueEquals(item, candidate));
   return valueEquals(field, candidate);
+}
+
+function dedupeValues(values: readonly Value[]): Value[] {
+  const result: Value[] = [];
+  for (const value of values)
+    if (!result.some((candidate) => valueEquals(candidate, value))) result.push(value);
+  return result;
+}
+
+function matchesElement(value: Value, expression: import("./types.js").ElementQueryExpr): boolean {
+  switch (expression.op) {
+    case "and": return expression.args.every((arg) => matchesElement(value, arg));
+    case "or": return expression.args.some((arg) => matchesElement(value, arg));
+    case "not": return !matchesElement(value, expression.arg);
+    case "in": return expression.values.some((candidate) => fieldEquals(value, candidate));
+    case "nin": return !expression.values.some((candidate) => fieldEquals(value, candidate));
+    case "compare": {
+      if (expression.cmp === "eq") return fieldEquals(value, expression.value);
+      if (expression.cmp === "ne") return !fieldEquals(value, expression.value);
+      const order = compareValues(value, expression.value);
+      if (order === undefined) return false;
+      if (expression.cmp === "gt") return order > 0;
+      if (expression.cmp === "gte") return order >= 0;
+      if (expression.cmp === "lt") return order < 0;
+      return order <= 0;
+    }
+  }
 }
 
 function plainObject(value: unknown): value is Record<string, unknown> {

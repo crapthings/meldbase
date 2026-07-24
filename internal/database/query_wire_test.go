@@ -76,6 +76,11 @@ func TestDecodeQuerySpecRejectsAmbiguousOrUnsafeInput(t *testing.T) {
 		{"int overflow", `{"version":1,"where":{"op":"compare","cmp":"eq","path":"x","value":{"t":"int64","v":"9223372036854775808"}}}`},
 		{"noncanonical date", `{"version":1,"where":{"op":"compare","cmp":"eq","path":"x","value":{"t":"date","v":"2026-07-15T00:00:00Z"}}}`},
 		{"duplicate sort path", `{"version":1,"where":{"op":"true"},"sort":[{"path":"rank","direction":1},{"path":"rank","direction":-1}]}`},
+		{"fractional size", `{"version":1,"where":{"op":"size","path":"items","size":1.5}}`},
+		{"negative size", `{"version":1,"where":{"op":"size","path":"items","size":-1}}`},
+		{"scalar wire type", `{"version":1,"where":{"op":"type","path":"value","types":"int64"}}`},
+		{"empty wire types", `{"version":1,"where":{"op":"type","path":"value","types":[]}}`},
+		{"unknown wire type", `{"version":1,"where":{"op":"type","path":"value","types":["number"]}}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -122,6 +127,128 @@ func TestMarshalQuerySpecIsCanonicalAndRoundTrips(t *testing.T) {
 	again, err := MarshalQuerySpecJSON(decoded)
 	if err != nil || !reflect.DeepEqual(first, again) {
 		t.Fatalf("round trip differs: %s / %s", first, again)
+	}
+}
+
+func TestCompileSizeAndTypeCanonicalizesAndRejectsInvalidOperands(t *testing.T) {
+	query, err := CompileQuery(Filter{
+		"items": map[string]any{"$size": uint8(2)},
+		"value": map[string]any{"$type": []any{"object", "int64", "int64"}},
+	}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := query.FilterCapabilities(), []FilterCapability{
+		{Path: "items", Operator: "size"},
+		{Path: "value", Operator: "type"},
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("capabilities=%+v want=%+v", got, want)
+	}
+	encoded, err := MarshalQuerySpecJSON(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"version":1,"where":{"args":[{"op":"size","path":"items","size":2},{"op":"type","path":"value","types":["int64","object"]}],"op":"and"}}`
+	if string(encoded) != want {
+		t.Fatalf("canonical query=%s want=%s", encoded, want)
+	}
+	decoded, err := DecodeQuerySpecJSON([]byte(`{"version":1,"where":{"op":"type","path":"value","types":["object","int64","int64"]}}`), DefaultQueryLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := MarshalQuerySpecJSON(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(canonical) != `{"version":1,"where":{"op":"type","path":"value","types":["int64","object"]}}` {
+		t.Fatalf("canonical decoded type=%s", canonical)
+	}
+
+	invalid := []Filter{
+		{"items": map[string]any{"$size": -1}},
+		{"items": map[string]any{"$size": float64(1)}},
+		{"items": map[string]any{"$size": uint64(maxQueryArraySize + 1)}},
+		{"value": map[string]any{"$type": []string{}}},
+		{"value": map[string]any{"$type": "number"}},
+		{"value": map[string]any{"$type": []any{"int64", 1}}},
+	}
+	for index, filter := range invalid {
+		if _, err := CompileQuery(filter, QueryOptions{}); !errors.Is(err, ErrInvalidFilter) {
+			t.Fatalf("invalid filter %d error=%v", index, err)
+		}
+	}
+}
+
+func TestCompileAllCanonicalizesAndRejectsInvalidOperands(t *testing.T) {
+	query, err := CompileQuery(Filter{"tags": map[string]any{"$all": []any{"one", "two", "one"}}}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := query.FilterCapabilities(), []FilterCapability{{Path: "tags", Operator: "all"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("capabilities=%+v want=%+v", got, want)
+	}
+	encoded, err := MarshalQuerySpecJSON(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"version":1,"where":{"op":"all","path":"tags","values":[{"t":"string","v":"one"},{"t":"string","v":"two"}]}}`; got != want {
+		t.Fatalf("canonical query=%s want=%s", got, want)
+	}
+	decoded, err := DecodeQuerySpecJSON([]byte(`{"version":1,"where":{"op":"all","path":"tags","values":[{"t":"string","v":"one"},{"t":"string","v":"two"},{"t":"string","v":"one"}]}}`), DefaultQueryLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := MarshalQuerySpecJSON(decoded)
+	if err != nil || string(canonical) != string(encoded) {
+		t.Fatalf("canonical decoded all=%s err=%v", canonical, err)
+	}
+	invalid := []Filter{
+		{"tags": map[string]any{"$all": []any{}}},
+		{"tags": map[string]any{"$all": "one"}},
+	}
+	for index, filter := range invalid {
+		if _, err := CompileQuery(filter, QueryOptions{}); !errors.Is(err, ErrInvalidFilter) {
+			t.Fatalf("invalid filter %d error=%v", index, err)
+		}
+	}
+	if _, err := DecodeQuerySpecJSON([]byte(`{"version":1,"where":{"op":"all","path":"tags","values":[]}}`), DefaultQueryLimits); !errors.Is(err, ErrInvalidFilter) {
+		t.Fatalf("empty all wire error=%v", err)
+	}
+}
+
+func TestElemMatchWireRoundTripAndInvalidOperands(t *testing.T) {
+	query, err := CompileQuery(Filter{
+		"scores": map[string]any{"$elemMatch": map[string]any{"$gte": int64(90), "$lt": int64(100)}},
+		"parts":  map[string]any{"$elemMatch": map[string]any{"kind": "a", "qty": map[string]any{"$gte": int64(5)}}},
+	}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := MarshalQuerySpecJSON(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeQuerySpecJSON(encoded, DefaultQueryLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := MarshalQuerySpecJSON(decoded)
+	if err != nil || !reflect.DeepEqual(encoded, again) {
+		t.Fatalf("elem match round trip=%s / %s err=%v", encoded, again, err)
+	}
+	invalid := []Filter{
+		{"items": map[string]any{"$elemMatch": map[string]any{}}},
+		{"items": map[string]any{"$elemMatch": map[string]any{"$gte": int64(1), "kind": "a"}}},
+		{"items": map[string]any{"$elemMatch": map[string]any{"$where": "no"}}},
+	}
+	for index, filter := range invalid {
+		if _, err := CompileQuery(filter, QueryOptions{}); !errors.Is(err, ErrInvalidFilter) {
+			t.Fatalf("invalid elem match %d error=%v", index, err)
+		}
+	}
+	invalidWire := []byte(`{"version":1,"where":{"op":"elem_match","path":"items","mode":"scalar","arg":{"op":"compare","cmp":"gte","path":"forbidden","value":{"t":"number","v":1}}}}`)
+	if _, err := DecodeQuerySpecJSON(invalidWire, DefaultQueryLimits); !errors.Is(err, ErrInvalidFilter) {
+		t.Fatalf("invalid scalar elem match wire error=%v", err)
 	}
 }
 

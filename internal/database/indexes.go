@@ -328,14 +328,15 @@ type ExplainAccessSource struct {
 
 // ExplainBudget is the final resource-budget snapshot for one execution.
 // Pressure and Exceeded are fixed reason codes naming one of "documents",
-// "keys", "candidates", "sort_bytes", or "skip".
+// "keys", "candidates", "sort_bytes", "skip", or "predicate_steps".
 type ExplainBudget struct {
-	DocumentsUsed, DocumentsLimit   uint64
-	KeysUsed, KeysLimit             uint64
-	CandidatesUsed, CandidatesLimit uint64
-	SortBytesUsed, SortBytesLimit   uint64
-	SkipUsed, SkipLimit             uint64
-	Pressure, Exceeded              string
+	DocumentsUsed, DocumentsLimit           uint64
+	KeysUsed, KeysLimit                     uint64
+	CandidatesUsed, CandidatesLimit         uint64
+	SortBytesUsed, SortBytesLimit           uint64
+	SkipUsed, SkipLimit                     uint64
+	PredicateStepsUsed, PredicateStepsLimit uint64
+	Pressure, Exceeded                      string
 }
 
 // ExplainAdvice is a conservative, structured observation rather than an
@@ -569,7 +570,11 @@ func (c *Collection) planWithBudgetAccess(ctx context.Context, query QuerySpec, 
 				return nil, explain, err
 			}
 			explain.DocumentsExamined++
-			if query.Match(document) {
+			matched, err := query.matchWithBudget(document, budget)
+			if err != nil {
+				return nil, explain, err
+			}
+			if matched {
 				if err := retainQueryCandidate(&collector, budget, queryCandidate{document: document, position: data.positions[id]}); err != nil {
 					return nil, explain, err
 				}
@@ -694,7 +699,11 @@ func executeMemoryOrderedCandidates(ctx context.Context, data *collectionData, r
 			return nil, explain, err
 		}
 		observeExplainDocument(&explain, candidate.source)
-		if !query.Match(document) {
+		matched, err := query.matchWithBudget(document, budget)
+		if err != nil {
+			return nil, explain, err
+		}
+		if !matched {
 			continue
 		}
 		if err := retainQueryCandidate(&collector, budget, queryCandidate{document: document, position: candidate.position}); err != nil {
@@ -739,7 +748,11 @@ func executeMemoryIndexCandidates(ctx context.Context, data *collectionData, raw
 			return nil, explain, err
 		}
 		observeExplainDocument(&explain, rawCandidate.source)
-		if !query.Match(document) {
+		matched, err := query.matchWithBudget(document, budget)
+		if err != nil {
+			return nil, explain, err
+		}
+		if !matched {
 			continue
 		}
 		position, exists := collectionDocumentPosition(data, id)
@@ -836,7 +849,11 @@ func (c *Collection) planStorageLockedAccess(ctx context.Context, query QuerySpe
 			return nil, explain, err
 		}
 		explain.DocumentsExamined++
-		if query.Match(candidate.document) {
+		matched, err := query.matchWithBudget(candidate.document, budget)
+		if err != nil {
+			return nil, explain, err
+		}
+		if matched {
 			if err := retainQueryCandidate(&collector, budget, candidate); err != nil {
 				return nil, explain, err
 			}
@@ -901,7 +918,11 @@ func executeStorageAccessPlan(ctx context.Context, snapshot queryStorageSnapshot
 			return err
 		}
 		observeExplainDocument(&explain, source)
-		if query.Match(candidate.document) {
+		matched, err := query.matchWithBudget(candidate.document, budget)
+		if err != nil {
+			return err
+		}
+		if matched {
 			if err := retainQueryCandidate(&collector, budget, candidate); err != nil {
 				return err
 			}
@@ -1092,7 +1113,11 @@ func executeStorageOrderedAccessPlan(ctx context.Context, snapshot queryStorageS
 				return nil, explain, err
 			}
 			observeExplainDocument(&explain, scan.source)
-			if query.Match(candidate.document) {
+			matched, err := query.matchWithBudget(candidate.document, budget)
+			if err != nil {
+				return nil, explain, err
+			}
+			if matched {
 				if err := retainQueryCandidate(&collector, budget, candidate); err != nil {
 					return nil, explain, err
 				}

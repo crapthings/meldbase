@@ -114,11 +114,22 @@ func (tx *WriteTransaction) Find(collection string, query QuerySpec) (QuerySnaps
 		return QuerySnapshot{}, err
 	}
 	defer iterator.Close()
+	budget, err := tx.db.newQueryBudget(query)
+	if err != nil {
+		return QuerySnapshot{}, err
+	}
 	candidates := make([]queryCandidate, 0)
 	seen := make(map[DocumentID]struct{})
 	var candidateBytes uint64
 	add := func(document Document, position uint64) error {
-		if document == nil || position == 0 || !query.Match(document) {
+		if document == nil || position == 0 {
+			return nil
+		}
+		matched, err := query.matchWithBudget(document, budget)
+		if err != nil {
+			return err
+		}
+		if !matched {
 			return nil
 		}
 		if uint64(len(candidates)) >= tx.db.resourceLimits.MaxTransactionChanges {
@@ -138,6 +149,9 @@ func (tx *WriteTransaction) Find(collection string, query QuerySpec) (QuerySnaps
 		return nil
 	}
 	for iterator.Next() {
+		if err := budget.document(); err != nil {
+			return QuerySnapshot{}, err
+		}
 		record := iterator.Record()
 		candidate, err := decodeQueryStorageCandidate(record)
 		if err != nil {

@@ -66,6 +66,64 @@
       ],
       "query": {"version":1,"where":{"op":"compare","cmp":"eq","path":"value","value":{"t":"id","v":"00000000000000000000000000000001"}}},
       "expectedIds": ["generic-id"]
+    },
+    {
+      "name": "array-size-distinguishes-empty-nonarray-and-missing",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"empty"}],["items",{"t":"array","v":[]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"two"}],["items",{"t":"array","v":[{"t":"null"},{"t":"number","v":2}]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"object"}],["items",{"t":"object","v":[]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"missing"}]]}
+      ],
+      "query": {"version":1,"where":{"op":"size","path":"items","size":0}},
+      "expectedIds": ["empty"]
+    },
+    {
+      "name": "type-union-is-exact-and-excludes-missing",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"null"}],["value",{"t":"null"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"int64"}],["value",{"t":"int64","v":"1"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"float64"}],["value",{"t":"number","v":1}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"string"}],["value",{"t":"string","v":"1"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"array"}],["value",{"t":"array","v":[]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"object"}],["value",{"t":"object","v":[]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"missing"}]]}
+      ],
+      "query": {"version":1,"where":{"op":"type","path":"value","types":["array","int64","float64","int64"]}},
+      "expectedIds": ["int64","float64","array"]
+    },
+    {
+      "name": "size-and-type-compose-with-or-and-not",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"empty"}],["items",{"t":"array","v":[]}],["value",{"t":"number","v":1}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"int64"}],["items",{"t":"array","v":[{"t":"null"}]}],["value",{"t":"int64","v":"1"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"float64"}],["items",{"t":"array","v":[{"t":"null"}]}],["value",{"t":"number","v":1}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"missing"}]]}
+      ],
+      "query": {"version":1,"where":{"op":"or","args":[{"op":"size","path":"items","size":0},{"op":"not","arg":{"op":"type","path":"value","types":["float64"]}}]}},
+      "expectedIds": ["empty","int64","missing"]
+    },
+    {
+      "name": "all-requires-every-deduplicated-array-value",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"all"}],["tags",{"t":"array","v":[{"t":"string","v":"one"},{"t":"string","v":"two"},{"t":"object","v":[["x",{"t":"number","v":1}]]}]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"pair"}],["tags",{"t":"array","v":[{"t":"string","v":"one"},{"t":"string","v":"two"}]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"missing"}],["tags",{"t":"array","v":[{"t":"string","v":"one"}]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"scalar"}],["tags",{"t":"string","v":"one"}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"absent"}]]}
+      ],
+      "query": {"version":1,"where":{"op":"all","path":"tags","values":[{"t":"string","v":"one"},{"t":"string","v":"two"},{"t":"string","v":"one"}]}},
+      "expectedIds": ["all","pair"]
+    },
+    {
+      "name": "elem-match-object-conditions-share-one-array-element",
+      "documents": [
+        {"t":"object","v":[["_id",{"t":"string","v":"split"}],["parts",{"t":"array","v":[{"t":"object","v":[["kind",{"t":"string","v":"a"}],["qty",{"t":"number","v":1}]]},{"t":"object","v":[["kind",{"t":"string","v":"b"}],["qty",{"t":"number","v":5}]]}]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"same"}],["parts",{"t":"array","v":[{"t":"object","v":[["kind",{"t":"string","v":"a"}],["qty",{"t":"number","v":5}]]}]}]]},
+        {"t":"object","v":[["_id",{"t":"string","v":"scalar"}],["parts",{"t":"string","v":"not-array"}]]}
+      ],
+      "query": {"version":1,"where":{"op":"elem_match","path":"parts","mode":"object","arg":{"op":"and","args":[{"op":"compare","cmp":"eq","path":"kind","value":{"t":"string","v":"a"}},{"op":"compare","cmp":"gte","path":"qty","value":{"t":"number","v":5}}]}}},
+      "expectedIds": ["same"]
     }
   ]
 }

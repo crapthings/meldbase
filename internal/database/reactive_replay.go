@@ -71,6 +71,7 @@ func newReactiveReplayView(snapshot *storage.ReadSnapshot, collection string, qu
 	}
 	defer iterator.Close()
 	entries := make([]reactiveTreeEntry, 0)
+	budget := newPredicateBudget(query, limits)
 	var memberCount, memberBytes uint64
 	var scanned uint64
 	for iterator.Next() {
@@ -88,7 +89,11 @@ func newReactiveReplayView(snapshot *storage.ReadSnapshot, collection string, qu
 		}
 		view.order.positions[id] = record.InsertionPosition
 		scanned++
-		if query.Match(document) {
+		matched, err := query.matchWithBudget(document, budget)
+		if err != nil {
+			return nil, err
+		}
+		if matched {
 			size, err := canonicalDocumentSize(document)
 			if err != nil {
 				return nil, err

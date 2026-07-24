@@ -35,6 +35,7 @@ export type {
   QueryExpr,
   QueryLimits,
   QuerySpec,
+  QueryTypeName,
   SortField,
   Update,
   Value,

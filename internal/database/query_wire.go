@@ -163,8 +163,73 @@ func encodeQueryExpression(expression expr) (any, error) {
 		return map[string]any{"op": value.op, "path": value.path, "values": values}, nil
 	case existsExpr:
 		return map[string]any{"op": "exists", "path": value.path, "value": value.value}, nil
+	case sizeExpr:
+		return map[string]any{"op": "size", "path": value.path, "size": value.size}, nil
+	case typeExpr:
+		return map[string]any{"op": "type", "path": value.path, "types": queryTypeNames(value.types)}, nil
+	case allExpr:
+		values := make([]any, len(value.values))
+		for index, item := range value.values {
+			encoded, err := encodeWireValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values[index] = encoded
+		}
+		return map[string]any{"op": "all", "path": value.path, "values": values}, nil
+	case elemMatchExpr:
+		var arg any
+		var err error
+		if value.mode == "scalar" {
+			arg, err = encodeElementExpression(value.scalar)
+		} else {
+			arg, err = encodeQueryExpression(value.object)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"op": "elem_match", "path": value.path, "mode": value.mode, "arg": arg}, nil
 	default:
 		return nil, fmt.Errorf("%w: unknown compiled expression", ErrInvalidFilter)
+	}
+}
+
+func encodeElementExpression(expression elementExpr) (any, error) {
+	switch value := expression.(type) {
+	case elementLogicalExpr:
+		args := make([]any, len(value.args))
+		for index, child := range value.args {
+			encoded, err := encodeElementExpression(child)
+			if err != nil {
+				return nil, err
+			}
+			args[index] = encoded
+		}
+		return map[string]any{"op": value.op, "args": args}, nil
+	case elementNotExpr:
+		arg, err := encodeElementExpression(value.arg)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"op": "not", "arg": arg}, nil
+	case elementCompareExpr:
+		encoded, err := encodeWireValue(value.value)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"op": "compare", "cmp": value.cmp, "value": encoded}, nil
+	case elementMembershipExpr:
+		values := make([]any, len(value.values))
+		for index, item := range value.values {
+			encoded, err := encodeWireValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values[index] = encoded
+		}
+		return map[string]any{"op": value.op, "values": values}, nil
+	default:
+		return nil, fmt.Errorf("%w: unknown scalar elem match condition", ErrInvalidFilter)
 	}
 }
 
@@ -227,7 +292,11 @@ func (d *queryDecoder) decodeExpr(data []byte, depth int) (expr, error) {
 		"true": {"op": true}, "and": {"op": true, "args": true}, "or": {"op": true, "args": true},
 		"not": {"op": true, "arg": true}, "compare": {"op": true, "cmp": true, "path": true, "value": true},
 		"in": {"op": true, "path": true, "values": true}, "nin": {"op": true, "path": true, "values": true},
-		"exists": {"op": true, "path": true, "value": true},
+		"exists":     {"op": true, "path": true, "value": true},
+		"size":       {"op": true, "path": true, "size": true},
+		"type":       {"op": true, "path": true, "types": true},
+		"all":        {"op": true, "path": true, "values": true},
+		"elem_match": {"op": true, "path": true, "mode": true, "arg": true},
 	}
 	permitted, known := allowed[op]
 	if !known {
@@ -277,7 +346,62 @@ func (d *queryDecoder) decodeExpr(data []byte, depth int) (expr, error) {
 			return nil, err
 		}
 		return existsExpr{path: path, value: value}, nil
-	case "in", "nin":
+	case "size":
+		path, err := decodePath(fields)
+		if err != nil {
+			return nil, err
+		}
+		var size int64
+		if err := requiredField(fields, "size", &size); err != nil {
+			return nil, err
+		}
+		if size < 0 || size > maxQueryArraySize {
+			return nil, fmt.Errorf("%w: invalid array size", ErrInvalidFilter)
+		}
+		return sizeExpr{path: path, size: size}, nil
+	case "type":
+		path, err := decodePath(fields)
+		if err != nil {
+			return nil, err
+		}
+		var names []string
+		if err := requiredField(fields, "types", &names); err != nil {
+			return nil, err
+		}
+		types, err := normalizeQueryTypes(names, d.limits.MaxArrayItems)
+		if err != nil {
+			return nil, err
+		}
+		return typeExpr{path: path, types: types}, nil
+	case "elem_match":
+		path, err := decodePath(fields)
+		if err != nil {
+			return nil, err
+		}
+		var mode string
+		if err := requiredField(fields, "mode", &mode); err != nil {
+			return nil, err
+		}
+		arg, ok := fields["arg"]
+		if !ok {
+			return nil, fmt.Errorf("%w: elem match is missing arg", ErrInvalidFilter)
+		}
+		if mode == "scalar" {
+			condition, err := d.decodeElementExpr(arg, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			return elemMatchExpr{path: path, mode: mode, scalar: condition}, nil
+		}
+		if mode == "object" {
+			condition, err := d.decodeExpr(arg, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			return elemMatchExpr{path: path, mode: mode, object: condition}, nil
+		}
+		return nil, fmt.Errorf("%w: invalid elem match mode", ErrInvalidFilter)
+	case "in", "nin", "all":
 		path, err := decodePath(fields)
 		if err != nil {
 			return nil, err
@@ -286,7 +410,7 @@ func (d *queryDecoder) decodeExpr(data []byte, depth int) (expr, error) {
 		if err := requiredField(fields, "values", &rawValues); err != nil {
 			return nil, err
 		}
-		if len(rawValues) > d.limits.MaxArrayItems {
+		if len(rawValues) > d.limits.MaxArrayItems || (op == "all" && len(rawValues) == 0) {
 			return nil, fmt.Errorf("%w: membership list too large", ErrInvalidFilter)
 		}
 		values := make([]Value, len(rawValues))
@@ -295,6 +419,15 @@ func (d *queryDecoder) decodeExpr(data []byte, depth int) (expr, error) {
 			if err != nil {
 				return nil, err
 			}
+		}
+		if op == "all" {
+			canonical := make([]Value, 0, len(values))
+			for _, value := range values {
+				if !containsQueryValue(canonical, value) {
+					canonical = append(canonical, value)
+				}
+			}
+			return allExpr{path: path, values: canonical}, nil
 		}
 		return membershipExpr{op: op, path: path, values: values}, nil
 	default:
@@ -318,6 +451,103 @@ func (d *queryDecoder) decodeExpr(data []byte, depth int) (expr, error) {
 			return nil, err
 		}
 		return compareExpr{cmp: cmp, path: path, value: value}, nil
+	}
+}
+
+func (d *queryDecoder) decodeElementExpr(data []byte, depth int) (elementExpr, error) {
+	if depth > d.limits.MaxDepth {
+		return nil, fmt.Errorf("%w: query nesting is too deep", ErrInvalidFilter)
+	}
+	d.nodes++
+	if d.nodes > d.limits.MaxNodes {
+		return nil, fmt.Errorf("%w: too many query nodes", ErrInvalidFilter)
+	}
+	fields, err := rawObject(data)
+	if err != nil {
+		return nil, fmt.Errorf("%w: scalar elem match expression must be an object", ErrInvalidFilter)
+	}
+	opRaw, ok := fields["op"]
+	if !ok {
+		return nil, fmt.Errorf("%w: scalar elem match expression is missing op", ErrInvalidFilter)
+	}
+	var op string
+	if err := strictJSON(opRaw, &op); err != nil {
+		return nil, fmt.Errorf("%w: invalid scalar elem match op", ErrInvalidFilter)
+	}
+	allowed := map[string]map[string]bool{
+		"and": {"op": true, "args": true}, "or": {"op": true, "args": true},
+		"not": {"op": true, "arg": true}, "compare": {"op": true, "cmp": true, "value": true},
+		"in": {"op": true, "values": true}, "nin": {"op": true, "values": true},
+	}
+	permitted, known := allowed[op]
+	if !known {
+		return nil, fmt.Errorf("%w: unknown scalar elem match op %q", ErrInvalidFilter, op)
+	}
+	for field := range fields {
+		if !permitted[field] {
+			return nil, fmt.Errorf("%w: unexpected %q for scalar elem match %s", ErrInvalidFilter, field, op)
+		}
+	}
+	switch op {
+	case "and", "or":
+		var args []json.RawMessage
+		if err := requiredField(fields, "args", &args); err != nil {
+			return nil, err
+		}
+		if len(args) == 0 || len(args) > d.limits.MaxArrayItems {
+			return nil, fmt.Errorf("%w: scalar elem match args outside bounds", ErrInvalidFilter)
+		}
+		children := make([]elementExpr, len(args))
+		for index := range args {
+			children[index], err = d.decodeElementExpr(args[index], depth+1)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return elementLogicalExpr{op: op, args: children}, nil
+	case "not":
+		arg, ok := fields["arg"]
+		if !ok {
+			return nil, fmt.Errorf("%w: scalar elem match not is missing arg", ErrInvalidFilter)
+		}
+		condition, err := d.decodeElementExpr(arg, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		return elementNotExpr{arg: condition}, nil
+	case "in", "nin":
+		var rawValues []json.RawMessage
+		if err := requiredField(fields, "values", &rawValues); err != nil {
+			return nil, err
+		}
+		if len(rawValues) > d.limits.MaxArrayItems {
+			return nil, fmt.Errorf("%w: scalar elem match membership too large", ErrInvalidFilter)
+		}
+		values := make([]Value, len(rawValues))
+		for index := range rawValues {
+			values[index], err = decodeWireValue(rawValues[index], d.limits, depth+1)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return elementMembershipExpr{op: op, values: values}, nil
+	default:
+		var cmp string
+		if err := requiredField(fields, "cmp", &cmp); err != nil {
+			return nil, err
+		}
+		if cmp != "eq" && cmp != "ne" && cmp != "gt" && cmp != "gte" && cmp != "lt" && cmp != "lte" {
+			return nil, fmt.Errorf("%w: invalid scalar elem match comparison", ErrInvalidFilter)
+		}
+		raw, ok := fields["value"]
+		if !ok {
+			return nil, fmt.Errorf("%w: scalar elem match compare is missing value", ErrInvalidFilter)
+		}
+		value, err := decodeWireValue(raw, d.limits, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		return elementCompareExpr{cmp: cmp, value: value}, nil
 	}
 }
 

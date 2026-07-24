@@ -156,6 +156,7 @@ type QueryStats struct {
 	DocumentsExamined     uint64 `json:"documentsExamined"`
 	DocumentsReturned     uint64 `json:"documentsReturned"`
 	KeysExamined          uint64 `json:"keysExamined"`
+	PredicateSteps        uint64 `json:"predicateSteps"`
 	CandidateIDs          uint64 `json:"candidateIds"`
 	UniqueCandidateIDs    uint64 `json:"uniqueCandidateIds"`
 	DuplicateCandidateIDs uint64 `json:"duplicateCandidateIds"`
@@ -311,15 +312,15 @@ type dbMetrics struct {
 	writeTransactionsCommitted, writeTransactionsNoops   atomic.Uint64
 	writeTransactionsConflicts, writeTransactionsAborted atomic.Uint64
 
-	queries, queryFailures, activeCursors   atomic.Uint64
-	collectionScans, indexScans, idLookups  atomic.Uint64
-	documentsExamined, documentsReturned    atomic.Uint64
-	keysExamined, queryCandidateIDs         atomic.Uint64
-	queryUniqueCandidateIDs                 atomic.Uint64
-	queryDuplicateCandidateIDs              atomic.Uint64
-	queryCandidatesRetained, querySortBytes atomic.Uint64
-	queryEarlyStops, queryBudgetPressure    atomic.Uint64
-	queryBudgetRejections                   atomic.Uint64
+	queries, queryFailures, activeCursors                atomic.Uint64
+	collectionScans, indexScans, idLookups               atomic.Uint64
+	documentsExamined, documentsReturned                 atomic.Uint64
+	keysExamined, queryPredicateSteps, queryCandidateIDs atomic.Uint64
+	queryUniqueCandidateIDs                              atomic.Uint64
+	queryDuplicateCandidateIDs                           atomic.Uint64
+	queryCandidatesRetained, querySortBytes              atomic.Uint64
+	queryEarlyStops, queryBudgetPressure                 atomic.Uint64
+	queryBudgetRejections                                atomic.Uint64
 
 	publishedBatches, publishedChanges, watcherDeliveries atomic.Uint64
 	initialSnapshots, queryRecomputes, snapshotsEmitted   atomic.Uint64
@@ -469,6 +470,7 @@ func (db *DB) Stats() DBStats {
 		DocumentsExamined:     db.metrics.documentsExamined.Load(),
 		DocumentsReturned:     db.metrics.documentsReturned.Load(),
 		KeysExamined:          db.metrics.keysExamined.Load(),
+		PredicateSteps:        db.metrics.queryPredicateSteps.Load(),
 		CandidateIDs:          db.metrics.queryCandidateIDs.Load(),
 		UniqueCandidateIDs:    db.metrics.queryUniqueCandidateIDs.Load(),
 		DuplicateCandidateIDs: db.metrics.queryDuplicateCandidateIDs.Load(),
@@ -587,6 +589,9 @@ func (db *DB) recordQuery(explain ExplainResult, returned int, err error, diagno
 	db.metrics.queries.Add(1)
 	if explain.KeysExamined > 0 {
 		db.metrics.keysExamined.Add(uint64(explain.KeysExamined))
+	}
+	if explain.Budget.PredicateStepsUsed > 0 {
+		db.metrics.queryPredicateSteps.Add(explain.Budget.PredicateStepsUsed)
 	}
 	if explain.CandidateIDs > 0 {
 		db.metrics.queryCandidateIDs.Add(uint64(explain.CandidateIDs))

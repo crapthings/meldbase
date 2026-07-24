@@ -11,6 +11,18 @@ export type Value = Primitive | readonly Value[] | { readonly [key: string]: Val
 export type Document = { readonly _id: string; readonly [key: string]: Value };
 export type InputDocument = { readonly _id?: string; readonly [key: string]: Value | undefined };
 
+export type QueryTypeName =
+  | "null"
+  | "boolean"
+  | "int64"
+  | "float64"
+  | "string"
+  | "date"
+  | "id"
+  | "binary"
+  | "array"
+  | "object";
+
 // InsertDocument carries the schema of a typed collection through an insert
 // while allowing the SDK to allocate `_id`. `U` is inferred from the supplied
 // value; adding an ID must make it assignable to T. This avoids losing T's
@@ -28,7 +40,25 @@ export type Comparison = {
   readonly $in?: readonly Value[];
   readonly $nin?: readonly Value[];
   readonly $exists?: boolean;
+  readonly $size?: number;
+  readonly $type?: QueryTypeName | readonly QueryTypeName[];
+  readonly $all?: readonly Value[];
+  readonly $elemMatch?: ElemMatchScalar | Filter;
   readonly $not?: Value | Comparison;
+};
+
+export type ElemMatchScalar = {
+  readonly $eq?: Value;
+  readonly $ne?: Value;
+  readonly $gt?: Value;
+  readonly $gte?: Value;
+  readonly $lt?: Value;
+  readonly $lte?: Value;
+  readonly $in?: readonly Value[];
+  readonly $nin?: readonly Value[];
+  readonly $and?: readonly ElemMatchScalar[];
+  readonly $or?: readonly ElemMatchScalar[];
+  readonly $not?: ElemMatchScalar;
 };
 
 export type Filter = {
@@ -85,7 +115,18 @@ export type QueryExpr =
   | { readonly op: "not"; readonly arg: QueryExpr }
   | { readonly op: "compare"; readonly cmp: CompareOperator; readonly path: string; readonly value: Value }
   | { readonly op: "in" | "nin"; readonly path: string; readonly values: readonly Value[] }
-  | { readonly op: "exists"; readonly path: string; readonly value: boolean };
+  | { readonly op: "exists"; readonly path: string; readonly value: boolean }
+  | { readonly op: "size"; readonly path: string; readonly size: number }
+  | { readonly op: "type"; readonly path: string; readonly types: readonly QueryTypeName[] }
+  | { readonly op: "all"; readonly path: string; readonly values: readonly Value[] }
+  | { readonly op: "elem_match"; readonly path: string; readonly mode: "scalar"; readonly arg: ElementQueryExpr }
+  | { readonly op: "elem_match"; readonly path: string; readonly mode: "object"; readonly arg: QueryExpr };
+
+export type ElementQueryExpr =
+  | { readonly op: "and" | "or"; readonly args: readonly ElementQueryExpr[] }
+  | { readonly op: "not"; readonly arg: ElementQueryExpr }
+  | { readonly op: "compare"; readonly cmp: CompareOperator; readonly value: Value }
+  | { readonly op: "in" | "nin"; readonly values: readonly Value[] };
 
 export interface SortField {
   readonly path: string;

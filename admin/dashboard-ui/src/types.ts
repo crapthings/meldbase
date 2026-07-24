@@ -38,6 +38,7 @@ export type DiagnosticEvent = {
   documentsExamined?: number;
   documentsReturned?: number;
   keysExamined?: number;
+  predicateSteps?: number;
   candidateIds?: number;
   uniqueCandidateIds?: number;
   duplicateCandidateIds?: number;

@@ -194,6 +194,7 @@ func explainBudgetSnapshot(budget *queryBudget) ExplainBudget {
 		CandidatesUsed: budget.candidates, CandidatesLimit: budget.limits.MaxQueryCandidates,
 		SortBytesUsed: budget.sortBytes, SortBytesLimit: budget.limits.MaxQuerySortBytes,
 		SkipUsed: uint64(budget.query.skip), SkipLimit: budget.limits.MaxQuerySkip,
+		PredicateStepsUsed: budget.predicateSteps, PredicateStepsLimit: budget.limits.MaxQueryPredicateSteps,
 		Exceeded: budget.exceeded,
 	}
 	result.Pressure = highestBudgetPressure(result)
@@ -211,6 +212,7 @@ func highestBudgetPressure(budget ExplainBudget) string {
 		{"candidates", budget.CandidatesUsed, budget.CandidatesLimit},
 		{"sort_bytes", budget.SortBytesUsed, budget.SortBytesLimit},
 		{"skip", budget.SkipUsed, budget.SkipLimit},
+		{"predicate_steps", budget.PredicateStepsUsed, budget.PredicateStepsLimit},
 	}
 	bestName := ""
 	bestRatio := float64(0)

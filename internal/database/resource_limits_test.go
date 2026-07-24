@@ -194,6 +194,68 @@ func TestQueryBudgetsApplyToReadsSnapshotsAndMutations(t *testing.T) {
 	}
 }
 
+func TestPredicateWorkBudgetBoundsArrayResidualsAcrossExecutionPaths(t *testing.T) {
+	constructors := map[string]func(*testing.T) *DB{
+		"memory": func(t *testing.T) *DB {
+			db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{MaxQueryPredicateSteps: 4, MaxQueryDocumentsExamined: 10}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return db
+		},
+		"durable": func(t *testing.T) *DB {
+			db, err := OpenWithOptions(filepath.Join(t.TempDir(), "predicate-budget.meld2"), OpenOptions{ResourceLimits: ResourceLimits{MaxQueryPredicateSteps: 4, MaxQueryDocumentsExamined: 10}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return db
+		},
+	}
+	for name, construct := range constructors {
+		t.Run(name, func(t *testing.T) {
+			db := construct(t)
+			defer db.Close()
+			items := db.Collection("items")
+			if _, err := items.InsertOne(context.Background(), Document{"scope": String("ready"), "labels": Array(String("one"), String("two"), String("three"))}); err != nil {
+				t.Fatal(err)
+			}
+			if err := items.CreateIndex(context.Background(), "by_scope", []IndexField{{Field: "scope", Order: 1}}, IndexOptions{}); err != nil {
+				t.Fatal(err)
+			}
+
+			filter := Filter{"scope": "ready", "labels": "missing"}
+			explain, err := items.Explain(context.Background(), filter)
+			if !errors.Is(err, ErrQueryBudget) || explain.Stage != "IXSCAN" ||
+				explain.Budget.Exceeded != "predicate_steps" || explain.Budget.PredicateStepsUsed != 4 ||
+				explain.Budget.PredicateStepsLimit != 4 || explain.Budget.Pressure != "predicate_steps" {
+				t.Fatalf("partial explain=%+v err=%v", explain, err)
+			}
+
+			cursor, err := items.Find(context.Background(), filter, QueryOptions{})
+			if err == nil {
+				_, err = cursor.All(context.Background())
+			}
+			if !errors.Is(err, ErrQueryBudget) {
+				t.Fatalf("find error=%v", err)
+			}
+			query, err := CompileQuery(filter, QueryOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := items.SnapshotQuery(context.Background(), query); !errors.Is(err, ErrQueryBudget) {
+				t.Fatalf("snapshot error=%v", err)
+			}
+			if _, err := items.UpdateMany(context.Background(), filter, Update{"$set": map[string]any{"changed": true}}); !errors.Is(err, ErrQueryBudget) {
+				t.Fatalf("mutation error=%v", err)
+			}
+			stats := db.Stats().Queries
+			if stats.PredicateSteps != 4 || stats.BudgetRejections != 1 || stats.Failed != 1 {
+				t.Fatalf("public query stats=%+v", stats)
+			}
+		})
+	}
+}
+
 func TestQueryBudgetsBoundIndexKeysSortBytesAndSkip(t *testing.T) {
 	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{
 		MaxQueryKeysExamined: 1, MaxQuerySortBytes: 32, MaxQuerySkip: 1,

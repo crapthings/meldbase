@@ -1,4 +1,4 @@
-import type { Document, QueryLimits, Value } from "./types.js";
+import type { Document, QueryLimits, QueryTypeName, Value } from "./types.js";
 import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
 
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
@@ -12,6 +12,19 @@ const DEFAULT_TRANSPORT_VALUE_LIMITS: QueryLimits = Object.freeze({
   ...DEFAULT_QUERY_LIMITS,
   maxDepth: 64,
 });
+const QUERY_TYPE_ORDER = [
+  "null",
+  "boolean",
+  "int64",
+  "float64",
+  "string",
+  "date",
+  "id",
+  "binary",
+  "array",
+  "object",
+] as const satisfies readonly QueryTypeName[];
+const QUERY_TYPE_NAMES = new Set<string>(QUERY_TYPE_ORDER);
 
 // DocumentID represents an ID-valued generic field. It is intentionally
 // separate from string: a canonical-looking string is still a string unless a
@@ -212,6 +225,35 @@ export function getPath(document: Document, path: string): { found: boolean; val
     current = next;
   }
   return { found: true, value: current };
+}
+
+export function normalizeQueryTypes(
+  raw: unknown,
+  maxItems = DEFAULT_QUERY_LIMITS.maxArrayItems,
+): QueryTypeName[] {
+  const values = typeof raw === "string" ? [raw] : raw;
+  if (!Array.isArray(values) || values.length === 0 || values.length > maxItems)
+    throw new QueryValidationError("$type expects a non-empty bounded type list");
+  const selected = new Set<QueryTypeName>();
+  for (const value of values) {
+    if (typeof value !== "string" || !QUERY_TYPE_NAMES.has(value))
+      throw new QueryValidationError(`Unknown query type: ${String(value)}`);
+    selected.add(value as QueryTypeName);
+  }
+  return QUERY_TYPE_ORDER.filter((value) => selected.has(value));
+}
+
+export function queryTypeNameOf(value: Value, path: string): QueryTypeName {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "bigint") return "int64";
+  if (typeof value === "number") return "float64";
+  if (typeof value === "string") return path === "_id" && isDocumentID(value) ? "id" : "string";
+  if (value instanceof Date) return "date";
+  if (isDocumentIDValue(value)) return "id";
+  if (value instanceof Uint8Array) return "binary";
+  if (Array.isArray(value)) return "array";
+  return "object";
 }
 
 export function valueEquals(left: Value, right: Value): boolean {

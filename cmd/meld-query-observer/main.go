@@ -82,6 +82,7 @@ func parseObserverConfig(args []string, stderr io.Writer) (observerConfig, error
 	flags.Uint64Var(&config.Limits.MaxQueryCandidates, "max-query-candidates", 0, "override MaxQueryCandidates; zero uses the default")
 	flags.Uint64Var(&config.Limits.MaxQuerySortBytes, "max-query-sort-bytes", 0, "override MaxQuerySortBytes; zero uses the default")
 	flags.Uint64Var(&config.Limits.MaxQuerySkip, "max-query-skip", 0, "override MaxQuerySkip; zero uses the default")
+	flags.Uint64Var(&config.Limits.MaxQueryPredicateSteps, "max-query-predicate-steps", 0, "override MaxQueryPredicateSteps; zero uses the default")
 	if err := flags.Parse(args); err != nil {
 		return observerConfig{}, err
 	}

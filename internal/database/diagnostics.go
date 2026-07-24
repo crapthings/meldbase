@@ -57,6 +57,7 @@ type DiagnosticEvent struct {
 	DocumentsExamined     uint64            `json:"documentsExamined,omitempty"`
 	DocumentsReturned     uint64            `json:"documentsReturned,omitempty"`
 	KeysExamined          uint64            `json:"keysExamined,omitempty"`
+	PredicateSteps        uint64            `json:"predicateSteps,omitempty"`
 	CandidateIDs          uint64            `json:"candidateIds,omitempty"`
 	UniqueCandidateIDs    uint64            `json:"uniqueCandidateIds,omitempty"`
 	DuplicateCandidateIDs uint64            `json:"duplicateCandidateIds,omitempty"`
@@ -199,6 +200,9 @@ func (d *Diagnostics) finishQuery(span diagnosticSpan, explain ExplainResult, re
 	}
 	if explain.KeysExamined > 0 {
 		event.KeysExamined = uint64(explain.KeysExamined)
+	}
+	if explain.Budget.PredicateStepsUsed > 0 {
+		event.PredicateSteps = explain.Budget.PredicateStepsUsed
 	}
 	if explain.CandidateIDs > 0 {
 		event.CandidateIDs = uint64(explain.CandidateIDs)
@@ -419,7 +423,7 @@ func safeDiagnosticEarlyStopScope(scope string) string {
 
 func safeDiagnosticBudgetReason(reason string) string {
 	switch reason {
-	case "documents", "keys", "candidates", "sort_bytes", "skip":
+	case "documents", "keys", "candidates", "sort_bytes", "skip", "predicate_steps":
 		return reason
 	default:
 		return ""

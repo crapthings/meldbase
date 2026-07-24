@@ -749,7 +749,12 @@ func (c *Cursor) Next(ctx context.Context) (Document, bool, error) {
 				}
 			}
 			c.explain.DocumentsExamined++
-			if !c.query.Match(candidate.document) {
+			matched, err := c.query.matchWithBudget(candidate.document, c.budget)
+			if err != nil {
+				_ = c.finishLocked(err)
+				return nil, false, err
+			}
+			if !matched {
 				continue
 			}
 			if c.budget != nil {

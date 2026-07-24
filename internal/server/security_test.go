@@ -69,12 +69,28 @@ func TestQueryPolicySeparatesFilterOperatorsFromSortPaths(t *testing.T) {
 	policy := QueryPolicy{
 		PolicyVersion: "policy-v1", MaxResults: 10,
 		AllowedFilterPaths:     map[string]struct{}{"rank": {}},
-		AllowedFilterOperators: map[string]map[string]struct{}{"rank": {"eq": {}}},
+		AllowedFilterOperators: map[string]map[string]struct{}{"rank": {"eq": {}, "size": {}, "type": {}, "all": {}, "elem_match": {}}},
 		AllowedSortPaths:       map[string]struct{}{"title": {}},
 	}
 	equality, _ := meldbase.CompileQuery(meldbase.Filter{"rank": int64(1)}, meldbase.QueryOptions{Sort: []meldbase.SortField{{Path: "title", Direction: 1}}})
 	if _, err := applyPolicy(equality, policy); err != nil {
 		t.Fatalf("equality query denied: %v", err)
+	}
+	sizeQuery, _ := meldbase.CompileQuery(meldbase.Filter{"rank": map[string]any{"$size": 0}}, meldbase.QueryOptions{})
+	if _, err := applyPolicy(sizeQuery, policy); err != nil {
+		t.Fatalf("size query denied: %v", err)
+	}
+	typeQuery, _ := meldbase.CompileQuery(meldbase.Filter{"rank": map[string]any{"$type": "array"}}, meldbase.QueryOptions{})
+	if _, err := applyPolicy(typeQuery, policy); err != nil {
+		t.Fatalf("type query denied: %v", err)
+	}
+	allQuery, _ := meldbase.CompileQuery(meldbase.Filter{"rank": map[string]any{"$all": []any{int64(1)}}}, meldbase.QueryOptions{})
+	if _, err := applyPolicy(allQuery, policy); err != nil {
+		t.Fatalf("all query denied: %v", err)
+	}
+	elemMatchQuery, _ := meldbase.CompileQuery(meldbase.Filter{"rank": map[string]any{"$elemMatch": map[string]any{"$gte": int64(1)}}}, meldbase.QueryOptions{})
+	if _, err := applyPolicy(elemMatchQuery, policy); err != nil {
+		t.Fatalf("elem match query denied: %v", err)
 	}
 	rangeQuery, _ := meldbase.CompileQuery(meldbase.Filter{"rank": map[string]any{"$gt": int64(1)}}, meldbase.QueryOptions{})
 	if _, err := applyPolicy(rangeQuery, policy); !errors.Is(err, ErrForbidden) {

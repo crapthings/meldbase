@@ -1,4 +1,14 @@
-import type { Document, InputDocument, QueryExpr, QueryLimits, QuerySpec, SortField, Value } from "./types.js";
+import type {
+  Document,
+  ElementQueryExpr,
+  InputDocument,
+  QueryExpr,
+  QueryLimits,
+  QuerySpec,
+  QueryTypeName,
+  SortField,
+  Value,
+} from "./types.js";
 import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
 import {
   assertPath,
@@ -10,6 +20,8 @@ import {
   documentID,
   isDocumentID,
   isDocumentIDValue,
+  normalizeQueryTypes,
+  valueEquals,
 } from "./safe-value.js";
 
 export type WireValue =
@@ -35,7 +47,18 @@ export type WireQueryExpr =
       readonly value: WireValue;
     }
   | { readonly op: "in" | "nin"; readonly path: string; readonly values: readonly WireValue[] }
-  | { readonly op: "exists"; readonly path: string; readonly value: boolean };
+  | { readonly op: "exists"; readonly path: string; readonly value: boolean }
+  | { readonly op: "size"; readonly path: string; readonly size: number }
+  | { readonly op: "type"; readonly path: string; readonly types: readonly QueryTypeName[] }
+  | { readonly op: "all"; readonly path: string; readonly values: readonly WireValue[] }
+  | { readonly op: "elem_match"; readonly path: string; readonly mode: "scalar"; readonly arg: WireElementQueryExpr }
+  | { readonly op: "elem_match"; readonly path: string; readonly mode: "object"; readonly arg: WireQueryExpr };
+
+export type WireElementQueryExpr =
+  | { readonly op: "and" | "or"; readonly args: readonly WireElementQueryExpr[] }
+  | { readonly op: "not"; readonly arg: WireElementQueryExpr }
+  | { readonly op: "compare"; readonly cmp: "eq" | "ne" | "gt" | "gte" | "lt" | "lte"; readonly value: WireValue }
+  | { readonly op: "in" | "nin"; readonly values: readonly WireValue[] };
 
 export interface WireQuerySpec {
   readonly version: 1;
@@ -217,6 +240,37 @@ export function decodeQuerySpec(input: unknown, overrides: Partial<QueryLimits> 
   onlyKeys(input, ["version", "where", "sort", "skip", "limit", "seek"]);
   if (input.version !== 1) throw new QueryValidationError("Unsupported query version");
   let nodes = 0;
+  const decodeElementExpression = (raw: unknown, depth: number): ElementQueryExpr => {
+    if (depth > limits.maxDepth) throw new QueryValidationError("Query nesting is too deep");
+    nodes += 1;
+    if (nodes > limits.maxNodes) throw new QueryValidationError("Query has too many expression nodes");
+    if (!record(raw) || typeof raw.op !== "string") throw new QueryValidationError("Malformed scalar elem match expression");
+    switch (raw.op) {
+      case "and":
+      case "or":
+        onlyKeys(raw, ["op", "args"]);
+        if (!Array.isArray(raw.args) || raw.args.length === 0 || raw.args.length > limits.maxArrayItems)
+          throw new QueryValidationError("Scalar elem match args outside limits");
+        return { op: raw.op, args: raw.args.map((arg) => decodeElementExpression(arg, depth + 1)) };
+      case "not":
+        onlyKeys(raw, ["op", "arg"]);
+        return { op: "not", arg: decodeElementExpression(raw.arg, depth + 1) };
+      case "in":
+      case "nin":
+        onlyKeys(raw, ["op", "values"]);
+        if (!Array.isArray(raw.values) || raw.values.length > limits.maxArrayItems)
+          throw new QueryValidationError("Scalar elem match membership outside limits");
+        return { op: raw.op, values: raw.values.map((item) => boundedDecodedValue(item, limits)) };
+      case "compare": {
+        onlyKeys(raw, ["op", "cmp", "value"]);
+        if (raw.cmp !== "eq" && raw.cmp !== "ne" && raw.cmp !== "gt" && raw.cmp !== "gte" && raw.cmp !== "lt" && raw.cmp !== "lte")
+          throw new QueryValidationError("Unknown scalar elem match comparison");
+        return { op: "compare", cmp: raw.cmp, value: boundedDecodedValue(raw.value, limits) };
+      }
+      default:
+        throw new QueryValidationError(`Unknown scalar elem match operator: ${raw.op}`);
+    }
+  };
   const decodeExpression = (raw: unknown, depth: number): QueryExpr => {
     if (depth > limits.maxDepth) throw new QueryValidationError("Query nesting is too deep");
     nodes += 1;
@@ -242,6 +296,19 @@ export function decodeQuerySpec(input: unknown, overrides: Partial<QueryLimits> 
         if (typeof raw.value !== "boolean") throw new QueryValidationError("exists expects boolean");
         return { op: "exists", path, value: raw.value };
       }
+      case "size": {
+        onlyKeys(raw, ["op", "path", "size"]);
+        const path = wirePath(raw.path);
+        if (typeof raw.size !== "number" || !Number.isSafeInteger(raw.size) || raw.size < 0)
+          throw new QueryValidationError("size expects a non-negative safe integer");
+        return { op: "size", path, size: raw.size };
+      }
+      case "type": {
+        onlyKeys(raw, ["op", "path", "types"]);
+        const path = wirePath(raw.path);
+        if (!Array.isArray(raw.types)) throw new QueryValidationError("type expects a type-name array");
+        return { op: "type", path, types: normalizeQueryTypes(raw.types, limits.maxArrayItems) };
+      }
       case "compare": {
         onlyKeys(raw, ["op", "cmp", "path", "value"]);
         const path = wirePath(raw.path);
@@ -258,12 +325,21 @@ export function decodeQuerySpec(input: unknown, overrides: Partial<QueryLimits> 
         return { op: "compare", cmp: raw.cmp, path, value };
       }
       case "in":
-      case "nin": {
+      case "nin":
+      case "all": {
         onlyKeys(raw, ["op", "path", "values"]);
         const path = wirePath(raw.path);
-        if (!Array.isArray(raw.values) || raw.values.length > limits.maxArrayItems)
+        if (!Array.isArray(raw.values) || raw.values.length > limits.maxArrayItems || (raw.op === "all" && raw.values.length === 0))
           throw new QueryValidationError("Membership values outside limits");
-        return { op: raw.op, path, values: raw.values.map((item) => boundedDecodedValue(item, limits, path)) };
+        const values = raw.values.map((item) => boundedDecodedValue(item, limits, path));
+        return raw.op === "all" ? { op: "all", path, values: dedupeValues(values) } : { op: raw.op, path, values };
+      }
+      case "elem_match": {
+        onlyKeys(raw, ["op", "path", "mode", "arg"]);
+        const path = wirePath(raw.path);
+        if (raw.mode === "scalar") return { op: "elem_match", path, mode: "scalar", arg: decodeElementExpression(raw.arg, depth + 1) };
+        if (raw.mode === "object") return { op: "elem_match", path, mode: "object", arg: decodeExpression(raw.arg, depth + 1) };
+        throw new QueryValidationError("Invalid elem match mode");
       }
       default:
         throw new QueryValidationError(`Unknown query operator: ${raw.op}`);
@@ -318,11 +394,43 @@ function encodeExpression(expression: QueryExpr): WireQueryExpr {
       return { op: "not", arg: encodeExpression(expression.arg) };
     case "exists":
       return { ...expression };
+    case "size":
+      assertPath(expression.path);
+      if (!Number.isSafeInteger(expression.size) || expression.size < 0)
+        throw new QueryValidationError("size expects a non-negative safe integer");
+      return { op: "size", path: expression.path, size: expression.size };
+    case "type":
+      assertPath(expression.path);
+      return { op: "type", path: expression.path, types: normalizeQueryTypes(expression.types) };
+    case "all":
+      assertPath(expression.path);
+      if (expression.values.length === 0) throw new QueryValidationError("all expects a non-empty array");
+      return { op: "all", path: expression.path, values: dedupeValues(expression.values).map((value) => encodeQueryValue(expression.path, value)) };
+    case "elem_match":
+      assertPath(expression.path);
+      return expression.mode === "scalar"
+        ? { op: "elem_match", path: expression.path, mode: "scalar", arg: encodeElementExpression(expression.arg) }
+        : { op: "elem_match", path: expression.path, mode: "object", arg: encodeExpression(expression.arg) };
     case "compare":
       return { ...expression, value: encodeQueryValue(expression.path, expression.value) };
     case "in":
     case "nin":
       return { ...expression, values: expression.values.map((value) => encodeQueryValue(expression.path, value)) };
+  }
+}
+
+function encodeElementExpression(expression: ElementQueryExpr): WireElementQueryExpr {
+  switch (expression.op) {
+    case "and":
+    case "or":
+      return { op: expression.op, args: expression.args.map(encodeElementExpression) };
+    case "not":
+      return { op: "not", arg: encodeElementExpression(expression.arg) };
+    case "in":
+    case "nin":
+      return { op: expression.op, values: expression.values.map(encodeValue) };
+    case "compare":
+      return { op: "compare", cmp: expression.cmp, value: encodeValue(expression.value) };
   }
 }
 
@@ -392,4 +500,12 @@ function encodeQueryValue(path: string, value: Value): WireValue {
     return { t: "id", v: value };
   }
   return encodeValue(value);
+}
+
+function dedupeValues(values: readonly Value[]): Value[] {
+  const result: Value[] = [];
+  for (const value of values) {
+    if (!result.some((candidate) => valueEquals(candidate, value))) result.push(value);
+  }
+  return result;
 }

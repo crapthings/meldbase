@@ -40,6 +40,114 @@ test("distinguishes missing from null and defines direct array membership", () =
   );
 });
 
+test("$size and $type use exact bounded residual semantics", () => {
+  const values: Document[] = [
+    { _id: "empty", items: [], value: null },
+    { _id: "two-int64", items: [1, 2], value: 1n },
+    { _id: "two-float64", items: [1, 2], value: 1 },
+    { _id: "object", items: {}, value: {} },
+    { _id: "missing" },
+  ];
+  assert.deepEqual(
+    executeQuery(values, compileQuery({ items: { $size: 0 } })).map((item) => item._id),
+    ["empty"],
+  );
+  assert.deepEqual(
+    executeQuery(values, compileQuery({ value: { $type: ["array", "int64"] } })).map((item) => item._id),
+    ["two-int64"],
+  );
+  assert.deepEqual(
+    executeQuery(values, compileQuery({ value: { $not: { $type: "float64" } } })).map((item) => item._id),
+    ["empty", "two-int64", "object", "missing"],
+  );
+
+  const query = compileQuery({ value: { $type: ["object", "int64", "int64"] } });
+  assert.deepEqual(query.where, { op: "type", path: "value", types: ["int64", "object"] });
+  assert.deepEqual(encodeQuerySpec(query).where, {
+    op: "type",
+    path: "value",
+    types: ["int64", "object"],
+  });
+  assert.deepEqual(
+    decodeQuerySpec({
+      version: 1,
+      where: { op: "type", path: "value", types: ["object", "int64", "int64"] },
+    }).where,
+    { op: "type", path: "value", types: ["int64", "object"] },
+  );
+
+  const persistedID = "00000000000000000000000000000001";
+  assert.equal(executeQuery([{ _id: persistedID }], compileQuery({ _id: { $type: "id" } })).length, 1);
+
+  for (const filter of [
+    { items: { $size: -1 } },
+    { items: { $size: 1.5 } },
+    { items: { $size: Number.MAX_SAFE_INTEGER + 1 } },
+    { value: { $type: [] } },
+    { value: { $type: "number" } },
+    { value: { $type: ["int64", 1] } },
+  ]) {
+    assert.throws(() => compileQuery(filter as never), QueryValidationError);
+  }
+  for (const where of [
+    { op: "size", path: "items", size: 1.5 },
+    { op: "size", path: "items", size: -1 },
+    { op: "type", path: "value", types: [] },
+    { op: "type", path: "value", types: ["number"] },
+    { op: "type", path: "value", types: "int64" },
+  ]) {
+    assert.throws(() => decodeQuerySpec({ version: 1, where }), QueryValidationError);
+  }
+});
+
+test("$all requires every deduplicated value in one array", () => {
+  const values: Document[] = [
+    { _id: "all", tags: ["one", "two", "three"] },
+    { _id: "pair", tags: ["one", "two"] },
+    { _id: "missing", tags: ["one"] },
+    { _id: "scalar", tags: "one" },
+    { _id: "absent" },
+  ];
+  const query = compileQuery({ tags: { $all: ["one", "two", "one"] } });
+  assert.deepEqual(executeQuery(values, query).map((item) => item._id), ["all", "pair"]);
+  assert.deepEqual(query.where, { op: "all", path: "tags", values: ["one", "two"] });
+  assert.deepEqual(encodeQuerySpec(query).where, {
+    op: "all",
+    path: "tags",
+    values: [{ t: "string", v: "one" }, { t: "string", v: "two" }],
+  });
+  assert.deepEqual(
+    decodeQuerySpec({
+      version: 1,
+      where: {
+        op: "all",
+        path: "tags",
+        values: [{ t: "string", v: "one" }, { t: "string", v: "two" }, { t: "string", v: "one" }],
+      },
+    }).where,
+    { op: "all", path: "tags", values: ["one", "two"] },
+  );
+  assert.throws(() => compileQuery({ tags: { $all: [] } }), QueryValidationError);
+  assert.throws(() => decodeQuerySpec({ version: 1, where: { op: "all", path: "tags", values: [] } }), QueryValidationError);
+});
+
+test("$elemMatch keeps scalar and object conditions on one array element", () => {
+  const values: Document[] = [
+    { _id: "split", scores: [80, 93, 101], parts: [{ kind: "a", qty: 1 }, { kind: "b", qty: 5 }] },
+    { _id: "same", scores: [85, 100], parts: [{ kind: "a", qty: 5 }] },
+    { _id: "near", scores: [91], parts: [{ kind: "a", qty: 2 }, { kind: "b", qty: 9 }] },
+    { _id: "scalar", scores: 93, parts: [] },
+  ];
+  const scalar = compileQuery({ scores: { $elemMatch: { $gte: 90, $lt: 100 } } });
+  assert.deepEqual(executeQuery(values, scalar).map((item) => item._id), ["split", "near"]);
+  const object = compileQuery({ parts: { $elemMatch: { kind: "a", qty: { $gte: 5 } } } });
+  assert.deepEqual(executeQuery(values, object).map((item) => item._id), ["same"]);
+  assert.deepEqual(decodeQuerySpec(encodeQuerySpec(scalar)), scalar);
+  assert.throws(() => compileQuery({ parts: { $elemMatch: {} } }), QueryValidationError);
+  assert.throws(() => compileQuery({ parts: { $elemMatch: { $gte: 1, kind: "a" } } }), QueryValidationError);
+  assert.throws(() => decodeQuerySpec({ version: 1, where: { op: "elem_match", path: "parts", mode: "scalar", arg: { op: "compare", cmp: "eq", path: "bad", value: { t: "number", v: 1 } } } }), QueryValidationError);
+});
+
 test("compares Int64 bigint and Float64 number without rounding Int64", () => {
   const values: Document[] = [
     { _id: "a", n: 9_007_199_254_740_993n },

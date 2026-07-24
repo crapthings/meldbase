@@ -106,6 +106,7 @@ type queryCounters struct {
 	DocumentsExamined     uint64 `json:"documentsExamined"`
 	DocumentsReturned     uint64 `json:"documentsReturned"`
 	KeysExamined          uint64 `json:"keysExamined"`
+	PredicateSteps        uint64 `json:"predicateSteps"`
 	CandidateIDs          uint64 `json:"candidateIds"`
 	UniqueCandidateIDs    uint64 `json:"uniqueCandidateIds"`
 	DuplicateCandidateIDs uint64 `json:"duplicateCandidateIds"`
@@ -646,6 +647,7 @@ func queryStatsDelta(before, after meldbase.QueryStats) queryCounters {
 		DocumentsExamined:     counterDelta(before.DocumentsExamined, after.DocumentsExamined),
 		DocumentsReturned:     counterDelta(before.DocumentsReturned, after.DocumentsReturned),
 		KeysExamined:          counterDelta(before.KeysExamined, after.KeysExamined),
+		PredicateSteps:        counterDelta(before.PredicateSteps, after.PredicateSteps),
 		CandidateIDs:          counterDelta(before.CandidateIDs, after.CandidateIDs),
 		UniqueCandidateIDs:    counterDelta(before.UniqueCandidateIDs, after.UniqueCandidateIDs),
 		DuplicateCandidateIDs: counterDelta(before.DuplicateCandidateIDs, after.DuplicateCandidateIDs),
@@ -667,6 +669,7 @@ func addQueryCounters(left, right queryCounters) queryCounters {
 		DocumentsExamined:     left.DocumentsExamined + right.DocumentsExamined,
 		DocumentsReturned:     left.DocumentsReturned + right.DocumentsReturned,
 		KeysExamined:          left.KeysExamined + right.KeysExamined,
+		PredicateSteps:        left.PredicateSteps + right.PredicateSteps,
 		CandidateIDs:          left.CandidateIDs + right.CandidateIDs,
 		UniqueCandidateIDs:    left.UniqueCandidateIDs + right.UniqueCandidateIDs,
 		DuplicateCandidateIDs: left.DuplicateCandidateIDs + right.DuplicateCandidateIDs,
