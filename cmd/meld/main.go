@@ -20,6 +20,11 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+var (
+	buildVersion = "devel"
+	buildCommit  = "unknown"
+)
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "meld:", err)
@@ -30,6 +35,13 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("usage: meld <command>; run 'meld help' for the stable operational command set")
+	}
+	if args[0] == "version" || args[0] == "--version" {
+		if len(args) != 1 {
+			return errors.New("usage: meld version")
+		}
+		_, _ = fmt.Fprintf(stdout, "meld %s (%s)\n", buildVersion, buildCommit)
+		return nil
 	}
 	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
 		_, _ = fmt.Fprintln(stdout, `usage: meld <command>

@@ -34,3 +34,20 @@ func TestTopLevelHelpPreservesStableOperationalCommands(t *testing.T) {
 		t.Fatalf("experimental destructive command leaked into stable help:\n%s", output.String())
 	}
 }
+
+func TestVersionCommandReportsBuildIdentity(t *testing.T) {
+	for _, argument := range []string{"version", "--version"} {
+		t.Run(argument, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := run([]string{argument}, &output, &bytes.Buffer{}); err != nil {
+				t.Fatalf("run(%q)=%v", argument, err)
+			}
+			if got, want := output.String(), "meld "+buildVersion+" ("+buildCommit+")\n"; got != want {
+				t.Fatalf("version output=%q want %q", got, want)
+			}
+		})
+	}
+	if err := run([]string{"version", "extra"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("version accepted an unexpected argument")
+	}
+}

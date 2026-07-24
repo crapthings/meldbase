@@ -1,0 +1,74 @@
+name: CLI alpha release
+
+on:
+  push:
+    tags:
+      - "v0.*-alpha.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-alpha-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify and release macOS CLI archives
+    runs-on: macos-14
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Require a current main release commit
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v0\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]
+          git fetch origin main
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+      - name: Run Go verification
+        run: go test ./...
+      - id: archive
+        name: Build macOS archives and Formula
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          mkdir -p artifacts/darwin_arm64 artifacts/darwin_amd64
+          GOOS=darwin GOARCH=arm64 go build -trimpath \
+            -ldflags "-s -w -X main.buildVersion=$version -X main.buildCommit=$GITHUB_SHA" \
+            -o artifacts/darwin_arm64/meld ./cmd/meld
+          GOOS=darwin GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X main.buildVersion=$version -X main.buildCommit=$GITHUB_SHA" \
+            -o artifacts/darwin_amd64/meld ./cmd/meld
+          tar -C artifacts/darwin_arm64 -czf "artifacts/meldbase_${version}_darwin_arm64.tar.gz" meld
+          tar -C artifacts/darwin_amd64 -czf "artifacts/meldbase_${version}_darwin_amd64.tar.gz" meld
+          shasum -a 256 "artifacts/meldbase_${version}_darwin_arm64.tar.gz" > artifacts/checksums.txt
+          shasum -a 256 "artifacts/meldbase_${version}_darwin_amd64.tar.gz" >> artifacts/checksums.txt
+          arm64_sha=$(awk '/darwin_arm64/ {print $1}' artifacts/checksums.txt)
+          amd64_sha=$(awk '/darwin_amd64/ {print $1}' artifacts/checksums.txt)
+          node scripts/render-homebrew-formula.mjs \
+            --version "$version" \
+            --arm64-sha256 "$arm64_sha" \
+            --amd64-sha256 "$amd64_sha" \
+            --out artifacts/meldbase.rb
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - name: Create immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/meldbase_*.tar.gz artifacts/checksums.txt artifacts/meldbase.rb \
+            --verify-tag --title "Meldbase $GITHUB_REF_NAME" --generate-notes
+      - name: Attest release archives
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-checksums: artifacts/checksums.txt

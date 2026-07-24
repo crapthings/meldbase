@@ -58,6 +58,9 @@ hero:
       text: Container image
       link: /container-image
     - theme: alt
+      text: Homebrew alpha tap
+      link: /homebrew
+    - theme: alt
       text: Security and isolation
       link: /production-security
     - theme: alt
