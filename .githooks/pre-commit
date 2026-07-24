@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -- \
+  'sdk/**/*.ts' 'sdk/**/*.tsx' 'sdk/**/*.md' 'sdk/**/*.json' || true)
+
+if [ -z "$files" ]; then
+  exit 0
+fi
+
+printf '%s\n' "$files" | while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  pnpm exec prettier --write -- "$file"
+  git add -- "$file"
+done

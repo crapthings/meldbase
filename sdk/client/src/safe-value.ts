@@ -227,10 +227,7 @@ export function getPath(document: Document, path: string): { found: boolean; val
   return { found: true, value: current };
 }
 
-export function normalizeQueryTypes(
-  raw: unknown,
-  maxItems = DEFAULT_QUERY_LIMITS.maxArrayItems,
-): QueryTypeName[] {
+export function normalizeQueryTypes(raw: unknown, maxItems = DEFAULT_QUERY_LIMITS.maxArrayItems): QueryTypeName[] {
   const values = typeof raw === "string" ? [raw] : raw;
   if (!Array.isArray(values) || values.length === 0 || values.length > maxItems)
     throw new QueryValidationError("$type expects a non-empty bounded type list");

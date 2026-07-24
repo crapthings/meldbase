@@ -109,12 +109,18 @@ test("$all requires every deduplicated value in one array", () => {
     { _id: "absent" },
   ];
   const query = compileQuery({ tags: { $all: ["one", "two", "one"] } });
-  assert.deepEqual(executeQuery(values, query).map((item) => item._id), ["all", "pair"]);
+  assert.deepEqual(
+    executeQuery(values, query).map((item) => item._id),
+    ["all", "pair"],
+  );
   assert.deepEqual(query.where, { op: "all", path: "tags", values: ["one", "two"] });
   assert.deepEqual(encodeQuerySpec(query).where, {
     op: "all",
     path: "tags",
-    values: [{ t: "string", v: "one" }, { t: "string", v: "two" }],
+    values: [
+      { t: "string", v: "one" },
+      { t: "string", v: "two" },
+    ],
   });
   assert.deepEqual(
     decodeQuerySpec({
@@ -122,30 +128,69 @@ test("$all requires every deduplicated value in one array", () => {
       where: {
         op: "all",
         path: "tags",
-        values: [{ t: "string", v: "one" }, { t: "string", v: "two" }, { t: "string", v: "one" }],
+        values: [
+          { t: "string", v: "one" },
+          { t: "string", v: "two" },
+          { t: "string", v: "one" },
+        ],
       },
     }).where,
     { op: "all", path: "tags", values: ["one", "two"] },
   );
   assert.throws(() => compileQuery({ tags: { $all: [] } }), QueryValidationError);
-  assert.throws(() => decodeQuerySpec({ version: 1, where: { op: "all", path: "tags", values: [] } }), QueryValidationError);
+  assert.throws(
+    () => decodeQuerySpec({ version: 1, where: { op: "all", path: "tags", values: [] } }),
+    QueryValidationError,
+  );
 });
 
 test("$elemMatch keeps scalar and object conditions on one array element", () => {
   const values: Document[] = [
-    { _id: "split", scores: [80, 93, 101], parts: [{ kind: "a", qty: 1 }, { kind: "b", qty: 5 }] },
+    {
+      _id: "split",
+      scores: [80, 93, 101],
+      parts: [
+        { kind: "a", qty: 1 },
+        { kind: "b", qty: 5 },
+      ],
+    },
     { _id: "same", scores: [85, 100], parts: [{ kind: "a", qty: 5 }] },
-    { _id: "near", scores: [91], parts: [{ kind: "a", qty: 2 }, { kind: "b", qty: 9 }] },
+    {
+      _id: "near",
+      scores: [91],
+      parts: [
+        { kind: "a", qty: 2 },
+        { kind: "b", qty: 9 },
+      ],
+    },
     { _id: "scalar", scores: 93, parts: [] },
   ];
   const scalar = compileQuery({ scores: { $elemMatch: { $gte: 90, $lt: 100 } } });
-  assert.deepEqual(executeQuery(values, scalar).map((item) => item._id), ["split", "near"]);
+  assert.deepEqual(
+    executeQuery(values, scalar).map((item) => item._id),
+    ["split", "near"],
+  );
   const object = compileQuery({ parts: { $elemMatch: { kind: "a", qty: { $gte: 5 } } } });
-  assert.deepEqual(executeQuery(values, object).map((item) => item._id), ["same"]);
+  assert.deepEqual(
+    executeQuery(values, object).map((item) => item._id),
+    ["same"],
+  );
   assert.deepEqual(decodeQuerySpec(encodeQuerySpec(scalar)), scalar);
   assert.throws(() => compileQuery({ parts: { $elemMatch: {} } }), QueryValidationError);
   assert.throws(() => compileQuery({ parts: { $elemMatch: { $gte: 1, kind: "a" } } }), QueryValidationError);
-  assert.throws(() => decodeQuerySpec({ version: 1, where: { op: "elem_match", path: "parts", mode: "scalar", arg: { op: "compare", cmp: "eq", path: "bad", value: { t: "number", v: 1 } } } }), QueryValidationError);
+  assert.throws(
+    () =>
+      decodeQuerySpec({
+        version: 1,
+        where: {
+          op: "elem_match",
+          path: "parts",
+          mode: "scalar",
+          arg: { op: "compare", cmp: "eq", path: "bad", value: { t: "number", v: 1 } },
+        },
+      }),
+    QueryValidationError,
+  );
 });
 
 test("compares Int64 bigint and Float64 number without rounding Int64", () => {

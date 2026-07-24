@@ -74,3 +74,20 @@ public contract.
 The module-root API is maintained explicitly in `api.go`. Adding an exported
 name to `internal/database` does not make it public; every public declaration
 must be selected, documented, and reviewed in `api.go`.
+# Development checks
+
+Install the repository's pre-commit hook once per checkout:
+
+```sh
+pnpm hooks:install
+```
+
+The hook formats staged SDK files with Prettier before the commit is created.
+Before creating a release tag, run:
+
+```sh
+pnpm release:check
+```
+
+This formats the SDK, runs the SDK quality gates, and runs the full Go test
+suite.

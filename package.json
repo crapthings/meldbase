@@ -16,6 +16,8 @@
     "test:sdk:browser": "node scripts/test-sdk-browser.mjs",
     "format:sdk": "prettier --write \"sdk/**/*.{ts,tsx,md,json}\" \"docs/sdk*.md\" \"docs/.vitepress/config.mts\" \"scripts/{check-sdk-release-readiness,publish-sdk-beta,test-sdk-browser,verify-sdk-packages,verify-sdk-api-docs}.mjs\" \"examples/realtime-todos/**/*.{ts,tsx,html,json}\" \".github/workflows/{docs,sdk-beta-release,sdk-compatibility}.yml\" \"package.json\" \"pnpm-workspace.yaml\" \"typedoc*.json\" \"eslint.config.mjs\" \".prettierrc.json\"",
     "format:sdk:check": "prettier --check \"sdk/**/*.{ts,tsx,md,json}\" \"docs/sdk*.md\" \"docs/.vitepress/config.mts\" \"scripts/{check-sdk-release-readiness,publish-sdk-beta,test-sdk-browser,verify-sdk-packages,verify-sdk-api-docs}.mjs\" \"examples/realtime-todos/**/*.{ts,tsx,html,json}\" \".github/workflows/{docs,sdk-beta-release,sdk-compatibility}.yml\" \"package.json\" \"pnpm-workspace.yaml\" \"typedoc*.json\" \"eslint.config.mjs\" \".prettierrc.json\"",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "release:check": "pnpm format:sdk && pnpm quality:sdk && go test ./...",
     "lint:sdk": "eslint \"sdk/**/*.{ts,tsx}\"",
     "coverage:sdk": "pnpm --filter @meldbase/client run coverage && pnpm --filter @meldbase/worker run coverage && pnpm --filter @meldbase/react run coverage",
     "release:sdk:checklist": "node scripts/check-sdk-release-readiness.mjs",

@@ -1,12 +1,4 @@
-import type {
-  Comparison,
-  Filter,
-  QueryExpr,
-  QueryLimits,
-  QuerySpec,
-  SortField,
-  Value,
-} from "./types.js";
+import type { Comparison, Filter, QueryExpr, QueryLimits, QuerySpec, SortField, Value } from "./types.js";
 import { DEFAULT_QUERY_LIMITS, QueryValidationError } from "./types.js";
 import {
   assertDocumentID,
@@ -123,20 +115,34 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
       if (operator === "$and" || operator === "$or") {
         if (!Array.isArray(operand) || operand.length === 0 || operand.length > limits.maxArrayItems)
           throw new QueryValidationError(`${operator} expects a non-empty bounded condition array`);
-        args.push({ op: operator.slice(1) as "and" | "or", args: operand.map((item) => compileElement(path, item, depth + 1)) });
+        args.push({
+          op: operator.slice(1) as "and" | "or",
+          args: operand.map((item) => compileElement(path, item, depth + 1)),
+        });
       } else if (operator === "$not") {
         args.push({ op: "not", arg: compileElement(path, operand, depth + 1) });
       } else if (operator === "$in" || operator === "$nin") {
         if (!Array.isArray(operand) || operand.length > limits.maxArrayItems)
           throw new QueryValidationError(`${operator} expects a bounded array`);
         args.push({ op: operator.slice(1) as "in" | "nin", values: operand.map((item) => checkedValue(path, item)) });
-      } else if (operator === "$eq" || operator === "$ne" || operator === "$gt" || operator === "$gte" || operator === "$lt" || operator === "$lte") {
-        args.push({ op: "compare", cmp: operator.slice(1) as "eq" | "ne" | "gt" | "gte" | "lt" | "lte", value: checkedValue(path, operand) });
+      } else if (
+        operator === "$eq" ||
+        operator === "$ne" ||
+        operator === "$gt" ||
+        operator === "$gte" ||
+        operator === "$lt" ||
+        operator === "$lte"
+      ) {
+        args.push({
+          op: "compare",
+          cmp: operator.slice(1) as "eq" | "ne" | "gt" | "gte" | "lt" | "lte",
+          value: checkedValue(path, operand),
+        });
       } else {
         throw new QueryValidationError(`Unsupported scalar $elemMatch operator: ${operator}`);
       }
     }
-    return args.length === 1 ? args[0] as import("./types.js").ElementQueryExpr : { op: "and", args };
+    return args.length === 1 ? (args[0] as import("./types.js").ElementQueryExpr) : { op: "and", args };
   };
 
   const compileField = (path: string, raw: Value | Comparison, depth: number): QueryExpr[] => {
@@ -257,15 +263,16 @@ export function matches(document: import("./types.js").Document, expression: Que
     }
     case "type": {
       const found = getPath(document, expression.path);
-      return (
-        found.found &&
-        expression.types.includes(queryTypeNameOf(found.value as Value, expression.path))
-      );
+      return found.found && expression.types.includes(queryTypeNameOf(found.value as Value, expression.path));
     }
     case "all": {
       const found = getPath(document, expression.path);
-      return found.found && Array.isArray(found.value) && expression.values.every((candidate) =>
-        (found.value as readonly Value[]).some((item) => valueEquals(item, candidate)),
+      return (
+        found.found &&
+        Array.isArray(found.value) &&
+        expression.values.every((candidate) =>
+          (found.value as readonly Value[]).some((item) => valueEquals(item, candidate)),
+        )
       );
     }
     case "elem_match": {
@@ -329,18 +336,22 @@ function fieldEquals(field: Value, candidate: Value): boolean {
 
 function dedupeValues(values: readonly Value[]): Value[] {
   const result: Value[] = [];
-  for (const value of values)
-    if (!result.some((candidate) => valueEquals(candidate, value))) result.push(value);
+  for (const value of values) if (!result.some((candidate) => valueEquals(candidate, value))) result.push(value);
   return result;
 }
 
 function matchesElement(value: Value, expression: import("./types.js").ElementQueryExpr): boolean {
   switch (expression.op) {
-    case "and": return expression.args.every((arg) => matchesElement(value, arg));
-    case "or": return expression.args.some((arg) => matchesElement(value, arg));
-    case "not": return !matchesElement(value, expression.arg);
-    case "in": return expression.values.some((candidate) => fieldEquals(value, candidate));
-    case "nin": return !expression.values.some((candidate) => fieldEquals(value, candidate));
+    case "and":
+      return expression.args.every((arg) => matchesElement(value, arg));
+    case "or":
+      return expression.args.some((arg) => matchesElement(value, arg));
+    case "not":
+      return !matchesElement(value, expression.arg);
+    case "in":
+      return expression.values.some((candidate) => fieldEquals(value, candidate));
+    case "nin":
+      return !expression.values.some((candidate) => fieldEquals(value, candidate));
     case "compare": {
       if (expression.cmp === "eq") return fieldEquals(value, expression.value);
       if (expression.cmp === "ne") return !fieldEquals(value, expression.value);
