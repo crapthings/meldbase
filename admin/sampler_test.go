@@ -73,6 +73,7 @@ func TestSamplerDerivesRatesAndBoundsHistory(t *testing.T) {
 	second.Queries.Total += 6
 	second.Queries.DocumentsExamined += 20
 	second.Queries.DocumentsReturned += 8
+	second.Queries.KeysExamined += 30
 	second.Storage.PageCache.Hits = 9
 	second.Storage.PageCache.Misses = 1
 	source.set(second)
@@ -87,6 +88,9 @@ func TestSamplerDerivesRatesAndBoundsHistory(t *testing.T) {
 	}
 	if latest.Rates.PageCacheHitRatio != 0.9 {
 		t.Fatalf("page cache hit ratio=%f", latest.Rates.PageCacheHitRatio)
+	}
+	if latest.Rates.KeysExaminedPerSecond != 15 {
+		t.Fatalf("key rate=%f", latest.Rates.KeysExaminedPerSecond)
 	}
 
 	third := second

@@ -41,18 +41,31 @@ type DiagnosticsOptions struct {
 }
 
 type DiagnosticEvent struct {
-	Sequence          uint64            `json:"sequence"`
-	CapturedAt        time.Time         `json:"capturedAt"`
-	Kind              DiagnosticKind    `json:"kind"`
-	Outcome           DiagnosticOutcome `json:"outcome"`
-	ErrorClass        string            `json:"errorClass,omitempty"`
-	Stage             string            `json:"stage,omitempty"`
-	Duration          time.Duration     `json:"durationNanos"`
-	DocumentsExamined uint64            `json:"documentsExamined,omitempty"`
-	DocumentsReturned uint64            `json:"documentsReturned,omitempty"`
-	Changes           uint64            `json:"changes,omitempty"`
-	Slow              bool              `json:"slow"`
-	Sampled           bool              `json:"sampled"`
+	Sequence              uint64            `json:"sequence"`
+	CapturedAt            time.Time         `json:"capturedAt"`
+	Kind                  DiagnosticKind    `json:"kind"`
+	Outcome               DiagnosticOutcome `json:"outcome"`
+	ErrorClass            string            `json:"errorClass,omitempty"`
+	Stage                 string            `json:"stage,omitempty"`
+	PlanReason            string            `json:"planReason,omitempty"`
+	FallbackReason        string            `json:"fallbackReason,omitempty"`
+	EarlyStopReason       string            `json:"earlyStopReason,omitempty"`
+	EarlyStopScope        string            `json:"earlyStopScope,omitempty"`
+	BudgetPressure        string            `json:"budgetPressure,omitempty"`
+	BudgetExceeded        string            `json:"budgetExceeded,omitempty"`
+	Duration              time.Duration     `json:"durationNanos"`
+	DocumentsExamined     uint64            `json:"documentsExamined,omitempty"`
+	DocumentsReturned     uint64            `json:"documentsReturned,omitempty"`
+	KeysExamined          uint64            `json:"keysExamined,omitempty"`
+	CandidateIDs          uint64            `json:"candidateIds,omitempty"`
+	UniqueCandidateIDs    uint64            `json:"uniqueCandidateIds,omitempty"`
+	DuplicateCandidateIDs uint64            `json:"duplicateCandidateIds,omitempty"`
+	CandidatesRetained    uint64            `json:"candidatesRetained,omitempty"`
+	SortBytes             uint64            `json:"sortBytes,omitempty"`
+	EarlyStopped          bool              `json:"earlyStopped,omitempty"`
+	Changes               uint64            `json:"changes,omitempty"`
+	Slow                  bool              `json:"slow"`
+	Sampled               bool              `json:"sampled"`
 }
 
 type DiagnosticStats struct {
@@ -174,9 +187,30 @@ func (db *DB) finishQueryDiagnostic(span diagnosticSpan, explain ExplainResult, 
 func (d *Diagnostics) finishQuery(span diagnosticSpan, explain ExplainResult, returned int, operationErr error) {
 	event := finishDiagnosticEvent(span, operationErr)
 	event.Stage = safeDiagnosticStage(explain.Stage)
+	event.PlanReason = safeDiagnosticPlanReason(explain.PlanReason)
+	event.FallbackReason = safeDiagnosticFallbackReason(explain.FallbackReason)
+	event.EarlyStopReason = safeDiagnosticEarlyStopReason(explain.EarlyStopReason)
+	event.EarlyStopScope = safeDiagnosticEarlyStopScope(explain.EarlyStopScope)
+	event.BudgetPressure = safeDiagnosticBudgetReason(explain.Budget.Pressure)
+	event.BudgetExceeded = safeDiagnosticBudgetReason(explain.Budget.Exceeded)
+	event.EarlyStopped = explain.EarlyStopped
 	if explain.DocumentsExamined > 0 {
 		event.DocumentsExamined = uint64(explain.DocumentsExamined)
 	}
+	if explain.KeysExamined > 0 {
+		event.KeysExamined = uint64(explain.KeysExamined)
+	}
+	if explain.CandidateIDs > 0 {
+		event.CandidateIDs = uint64(explain.CandidateIDs)
+	}
+	if explain.UniqueCandidateIDs > 0 {
+		event.UniqueCandidateIDs = uint64(explain.UniqueCandidateIDs)
+	}
+	if explain.DuplicateCandidateIDs > 0 {
+		event.DuplicateCandidateIDs = uint64(explain.DuplicateCandidateIDs)
+	}
+	event.CandidatesRetained = explain.CandidatesRetained
+	event.SortBytes = explain.SortBytes
 	if returned > 0 {
 		event.DocumentsReturned = uint64(returned)
 	}
@@ -342,6 +376,56 @@ func safeDiagnosticStage(stage string) string {
 	}
 }
 
+func safeDiagnosticPlanReason(reason string) string {
+	switch reason {
+	case "collection_scan", "empty_index_result", "primary_lookup", "primary_union",
+		"secondary_index", "index_union", "multi_index_union", "not_planned":
+		return reason
+	default:
+		return ""
+	}
+}
+
+func safeDiagnosticFallbackReason(reason string) string {
+	switch reason {
+	case "unfiltered", "unindexed_or_branch", "no_secondary_indexes",
+		"no_usable_index", "budget_rejected":
+		return reason
+	default:
+		return ""
+	}
+}
+
+func safeDiagnosticEarlyStopReason(reason string) string {
+	switch reason {
+	case "limit_not_set", "zero_limit", "sort_required", "collection_insertion_order",
+		"candidate_position_order", "single_exact_source", "exact_span_position_merge",
+		"window_overflow", "mixed_primary_secondary", "primary_union", "range_scan",
+		"too_many_exact_spans", "access_order_not_proven":
+		return reason
+	default:
+		return ""
+	}
+}
+
+func safeDiagnosticEarlyStopScope(scope string) string {
+	switch scope {
+	case "documents", "keys_and_documents":
+		return scope
+	default:
+		return ""
+	}
+}
+
+func safeDiagnosticBudgetReason(reason string) string {
+	switch reason {
+	case "documents", "keys", "candidates", "sort_bytes", "skip":
+		return reason
+	default:
+		return ""
+	}
+}
+
 func classifyDiagnosticError(err error) (DiagnosticOutcome, string) {
 	if err == nil {
 		return DiagnosticSuccess, ""
@@ -361,7 +445,7 @@ func classifyDiagnosticError(err error) (DiagnosticOutcome, string) {
 		{ErrMutationLimit, "mutation_limit"}, {ErrDurability, "durability"},
 		{ErrCorrupt, "corrupt"}, {ErrInvalidDocument, "invalid_document"},
 		{ErrInvalidFilter, "invalid_filter"}, {ErrInvalidUpdate, "invalid_update"},
-		{ErrInvalidIndex, "invalid_index"},
+		{ErrInvalidIndex, "invalid_index"}, {ErrQueryBudget, "query_budget"},
 	}
 	for _, class := range classes {
 		if errors.Is(err, class.err) {

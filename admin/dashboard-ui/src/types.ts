@@ -26,11 +26,24 @@ export type DiagnosticEvent = {
   capturedAt: string;
   kind: string;
   stage?: string;
+  planReason?: string;
+  fallbackReason?: string;
+  earlyStopReason?: string;
+  earlyStopScope?: string;
+  budgetPressure?: string;
+  budgetExceeded?: string;
   errorClass?: string;
   outcome: string;
   durationNanos: number;
   documentsExamined?: number;
   documentsReturned?: number;
+  keysExamined?: number;
+  candidateIds?: number;
+  uniqueCandidateIds?: number;
+  duplicateCandidateIds?: number;
+  candidatesRetained?: number;
+  sortBytes?: number;
+  earlyStopped?: boolean;
   changes?: number;
 };
 

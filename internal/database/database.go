@@ -442,11 +442,16 @@ func (c *Collection) FindQuery(ctx context.Context, query QuerySpec) (*Cursor, e
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
+	diagnostic := c.db.beginDiagnostic(DiagnosticQuery)
 	budget, err := c.db.newQueryBudget(query)
 	if err != nil {
+		explain := enrichExplain(ExplainResult{
+			PlanReason: "not_planned", FallbackReason: "budget_rejected",
+		}, query, budget)
+		c.db.recordQuery(explain, 0, err, diagnostic)
 		return nil, err
 	}
-	diagnostic := c.db.beginDiagnostic(DiagnosticQuery)
+	var plannedAccess *queryAccessPlan
 	if c.db.querySource != nil {
 		c.db.mu.RLock()
 		if c.db.closed {
@@ -454,7 +459,7 @@ func (c *Collection) FindQuery(ctx context.Context, query QuerySpec) (*Cursor, e
 			c.db.recordQuery(ExplainResult{Stage: "COLLSCAN"}, 0, ErrClosed, diagnostic)
 			return nil, ErrClosed
 		}
-		stream, streamed, err := c.openStorageCollectionStreamLocked(ctx, query)
+		stream, access, streamed, err := c.openStorageCollectionStreamLocked(ctx, query)
 		c.db.mu.RUnlock()
 		if err != nil {
 			c.db.recordQuery(ExplainResult{Stage: "COLLSCAN"}, 0, err, diagnostic)
@@ -467,7 +472,7 @@ func (c *Collection) FindQuery(ctx context.Context, query QuerySpec) (*Cursor, e
 			}
 			cursor := &Cursor{
 				stream: stream, query: query, skip: query.Skip(), remaining: limit, budget: budget,
-				db: c.db, explain: ExplainResult{Stage: "COLLSCAN"}, active: true, diagnostic: diagnostic,
+				db: c.db, explain: explainCollectionPlan(query, *access), active: true, diagnostic: diagnostic,
 			}
 			c.db.metrics.activeCursors.Add(1)
 			stop := context.AfterFunc(ctx, func() { _ = cursor.closeWithError(ctx.Err()) })
@@ -484,8 +489,11 @@ func (c *Collection) FindQuery(ctx context.Context, query QuerySpec) (*Cursor, e
 			}
 			return cursor, nil
 		}
+		if access != nil && access.usable {
+			plannedAccess = access
+		}
 	}
-	documents, explain, err := c.planWithBudget(ctx, query, budget)
+	documents, explain, err := c.planWithBudgetAccess(ctx, query, budget, plannedAccess)
 	if c != nil && c.db != nil {
 		c.db.recordQuery(explain, len(documents), err, diagnostic)
 	}
@@ -734,13 +742,13 @@ func (c *Cursor) Next(ctx context.Context) (Document, bool, error) {
 				_ = c.finishLocked(err)
 				return nil, false, err
 			}
-			c.explain.DocumentsExamined++
 			if c.budget != nil {
 				if err := c.budget.document(); err != nil {
 					_ = c.finishLocked(err)
 					return nil, false, err
 				}
 			}
+			c.explain.DocumentsExamined++
 			if !c.query.Match(candidate.document) {
 				continue
 			}
@@ -759,6 +767,7 @@ func (c *Cursor) Next(ctx context.Context) (Document, bool, error) {
 			if c.remaining > 0 {
 				c.remaining--
 				if c.remaining == 0 {
+					c.explain.EarlyStopped = true
 					if err := c.finishLocked(nil); err != nil {
 						return nil, false, err
 					}
@@ -862,6 +871,7 @@ func (c *Cursor) finishLocked(operationErr error) error {
 	}
 	if c.db != nil && !c.recorded {
 		c.recorded = true
+		c.explain = enrichExplain(c.explain, c.query, c.budget)
 		c.db.recordQuery(c.explain, c.returned, resultErr, c.diagnostic)
 	}
 	if c.db != nil && c.active {

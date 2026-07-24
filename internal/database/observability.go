@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -142,15 +143,27 @@ type WriteTransactionStats struct {
 	Aborted   uint64 `json:"aborted"`
 }
 
+// QueryStats contains fixed-cardinality process-session counters. Physical key
+// and candidate counters include work completed before a failed query; the
+// older document/return counters retain their successful-query contract.
 type QueryStats struct {
-	ActiveCursors     uint64 `json:"activeCursors"`
-	Total             uint64 `json:"total"`
-	Failed            uint64 `json:"failed"`
-	CollectionScans   uint64 `json:"collectionScans"`
-	IndexScans        uint64 `json:"indexScans"`
-	IDLookups         uint64 `json:"idLookups"`
-	DocumentsExamined uint64 `json:"documentsExamined"`
-	DocumentsReturned uint64 `json:"documentsReturned"`
+	ActiveCursors         uint64 `json:"activeCursors"`
+	Total                 uint64 `json:"total"`
+	Failed                uint64 `json:"failed"`
+	CollectionScans       uint64 `json:"collectionScans"`
+	IndexScans            uint64 `json:"indexScans"`
+	IDLookups             uint64 `json:"idLookups"`
+	DocumentsExamined     uint64 `json:"documentsExamined"`
+	DocumentsReturned     uint64 `json:"documentsReturned"`
+	KeysExamined          uint64 `json:"keysExamined"`
+	CandidateIDs          uint64 `json:"candidateIds"`
+	UniqueCandidateIDs    uint64 `json:"uniqueCandidateIds"`
+	DuplicateCandidateIDs uint64 `json:"duplicateCandidateIds"`
+	CandidatesRetained    uint64 `json:"candidatesRetained"`
+	SortBytes             uint64 `json:"sortBytes"`
+	EarlyStops            uint64 `json:"earlyStops"`
+	BudgetPressureEvents  uint64 `json:"budgetPressureEvents"`
+	BudgetRejections      uint64 `json:"budgetRejections"`
 }
 
 type RealtimeStats struct {
@@ -298,9 +311,15 @@ type dbMetrics struct {
 	writeTransactionsCommitted, writeTransactionsNoops   atomic.Uint64
 	writeTransactionsConflicts, writeTransactionsAborted atomic.Uint64
 
-	queries, queryFailures, activeCursors  atomic.Uint64
-	collectionScans, indexScans, idLookups atomic.Uint64
-	documentsExamined, documentsReturned   atomic.Uint64
+	queries, queryFailures, activeCursors   atomic.Uint64
+	collectionScans, indexScans, idLookups  atomic.Uint64
+	documentsExamined, documentsReturned    atomic.Uint64
+	keysExamined, queryCandidateIDs         atomic.Uint64
+	queryUniqueCandidateIDs                 atomic.Uint64
+	queryDuplicateCandidateIDs              atomic.Uint64
+	queryCandidatesRetained, querySortBytes atomic.Uint64
+	queryEarlyStops, queryBudgetPressure    atomic.Uint64
+	queryBudgetRejections                   atomic.Uint64
 
 	publishedBatches, publishedChanges, watcherDeliveries atomic.Uint64
 	initialSnapshots, queryRecomputes, snapshotsEmitted   atomic.Uint64
@@ -441,14 +460,23 @@ func (db *DB) Stats() DBStats {
 		SchedulerFailures: db.metrics.indexBuildSchedulerFailures.Load(),
 	}
 	stats.Queries = QueryStats{
-		ActiveCursors:     db.metrics.activeCursors.Load(),
-		Total:             db.metrics.queries.Load(),
-		Failed:            db.metrics.queryFailures.Load(),
-		CollectionScans:   db.metrics.collectionScans.Load(),
-		IndexScans:        db.metrics.indexScans.Load(),
-		IDLookups:         db.metrics.idLookups.Load(),
-		DocumentsExamined: db.metrics.documentsExamined.Load(),
-		DocumentsReturned: db.metrics.documentsReturned.Load(),
+		ActiveCursors:         db.metrics.activeCursors.Load(),
+		Total:                 db.metrics.queries.Load(),
+		Failed:                db.metrics.queryFailures.Load(),
+		CollectionScans:       db.metrics.collectionScans.Load(),
+		IndexScans:            db.metrics.indexScans.Load(),
+		IDLookups:             db.metrics.idLookups.Load(),
+		DocumentsExamined:     db.metrics.documentsExamined.Load(),
+		DocumentsReturned:     db.metrics.documentsReturned.Load(),
+		KeysExamined:          db.metrics.keysExamined.Load(),
+		CandidateIDs:          db.metrics.queryCandidateIDs.Load(),
+		UniqueCandidateIDs:    db.metrics.queryUniqueCandidateIDs.Load(),
+		DuplicateCandidateIDs: db.metrics.queryDuplicateCandidateIDs.Load(),
+		CandidatesRetained:    db.metrics.queryCandidatesRetained.Load(),
+		SortBytes:             db.metrics.querySortBytes.Load(),
+		EarlyStops:            db.metrics.queryEarlyStops.Load(),
+		BudgetPressureEvents:  db.metrics.queryBudgetPressure.Load(),
+		BudgetRejections:      db.metrics.queryBudgetRejections.Load(),
 	}
 	stats.Realtime = RealtimeStats{
 		SharedViews:            db.metrics.sharedViews.Load(),
@@ -557,6 +585,33 @@ func (db *DB) initializeLogicalStats(persistentDocuments *uint64) {
 
 func (db *DB) recordQuery(explain ExplainResult, returned int, err error, diagnostic diagnosticSpan) {
 	db.metrics.queries.Add(1)
+	if explain.KeysExamined > 0 {
+		db.metrics.keysExamined.Add(uint64(explain.KeysExamined))
+	}
+	if explain.CandidateIDs > 0 {
+		db.metrics.queryCandidateIDs.Add(uint64(explain.CandidateIDs))
+	}
+	if explain.UniqueCandidateIDs > 0 {
+		db.metrics.queryUniqueCandidateIDs.Add(uint64(explain.UniqueCandidateIDs))
+	}
+	if explain.DuplicateCandidateIDs > 0 {
+		db.metrics.queryDuplicateCandidateIDs.Add(uint64(explain.DuplicateCandidateIDs))
+	}
+	if explain.CandidatesRetained > 0 {
+		db.metrics.queryCandidatesRetained.Add(explain.CandidatesRetained)
+	}
+	if explain.SortBytes > 0 {
+		db.metrics.querySortBytes.Add(explain.SortBytes)
+	}
+	if explain.EarlyStopped {
+		db.metrics.queryEarlyStops.Add(1)
+	}
+	if explain.Budget.Pressure != "" {
+		db.metrics.queryBudgetPressure.Add(1)
+	}
+	if errors.Is(err, ErrQueryBudget) {
+		db.metrics.queryBudgetRejections.Add(1)
+	}
 	if err != nil {
 		db.metrics.queryFailures.Add(1)
 		db.finishQueryDiagnostic(diagnostic, explain, returned, err)

@@ -64,6 +64,62 @@ func BenchmarkIndexedRangeScan(b *testing.B) {
 	}
 }
 
+func BenchmarkLargeOrUnionPlanning(b *testing.B) {
+	db := New()
+	defer db.Close()
+	collection := db.Collection("items")
+	if err := collection.CreateIndex(context.Background(), "by_bucket", []IndexField{{Field: "bucket", Order: 1}}, IndexOptions{}); err != nil {
+		b.Fatal(err)
+	}
+	branches := make([]Filter, 64)
+	var next int64
+	for branch := range branches {
+		values := make([]any, 128)
+		for index := range values {
+			values[index] = next
+			next++
+		}
+		branches[branch] = Filter{"bucket": map[string]any{"$in": values}}
+	}
+	query, err := CompileQuery(Filter{"$or": branches}, QueryOptions{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := collection.ExplainQuery(context.Background(), query); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkIndexedOrUnionLimit(b *testing.B) {
+	db, collection := benchmarkCollection(b, 10_000, true)
+	defer db.Close()
+	limit := 1
+	query, err := CompileQuery(Filter{"$or": []Filter{
+		{"n": int64(9_999)},
+		{"n": int64(5_000)},
+		{"n": int64(1)},
+	}}, QueryOptions{Limit: &limit})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		cursor, err := collection.FindQuery(context.Background(), query)
+		if err != nil {
+			b.Fatal(err)
+		}
+		documents, err := cursor.All(context.Background())
+		if err != nil || len(documents) != 1 {
+			b.Fatalf("documents=%d err=%v", len(documents), err)
+		}
+	}
+}
+
 func BenchmarkCompoundIndexPointQuery(b *testing.B) {
 	db := New()
 	defer db.Close()

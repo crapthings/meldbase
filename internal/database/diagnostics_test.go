@@ -208,6 +208,84 @@ func TestStreamingCursorRecordsExecutionLifecycle(t *testing.T) {
 	}
 }
 
+func TestQueryBudgetFailureRetainsExplainWorkAndDiagnosticReason(t *testing.T) {
+	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{
+		MaxQueryKeysExamined: 1, MaxQuerySkip: 1,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	items := db.Collection("items")
+	if _, err := items.InsertMany(context.Background(), []Document{{"n": Int(1)}, {"n": Int(2)}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := items.CreateIndex(context.Background(), "by_n", []IndexField{{Field: "n", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	diagnostics, err := db.EnableDiagnostics(DiagnosticsOptions{Capacity: 4, RecordAll: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer diagnostics.Close()
+
+	filter := Filter{"n": map[string]any{"$gte": int64(1)}}
+	explain, err := items.Explain(context.Background(), filter)
+	if !errors.Is(err, ErrQueryBudget) {
+		t.Fatalf("explain error=%v result=%+v", err, explain)
+	}
+	if explain.Stage != "IXSCAN" || explain.KeysExamined != 1 ||
+		explain.Budget.KeysUsed != 1 || explain.Budget.KeysLimit != 1 ||
+		explain.Budget.Exceeded != "keys" || explain.Budget.Pressure != "keys" ||
+		len(explain.Sources) != 1 || explain.Sources[0].KeysExamined != 1 ||
+		!hasExplainAdvice(explain, "budget_pressure") {
+		t.Fatalf("partial explain=%+v", explain)
+	}
+
+	if _, err := items.Find(context.Background(), filter); !errors.Is(err, ErrQueryBudget) {
+		t.Fatalf("find error=%v", err)
+	}
+	stats := db.Stats().Queries
+	if stats.Total != 1 || stats.Failed != 1 || stats.KeysExamined != 1 ||
+		stats.BudgetPressureEvents != 1 || stats.BudgetRejections != 1 || stats.CandidateIDs != 1 ||
+		stats.UniqueCandidateIDs != 1 {
+		t.Fatalf("query stats=%+v", stats)
+	}
+	events := diagnostics.Snapshot().Events
+	if len(events) != 1 {
+		t.Fatalf("events=%+v", events)
+	}
+	event := events[0]
+	if event.ErrorClass != "query_budget" || event.Stage != "IXSCAN" ||
+		event.KeysExamined != 1 || event.BudgetExceeded != "keys" ||
+		event.BudgetPressure != "keys" || event.PlanReason != "secondary_index" {
+		t.Fatalf("budget diagnostic=%+v", event)
+	}
+
+	two := 2
+	skipExplain, err := items.ExplainWithOptions(context.Background(), Filter{}, QueryOptions{Skip: two})
+	if !errors.Is(err, ErrQueryBudget) || skipExplain.PlanReason != "not_planned" ||
+		skipExplain.FallbackReason != "budget_rejected" ||
+		skipExplain.Budget.SkipUsed != 2 || skipExplain.Budget.SkipLimit != 1 ||
+		skipExplain.Budget.Exceeded != "skip" || skipExplain.Budget.Pressure != "skip" {
+		t.Fatalf("skip explain=%+v err=%v", skipExplain, err)
+	}
+	if _, err := items.Find(context.Background(), Filter{}, QueryOptions{Skip: two}); !errors.Is(err, ErrQueryBudget) {
+		t.Fatalf("skip find error=%v", err)
+	}
+	stats = db.Stats().Queries
+	if stats.Total != 2 || stats.Failed != 2 || stats.BudgetPressureEvents != 2 || stats.BudgetRejections != 2 {
+		t.Fatalf("skip query stats=%+v", stats)
+	}
+	events = diagnostics.Snapshot().Events
+	if len(events) != 2 || events[1].ErrorClass != "query_budget" ||
+		events[1].Stage != "UNKNOWN" || events[1].PlanReason != "not_planned" ||
+		events[1].FallbackReason != "budget_rejected" ||
+		events[1].BudgetExceeded != "skip" {
+		t.Fatalf("skip diagnostic=%+v", events)
+	}
+}
+
 func TestDiagnosticsConfigurationValidation(t *testing.T) {
 	db := New()
 	defer db.Close()

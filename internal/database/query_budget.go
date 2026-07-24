@@ -14,6 +14,8 @@ type queryBudget struct {
 	candidates uint64
 	sortBytes  uint64
 	rejected   bool
+	exceeded   string
+	detailed   bool
 }
 
 func (db *DB) newQueryBudget(query QuerySpec) (*queryBudget, error) {
@@ -22,14 +24,14 @@ func (db *DB) newQueryBudget(query QuerySpec) (*queryBudget, error) {
 	}
 	budget := &queryBudget{db: db, query: query, limits: db.resourceLimits}
 	if uint64(query.Skip()) > budget.limits.MaxQuerySkip {
-		return nil, budget.reject("skip %d exceeds limit %d", query.Skip(), budget.limits.MaxQuerySkip)
+		return budget, budget.reject("skip", "skip %d exceeds limit %d", query.Skip(), budget.limits.MaxQuerySkip)
 	}
 	return budget, nil
 }
 
 func (b *queryBudget) document() error {
 	if b.documents >= b.limits.MaxQueryDocumentsExamined {
-		return b.reject("documents examined exceed limit %d", b.limits.MaxQueryDocumentsExamined)
+		return b.reject("documents", "documents examined exceed limit %d", b.limits.MaxQueryDocumentsExamined)
 	}
 	b.documents++
 	return nil
@@ -37,7 +39,7 @@ func (b *queryBudget) document() error {
 
 func (b *queryBudget) key() error {
 	if b.keys >= b.limits.MaxQueryKeysExamined {
-		return b.reject("index keys examined exceed limit %d", b.limits.MaxQueryKeysExamined)
+		return b.reject("keys", "index keys examined exceed limit %d", b.limits.MaxQueryKeysExamined)
 	}
 	b.keys++
 	return nil
@@ -45,7 +47,7 @@ func (b *queryBudget) key() error {
 
 func (b *queryBudget) candidate(document Document) error {
 	if b.candidates >= b.limits.MaxQueryCandidates {
-		return b.reject("query candidates exceed limit %d", b.limits.MaxQueryCandidates)
+		return b.reject("candidates", "query candidates exceed limit %d", b.limits.MaxQueryCandidates)
 	}
 	b.candidates++
 	if len(b.query.sort) == 0 {
@@ -56,7 +58,7 @@ func (b *queryBudget) candidate(document Document) error {
 		return err
 	}
 	if b.sortBytes > b.limits.MaxQuerySortBytes || size > b.limits.MaxQuerySortBytes-b.sortBytes {
-		return b.reject("sort candidate bytes exceed limit %d", b.limits.MaxQuerySortBytes)
+		return b.reject("sort_bytes", "sort candidate bytes exceed limit %d", b.limits.MaxQuerySortBytes)
 	}
 	b.sortBytes += size
 	return nil
@@ -94,7 +96,10 @@ func retainQueryCandidate(collector *queryCandidateCollector, budget *queryBudge
 	return budget.candidate(candidate.document)
 }
 
-func (b *queryBudget) reject(format string, values ...any) error {
+func (b *queryBudget) reject(kind, format string, values ...any) error {
+	if b.exceeded == "" {
+		b.exceeded = kind
+	}
 	if !b.rejected && b.db != nil {
 		b.rejected = true
 		b.db.metrics.resourceLimitRejections.Add(1)

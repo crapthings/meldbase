@@ -2,6 +2,7 @@ package database
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -311,19 +312,75 @@ type ExplainBound struct {
 	LowerInclusive, UpperInclusive bool
 }
 
+// ExplainAccessSource reports the physical work attributed to one primary or
+// secondary access path. CandidateIDs counts document IDs processed by the
+// deduplicator. Read-ahead needed for an ordered union remains visible in
+// KeysExamined even when execution stops before those IDs are consumed.
+type ExplainAccessSource struct {
+	IndexName                                 string
+	Primary                                   bool
+	Bounds                                    []ExplainBound
+	Spans, ExactSpans                         int
+	KeysExamined, CandidateIDs                int64
+	UniqueCandidateIDs, DuplicateCandidateIDs int64
+	DocumentsExamined                         int64
+}
+
+// ExplainBudget is the final resource-budget snapshot for one execution.
+// Pressure and Exceeded are fixed reason codes naming one of "documents",
+// "keys", "candidates", "sort_bytes", or "skip".
+type ExplainBudget struct {
+	DocumentsUsed, DocumentsLimit   uint64
+	KeysUsed, KeysLimit             uint64
+	CandidatesUsed, CandidatesLimit uint64
+	SortBytesUsed, SortBytesLimit   uint64
+	SkipUsed, SkipLimit             uint64
+	Pressure, Exceeded              string
+}
+
+// ExplainAdvice is a conservative, structured observation rather than an
+// instruction to create an index. Paths and Sort contain schema facts but
+// never query values. Callers should validate selectivity against workload
+// measurements.
+type ExplainAdvice struct {
+	Code  string
+	Paths []string
+	Sort  []SortField
+}
+
 // ExplainResult separates plan facts from observed work. Estimated fields are
 // conservative candidate estimates when the selected backend can provide them;
 // DocumentsExamined and KeysExamined are the actual completed scan counts.
 // ResidualPredicate means the complete compiled predicate is rechecked after
 // index admission, including when the index appears to cover every condition.
 type ExplainResult struct {
-	Stage, IndexName                  string
+	Stage, IndexName string
+	// IndexNames contains every access path used by an index union. IndexName
+	// remains populated for the common single-index and primary-key plans.
+	IndexNames                        []string
 	Bounds                            []ExplainBound
 	ResidualPredicate, SortRequired   bool
 	SortIndexCompatible               bool
 	EstimatedDocuments, EstimatedKeys int64
 	DocumentsExamined, KeysExamined   int64
 	CandidatesRetained, SortBytes     uint64
+	PlanReason, FallbackReason        string
+	UnindexedPaths                    []string
+	// IndexableConjunctPaths lists distinct AND predicate paths that each have
+	// an independently usable access path. It is populated only by explicit
+	// Explain calls and does not imply that an index intersection was selected.
+	IndexableConjunctPaths []string
+	// CompoundIndexOpportunity is a structural signal: multiple independently
+	// indexable AND paths exist, while the selected non-unique source constrains
+	// only a subset. Advice still requires observed amplification.
+	CompoundIndexOpportunity         bool
+	Sources                          []ExplainAccessSource
+	CandidateIDs, UniqueCandidateIDs int64
+	DuplicateCandidateIDs            int64
+	EarlyStopEligible, EarlyStopped  bool
+	EarlyStopScope, EarlyStopReason  string
+	Budget                           ExplainBudget
+	Advice                           []ExplainAdvice
 }
 
 func (c *Collection) Explain(ctx context.Context, filter Filter) (ExplainResult, error) {
@@ -352,7 +409,7 @@ func (c *Collection) ExplainQuery(ctx context.Context, query QuerySpec) (Explain
 		return ExplainResult{}, err
 	}
 	_, explain, err := c.plan(ctx, query)
-	return explain, err
+	return finalizeExplainAdvice(query, explain), err
 }
 
 func (c *Collection) plan(ctx context.Context, query QuerySpec) ([]Document, ExplainResult, error) {
@@ -361,24 +418,15 @@ func (c *Collection) plan(ctx context.Context, query QuerySpec) ([]Document, Exp
 	}
 	budget, err := c.db.newQueryBudget(query)
 	if err != nil {
-		return nil, ExplainResult{}, err
+		explain := ExplainResult{PlanReason: "not_planned", FallbackReason: "budget_rejected"}
+		return nil, enrichExplain(explain, query, budget), err
 	}
+	budget.detailed = true
 	return c.planWithBudget(ctx, query, budget)
 }
 
-func explainIndex(definition IndexDefinition, query QuerySpec) ExplainResult {
-	return ExplainResult{
-		Stage:               "IXSCAN",
-		IndexName:           definition.Name,
-		Bounds:              explainIndexBounds(definition, query.where),
-		ResidualPredicate:   true,
-		SortRequired:        len(query.sort) > 0,
-		SortIndexCompatible: indexSortCompatible(definition, query),
-	}
-}
-
 func explainCollection(query QuerySpec) ExplainResult {
-	return ExplainResult{Stage: "COLLSCAN", SortRequired: len(query.sort) > 0}
+	return explainCollectionPlan(query, queryAccessPlan{fallbackReason: "no_usable_index"})
 }
 
 func explainIndexBounds(definition IndexDefinition, expression expr) []ExplainBound {
@@ -453,6 +501,12 @@ func enrichExplain(explain ExplainResult, query QuerySpec, budget *queryBudget) 
 	if budget == nil {
 		return explain
 	}
+	if explain.DocumentsExamined < int64(budget.documents) {
+		explain.DocumentsExamined = int64(budget.documents)
+	}
+	if explain.KeysExamined < int64(budget.keys) {
+		explain.KeysExamined = int64(budget.keys)
+	}
 	if explain.EstimatedDocuments == 0 && explain.DocumentsExamined > 0 {
 		explain.EstimatedDocuments = explain.DocumentsExamined
 	}
@@ -461,10 +515,15 @@ func enrichExplain(explain ExplainResult, query QuerySpec, budget *queryBudget) 
 	}
 	explain.CandidatesRetained = budget.candidates
 	explain.SortBytes = budget.sortBytes
+	explain.Budget = explainBudgetSnapshot(budget)
 	return explain
 }
 
 func (c *Collection) planWithBudget(ctx context.Context, query QuerySpec, budget *queryBudget) (documents []Document, explain ExplainResult, resultErr error) {
+	return c.planWithBudgetAccess(ctx, query, budget, nil)
+}
+
+func (c *Collection) planWithBudgetAccess(ctx context.Context, query QuerySpec, budget *queryBudget, plannedAccess *queryAccessPlan) (documents []Document, explain ExplainResult, resultErr error) {
 	defer func() { explain = enrichExplain(explain, query, budget) }()
 	if err := contextError(ctx); err != nil {
 		return nil, ExplainResult{}, err
@@ -478,217 +537,242 @@ func (c *Collection) planWithBudget(ctx context.Context, query QuerySpec, budget
 		return nil, ExplainResult{}, ErrClosed
 	}
 	if c.db.querySource != nil {
-		return c.planStorageLocked(ctx, query, budget)
+		return c.planStorageLockedAccess(ctx, query, budget, plannedAccess)
 	}
 	data := c.db.collections[c.name]
 	if data == nil {
-		return nil, explainCollection(query), nil
+		data = newCollectionData()
 	}
-	if value, ok := equalityCandidate(query.where, "_id"); ok && value.kind == IDKind {
-		if err := budget.key(); err != nil {
-			return nil, ExplainResult{}, err
-		}
-		document, exists := data.documents[value.id]
-		documents := []Document{}
-		examined := int64(0)
-		if exists {
-			if err := budget.document(); err != nil {
-				return nil, ExplainResult{}, err
-			}
-			documents, examined = []Document{document}, 1
-		}
-		if len(documents) > 0 && query.Match(documents[0]) {
-			if err := budget.candidate(documents[0]); err != nil {
-				return nil, ExplainResult{}, err
-			}
-		}
-		explain := explainIndex(IndexDefinition{Name: "_id", Field: "_id", Order: 1, Fields: []IndexField{{Field: "_id", Order: 1}}}, query)
-		explain.Stage, explain.DocumentsExamined, explain.KeysExamined = "ID_LOOKUP", examined, 1
-		return query.Execute(documents), explain, nil
+	definitions := make([]IndexDefinition, 0, len(data.indexes))
+	for _, state := range data.indexes {
+		definitions = append(definitions, state.definition)
 	}
-	names := make([]string, 0, len(data.indexes))
-	for name := range data.indexes {
-		names = append(names, name)
+	access := selectQueryAccessPlan(query.where, definitions, query)
+	if budget.detailed {
+		annotateQueryAccessPlan(&access, query.where, definitions, query)
 	}
-	sort.Slice(names, func(left, right int) bool {
-		leftScore := indexQueryScore(data.indexes[names[left]].definition, query.where)
-		rightScore := indexQueryScore(data.indexes[names[right]].definition, query.where)
-		if leftScore != rightScore {
-			return leftScore > rightScore
-		}
-		leftOrder := indexSortCompatible(data.indexes[names[left]].definition, query)
-		rightOrder := indexSortCompatible(data.indexes[names[right]].definition, query)
-		if leftOrder != rightOrder {
-			return leftOrder
-		}
-		return names[left] < names[right]
-	})
-	for _, name := range names {
-		state := data.indexes[name]
-		if start, end, ok, exact := compoundIndexQueryBounds(state.definition, query.where); ok {
-			var pairs []btree.Pair
-			if exact {
-				for _, raw := range state.tree.Get(start) {
-					pairs = append(pairs, btree.Pair{Key: start, Value: raw})
-				}
-			} else if end == nil || len(start) == 0 || bytes.Compare(start, end) < 0 {
-				pairs = state.tree.Scan(start, end, false)
-			}
-			rawIDs := make([][]byte, 0, len(pairs))
-			for _, pair := range pairs {
-				rawIDs = append(rawIDs, pair.Value)
-			}
-			matched, examined, err := executeMemoryIndexCandidates(ctx, data, rawIDs, query, budget)
-			if err != nil {
-				return nil, ExplainResult{}, err
-			}
-			explain := explainIndex(state.definition, query)
-			explain.DocumentsExamined, explain.KeysExamined = examined, int64(len(pairs))
-			return matched, explain, nil
-		}
-		if spans, ok := compoundIndexValueSpans(state.definition, query.where); ok {
-			pairs := make([]btree.Pair, 0)
-			for _, span := range spans {
-				pairs = append(pairs, state.tree.Scan(span.start, span.end, false)...)
-			}
-			rawIDs := make([][]byte, 0, len(pairs))
-			for _, pair := range pairs {
-				rawIDs = append(rawIDs, pair.Value)
-			}
-			matched, examined, err := executeMemoryIndexCandidates(ctx, data, rawIDs, query, budget)
-			if err != nil {
-				return nil, ExplainResult{}, err
-			}
-			explain := explainIndex(state.definition, query)
-			explain.DocumentsExamined, explain.KeysExamined = examined, int64(len(pairs))
-			return matched, explain, nil
-		}
-		if usesCompoundIndexCodec(state.definition) {
-			continue
-		}
-		values, ok := indexValuesCandidate(query.where, state.definition.Field)
-		if !ok {
-			continue
-		}
-		rawIDs := make([][]byte, 0)
-		for _, value := range values {
-			key, err := encodeIndexKey(value)
-			if err != nil {
-				continue
-			}
-			rawIDs = append(rawIDs, state.tree.Get(key)...)
-		}
-		matched, examined, err := executeMemoryIndexCandidates(ctx, data, rawIDs, query, budget)
-		if err != nil {
-			return nil, ExplainResult{}, err
-		}
-		explain := explainIndex(state.definition, query)
-		explain.DocumentsExamined, explain.KeysExamined = examined, int64(len(rawIDs))
-		return matched, explain, nil
+	if access.usable {
+		return executeMemoryAccessPlan(ctx, data, access, query, budget)
 	}
-	for _, name := range names {
-		state := data.indexes[name]
-		if usesCompoundIndexCodec(state.definition) {
-			continue
-		}
-		lower, upper, ok := rangeCandidate(query.where, state.definition.Field)
-		if !ok {
-			continue
-		}
-		start, end, valid, err := storageIndexBounds(lower, upper)
-		if err != nil {
-			continue
-		}
-		if !valid {
-			return []Document{}, explainIndex(state.definition, query), nil
-		}
-		pairs := state.tree.Scan(start, end, false)
-		rawIDs := make([][]byte, 0, len(pairs))
-		for _, pair := range pairs {
-			rawIDs = append(rawIDs, pair.Value)
-		}
-		matched, examined, err := executeMemoryIndexCandidates(ctx, data, rawIDs, query, budget)
-		if err != nil {
-			return nil, ExplainResult{}, err
-		}
-		explain := explainIndex(state.definition, query)
-		explain.DocumentsExamined, explain.KeysExamined = examined, int64(len(pairs))
-		return matched, explain, nil
+	explain = explainCollectionPlan(query, access)
+	if query.limit != nil && *query.limit == 0 {
+		return []Document{}, explain, nil
 	}
 	collector := newQueryCandidateCollector(query)
+	stopAfter := accessPlanWindow(query)
 	for _, id := range data.order {
 		if err := contextError(ctx); err != nil {
-			return nil, ExplainResult{}, err
+			return nil, explain, err
 		}
 		if document, ok := data.documents[id]; ok {
 			if err := budget.document(); err != nil {
-				return nil, ExplainResult{}, err
+				return nil, explain, err
 			}
+			explain.DocumentsExamined++
 			if query.Match(document) {
 				if err := retainQueryCandidate(&collector, budget, queryCandidate{document: document, position: data.positions[id]}); err != nil {
-					return nil, ExplainResult{}, err
+					return nil, explain, err
+				}
+				if explain.EarlyStopEligible && stopAfter >= 0 && len(collector.heap.items) >= stopAfter {
+					explain.EarlyStopped = true
+					break
 				}
 			}
 		}
 	}
-	explain = explainCollection(query)
-	explain.DocumentsExamined = int64(budget.documents)
 	return collector.Documents(), explain, nil
 }
 
-func executeMemoryIndexCandidates(ctx context.Context, data *collectionData, rawIDs [][]byte, query QuerySpec, budget *queryBudget) ([]Document, int64, error) {
-	collector := newQueryCandidateCollector(query)
+type memoryAccessCandidate struct {
+	raw    []byte
+	source int
+}
+
+func executeMemoryAccessPlan(ctx context.Context, data *collectionData, access queryAccessPlan, query QuerySpec, budget *queryBudget) ([]Document, ExplainResult, error) {
+	explain := explainQueryAccessPlan(access, query, budget.detailed)
+	configureMemoryAccessEarlyStop(&explain, access, query)
+	if query.limit != nil && *query.limit == 0 {
+		return []Document{}, explain, nil
+	}
+	candidates := make([]memoryAccessCandidate, 0, queryPlanWork(access))
+	for sourceIndex, source := range access.sources {
+		if source.primary {
+			for _, id := range source.ids {
+				raw := make([]byte, len(id))
+				copy(raw, id[:])
+				candidates = append(candidates, memoryAccessCandidate{raw: raw, source: sourceIndex})
+			}
+			continue
+		}
+		state := data.indexes[source.definition.Name]
+		if state == nil || state.tree == nil || !equalIndexDefinitions(state.definition, source.definition) {
+			return nil, explain, ErrCorrupt
+		}
+		for _, span := range source.spans {
+			if span.exact {
+				for _, raw := range state.tree.Get(span.start) {
+					candidates = append(candidates, memoryAccessCandidate{raw: raw, source: sourceIndex})
+				}
+				continue
+			}
+			for _, pair := range state.tree.Scan(span.start, span.end, false) {
+				candidates = append(candidates, memoryAccessCandidate{raw: pair.Value, source: sourceIndex})
+			}
+		}
+	}
+	if canOrderMemoryAccessByPosition(access, query) {
+		return executeMemoryOrderedCandidates(ctx, data, candidates, query, budget, explain)
+	}
+	return executeMemoryIndexCandidates(ctx, data, candidates, query, budget, explain)
+}
+
+func canOrderMemoryAccessByPosition(access queryAccessPlan, query QuerySpec) bool {
+	if len(query.sort) != 0 || query.limit == nil || accessPlanWindow(query) < 0 {
+		return false
+	}
+	for _, source := range access.sources {
+		if source.primary {
+			continue
+		}
+		for _, span := range source.spans {
+			if !span.exact {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func executeMemoryOrderedCandidates(ctx context.Context, data *collectionData, rawIDs []memoryAccessCandidate, query QuerySpec, budget *queryBudget, explain ExplainResult) ([]Document, ExplainResult, error) {
+	type positionedID struct {
+		id       DocumentID
+		position uint64
+		source   int
+	}
+	candidates := make([]positionedID, 0, len(rawIDs))
 	seen := make(map[DocumentID]struct{}, len(rawIDs))
-	var examined int64
-	for _, raw := range rawIDs {
-		if err := contextError(ctx); err != nil {
-			return nil, examined, err
-		}
+	for _, rawCandidate := range rawIDs {
 		if err := budget.key(); err != nil {
-			return nil, examined, err
+			return nil, explain, err
 		}
+		observeExplainKey(&explain, rawCandidate.source)
+		raw := rawCandidate.raw
 		if len(raw) != len(DocumentID{}) {
 			continue
 		}
 		var id DocumentID
 		copy(id[:], raw)
 		if _, duplicate := seen[id]; duplicate {
+			observeExplainCandidate(&explain, rawCandidate.source, true)
 			continue
 		}
+		observeExplainCandidate(&explain, rawCandidate.source, false)
+		seen[id] = struct{}{}
+		if _, exists := data.documents[id]; !exists {
+			continue
+		}
+		position, exists := collectionDocumentPosition(data, id)
+		if !exists {
+			continue
+		}
+		candidates = append(candidates, positionedID{id: id, position: position, source: rawCandidate.source})
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		if candidates[left].position != candidates[right].position {
+			return candidates[left].position < candidates[right].position
+		}
+		return bytes.Compare(candidates[left].id[:], candidates[right].id[:]) < 0
+	})
+	collector := newQueryCandidateCollector(query)
+	stopAfter := accessPlanWindow(query)
+	for _, candidate := range candidates {
+		if err := contextError(ctx); err != nil {
+			return nil, explain, err
+		}
+		document := data.documents[candidate.id]
+		if err := budget.document(); err != nil {
+			return nil, explain, err
+		}
+		observeExplainDocument(&explain, candidate.source)
+		if !query.Match(document) {
+			continue
+		}
+		if err := retainQueryCandidate(&collector, budget, queryCandidate{document: document, position: candidate.position}); err != nil {
+			return nil, explain, err
+		}
+		if len(collector.heap.items) >= stopAfter {
+			explain.EarlyStopped = true
+			break
+		}
+	}
+	return collector.Documents(), explain, nil
+}
+
+func executeMemoryIndexCandidates(ctx context.Context, data *collectionData, rawIDs []memoryAccessCandidate, query QuerySpec, budget *queryBudget, explain ExplainResult) ([]Document, ExplainResult, error) {
+	collector := newQueryCandidateCollector(query)
+	seen := make(map[DocumentID]struct{}, len(rawIDs))
+	for _, rawCandidate := range rawIDs {
+		if err := contextError(ctx); err != nil {
+			return nil, explain, err
+		}
+		if err := budget.key(); err != nil {
+			return nil, explain, err
+		}
+		observeExplainKey(&explain, rawCandidate.source)
+		raw := rawCandidate.raw
+		if len(raw) != len(DocumentID{}) {
+			continue
+		}
+		var id DocumentID
+		copy(id[:], raw)
+		if _, duplicate := seen[id]; duplicate {
+			observeExplainCandidate(&explain, rawCandidate.source, true)
+			continue
+		}
+		observeExplainCandidate(&explain, rawCandidate.source, false)
 		seen[id] = struct{}{}
 		document, exists := data.documents[id]
 		if !exists {
 			continue
 		}
-		examined++
 		if err := budget.document(); err != nil {
-			return nil, examined, err
+			return nil, explain, err
 		}
+		observeExplainDocument(&explain, rawCandidate.source)
 		if !query.Match(document) {
 			continue
 		}
-		position, exists := data.positions[id]
-		if !exists {
-			// Compatibility for deliberately hand-built collectionData values in
-			// package tests. All constructor and recovery paths own a position map.
-			for index, candidate := range data.order {
-				if candidate == id {
-					position, exists = uint64(index), true
-					break
-				}
-			}
-		}
+		position, exists := collectionDocumentPosition(data, id)
 		if !exists {
 			continue
 		}
 		if err := retainQueryCandidate(&collector, budget, queryCandidate{document: document, position: position}); err != nil {
-			return nil, examined, err
+			return nil, explain, err
 		}
 	}
-	return collector.Documents(), examined, nil
+	return collector.Documents(), explain, nil
+}
+
+func collectionDocumentPosition(data *collectionData, id DocumentID) (uint64, bool) {
+	position, exists := data.positions[id]
+	if exists {
+		return position, true
+	}
+	// Compatibility for deliberately hand-built collectionData values in package
+	// tests. All constructor and recovery paths own a position map.
+	for index, candidate := range data.order {
+		if candidate == id {
+			return uint64(index), true
+		}
+	}
+	return 0, false
 }
 
 func (c *Collection) planStorageLocked(ctx context.Context, query QuerySpec, budget *queryBudget) (documents []Document, explain ExplainResult, resultErr error) {
+	return c.planStorageLockedAccess(ctx, query, budget, nil)
+}
+
+func (c *Collection) planStorageLockedAccess(ctx context.Context, query QuerySpec, budget *queryBudget, plannedAccess *queryAccessPlan) (documents []Document, explain ExplainResult, resultErr error) {
 	defer func() { explain = enrichExplain(explain, query, budget) }()
 	snapshot, err := c.db.querySource.openQuerySnapshot()
 	if err != nil {
@@ -696,241 +780,410 @@ func (c *Collection) planStorageLocked(ctx context.Context, query QuerySpec, bud
 	}
 	defer func() {
 		if err := snapshot.Close(); resultErr == nil && err != nil {
-			documents, explain, resultErr = nil, ExplainResult{}, err
+			documents, resultErr = nil, err
 		}
 	}()
 	if snapshot.Sequence() != c.db.token {
 		return nil, ExplainResult{}, ErrCorrupt
 	}
-	if value, ok := equalityCandidate(query.where, "_id"); ok && value.kind == IDKind {
-		if err := budget.key(); err != nil {
-			return nil, ExplainResult{}, err
-		}
-		record, exists, err := snapshot.GetDocumentRecord(c.name, value.id)
-		if err != nil {
-			return nil, ExplainResult{}, err
-		}
-		collector := newQueryCandidateCollector(query)
-		if exists {
-			if err := budget.document(); err != nil {
-				return nil, ExplainResult{}, err
-			}
-			candidate, err := decodeQueryStorageCandidate(record)
-			if err != nil {
-				return nil, ExplainResult{}, err
-			}
-			if candidate.documentID() != value.id {
-				return nil, ExplainResult{}, ErrCorrupt
-			}
-			if query.Match(candidate.document) {
-				if err := retainQueryCandidate(&collector, budget, candidate); err != nil {
-					return nil, ExplainResult{}, err
-				}
-			}
-		}
-		explain := explainIndex(IndexDefinition{Name: "_id", Field: "_id", Order: 1, Fields: []IndexField{{Field: "_id", Order: 1}}}, query)
-		explain.Stage, explain.DocumentsExamined, explain.KeysExamined = "ID_LOOKUP", boolCount(exists), 1
-		return collector.Documents(), explain, nil
+	if plannedAccess != nil {
+		return executeStorageAccessPlan(ctx, snapshot, c.name, *plannedAccess, query, budget)
 	}
 	indexes, err := snapshot.Indexes(c.name)
 	if err != nil {
 		return nil, ExplainResult{}, err
 	}
-	sort.Slice(indexes, func(left, right int) bool {
-		leftDefinition := IndexDefinition{Name: indexes[left].Name, Field: indexes[left].Field, Order: 1, Unique: indexes[left].Unique, Fields: indexes[left].Fields}
-		rightDefinition := IndexDefinition{Name: indexes[right].Name, Field: indexes[right].Field, Order: 1, Unique: indexes[right].Unique, Fields: indexes[right].Fields}
-		leftScore, rightScore := indexQueryScore(leftDefinition, query.where), indexQueryScore(rightDefinition, query.where)
-		if leftScore != rightScore {
-			return leftScore > rightScore
+	definitions := make([]IndexDefinition, len(indexes))
+	for index := range indexes {
+		definitions[index] = IndexDefinition{
+			Name: indexes[index].Name, Field: indexes[index].Field, Order: 1,
+			Unique: indexes[index].Unique, Fields: cloneIndexFields(indexes[index].Fields),
 		}
-		leftOrder := indexSortCompatible(leftDefinition, query)
-		rightOrder := indexSortCompatible(rightDefinition, query)
-		if leftOrder != rightOrder {
-			return leftOrder
-		}
-		return indexes[left].Name < indexes[right].Name
-	})
-	for _, index := range indexes {
-		definition := IndexDefinition{Name: index.Name, Field: index.Field, Order: 1, Unique: index.Unique, Fields: cloneIndexFields(index.Fields)}
-		if start, end, ok, exact := compoundIndexQueryBounds(definition, query.where); ok {
-			return executeStorageIndexQuery(ctx, snapshot, c.name, definition, query, budget, start, end, exact)
-		}
-		if spans, ok := compoundIndexValueSpans(definition, query.where); ok {
-			return executeStorageIndexSpans(ctx, snapshot, c.name, definition, query, budget, spans, false)
-		}
-		if usesCompoundIndexCodec(definition) {
-			continue
-		}
-		values, ok := indexValuesCandidate(query.where, index.Field)
-		if !ok {
-			continue
-		}
-		spans := make([]indexScanSpan, 0, len(values))
-		for _, value := range values {
-			key, err := encodeIndexKey(value)
-			if err != nil {
-				continue
-			}
-			end := indexKeyPrefixEnd(key)
-			if end == nil {
-				return nil, ExplainResult{}, ErrCorrupt
-			}
-			spans = append(spans, indexScanSpan{start: key, end: end})
-		}
-		return executeStorageIndexSpans(ctx, snapshot, c.name, definition, query, budget, spans, len(spans) == 1)
 	}
-	for _, index := range indexes {
-		definition := IndexDefinition{Name: index.Name, Field: index.Field, Order: 1, Unique: index.Unique, Fields: cloneIndexFields(index.Fields)}
-		if usesCompoundIndexCodec(definition) {
-			continue
-		}
-		lower, upper, ok := rangeCandidate(query.where, index.Field)
-		if !ok {
-			continue
-		}
-		start, end, valid, err := storageIndexBounds(lower, upper)
-		if err != nil {
-			continue
-		}
-		if !valid {
-			return []Document{}, explainIndex(definition, query), nil
-		}
-		return executeStorageIndexQuery(ctx, snapshot, c.name, definition, query, budget, start, end, false)
+	access := selectQueryAccessPlan(query.where, definitions, query)
+	if budget.detailed {
+		annotateQueryAccessPlan(&access, query.where, definitions, query)
+	}
+	if access.usable {
+		return executeStorageAccessPlan(ctx, snapshot, c.name, access, query, budget)
+	}
+	explain = explainCollectionPlan(query, access)
+	if query.limit != nil && *query.limit == 0 {
+		return []Document{}, explain, nil
 	}
 	iterator, err := snapshot.OpenCollectionIterator(c.name)
 	if err != nil {
-		return nil, ExplainResult{}, err
+		return nil, explain, err
 	}
 	defer iterator.Close()
 	collector := newQueryCandidateCollector(query)
-	examined := int64(0)
+	stopAfter := accessPlanWindow(query)
 	seen := make(map[DocumentID]struct{})
 	for iterator.Next() {
 		if err := contextError(ctx); err != nil {
-			return nil, ExplainResult{}, err
+			return nil, explain, err
 		}
 		candidate, err := decodeQueryStorageCandidate(iterator.Record())
 		if err != nil {
-			return nil, ExplainResult{}, err
+			return nil, explain, err
 		}
 		id := candidate.documentID()
 		if _, duplicate := seen[id]; duplicate {
-			return nil, ExplainResult{}, ErrCorrupt
+			return nil, explain, ErrCorrupt
 		}
 		seen[id] = struct{}{}
-		examined++
 		if err := budget.document(); err != nil {
-			return nil, ExplainResult{}, err
+			return nil, explain, err
 		}
+		explain.DocumentsExamined++
 		if query.Match(candidate.document) {
 			if err := retainQueryCandidate(&collector, budget, candidate); err != nil {
-				return nil, ExplainResult{}, err
+				return nil, explain, err
+			}
+			if explain.EarlyStopEligible && stopAfter >= 0 && len(collector.heap.items) >= stopAfter {
+				explain.EarlyStopped = true
+				break
 			}
 		}
 	}
 	if err := iterator.Err(); err != nil {
-		return nil, ExplainResult{}, err
+		return nil, explain, err
 	}
 	if err := iterator.Close(); err != nil {
-		return nil, ExplainResult{}, err
+		return nil, explain, err
 	}
-	explain = explainCollection(query)
-	explain.DocumentsExamined = examined
 	return collector.Documents(), explain, nil
 }
 
-type indexScanSpan struct{ start, end []byte }
+func executeStorageAccessPlan(ctx context.Context, snapshot queryStorageSnapshot, collection string, access queryAccessPlan, query QuerySpec, budget *queryBudget) ([]Document, ExplainResult, error) {
+	if query.limit != nil && *query.limit == 0 {
+		explain := explainQueryAccessPlan(access, query, budget.detailed)
+		configureStorageAccessEarlyStop(&explain, access, query)
+		return []Document{}, explain, nil
+	}
+	if canMergeStorageAccessByPosition(access, query) {
+		return executeStorageOrderedAccessPlan(ctx, snapshot, collection, access, query, budget)
+	}
+	explain := explainQueryAccessPlan(access, query, budget.detailed)
+	configureStorageAccessEarlyStop(&explain, access, query)
+	collector := newQueryCandidateCollector(query)
+	seen := make(map[DocumentID]struct{})
+	stopAfter := accessPlanStopAfter(access, query)
+	stopped := false
+	admit := func(source int, id DocumentID, expectedPosition uint64, expectedKey []byte, definition *IndexDefinition, missingOK bool) error {
+		if _, duplicate := seen[id]; duplicate {
+			observeExplainCandidate(&explain, source, true)
+			return nil
+		}
+		observeExplainCandidate(&explain, source, false)
+		record, exists, err := snapshot.GetDocumentRecord(collection, id)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if missingOK {
+				return nil
+			}
+			return ErrCorrupt
+		}
+		candidate, err := decodeQueryStorageCandidate(record)
+		if err != nil || candidate.documentID() != id || (expectedPosition != 0 && record.Position != expectedPosition) {
+			return ErrCorrupt
+		}
+		if definition != nil {
+			actualKey, indexed, err := indexDocumentKey(*definition, candidate.document)
+			if err != nil || !indexed || !bytes.Equal(actualKey, expectedKey) {
+				return ErrCorrupt
+			}
+		}
+		seen[id] = struct{}{}
+		if err := budget.document(); err != nil {
+			return err
+		}
+		observeExplainDocument(&explain, source)
+		if query.Match(candidate.document) {
+			if err := retainQueryCandidate(&collector, budget, candidate); err != nil {
+				return err
+			}
+			if stopAfter >= 0 && len(collector.heap.items) >= stopAfter {
+				stopped = true
+			}
+		}
+		return nil
+	}
 
-func executeStorageIndexQuery(ctx context.Context, snapshot queryStorageSnapshot, collection string, definition IndexDefinition, query QuerySpec, budget *queryBudget, start, end []byte, ordered bool) ([]Document, ExplainResult, error) {
-	return executeStorageIndexSpans(ctx, snapshot, collection, definition, query, budget, []indexScanSpan{{start: start, end: end}}, ordered)
+	for sourceIndex, source := range access.sources {
+		if source.primary {
+			for _, id := range source.ids {
+				if err := budget.key(); err != nil {
+					return nil, explain, err
+				}
+				observeExplainKey(&explain, sourceIndex)
+				if err := admit(sourceIndex, id, 0, nil, nil, true); err != nil {
+					return nil, explain, err
+				}
+				if stopped {
+					break
+				}
+			}
+			if stopped {
+				break
+			}
+			continue
+		}
+		for _, span := range source.spans {
+			iterator, err := snapshot.OpenIndexIterator(collection, source.definition.Name, span.start, span.end, 0)
+			if err != nil {
+				return nil, explain, err
+			}
+			for iterator.Next() {
+				if err := contextError(ctx); err != nil {
+					_ = iterator.Close()
+					return nil, explain, err
+				}
+				entry := iterator.Entry()
+				if entry.ID.IsZero() || entry.Position == 0 {
+					_ = iterator.Close()
+					return nil, explain, ErrCorrupt
+				}
+				if err := budget.key(); err != nil {
+					_ = iterator.Close()
+					return nil, explain, err
+				}
+				observeExplainKey(&explain, sourceIndex)
+				if err := admit(sourceIndex, entry.ID, entry.Position, entry.Key, &source.definition, false); err != nil {
+					_ = iterator.Close()
+					return nil, explain, err
+				}
+				if stopped {
+					break
+				}
+			}
+			iteratorErr := iterator.Err()
+			closeErr := iterator.Close()
+			if iteratorErr != nil {
+				return nil, explain, iteratorErr
+			}
+			if closeErr != nil {
+				return nil, explain, closeErr
+			}
+			if stopped {
+				break
+			}
+		}
+		if stopped {
+			break
+		}
+	}
+	explain.EarlyStopped = stopped
+	return collector.Documents(), explain, nil
 }
 
-func executeStorageIndexSpans(ctx context.Context, snapshot queryStorageSnapshot, collection string, definition IndexDefinition, query QuerySpec, budget *queryBudget, spans []indexScanSpan, ordered bool) ([]Document, ExplainResult, error) {
-	stopAfter := -1
-	// Exact equality postings retain their collection insertion order. A limit
-	// can therefore stop there without changing unsorted query semantics; range
-	// scans still feed the bounded collector through to completion.
-	if ordered && len(spans) == 1 && len(query.sort) == 0 && query.limit != nil {
-		if *query.limit == 0 {
-			return []Document{}, explainIndex(definition, query), nil
+func accessPlanStopAfter(access queryAccessPlan, query QuerySpec) int {
+	if len(query.sort) != 0 || query.limit == nil || len(access.sources) != 1 {
+		return -1
+	}
+	source := access.sources[0]
+	if source.primary {
+		if len(source.ids) != 1 {
+			return -1
 		}
-		maxInt := int(^uint(0) >> 1)
-		if query.skip <= maxInt-*query.limit {
-			stopAfter = query.skip + *query.limit
+	} else if len(source.spans) != 1 || !source.spans[0].exact {
+		return -1
+	}
+	if *query.limit == 0 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if query.skip > maxInt-*query.limit {
+		return -1
+	}
+	return query.skip + *query.limit
+}
+
+const maxOrderedUnionIterators = 256
+
+func canMergeStorageAccessByPosition(access queryAccessPlan, query QuerySpec) bool {
+	if len(query.sort) != 0 || query.limit == nil || accessPlanWindow(query) < 0 {
+		return false
+	}
+	spans := 0
+	for _, source := range access.sources {
+		if source.primary {
+			return false
+		}
+		for _, span := range source.spans {
+			if !span.exact {
+				return false
+			}
+			spans++
+		}
+	}
+	return spans > 1 && spans <= maxOrderedUnionIterators
+}
+
+func executeStorageOrderedAccessPlan(ctx context.Context, snapshot queryStorageSnapshot, collection string, access queryAccessPlan, query QuerySpec, budget *queryBudget) (documents []Document, explain ExplainResult, resultErr error) {
+	explain = explainQueryAccessPlan(access, query, budget.detailed)
+	configureStorageAccessEarlyStop(&explain, access, query)
+	if query.limit != nil && *query.limit == 0 {
+		return []Document{}, explain, nil
+	}
+	stopAfter := accessPlanWindow(query)
+	scans := make([]*orderedStorageScan, 0, queryPlanWork(access))
+	defer func() {
+		for _, scan := range scans {
+			if scan.iterator == nil {
+				continue
+			}
+			if err := scan.iterator.Close(); resultErr == nil && err != nil {
+				documents, resultErr = nil, err
+			}
+		}
+	}()
+	queue := orderedStorageScanHeap{}
+	ordinal := 0
+	for sourceIndex, source := range access.sources {
+		for _, span := range source.spans {
+			iterator, err := snapshot.OpenIndexIterator(collection, source.definition.Name, span.start, span.end, 0)
+			if err != nil {
+				return nil, explain, err
+			}
+			scan := &orderedStorageScan{
+				iterator: iterator, definition: source.definition,
+				expectedKey: span.start, ordinal: ordinal, source: sourceIndex,
+			}
+			ordinal++
+			scans = append(scans, scan)
+			next, err := advanceOrderedStorageScan(ctx, scan, budget, &explain)
+			if err != nil {
+				return nil, explain, err
+			}
+			if next {
+				heap.Push(&queue, scan)
+			}
 		}
 	}
 	collector := newQueryCandidateCollector(query)
 	seen := make(map[DocumentID]struct{})
-	keys := int64(0)
-	for _, span := range spans {
-		stop, err := func() (stop bool, resultErr error) {
-			iterator, err := snapshot.OpenIndexIterator(collection, definition.Name, span.start, span.end, 0)
+	for queue.Len() > 0 {
+		scan := heap.Pop(&queue).(*orderedStorageScan)
+		entry := scan.entry
+		if _, duplicate := seen[entry.ID]; duplicate {
+			observeExplainCandidate(&explain, scan.source, true)
+		} else {
+			observeExplainCandidate(&explain, scan.source, false)
+			record, exists, err := snapshot.GetDocumentRecord(collection, entry.ID)
 			if err != nil {
-				return false, err
+				return nil, explain, err
 			}
-			defer func() {
-				if err := iterator.Close(); resultErr == nil && err != nil {
-					resultErr = err
+			if !exists {
+				return nil, explain, ErrCorrupt
+			}
+			candidate, err := decodeQueryStorageCandidate(record)
+			if err != nil || candidate.documentID() != entry.ID || record.Position != entry.Position {
+				return nil, explain, ErrCorrupt
+			}
+			actualKey, indexed, err := indexDocumentKey(scan.definition, candidate.document)
+			if err != nil || !indexed || !bytes.Equal(actualKey, entry.Key) {
+				return nil, explain, ErrCorrupt
+			}
+			seen[entry.ID] = struct{}{}
+			if err := budget.document(); err != nil {
+				return nil, explain, err
+			}
+			observeExplainDocument(&explain, scan.source)
+			if query.Match(candidate.document) {
+				if err := retainQueryCandidate(&collector, budget, candidate); err != nil {
+					return nil, explain, err
 				}
-			}()
-			for iterator.Next() {
-				if err := contextError(ctx); err != nil {
-					return false, err
-				}
-				entry := iterator.Entry()
-				if entry.ID.IsZero() || entry.Position == 0 {
-					return false, ErrCorrupt
-				}
-				keys++
-				if err := budget.key(); err != nil {
-					return false, err
-				}
-				if _, duplicate := seen[entry.ID]; duplicate {
-					// A multi-value membership or $or union can encounter one ID
-					// more than once. Account every physical key, but recheck one
-					// logical document only once.
-					continue
-				}
-				seen[entry.ID] = struct{}{}
-				record, exists, err := snapshot.GetDocumentRecord(collection, entry.ID)
-				if err != nil {
-					return false, err
-				}
-				if !exists {
-					return false, ErrCorrupt
-				}
-				candidate, err := decodeQueryStorageCandidate(record)
-				if err != nil || candidate.documentID() != entry.ID || record.Position != entry.Position {
-					return false, ErrCorrupt
-				}
-				actualKey, exists, err := indexDocumentKey(definition, candidate.document)
-				if err != nil || !exists || !bytes.Equal(actualKey, entry.Key) {
-					return false, ErrCorrupt
-				}
-				if err := budget.document(); err != nil {
-					return false, err
-				}
-				if query.Match(candidate.document) {
-					if err := retainQueryCandidate(&collector, budget, candidate); err != nil {
-						return false, err
-					}
-					if stopAfter >= 0 && len(collector.heap.items) >= stopAfter {
-						return true, nil
-					}
+				if len(collector.heap.items) >= stopAfter {
+					explain.EarlyStopped = true
+					return collector.Documents(), explain, nil
 				}
 			}
-			return false, iterator.Err()
-		}()
-		if err != nil {
-			return nil, ExplainResult{}, err
 		}
-		if stop {
-			break
+		next, err := advanceOrderedStorageScan(ctx, scan, budget, &explain)
+		if err != nil {
+			return nil, explain, err
+		}
+		if next {
+			heap.Push(&queue, scan)
 		}
 	}
-	explain := explainIndex(definition, query)
-	explain.DocumentsExamined, explain.KeysExamined = keys, keys
 	return collector.Documents(), explain, nil
+}
+
+func accessPlanWindow(query QuerySpec) int {
+	if query.limit == nil {
+		return -1
+	}
+	maxInt := int(^uint(0) >> 1)
+	if query.skip > maxInt-*query.limit {
+		return -1
+	}
+	return query.skip + *query.limit
+}
+
+type orderedStorageScan struct {
+	iterator    queryStorageIndexIterator
+	definition  IndexDefinition
+	expectedKey []byte
+	entry       queryStorageIndexEntry
+	ordinal     int
+	source      int
+}
+
+func advanceOrderedStorageScan(ctx context.Context, scan *orderedStorageScan, budget *queryBudget, explain *ExplainResult) (bool, error) {
+	if err := contextError(ctx); err != nil {
+		return false, err
+	}
+	if !scan.iterator.Next() {
+		return false, scan.iterator.Err()
+	}
+	entry := scan.iterator.Entry()
+	if entry.ID.IsZero() || entry.Position == 0 || !bytes.Equal(entry.Key, scan.expectedKey) {
+		return false, ErrCorrupt
+	}
+	if err := budget.key(); err != nil {
+		return false, err
+	}
+	observeExplainKey(explain, scan.source)
+	scan.entry = entry
+	return true, nil
+}
+
+type orderedStorageScanHeap []*orderedStorageScan
+
+func (heap orderedStorageScanHeap) Len() int { return len(heap) }
+func (heap orderedStorageScanHeap) Less(left, right int) bool {
+	if heap[left].entry.Position != heap[right].entry.Position {
+		return heap[left].entry.Position < heap[right].entry.Position
+	}
+	if comparison := bytes.Compare(heap[left].entry.ID[:], heap[right].entry.ID[:]); comparison != 0 {
+		return comparison < 0
+	}
+	return heap[left].ordinal < heap[right].ordinal
+}
+func (heap orderedStorageScanHeap) Swap(left, right int) {
+	heap[left], heap[right] = heap[right], heap[left]
+}
+func (heap *orderedStorageScanHeap) Push(value any) {
+	*heap = append(*heap, value.(*orderedStorageScan))
+}
+func (heap *orderedStorageScanHeap) Pop() any {
+	last := len(*heap) - 1
+	value := (*heap)[last]
+	(*heap)[last] = nil
+	*heap = (*heap)[:last]
+	return value
+}
+
+type indexScanSpan struct {
+	start, end []byte
+	// exact means start is one complete logical index key. Entries inside the
+	// span are therefore ordered by insertion position and can participate in
+	// an insertion-order union merge.
+	exact bool
 }
 
 func decodeQueryStorageCandidate(record queryStorageDocument) (queryCandidate, error) {
@@ -955,13 +1208,6 @@ func decodeQueryStorageCandidate(record queryStorageDocument) (queryCandidate, e
 func (candidate queryCandidate) documentID() DocumentID {
 	id, _ := candidate.document.ID()
 	return id
-}
-
-func boolCount(value bool) int64 {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 func indexKeyPrefixEnd(key []byte) []byte {
@@ -1030,25 +1276,40 @@ func equalityCandidate(expression expr, path string) (Value, bool) {
 // field. The executor always rechecks the complete predicate, so unrelated
 // conjuncts remain a residual filter rather than becoming planner assumptions.
 func indexValuesCandidate(expression expr, path string) ([]Value, bool) {
+	candidates, ok := encodedIndexValuesCandidate(expression, path)
+	if !ok {
+		return nil, false
+	}
+	values := make([]Value, len(candidates))
+	for index := range candidates {
+		values[index] = candidates[index].value
+	}
+	return values, true
+}
+
+type encodedIndexValueCandidate struct {
+	value Value
+	key   []byte
+}
+
+func encodedIndexValuesCandidate(expression expr, path string) ([]encodedIndexValueCandidate, bool) {
 	values, ok := indexValuesCandidateExpr(expression, path)
 	if !ok {
 		return nil, false
 	}
-	unique := make([]Value, 0, len(values))
+	unique := make([]encodedIndexValueCandidate, 0, len(values))
+	encoded := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		if _, err := encodeIndexKey(value); err != nil {
+		key, err := encodeIndexKey(value)
+		if err != nil {
 			return nil, false
 		}
-		duplicate := false
-		for _, existing := range unique {
-			if existing.Equal(value) {
-				duplicate = true
-				break
-			}
+		canonical := string(key)
+		if _, duplicate := encoded[canonical]; duplicate {
+			continue
 		}
-		if !duplicate {
-			unique = append(unique, value.Clone())
-		}
+		encoded[canonical] = struct{}{}
+		unique = append(unique, encodedIndexValueCandidate{value: value.Clone(), key: key})
 	}
 	return unique, true
 }

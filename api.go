@@ -404,6 +404,12 @@ type ExplainResult = database.ExplainResult
 
 type ExplainBound = database.ExplainBound
 
+type ExplainAccessSource = database.ExplainAccessSource
+
+type ExplainBudget = database.ExplainBudget
+
+type ExplainAdvice = database.ExplainAdvice
+
 // LogicalArchiveResult is the portable, data-only archive receipt. SHA256
 // covers every JSONL record before the final end record; the end record stores
 // the same digest so an importer can reject truncation or alteration.
