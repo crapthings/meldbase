@@ -229,7 +229,7 @@ func encodeReplicationChange(change Change) (replicationWireChange, error) {
 		}
 		return result, nil
 	}
-	if change.Operation == CreateIndexOperation {
+	if change.Operation == CreateIndexOperation || change.Operation == ReplaceIndexOperation {
 		if change.Index == nil || change.Before != nil || change.After != nil || len(change.ChangedPaths) != 1 || change.ChangedPaths[0] != "_indexes."+change.Index.Name {
 			return replicationWireChange{}, fmt.Errorf("%w: invalid index event", ErrReplicaProtocol)
 		}
@@ -281,7 +281,7 @@ func decodeReplicationChange(wire replicationWireChange) (Change, error) {
 		}
 		return result, nil
 	}
-	if wire.Operation == CreateIndexOperation {
+	if wire.Operation == CreateIndexOperation || wire.Operation == ReplaceIndexOperation {
 		if wire.DocumentID != "" || wire.Before != "" || wire.After != "" || wire.Index == nil || len(wire.Paths) != 1 || wire.Paths[0] != "_indexes."+wire.Index.Name {
 			return Change{}, fmt.Errorf("%w: invalid index event", ErrReplicaProtocol)
 		}

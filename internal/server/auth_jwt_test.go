@@ -35,6 +35,35 @@ func TestHS256JWTAuthenticatorVerifiesSignedActiveWorkspace(t *testing.T) {
 	}
 }
 
+func TestHS256JWTAuthenticatorAcceptsBoundedDistinctRotationSecrets(t *testing.T) {
+	oldSecret := []byte("0123456789abcdef0123456789abcdef")
+	newSecret := []byte("fedcba9876543210fedcba9876543210")
+	unknownSecret := []byte("abcdefghijklmnopqrstuvwxyz012345")
+	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{
+		Secrets: [][]byte{newSecret, oldSecret}, Issuer: "https://identity.example.test", Audience: "meldbase-api",
+		Clock: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := map[string]any{
+		"iss": "https://identity.example.test", "aud": "meldbase-api", "sub": "user-1", "workspace_id": "team-a", "exp": now.Add(time.Minute).Unix(),
+	}
+	for _, secret := range [][]byte{newSecret, oldSecret} {
+		request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
+		request.Header.Set("Authorization", "Bearer "+signedHS256JWT(t, secret, claims))
+		if actor, authErr := authenticator.AuthenticateHTTP(request); authErr != nil || actor != (Actor{ID: "user-1", WorkspaceID: "team-a"}) {
+			t.Fatalf("rotation secret actor=%+v error=%v", actor, authErr)
+		}
+	}
+	request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
+	request.Header.Set("Authorization", "Bearer "+signedHS256JWT(t, unknownSecret, claims))
+	if _, authErr := authenticator.AuthenticateHTTP(request); authErr != ErrUnauthenticated {
+		t.Fatalf("unknown rotation secret error=%v", authErr)
+	}
+}
+
 func TestHS256JWTAuthenticatorRejectsInvalidBearerClaimsAndSignature(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -66,11 +95,15 @@ func TestHS256JWTAuthenticatorRejectsInvalidBearerClaimsAndSignature(t *testing.
 
 func TestHS256JWTAuthenticatorRequiresIssuerAudienceAndNonReservedWorkspaceClaim(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
+	secondSecret := []byte("fedcba9876543210fedcba9876543210")
 	for _, config := range []HS256JWTAuthenticatorConfig{
 		{Secret: secret, Audience: "meldbase-api"},
 		{Secret: secret, Issuer: "https://identity.example.test"},
 		{Secret: secret, Issuer: "https://identity.example.test", Audience: "meldbase-api", WorkspaceClaim: "sub"},
 		{Secret: secret, Issuer: "https://identity.example.test", Audience: "meldbase-api", WorkspaceClaim: "aud"},
+		{Secret: secret, Secrets: [][]byte{secondSecret}, Issuer: "https://identity.example.test", Audience: "meldbase-api"},
+		{Secrets: [][]byte{secret, secret}, Issuer: "https://identity.example.test", Audience: "meldbase-api"},
+		{Secrets: [][]byte{secret, secondSecret, []byte("abcdefghijklmnopqrstuvwxyz012345"), []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"), []byte("00000000000000000000000000000000")}, Issuer: "https://identity.example.test", Audience: "meldbase-api"},
 	} {
 		if _, err := NewHS256JWTAuthenticator(config); err == nil {
 			t.Fatalf("unsafe JWT configuration accepted: %+v", config)

@@ -1,3 +1,10 @@
+/**
+ * Public entry point for @meldbase/client.
+ *
+ * @beta The package is semantically versioned, but its API is not yet stable
+ * until the first non-zero major release. Do not import ./internal from an
+ * application; that entry point is experimental.
+ */
 export type { FindOneOptions, QueryOptions } from "./query.js";
 export type { PageResult } from "./cursor.js";
 export { QueryValidationError, DEFAULT_QUERY_LIMITS } from "./types.js";

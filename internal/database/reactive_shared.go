@@ -772,7 +772,7 @@ func (order *reactiveCollectionOrder) apply(token uint64, changes []Change) bool
 				return false
 			}
 			delete(order.positions, change.DocumentID)
-		case CreateIndexOperation:
+		case CreateIndexOperation, ReplaceIndexOperation:
 		default:
 			return false
 		}
@@ -839,7 +839,7 @@ func transitionReactiveViewState(current *reactiveViewState, query QuerySpec, or
 	budget := newPredicateBudget(query, limits)
 	mutated := false
 	for _, change := range changes {
-		if change.Operation == CreateIndexOperation {
+		if change.Operation == CreateIndexOperation || change.Operation == ReplaceIndexOperation {
 			continue
 		}
 		member, wasMember := reactiveIDGet(byID, change.DocumentID)

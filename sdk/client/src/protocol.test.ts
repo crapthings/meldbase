@@ -99,6 +99,7 @@ test("TypeScript and Go share the immutable realtime protocol v1 contract", asyn
     "outcome_unknown",
     "policy_expired",
     "preflight_forbidden",
+    "rate_limited",
     "request_too_large",
     "resource_limit_exceeded",
     "resume_failed",

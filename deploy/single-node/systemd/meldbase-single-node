@@ -9,12 +9,26 @@ set -eu
 : "${MELDBASE_ADMIN_ADDR:=127.0.0.1:9091}"
 : "${MELDBASE_ADMIN_TOKEN:=}"
 : "${MELDBASE_JWT_HS256_SECRET_FILE:=}"
+: "${MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE:=}"
+: "${MELDBASE_JWT_JWKS_URL:=}"
 : "${MELDBASE_JWT_ISSUER:=}"
 : "${MELDBASE_JWT_AUDIENCE:=}"
 : "${MELDBASE_ACCESS_POLICY_FILE:=}"
 : "${MELDBASE_PUBLIC_REALTIME_URL:=}"
 : "${MELDBASE_HTTP_ORIGINS:=http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173}"
 : "${MELDBASE_REALTIME_ORIGIN_PATTERNS:=localhost:*,127.0.0.1:*,[[]::1]:*}"
+: "${MELDBASE_BACKUP_DIR:=}"
+: "${MELDBASE_BACKUP_INTERVAL:=}"
+: "${MELDBASE_BACKUP_KEEP:=}"
+: "${MELDBASE_BACKUP_TIMEOUT:=}"
+: "${MELDBASE_BACKUP_DRILL_DIR:=}"
+: "${MELDBASE_RESOURCE_LIMITS_FILE:=}"
+: "${MELDBASE_INDEX_BUILD_SCHEDULER:=1}"
+: "${MELDBASE_LOG_LEVEL:=info}"
+: "${MELDBASE_RATE_LIMIT_PER_MINUTE:=}"
+: "${MELDBASE_RATE_LIMIT_BURST:=}"
+: "${MELDBASE_RATE_LIMIT_SUBJECTS:=}"
+: "${MELDBASE_TRUSTED_PROXY_CIDRS:=}"
 
 case "$MELDBASE_ADDR" in
   127.*:*|'[::1]':*) ;;
@@ -34,8 +48,24 @@ if [ "${#MELDBASE_ADMIN_TOKEN}" -lt 32 ] || [ "$MELDBASE_ADMIN_TOKEN" = CHANGE_M
   printf '%s\n' 'MELDBASE_ADMIN_TOKEN must be a unique random token of at least 32 bytes' >&2
   exit 2
 fi
-if [ -z "$MELDBASE_JWT_HS256_SECRET_FILE" ] || [ ! -r "$MELDBASE_JWT_HS256_SECRET_FILE" ]; then
+if [ -n "$MELDBASE_JWT_HS256_SECRET_FILE" ] && [ -n "$MELDBASE_JWT_JWKS_URL" ]; then
+  printf '%s\n' 'configure MELDBASE_JWT_HS256_SECRET_FILE or MELDBASE_JWT_JWKS_URL, not both' >&2
+  exit 2
+fi
+if [ -z "$MELDBASE_JWT_HS256_SECRET_FILE$MELDBASE_JWT_JWKS_URL" ]; then
+  printf '%s\n' 'configure MELDBASE_JWT_HS256_SECRET_FILE or MELDBASE_JWT_JWKS_URL' >&2
+  exit 2
+fi
+if [ -n "$MELDBASE_JWT_HS256_SECRET_FILE" ] && [ ! -r "$MELDBASE_JWT_HS256_SECRET_FILE" ]; then
   printf '%s\n' 'MELDBASE_JWT_HS256_SECRET_FILE must name a readable 32+ byte secret file' >&2
+  exit 2
+fi
+if [ -n "$MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE" ] && [ -z "$MELDBASE_JWT_HS256_SECRET_FILE" ]; then
+  printf '%s\n' 'MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE requires MELDBASE_JWT_HS256_SECRET_FILE' >&2
+  exit 2
+fi
+if [ -n "$MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE" ] && [ ! -r "$MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE" ]; then
+  printf '%s\n' 'MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE must name a readable previous secret file when set' >&2
   exit 2
 fi
 if [ -z "$MELDBASE_JWT_ISSUER" ] || [ -z "$MELDBASE_JWT_AUDIENCE" ]; then
@@ -46,20 +76,83 @@ if [ -z "$MELDBASE_ACCESS_POLICY_FILE" ] || [ ! -r "$MELDBASE_ACCESS_POLICY_FILE
   printf '%s\n' 'MELDBASE_ACCESS_POLICY_FILE must name a readable manifest' >&2
   exit 2
 fi
-set -- --access-policy-file "$MELDBASE_ACCESS_POLICY_FILE"
 set -- "$@" \
   --http-origins "$MELDBASE_HTTP_ORIGINS" \
   --realtime-origin-patterns "$MELDBASE_REALTIME_ORIGIN_PATTERNS"
 if [ -n "$MELDBASE_PUBLIC_REALTIME_URL" ]; then
   set -- "$@" --public-realtime-url "$MELDBASE_PUBLIC_REALTIME_URL"
 fi
+if [ -n "$MELDBASE_BACKUP_DIR$MELDBASE_BACKUP_INTERVAL$MELDBASE_BACKUP_KEEP$MELDBASE_BACKUP_TIMEOUT" ]; then
+  if [ -z "$MELDBASE_BACKUP_DIR" ] || [ -z "$MELDBASE_BACKUP_INTERVAL" ] || [ -z "$MELDBASE_BACKUP_KEEP" ] || [ -z "$MELDBASE_BACKUP_TIMEOUT" ]; then
+    printf '%s\n' 'MELDBASE_BACKUP_DIR, MELDBASE_BACKUP_INTERVAL, MELDBASE_BACKUP_KEEP, and MELDBASE_BACKUP_TIMEOUT must be set together' >&2
+    exit 2
+  fi
+  set -- "$@" \
+    --backup-dir "$MELDBASE_BACKUP_DIR" \
+    --backup-interval "$MELDBASE_BACKUP_INTERVAL" \
+    --backup-keep "$MELDBASE_BACKUP_KEEP" \
+    --backup-timeout "$MELDBASE_BACKUP_TIMEOUT"
+  if [ -n "$MELDBASE_BACKUP_DRILL_DIR" ]; then
+    set -- "$@" --backup-drill-dir "$MELDBASE_BACKUP_DRILL_DIR"
+  fi
+fi
+if [ -n "$MELDBASE_RESOURCE_LIMITS_FILE" ]; then
+  if [ ! -r "$MELDBASE_RESOURCE_LIMITS_FILE" ]; then
+    printf '%s\n' 'MELDBASE_RESOURCE_LIMITS_FILE must name a readable strict JSON ResourceLimits file' >&2
+    exit 2
+  fi
+  set -- "$@" --resource-limits-file "$MELDBASE_RESOURCE_LIMITS_FILE"
+fi
+if [ -n "$MELDBASE_RATE_LIMIT_PER_MINUTE$MELDBASE_RATE_LIMIT_BURST$MELDBASE_RATE_LIMIT_SUBJECTS$MELDBASE_TRUSTED_PROXY_CIDRS" ]; then
+  if [ -z "$MELDBASE_RATE_LIMIT_PER_MINUTE" ] || [ -z "$MELDBASE_RATE_LIMIT_BURST" ] || [ -z "$MELDBASE_RATE_LIMIT_SUBJECTS" ]; then
+    printf '%s\n' 'MELDBASE_RATE_LIMIT_PER_MINUTE, MELDBASE_RATE_LIMIT_BURST, and MELDBASE_RATE_LIMIT_SUBJECTS must be set together' >&2
+    exit 2
+  fi
+  set -- "$@" --rate-limit-per-minute "$MELDBASE_RATE_LIMIT_PER_MINUTE" --rate-limit-burst "$MELDBASE_RATE_LIMIT_BURST" --rate-limit-subjects "$MELDBASE_RATE_LIMIT_SUBJECTS"
+  if [ -n "$MELDBASE_TRUSTED_PROXY_CIDRS" ]; then
+    set -- "$@" --trusted-proxy-cidrs "$MELDBASE_TRUSTED_PROXY_CIDRS"
+  fi
+fi
+if [ -n "$MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE" ]; then
+  set -- "$@" --jwt-hs256-previous-secret-file "$MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE"
+fi
+case "$MELDBASE_LOG_LEVEL" in
+  debug|info|warn|error) set -- "$@" --log-level "$MELDBASE_LOG_LEVEL" ;;
+  *)
+    printf '%s\n' 'MELDBASE_LOG_LEVEL must be debug, info, warn, or error' >&2
+    exit 2
+    ;;
+esac
+case "$MELDBASE_INDEX_BUILD_SCHEDULER" in
+  0) ;;
+  1) set -- "$@" --index-build-scheduler ;;
+  *)
+    printf '%s\n' 'MELDBASE_INDEX_BUILD_SCHEDULER must be 0 or 1' >&2
+    exit 2
+    ;;
+esac
+
+if [ -n "$MELDBASE_JWT_HS256_SECRET_FILE" ]; then
+  exec "$MELDBASE_BIN" serve \
+    --db "$MELDBASE_DB" \
+    --addr "$MELDBASE_ADDR" \
+    --jwt-hs256-secret-file "$MELDBASE_JWT_HS256_SECRET_FILE" \
+    --jwt-issuer "$MELDBASE_JWT_ISSUER" \
+    --jwt-audience "$MELDBASE_JWT_AUDIENCE" \
+    --access-policy-file "$MELDBASE_ACCESS_POLICY_FILE" \
+    "$@" \
+    --admin-addr "$MELDBASE_ADMIN_ADDR" \
+    --admin-diagnostics \
+    --admin-metrics
+fi
 
 exec "$MELDBASE_BIN" serve \
   --db "$MELDBASE_DB" \
   --addr "$MELDBASE_ADDR" \
-  --jwt-hs256-secret-file "$MELDBASE_JWT_HS256_SECRET_FILE" \
+  --jwt-jwks-url "$MELDBASE_JWT_JWKS_URL" \
   --jwt-issuer "$MELDBASE_JWT_ISSUER" \
   --jwt-audience "$MELDBASE_JWT_AUDIENCE" \
+  --access-policy-file "$MELDBASE_ACCESS_POLICY_FILE" \
   "$@" \
   --admin-addr "$MELDBASE_ADMIN_ADDR" \
   --admin-diagnostics \

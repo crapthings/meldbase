@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -37,6 +38,7 @@ type HandlerOptions struct {
 	ServeMetrics   bool
 	Diagnostics    DiagnosticSource
 	IndexCatalog   IndexCatalogSource
+	AuditWriter    io.Writer
 }
 
 type Handler struct {
@@ -48,6 +50,7 @@ type Handler struct {
 	diagnostics    DiagnosticSource
 	indexCatalog   IndexCatalogSource
 	mux            *http.ServeMux
+	audit          *auditLogger
 }
 
 //go:embed dashboard/index.html
@@ -92,6 +95,7 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 		allowedOrigins: make(map[string]struct{}, len(options.AllowedOrigins)),
 		writeTimeout:   options.WriteTimeout, serveDashboard: options.ServeDashboard,
 		diagnostics: options.Diagnostics, indexCatalog: options.IndexCatalog, mux: http.NewServeMux(),
+		audit: newAuditLogger(options.AuditWriter),
 	}
 	for _, origin := range options.AllowedOrigins {
 		parsed, err := url.Parse(origin)
@@ -121,6 +125,9 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	observed := &adminResponseStatusWriter{ResponseWriter: writer}
+	defer h.audit.record(request, observed)
+	writer = observed
 	setSecurityHeaders(writer)
 	if !h.originAllowed(request, request.Header.Get("Origin")) {
 		writeAdminError(writer, http.StatusForbidden, "origin_forbidden")
@@ -144,6 +151,36 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	h.mux.ServeHTTP(writer, request)
+}
+
+type adminResponseStatusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (writer *adminResponseStatusWriter) WriteHeader(status int) {
+	if writer.status == 0 {
+		writer.status = status
+	}
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *adminResponseStatusWriter) Write(body []byte) (int, error) {
+	if writer.status == 0 {
+		writer.status = http.StatusOK
+	}
+	return writer.ResponseWriter.Write(body)
+}
+
+func (writer *adminResponseStatusWriter) Unwrap() http.ResponseWriter { return writer.ResponseWriter }
+
+func (writer *adminResponseStatusWriter) Flush() {
+	if writer.status == 0 {
+		writer.status = http.StatusOK
+	}
+	if flusher, ok := writer.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func isDashboardPath(path string) bool {

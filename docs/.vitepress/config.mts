@@ -10,6 +10,7 @@ export default defineConfig({
   themeConfig: {
     logo: "/mark.svg",
     nav: [
+      { text: "Five-minute Go tour", link: "/getting-started" },
       { text: "SDK guide", link: "/sdk" },
       { text: "SDK beta checklist", link: "/sdk-beta-checklist" },
       { text: "TypeScript API", link: "/api/typescript/" },

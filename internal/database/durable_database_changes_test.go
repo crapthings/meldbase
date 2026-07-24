@@ -66,6 +66,28 @@ func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing
 		_ = db.Close()
 		t.Fatal(err)
 	}
+	build, err := db.Collection("items").StartIndexRebuild(context.Background(), "by_value", []IndexField{{Field: "value", Order: -1}}, IndexOptions{})
+	if err != nil {
+		subscription.Close()
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.ResumeIndexBuild(context.Background(), build); err != nil {
+		subscription.Close()
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	replaced := receiveDurableDatabaseBatch(t, subscription)
+	if replaced.Token != 4 || len(replaced.Changes) != 1 || replaced.Changes[0].Operation != ReplaceIndexOperation || replaced.Changes[0].Index == nil || replaced.Changes[0].Index.Name != "by_value" || replaced.Changes[0].Index.Fields[0] != (IndexField{Field: "value", Order: -1}) {
+		subscription.Close()
+		_ = db.Close()
+		t.Fatalf("replaced database batch=%+v", replaced)
+	}
+	if err := subscription.Ack(replaced.Token); err != nil {
+		subscription.Close()
+		_ = db.Close()
+		t.Fatal(err)
+	}
 	subscription.Close()
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
@@ -76,7 +98,7 @@ func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing
 		t.Fatal(err)
 	}
 	defer db.Close()
-	subscription, err = db.OpenDurableDatabaseChanges(context.Background(), "follower", 2)
+	subscription, err = db.OpenDurableDatabaseChanges(context.Background(), "follower", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +107,7 @@ func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing
 		t.Fatal(err)
 	}
 	third := receiveDurableDatabaseBatch(t, subscription)
-	if third.Token != 4 || len(third.Changes) != 1 || third.Changes[0].Operation != UpdateOperation || third.Changes[0].Collection != "items" ||
+	if third.Token != 5 || len(third.Changes) != 1 || third.Changes[0].Operation != UpdateOperation || third.Changes[0].Collection != "items" ||
 		len(third.Changes[0].ChangedPaths) != 1 || third.Changes[0].ChangedPaths[0] != "value" {
 		t.Fatalf("third database batch=%+v", third)
 	}

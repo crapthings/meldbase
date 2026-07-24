@@ -294,18 +294,21 @@ func writeTableReport(output io.Writer, report observationReport) error {
 		return err
 	}
 	writer = tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "SCENARIO\tRUNS\tFAILED\tAVG LATENCY\tAVG RETURNED\tKEYS/RUN\tDOCS/RUN\tSTEPS/RUN\tDUP/RUN\tSORT/RUN\tPRESSURE\tREJECTIONS"); err != nil {
+	if _, err := fmt.Fprintln(writer, "SCENARIO\tRUNS\tFAILED\tAVG LATENCY\tP50\tP95\tP99\tAVG RETURNED\tKEYS/RUN\tDOCS/RUN\tSTEPS/RUN\tDUP/RUN\tSORT/RUN\tPRESSURE\tREJECTIONS"); err != nil {
 		return err
 	}
 	for _, observation := range report.Scenarios {
 		runs := float64(max(1, observation.RunsAttempted))
 		if _, err := fmt.Fprintf(
 			writer,
-			"%s\t%d\t%d\t%s\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\t%s\t%d\t%d\n",
+			"%s\t%d\t%d\t%s\t%s\t%s\t%s\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\t%s\t%d\t%d\n",
 			observation.Name,
 			observation.RunsAttempted,
 			observation.RunsFailed,
 			formatMicros(observation.AverageLatencyMicros),
+			formatMicros(observation.P50LatencyMicros),
+			formatMicros(observation.P95LatencyMicros),
+			formatMicros(observation.P99LatencyMicros),
 			observation.AverageReturned,
 			float64(observation.Measured.KeysExamined)/runs,
 			float64(observation.Measured.DocumentsExamined)/runs,

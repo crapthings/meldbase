@@ -108,8 +108,12 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 	directory := t.TempDir()
 	argumentsPath := filepath.Join(directory, "arguments")
 	secretPath := filepath.Join(directory, "jwt.secret")
+	previousSecretPath := filepath.Join(directory, "jwt.previous.secret")
 	policyPath := filepath.Join(directory, "access-policy.json")
 	if err := os.WriteFile(secretPath, []byte(strings.Repeat("s", 32)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(previousSecretPath, []byte(strings.Repeat("p", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(policyPath, []byte(`{"version":1,"workspaceField":"workspaceId","collections":[{"collection":"projects","mode":"collaborative"}]}`), 0o600); err != nil {
@@ -135,9 +139,12 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 			"MELDBASE_DB=/var/lib/meldbase/data/test.meld",
 			"MELDBASE_ADMIN_TOKEN="+strings.Repeat("a", 32),
 			"MELDBASE_JWT_HS256_SECRET_FILE="+secretPath,
+			"MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE=",
 			"MELDBASE_JWT_ISSUER=https://identity.example.test/",
 			"MELDBASE_JWT_AUDIENCE=meldbase-api",
 			"MELDBASE_ACCESS_POLICY_FILE="+policyPath,
+			"MELDBASE_INDEX_BUILD_SCHEDULER=1",
+			"MELDBASE_LOG_LEVEL=info",
 			"MELDBASE_ARGUMENTS_FILE="+argumentsPath,
 		)
 		command.Env = append(command.Env, extra...)
@@ -157,10 +164,43 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		"--access-policy-file", policyPath,
 		"--http-origins", "http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173",
 		"--realtime-origin-patterns", "localhost:*,127.0.0.1:*,[[]::1]:*",
+		"--log-level", "info",
+		"--index-build-scheduler",
 		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
 	}
 	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("arguments=%q want=%q", got, want)
+	}
+	if output, err := run(
+		"MELDBASE_JWT_HS256_SECRET_FILE=",
+		"MELDBASE_JWT_JWKS_URL=https://identity.example.test/.well-known/jwks.json",
+	); err != nil {
+		t.Fatalf("jwks launcher: %v\n%s", err, output)
+	}
+	raw, err = os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwksWant := append([]string{}, want...)
+	jwksWant[5], jwksWant[6] = "--jwt-jwks-url", "https://identity.example.test/.well-known/jwks.json"
+	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, jwksWant) {
+		t.Fatalf("jwks arguments=%q want=%q", got, jwksWant)
+	}
+	if output, err := run("MELDBASE_JWT_JWKS_URL=https://identity.example.test/keys"); err == nil || !strings.Contains(output, "not both") {
+		t.Fatalf("mixed authentication configuration should fail: err=%v output=%q", err, output)
+	}
+	if output, err := run("MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE=" + previousSecretPath); err != nil {
+		t.Fatalf("rotation launcher: %v\n%s", err, output)
+	}
+	raw, err = os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotationWant := append([]string{}, want[:17]...)
+	rotationWant = append(rotationWant, "--jwt-hs256-previous-secret-file", previousSecretPath)
+	rotationWant = append(rotationWant, want[17:]...)
+	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, rotationWant) {
+		t.Fatalf("rotation arguments=%q want=%q", got, rotationWant)
 	}
 	if output, err := run(
 		"MELDBASE_HTTP_ORIGINS=https://app.example,https://admin.example",
@@ -180,13 +220,46 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 		"--http-origins", "https://app.example,https://admin.example",
 		"--realtime-origin-patterns", "https://app.example",
 		"--public-realtime-url", "wss://api.example/v1/realtime",
+		"--log-level", "info",
+		"--index-build-scheduler",
 		"--admin-addr", "127.0.0.1:9091", "--admin-diagnostics", "--admin-metrics",
 	}
 	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, configuredWant) {
 		t.Fatalf("configured arguments=%q want=%q", got, configuredWant)
 	}
+	if output, err := run(
+		"MELDBASE_BACKUP_DIR=/var/lib/meldbase/backups",
+		"MELDBASE_BACKUP_INTERVAL=1h",
+		"MELDBASE_BACKUP_KEEP=168",
+		"MELDBASE_BACKUP_TIMEOUT=10m",
+	); err != nil {
+		t.Fatalf("backup launcher: %v\n%s", err, output)
+	}
+	raw, err = os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupWant := append([]string{}, want[:17]...)
+	backupWant = append(backupWant,
+		"--backup-dir", "/var/lib/meldbase/backups", "--backup-interval", "1h", "--backup-keep", "168", "--backup-timeout", "10m")
+	backupWant = append(backupWant, want[17:]...)
+	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); !reflect.DeepEqual(got, backupWant) {
+		t.Fatalf("backup arguments=%q want=%q", got, backupWant)
+	}
 	if output, err := run("MELDBASE_ACCESS_POLICY_FILE="); err == nil || !strings.Contains(output, "must name a readable manifest") {
 		t.Fatalf("missing policy should fail: err=%v output=%q", err, output)
+	}
+	if output, err := run("MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE=/missing/previous.jwt"); err == nil || !strings.Contains(output, "previous secret file") {
+		t.Fatalf("missing previous secret should fail: err=%v output=%q", err, output)
+	}
+	if output, err := run("MELDBASE_INDEX_BUILD_SCHEDULER=unknown"); err == nil || !strings.Contains(output, "must be 0 or 1") {
+		t.Fatalf("invalid index scheduler setting should fail: err=%v output=%q", err, output)
+	}
+	if output, err := run("MELDBASE_LOG_LEVEL=verbose"); err == nil || !strings.Contains(output, "must be debug, info, warn, or error") {
+		t.Fatalf("invalid log level should fail: err=%v output=%q", err, output)
+	}
+	if output, err := run("MELDBASE_BACKUP_DIR=/var/lib/meldbase/backups"); err == nil || !strings.Contains(output, "must be set together") {
+		t.Fatalf("partial backup configuration should fail: err=%v output=%q", err, output)
 	}
 	if output, err := run("MELDBASE_ADDR=0.0.0.0:8080"); err == nil || !strings.Contains(output, "loopback") {
 		t.Fatalf("public listener should fail: err=%v output=%q", err, output)

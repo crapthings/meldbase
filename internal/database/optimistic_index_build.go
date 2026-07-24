@@ -16,7 +16,7 @@ const maxOptimisticIndexBuildAttempts = 3
 func (c *Collection) createDurableIndexOptimistic(ctx context.Context, definition IndexDefinition, store *durableStore, budget *indexBuildBudget) error {
 	reservation := c.name + "\x00" + definition.Name
 	c.db.mu.Lock()
-	if err := c.indexBuildPreconditionLocked(definition); err != nil {
+	if err := c.indexBuildPreconditionLocked(definition, false); err != nil {
 		c.db.mu.Unlock()
 		return err
 	}
@@ -41,7 +41,7 @@ func (c *Collection) createDurableIndexOptimistic(ctx context.Context, definitio
 			return err
 		}
 		c.db.mu.RLock()
-		if err := c.indexBuildPreconditionLocked(definition); err != nil {
+		if err := c.indexBuildPreconditionLocked(definition, false); err != nil {
 			c.db.mu.RUnlock()
 			return err
 		}
@@ -65,7 +65,7 @@ func (c *Collection) createDurableIndexOptimistic(ctx context.Context, definitio
 		}
 
 		c.db.mu.Lock()
-		if err := c.indexBuildPreconditionLocked(definition); err != nil {
+		if err := c.indexBuildPreconditionLocked(definition, false); err != nil {
 			c.db.mu.Unlock()
 			return err
 		}
@@ -111,7 +111,7 @@ func (db *DB) recordIndexBuildConflict(attempt int) {
 }
 
 // indexBuildPreconditionLocked accepts either db.mu mode.
-func (c *Collection) indexBuildPreconditionLocked(definition IndexDefinition) error {
+func (c *Collection) indexBuildPreconditionLocked(definition IndexDefinition, replaceExisting bool) error {
 	if c.db.closed {
 		return ErrClosed
 	}
@@ -119,8 +119,12 @@ func (c *Collection) indexBuildPreconditionLocked(definition IndexDefinition) er
 		return c.db.fatalErr
 	}
 	if data := c.db.collections[c.name]; data != nil && data.indexes != nil {
-		if _, exists := data.indexes[definition.Name]; exists {
-			return fmt.Errorf("%w: index name exists", ErrInvalidIndex)
+		_, exists := data.indexes[definition.Name]
+		if exists != replaceExisting {
+			if exists {
+				return fmt.Errorf("%w: index name exists", ErrInvalidIndex)
+			}
+			return fmt.Errorf("%w: index name does not exist", ErrInvalidIndex)
 		}
 	}
 	return nil

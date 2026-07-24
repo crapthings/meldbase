@@ -29,7 +29,27 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: meld <access-policy|init|demo|serve|anchor-serve|anchor-qualification|inspect|verify|backup|restore|export|import|durability-check|destructive-volume-check|destructive-process-check|destructive-enospc-check|destructive-power-prepare|destructive-power-controller-keygen|destructive-power-controller-run|destructive-qemu-reset|destructive-qemu-process-kill|destructive-power-recover|destructive-power-receipt-check|destructive-power-matrix-check|destructive-corruption-check|destructive-qemu-eio|destructive-qemu-volatile-loss|destructive-manifest-build|storage-soak|qualification-environment-capture|qualification-session-init|qualification-session-record|qualification-session-status|qualification-session-power-status|qualification-session-power-prepare|qualification-session-power-recover|qualification-session-seal|qualification-artifacts-index-build|qualification-artifacts-index-verify|qualification-check|qualification-packet-keygen|qualification-packet-verify|index-build>")
+		return errors.New("usage: meld <command>; run 'meld help' for the stable operational command set")
+	}
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+		_, _ = fmt.Fprintln(stdout, `usage: meld <command>
+
+Stable operational commands:
+  access-policy  validate or explain a strict collection access manifest
+  init           create a local development bundle
+  serve          run the single-node HTTP/realtime service
+  inspect        report durable storage metadata
+  verify         perform offline storage verification
+  backup         create a verified physical backup artifact
+  restore        import a verified physical backup artifact
+  export         create a portable logical archive
+  import         import a portable logical archive
+  index-build    start, inspect, resume, abort, or rebuild online indexes
+
+demo is a tutorial command. Qualification, anchor, storage-soak, and destructive
+commands are experimental operator tools, not stable scripting interfaces.
+See docs/cli-contract.md for output and compatibility rules.`)
+		return nil
 	}
 	switch args[0] {
 	case "access-policy":
@@ -312,7 +332,9 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	httpOrigins := flags.String("http-origins", "", "comma-separated exact browser HTTP(S) origins; defaults to local development origins")
 	realtimeOriginPatterns := flags.String("realtime-origin-patterns", "", "comma-separated WebSocket Origin host or scheme+host patterns; defaults to local development origins")
 	devNoAuth := flags.Bool("dev-no-auth", false, "explicitly allow all requests; development only")
+	logLevel := flags.String("log-level", "info", "minimum JSONL service log level: debug, info, warn, or error")
 	jwtHS256SecretFile := flags.String("jwt-hs256-secret-file", "", "private file containing a 32+ byte HS256 JWT secret")
+	jwtHS256PreviousSecretFile := flags.String("jwt-hs256-previous-secret-file", "", "optional previous HS256 JWT secret file accepted during a bounded key-rotation window")
 	jwtJWKSURL := flags.String("jwt-jwks-url", "", "HTTPS OIDC JSON Web Key Set URL for RS256 JWT verification")
 	jwtIssuer := flags.String("jwt-issuer", "", "required JWT issuer value")
 	jwtAudience := flags.String("jwt-audience", "", "required JWT audience value")
@@ -322,6 +344,20 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	adminDiagnostics := flags.Bool("admin-diagnostics", false, "record bounded slow/failure diagnostics for the admin dashboard")
 	adminDiagnosticsAll := flags.Bool("admin-diagnostics-all", false, "record every query/commit; short development sessions only")
 	adminMetrics := flags.Bool("admin-metrics", false, "serve authenticated Prometheus metrics on the admin listener")
+	backupDirectory := flags.String("backup-dir", "", "private directory for scheduled verified physical backups")
+	backupInterval := flags.Duration("backup-interval", 0, "scheduled backup interval; requires --backup-dir")
+	backupKeep := flags.Int("backup-keep", 0, "number of receipt-backed scheduled physical backups to retain")
+	backupTimeout := flags.Duration("backup-timeout", 0, "deadline for each scheduled backup")
+	backupDrillDirectory := flags.String("backup-drill-dir", "", "independent directory for restore verification after each scheduled backup")
+	resourceLimitsFile := flags.String("resource-limits-file", "", "strict JSON ResourceLimits file applied when opening the database")
+	indexBuildSchedulerEnabled := flags.Bool("index-build-scheduler", false, "resume durable online index builds in bounded background slices")
+	indexBuildPollInterval := flags.Duration("index-build-poll-interval", 0, "online index-build scheduler poll interval; requires --index-build-scheduler")
+	indexBuildRunTimeout := flags.Duration("index-build-run-timeout", 0, "online index-build scheduler work slice; requires --index-build-scheduler")
+	indexBuildMaxConcurrency := flags.Int("index-build-max-concurrency", 0, "online index-build scheduler concurrency; requires --index-build-scheduler")
+	rateLimitPerMinute := flags.Int("rate-limit-per-minute", 0, "per-client HTTP requests per minute; zero disables in-process limiting")
+	rateLimitBurst := flags.Int("rate-limit-burst", 0, "allowed per-client request burst; requires --rate-limit-per-minute")
+	rateLimitSubjects := flags.Int("rate-limit-subjects", 0, "maximum tracked client addresses; requires --rate-limit-per-minute")
+	trustedProxyCIDRs := flags.String("trusted-proxy-cidrs", "", "comma-separated proxy CIDRs allowed to supply X-Forwarded-For")
 	workerAddress := flags.String("worker-addr", "", "optional loopback control address for server JavaScript workers")
 	workerReadPolicies := flags.String("worker-read-policies", "", "comma-separated collections whose query visibility is owned by the worker")
 	rollbackAnchorPath := flags.String("rollback-anchor", "", "independently trusted rollback-anchor file")
@@ -342,6 +378,11 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if *path == "" {
 		return errors.New("serve requires --db")
 	}
+	serviceOutput := &synchronizedWriter{writer: stderr}
+	logger, err := newServiceLogger(serviceOutput, *logLevel)
+	if err != nil {
+		return err
+	}
 	remoteAnchor := remoteAnchorConfig{
 		clusterID: *rollbackAnchorCluster, replicaSpecs: rollbackAnchorReplicas, anchorName: *rollbackAnchorName,
 		keyID: *rollbackAnchorKeyID, keyFile: *rollbackAnchorKeyFile, serverCAFile: *rollbackAnchorCA,
@@ -356,13 +397,16 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if (*rollbackAnchorPath != "" || remoteAnchor.enabled()) && *rollbackAnchorTimeout <= 0 {
 		return errors.New("--rollback-anchor-timeout must be positive")
 	}
-	if *devNoAuth && (*jwtHS256SecretFile != "" || *jwtJWKSURL != "") {
+	if *jwtHS256PreviousSecretFile != "" && *jwtHS256SecretFile == "" {
+		return errors.New("--jwt-hs256-previous-secret-file requires --jwt-hs256-secret-file")
+	}
+	if *devNoAuth && (*jwtHS256SecretFile != "" || *jwtHS256PreviousSecretFile != "" || *jwtJWKSURL != "") {
 		return errors.New("--dev-no-auth and production JWT authentication flags are mutually exclusive")
 	}
 	if !*devNoAuth && (*jwtHS256SecretFile == "" && *jwtJWKSURL == "") {
 		return errors.New("configure --jwt-hs256-secret-file or --jwt-jwks-url for production auth, or pass --dev-no-auth only for local development")
 	}
-	if *jwtHS256SecretFile != "" && *jwtJWKSURL != "" {
+	if (*jwtHS256SecretFile != "" || *jwtHS256PreviousSecretFile != "") && *jwtJWKSURL != "" {
 		return errors.New("--jwt-hs256-secret-file and --jwt-jwks-url are mutually exclusive")
 	}
 	if !*devNoAuth && (*jwtIssuer == "" || *jwtAudience == "") {
@@ -373,6 +417,9 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	}
 	if !*devNoAuth && *accessPolicyFile == "" {
 		return errors.New("--access-policy-file is required with production JWT auth")
+	}
+	if !*indexBuildSchedulerEnabled && (*indexBuildPollInterval != 0 || *indexBuildRunTimeout != 0 || *indexBuildMaxConcurrency != 0) {
+		return errors.New("--index-build-poll-interval, --index-build-run-timeout, and --index-build-max-concurrency require --index-build-scheduler")
 	}
 	var workspaceAccessConfig meldserver.WorkspaceAuthorizerConfig
 	if !*devNoAuth {
@@ -426,6 +473,13 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	configuredHTTPOrigins := configuredOriginList(*httpOrigins, defaultHTTPOrigins())
 	configuredRealtimeOriginPatterns := configuredOriginList(*realtimeOriginPatterns, defaultRealtimeOriginPatterns())
 	openOptions := meldbase.OpenOptions{}
+	if *resourceLimitsFile != "" {
+		limits, err := readServiceResourceLimits(*resourceLimitsFile)
+		if err != nil {
+			return err
+		}
+		openOptions.ResourceLimits = limits
+	}
 	var anchorTransport *http.Transport
 	if *rollbackAnchorPath != "" {
 		anchor, err := meldbase.NewFileRollbackAnchorStore(*rollbackAnchorPath)
@@ -450,6 +504,13 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	backupScheduler, err := newServeBackupScheduler(db, serveBackupSchedule{
+		Directory: *backupDirectory, Interval: *backupInterval, Keep: *backupKeep, Timeout: *backupTimeout, DrillDir: *backupDrillDirectory,
+	}, logger)
+	if err != nil {
+		_ = db.Close()
+		return err
+	}
 	var authenticator meldserver.Authenticator
 	var authorizer meldserver.Authorizer
 	var rpcAuthorizer meldserver.RPCAuthorizer
@@ -458,13 +519,21 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		authenticator, authorizer, rpcAuthorizer = access, access, access
 	} else {
 		if *jwtHS256SecretFile != "" {
-			secret, readErr := os.ReadFile(*jwtHS256SecretFile)
-			if readErr != nil {
-				_ = db.Close()
-				return fmt.Errorf("read JWT HS256 secret: %w", readErr)
+			secretFiles := []string{*jwtHS256SecretFile}
+			if *jwtHS256PreviousSecretFile != "" {
+				secretFiles = append(secretFiles, *jwtHS256PreviousSecretFile)
+			}
+			secrets := make([][]byte, 0, len(secretFiles))
+			for _, secretFile := range secretFiles {
+				secret, readErr := os.ReadFile(secretFile)
+				if readErr != nil {
+					_ = db.Close()
+					return fmt.Errorf("read JWT HS256 secret %q: %w", secretFile, readErr)
+				}
+				secrets = append(secrets, secret)
 			}
 			authenticator, err = meldserver.NewHS256JWTAuthenticator(meldserver.HS256JWTAuthenticatorConfig{
-				Secret: secret, Issuer: *jwtIssuer, Audience: *jwtAudience, WorkspaceClaim: *jwtWorkspaceClaim,
+				Secrets: secrets, Issuer: *jwtIssuer, Audience: *jwtAudience, WorkspaceClaim: *jwtWorkspaceClaim,
 			})
 		} else {
 			authenticator, err = meldserver.NewRS256JWKSAuthenticator(meldserver.RS256JWKSAuthenticatorConfig{
@@ -529,6 +598,9 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		DB: db, Authenticator: authenticator, Authorizer: authorizer, PublicRealtimeURL: *realtimeURL,
 		OriginPatterns:     configuredRealtimeOriginPatterns,
 		AllowedHTTPOrigins: configuredHTTPOrigins, MaxBodyBytes: 1 << 20,
+		AuditWriter:               serviceOutput,
+		RequestRateLimitPerMinute: *rateLimitPerMinute, RequestRateLimitBurst: *rateLimitBurst,
+		RequestRateLimitMaxSubjects: *rateLimitSubjects, TrustedProxyCIDRs: splitCommaList(*trustedProxyCIDRs),
 		RPCMethodResolver: rpcMethodResolver, RPCTransactionalMethodResolver: rpcTransactionalMethodResolver, QueryPolicyResolver: queryPolicyResolver,
 		RPCIdempotencyStore: idempotency, RPCAuthorizer: rpcAuthorizer,
 	})
@@ -572,7 +644,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		}
 		adminHandler, err := admin.NewHandler(admin.HandlerOptions{
 			Sampler: adminSampler, Authorize: authorize, ServeDashboard: true,
-			ServeMetrics: *adminMetrics, Diagnostics: db, IndexCatalog: db,
+			ServeMetrics: *adminMetrics, Diagnostics: db, IndexCatalog: db, AuditWriter: serviceOutput,
 		})
 		if err != nil {
 			_ = adminSampler.Close()
@@ -593,6 +665,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		adminServeError = make(chan error, 1)
 		go func() { adminServeError <- adminServer.Serve(adminListener) }()
 		fmt.Fprintf(stdout, "Meldbase admin dashboard listening on http://%s\n", adminListener.Addr())
+		logger.info("admin_listener_started", map[string]any{"address": adminListener.Addr().String()})
 	}
 	if workerHub != nil {
 		workerListener, err = net.Listen("tcp", *workerAddress)
@@ -612,9 +685,31 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		workerServeError = make(chan error, 1)
 		go func() { workerServeError <- workerServer.Serve(workerListener) }()
 		fmt.Fprintf(stdout, "Meldbase worker control listening on ws://%s/v1/workers\n", workerListener.Addr())
+		logger.info("worker_listener_started", map[string]any{"address": workerListener.Addr().String()})
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var indexBuildScheduler *meldbase.IndexBuildScheduler
+	if *indexBuildSchedulerEnabled {
+		indexBuildScheduler, err = db.StartIndexBuildScheduler(ctx, meldbase.IndexBuildSchedulerOptions{
+			PollInterval: *indexBuildPollInterval, RunTimeout: *indexBuildRunTimeout,
+			MaxConcurrency: *indexBuildMaxConcurrency, RunImmediately: true,
+		})
+		if err != nil {
+			if workerServer != nil {
+				_ = workerServer.Close()
+			}
+			if adminServer != nil {
+				_ = adminServer.Close()
+				_ = adminSampler.Close()
+				_ = diagnostics.Close()
+			}
+			_ = listener.Close()
+			_ = db.Close()
+			return fmt.Errorf("start online index-build scheduler: %w", err)
+		}
+	}
+	backupScheduler.start(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -629,10 +724,15 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	}()
 	if *devNoAuth {
 		fmt.Fprintf(stdout, "Meldbase listening on http://%s (UNSAFE development auth disabled)\n", listener.Addr())
+		logger.warn("server_started", map[string]any{"address": listener.Addr().String(), "authentication": "disabled_development_only"})
 	} else {
 		fmt.Fprintf(stdout, "Meldbase listening on http://%s (JWT workspace isolation enabled)\n", listener.Addr())
+		logger.info("server_started", map[string]any{"address": listener.Addr().String(), "authentication": "jwt_workspace_isolation"})
 	}
 	serveErr := httpServer.Serve(listener)
+	stop()
+	backupScheduler.wait()
+	indexBuildScheduler.Stop()
 	var adminErr error
 	if adminServer != nil {
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)

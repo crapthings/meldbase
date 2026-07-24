@@ -30,7 +30,7 @@ var fixedProtocolErrorCodes = []string{
 	"invalid_json", "invalid_mutation_envelope", "invalid_policy", "invalid_query", "invalid_query_envelope",
 	"invalid_request", "invalid_rpc_argument", "invalid_rpc_envelope", "invalid_update", "missing_update",
 	"mutation_limit_exceeded", "origin_forbidden", "outcome_unknown", "policy_expired", "preflight_forbidden",
-	"request_too_large", "resource_limit_exceeded", "resume_failed", "rpc_busy",
+	"rate_limited", "request_too_large", "resource_limit_exceeded", "resume_failed", "rpc_busy",
 	"rpc_canceled", "rpc_duplicate_request", "rpc_idempotency_conflict", "rpc_idempotency_required",
 	"rpc_idempotency_unavailable", "rpc_in_progress", "rpc_not_found", "rpc_outcome_unknown",
 	"rpc_result_invalid", "rpc_transaction_conflict", "rpc_transaction_requires_write", "snapshot_failed",

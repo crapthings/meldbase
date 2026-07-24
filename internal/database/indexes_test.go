@@ -55,6 +55,129 @@ func TestIndexedRangeQueriesMatchCollectionScanAcrossRandomData(t *testing.T) {
 	}
 }
 
+func TestIndexedQueriesRemainCorrectAfterRepeatedIndexedFieldUpdates(t *testing.T) {
+	type model struct {
+		id       DocumentID
+		bucket   int64
+		state    string
+		priority int64
+	}
+	for _, durable := range []bool{false, true} {
+		name := "memory"
+		if durable {
+			name = "durable"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "repeated-index-updates.meld2")
+			var db *DB
+			var err error
+			if durable {
+				db, err = Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				db = New()
+			}
+			defer func() { _ = db.Close() }()
+			items := db.Collection("items")
+			models := make([]model, 128)
+			documents := make([]Document, len(models))
+			states := []string{"new", "open", "held", "done", "archived"}
+			for index := range models {
+				models[index].bucket = int64(index % 11)
+				models[index].state = states[index%len(states)]
+				models[index].priority = int64(index % 17)
+				documents[index] = Document{
+					"bucket":   Int(models[index].bucket),
+					"state":    String(models[index].state),
+					"priority": Int(models[index].priority),
+				}
+			}
+			ids, err := items.InsertMany(context.Background(), documents)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for index := range models {
+				models[index].id = ids[index]
+			}
+			for _, definition := range []struct{ name, field string }{
+				{"by_bucket", "bucket"}, {"by_state", "state"}, {"by_priority", "priority"},
+			} {
+				if err := items.CreateIndex(context.Background(), definition.name, []IndexField{{Field: definition.field, Order: 1}}, IndexOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			assertMatches := func(filter Filter, matches func(model) bool) {
+				t.Helper()
+				want := make([]DocumentID, 0)
+				for _, value := range models {
+					if matches(value) {
+						want = append(want, value.id)
+					}
+				}
+				if got := queryIDs(t, items, filter, QueryOptions{}); !reflect.DeepEqual(got, want) {
+					t.Fatalf("filter=%v got=%v want=%v", filter, got, want)
+				}
+				explain, err := items.Explain(context.Background(), filter)
+				if err != nil || explain.Stage != "IXSCAN" {
+					t.Fatalf("filter=%v explain=%+v err=%v", filter, explain, err)
+				}
+			}
+			assertQueries := func() {
+				assertMatches(Filter{"bucket": int64(3)}, func(value model) bool { return value.bucket == 3 })
+				assertMatches(Filter{"state": "held"}, func(value model) bool { return value.state == "held" })
+				assertMatches(Filter{"priority": map[string]any{"$gte": int64(7), "$lte": int64(19)}}, func(value model) bool {
+					return value.priority >= 7 && value.priority <= 19
+				})
+				assertMatches(Filter{"bucket": int64(3), "state": "held"}, func(value model) bool {
+					return value.bucket == 3 && value.state == "held"
+				})
+				assertMatches(Filter{"$or": []Filter{{"bucket": int64(3)}, {"priority": int64(9)}}}, func(value model) bool {
+					return value.bucket == 3 || value.priority == 9
+				})
+			}
+
+			for round := 0; round < 20; round++ {
+				targetBucket := int64(round % 11)
+				newBucket := int64((round*3 + 4) % 11)
+				newState := states[(round+2)%len(states)]
+				newPriority := int64((round*13 + 5) % 31)
+				matched := 0
+				for index := range models {
+					if models[index].bucket == targetBucket {
+						matched++
+						models[index].bucket = newBucket
+						models[index].state = newState
+						models[index].priority = newPriority
+					}
+				}
+				result, err := items.UpdateMany(context.Background(), Filter{"bucket": targetBucket}, Update{"$set": map[string]any{
+					"bucket": newBucket, "state": newState, "priority": newPriority,
+				}})
+				if err != nil || result.MatchedCount != int64(matched) {
+					t.Fatalf("round=%d update=%+v err=%v matched=%d", round, result, err, matched)
+				}
+				if round%4 == 3 {
+					assertQueries()
+				}
+				if durable && round == 9 {
+					if err := db.Close(); err != nil {
+						t.Fatal(err)
+					}
+					db, err = Open(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					items = db.Collection("items")
+					assertQueries()
+				}
+			}
+		})
+	}
+}
+
 func TestIndexedInAndEligibleOrMatchCollectionScanWithResiduals(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB {

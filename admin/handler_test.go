@@ -79,6 +79,38 @@ func TestHandlerRequiresAuthenticationAndExactOrigin(t *testing.T) {
 	}
 }
 
+func TestHandlerAuditRecordsSafeAdminOutcomes(t *testing.T) {
+	now := time.Now()
+	source := &fakeSource{stats: meldbase.DBStats{StartedAt: now, CapturedAt: now}}
+	sampler := newTestSampler(t, source, 4, 4)
+	var audit strings.Builder
+	handler, err := NewHandler(HandlerOptions{Sampler: sampler, Authorize: func(request *http.Request) bool {
+		return request.Header.Get("Authorization") == "Bearer "+testAdminToken
+	}, AuditWriter: &audit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/stats?secret=never-log", nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	request = httptest.NewRequest(http.MethodGet, "/v1/diagnostics?after=9", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	lines := strings.Split(strings.TrimSpace(audit.String()), "\n")
+	if len(lines) != 2 || strings.Contains(audit.String(), "secret") || strings.Contains(audit.String(), "after=9") || strings.Contains(audit.String(), testAdminToken) {
+		t.Fatalf("audit=%q", audit.String())
+	}
+	var first, second map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatal(err)
+	}
+	if first["kind"] != "admin_request" || first["path"] != "/v1/stats" || first["outcome"] != "success" || second["outcome"] != "unauthenticated" {
+		t.Fatalf("events=%v / %v", first, second)
+	}
+}
+
 func TestHandlerAllowsDirectSameOriginDashboardRequests(t *testing.T) {
 	_, handler := newTestHandler(t)
 	request := httptest.NewRequest(http.MethodGet, "http://admin.local/v1/stats", nil)

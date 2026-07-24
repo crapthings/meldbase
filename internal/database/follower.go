@@ -254,7 +254,7 @@ func applyFollowerBatchLocked(ctx context.Context, db *DB, store *durableStore, 
 				return ErrCorrupt
 			}
 			collections[change.Collection] = struct{}{}
-		case CreateIndexOperation:
+		case CreateIndexOperation, ReplaceIndexOperation:
 			if change.Index == nil || !collectionNamePattern.MatchString(change.Collection) || change.Before != nil || change.After != nil {
 				return ErrCorrupt
 			}

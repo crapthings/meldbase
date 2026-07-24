@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -18,7 +19,11 @@ import (
 // secret. OIDC/JWKS verification can use the same Actor contract later;
 // callers never supply a workspace separately from the signed token.
 type HS256JWTAuthenticatorConfig struct {
+	// Secret is retained for single-key deployments. Secrets permits a bounded
+	// overlap window while a signing key is rotated; it must not be set together
+	// with Secret.
 	Secret         []byte
+	Secrets        [][]byte
 	Issuer         string
 	Audience       string
 	WorkspaceClaim string
@@ -28,7 +33,7 @@ type HS256JWTAuthenticatorConfig struct {
 // HS256JWTAuthenticator verifies a bounded Bearer JWT and maps its `sub` and
 // active workspace claim to the server Actor.
 type HS256JWTAuthenticator struct {
-	secret         []byte
+	secrets        [][]byte
 	issuer         string
 	audience       string
 	workspaceClaim string
@@ -36,8 +41,25 @@ type HS256JWTAuthenticator struct {
 }
 
 func NewHS256JWTAuthenticator(config HS256JWTAuthenticatorConfig) (*HS256JWTAuthenticator, error) {
-	if len(config.Secret) < 32 {
-		return nil, errors.New("JWT HS256 secret must contain at least 32 bytes")
+	if len(config.Secret) > 0 && len(config.Secrets) > 0 {
+		return nil, errors.New("JWT HS256 authentication accepts Secret or Secrets, not both")
+	}
+	secrets := config.Secrets
+	if len(secrets) == 0 {
+		secrets = [][]byte{config.Secret}
+	}
+	if len(secrets) == 0 || len(secrets) > 4 {
+		return nil, errors.New("JWT HS256 authentication requires between one and four active secrets")
+	}
+	for index, secret := range secrets {
+		if len(secret) < 32 {
+			return nil, errors.New("JWT HS256 secret must contain at least 32 bytes")
+		}
+		for previous := 0; previous < index; previous++ {
+			if hmac.Equal(secret, secrets[previous]) {
+				return nil, errors.New("JWT HS256 active secrets must be unique")
+			}
+		}
 	}
 	if config.Issuer == "" || config.Audience == "" {
 		return nil, errors.New("JWT HS256 authentication requires issuer and audience")
@@ -51,8 +73,12 @@ func NewHS256JWTAuthenticator(config HS256JWTAuthenticatorConfig) (*HS256JWTAuth
 	if config.Clock == nil {
 		config.Clock = time.Now
 	}
+	activeSecrets := make([][]byte, len(secrets))
+	for index, secret := range secrets {
+		activeSecrets[index] = append([]byte(nil), secret...)
+	}
 	return &HS256JWTAuthenticator{
-		secret: append([]byte(nil), config.Secret...), issuer: config.Issuer,
+		secrets: activeSecrets, issuer: config.Issuer,
 		audience: config.Audience, workspaceClaim: config.WorkspaceClaim, now: config.Clock,
 	}, nil
 }
@@ -75,11 +101,14 @@ func (a *HS256JWTAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, 
 	if !ok || len(signature) != sha256.Size {
 		return Actor{}, ErrUnauthenticated
 	}
-	mac := hmac.New(sha256.New, a.secret)
-	_, _ = mac.Write([]byte(parts[0]))
-	_, _ = mac.Write([]byte("."))
-	_, _ = mac.Write([]byte(parts[1]))
-	if !hmac.Equal(signature, mac.Sum(nil)) {
+	unsigned := parts[0] + "." + parts[1]
+	validSignature := 0
+	for _, secret := range a.secrets {
+		mac := hmac.New(sha256.New, secret)
+		_, _ = mac.Write([]byte(unsigned))
+		validSignature |= subtle.ConstantTimeCompare(signature, mac.Sum(nil))
+	}
+	if validSignature != 1 {
 		return Actor{}, ErrUnauthenticated
 	}
 	payload, ok := decodeJWTPart(parts[1], 6144)

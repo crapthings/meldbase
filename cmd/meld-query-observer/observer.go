@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +87,9 @@ type scenarioObservation struct {
 	AverageReturned      float64                `json:"averageReturned"`
 	ElapsedMillis        float64                `json:"elapsedMillis"`
 	AverageLatencyMicros float64                `json:"averageLatencyMicros"`
+	P50LatencyMicros     float64                `json:"p50LatencyMicros"`
+	P95LatencyMicros     float64                `json:"p95LatencyMicros"`
+	P99LatencyMicros     float64                `json:"p99LatencyMicros"`
 	Measured             queryCounters          `json:"measured"`
 	Ratios               explainRatios          `json:"ratios"`
 }
@@ -616,12 +620,17 @@ func observeScenario(ctx context.Context, db *meldbase.DB, collection *meldbase.
 
 	before := db.Stats().Queries
 	started := time.Now()
+	latencies := make([]time.Duration, 0, config.Iterations)
 	for range config.Iterations {
 		if ctx.Err() != nil {
 			break
 		}
 		observation.RunsAttempted++
+		runStarted := time.Now()
 		returned, err := executeObserverQuery(ctx, collection, scenario.query)
+		if err == nil {
+			latencies = append(latencies, time.Since(runStarted))
+		}
 		observation.ReturnedTotal += returned
 		if err != nil {
 			observation.RunsFailed++
@@ -637,8 +646,21 @@ func observeScenario(ctx context.Context, db *meldbase.DB, collection *meldbase.
 		observation.AverageLatencyMicros = float64(elapsed.Nanoseconds()) / float64(observation.RunsAttempted) / 1_000
 		observation.AverageReturned = float64(observation.ReturnedTotal) / float64(observation.RunsAttempted)
 	}
+	observation.P50LatencyMicros = observerPercentileMicros(latencies, 0.50)
+	observation.P95LatencyMicros = observerPercentileMicros(latencies, 0.95)
+	observation.P99LatencyMicros = observerPercentileMicros(latencies, 0.99)
 	observation.Measured = queryStatsDelta(before, after)
 	return observation
+}
+
+func observerPercentileMicros(samples []time.Duration, percentile float64) float64 {
+	if len(samples) == 0 {
+		return 0
+	}
+	sorted := append([]time.Duration(nil), samples...)
+	sort.Slice(sorted, func(left, right int) bool { return sorted[left] < sorted[right] })
+	index := int(float64(len(sorted)-1) * percentile)
+	return float64(sorted[index].Nanoseconds()) / 1_000
 }
 
 func executeObserverQuery(ctx context.Context, collection *meldbase.Collection, query meldbase.QuerySpec) (int, error) {

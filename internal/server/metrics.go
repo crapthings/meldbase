@@ -33,23 +33,27 @@ type ServerStats struct {
 	RPCAtomicCommits          uint64         `json:"rpcAtomicCommits"`
 	RPCAtomicRollbacks        uint64         `json:"rpcAtomicRollbacks"`
 	RPCAtomicNoopCompletions  uint64         `json:"rpcAtomicNoopCompletions"`
+	HTTPUnauthenticated       uint64         `json:"httpUnauthenticated"`
+	HTTPForbidden             uint64         `json:"httpForbidden"`
+	HTTPRateLimited           uint64         `json:"httpRateLimited"`
 	Worker                    WorkerHubStats `json:"worker"`
 }
 
 type serverMetrics struct {
-	activeConnections, connectionsAccepted            atomic.Uint64
-	realtimeOutboundOverflows                         atomic.Uint64
-	rpcRequests, rpcActive                            atomic.Uint64
-	rpcSucceeded, rpcFailed, rpcCanceled              atomic.Uint64
-	rpcRejected, rpcBusy                              atomic.Uint64
-	rpcRequestBytes                                   atomic.Uint64
-	rpcResultBytes, rpcTotalNanos                     atomic.Uint64
-	rpcMaxNanos                                       atomic.Uint64
-	rpcIdempotencyClaims, rpcIdempotencyReplays       atomic.Uint64
-	rpcIdempotencyConflicts, rpcIdempotencyInProgress atomic.Uint64
-	rpcIdempotencyUnknown, rpcIdempotencyFailures     atomic.Uint64
-	rpcAtomicCommits, rpcAtomicRollbacks              atomic.Uint64
-	rpcAtomicNoopCompletions                          atomic.Uint64
+	activeConnections, connectionsAccepted              atomic.Uint64
+	realtimeOutboundOverflows                           atomic.Uint64
+	rpcRequests, rpcActive                              atomic.Uint64
+	rpcSucceeded, rpcFailed, rpcCanceled                atomic.Uint64
+	rpcRejected, rpcBusy                                atomic.Uint64
+	rpcRequestBytes                                     atomic.Uint64
+	rpcResultBytes, rpcTotalNanos                       atomic.Uint64
+	rpcMaxNanos                                         atomic.Uint64
+	rpcIdempotencyClaims, rpcIdempotencyReplays         atomic.Uint64
+	rpcIdempotencyConflicts, rpcIdempotencyInProgress   atomic.Uint64
+	rpcIdempotencyUnknown, rpcIdempotencyFailures       atomic.Uint64
+	rpcAtomicCommits, rpcAtomicRollbacks                atomic.Uint64
+	rpcAtomicNoopCompletions                            atomic.Uint64
+	httpUnauthenticated, httpForbidden, httpRateLimited atomic.Uint64
 }
 
 type rpcMetricSpan struct{ started time.Time }
@@ -82,7 +86,8 @@ func (h *Handler) Stats() ServerStats {
 		RPCIdempotencyUnknown: h.metrics.rpcIdempotencyUnknown.Load(), RPCIdempotencyFailures: h.metrics.rpcIdempotencyFailures.Load(),
 		RPCAtomicCommits: h.metrics.rpcAtomicCommits.Load(), RPCAtomicRollbacks: h.metrics.rpcAtomicRollbacks.Load(),
 		RPCAtomicNoopCompletions: h.metrics.rpcAtomicNoopCompletions.Load(),
-		Worker:                   workerStats,
+		HTTPUnauthenticated:      h.metrics.httpUnauthenticated.Load(), HTTPForbidden: h.metrics.httpForbidden.Load(), HTTPRateLimited: h.metrics.httpRateLimited.Load(),
+		Worker: workerStats,
 	}
 }
 

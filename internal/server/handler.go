@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -50,6 +51,11 @@ type Config struct {
 	RPCIdempotencyStore            RPCIdempotencyStore
 	RPCIdempotencyRetention        time.Duration
 	RPCIdempotencyCommitTimeout    time.Duration
+	AuditWriter                    io.Writer
+	RequestRateLimitPerMinute      int
+	RequestRateLimitBurst          int
+	RequestRateLimitMaxSubjects    int
+	TrustedProxyCIDRs              []string
 }
 
 type Handler struct {
@@ -62,6 +68,8 @@ type Handler struct {
 	rpcSessionID     [16]byte
 	operationalState func() meldbase.OperationalState
 	metrics          serverMetrics
+	rateLimit        *requestRateLimit
+	audit            *httpAuditLogger
 }
 
 func New(config Config) (*Handler, error) {
@@ -95,6 +103,24 @@ func New(config Config) (*Handler, error) {
 	}
 	if config.MaxBodyBytes <= 0 {
 		config.MaxBodyBytes = 1 << 20
+	}
+	if config.RequestRateLimitPerMinute < 0 || config.RequestRateLimitPerMinute > 1_000_000 {
+		return nil, errors.New("request rate limit per minute must be between zero and 1,000,000")
+	}
+	var trustedProxyCIDRs []*net.IPNet
+	for _, raw := range config.TrustedProxyCIDRs {
+		_, network, err := net.ParseCIDR(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy CIDR %q", raw)
+		}
+		trustedProxyCIDRs = append(trustedProxyCIDRs, network)
+	}
+	if config.RequestRateLimitPerMinute > 0 {
+		if config.RequestRateLimitBurst < 1 || config.RequestRateLimitBurst > config.RequestRateLimitPerMinute || config.RequestRateLimitMaxSubjects < 1 || config.RequestRateLimitMaxSubjects > 100_000 {
+			return nil, errors.New("enabled request rate limiting requires a positive burst no greater than the per-minute rate and 1..100,000 subjects")
+		}
+	} else if config.RequestRateLimitBurst != 0 || config.RequestRateLimitMaxSubjects != 0 || len(trustedProxyCIDRs) != 0 {
+		return nil, errors.New("request rate limit burst, subjects, and trusted proxies require a positive per-minute rate")
 	}
 	if config.MaxQueryResultBytes <= 0 {
 		config.MaxQueryResultBytes = config.MaxBodyBytes
@@ -242,6 +268,8 @@ func New(config Config) (*Handler, error) {
 		startedAt:        time.Now(),
 		rpcSessionID:     rpcSessionID,
 		operationalState: config.DB.OperationalState,
+		rateLimit:        newRequestRateLimit(config.RequestRateLimitPerMinute, config.RequestRateLimitBurst, config.RequestRateLimitMaxSubjects, trustedProxyCIDRs),
+		audit:            newHTTPAuditLogger(config.AuditWriter),
 	}
 	h.mux.HandleFunc("GET /health", h.health)
 	h.mux.HandleFunc("GET /livez", h.liveness)
@@ -268,6 +296,19 @@ func unrestrictedRealtimeOriginPattern(pattern string) bool {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	observed := &responseStatusWriter{ResponseWriter: w}
+	defer func() {
+		h.observeHTTPStatus(observed)
+		h.audit.record(r, observed)
+	}()
+	w = observed
+	if r.URL.Path != "/livez" && r.URL.Path != "/readyz" && r.URL.Path != "/health" {
+		if allowed, retryAfter := h.rateLimit.allow(r); !allowed {
+			w.Header().Set("retry-after", fmt.Sprintf("%d", max(1, int(retryAfter.Seconds()+0.999))))
+			writeError(w, http.StatusTooManyRequests, "rate_limited")
+			return
+		}
+	}
 	origin := r.Header.Get("origin")
 	// A WebSocket upgrade has its own Origin enforcement in realtime via
 	// websocket.Accept. Do not apply the HTTP CORS allowlist here: deployments
@@ -294,6 +335,38 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.mux.ServeHTTP(w, r)
+}
+
+type responseStatusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (writer *responseStatusWriter) WriteHeader(status int) {
+	if writer.status == 0 {
+		writer.status = status
+	}
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *responseStatusWriter) Write(data []byte) (int, error) {
+	if writer.status == 0 {
+		writer.status = http.StatusOK
+	}
+	return writer.ResponseWriter.Write(data)
+}
+
+func (writer *responseStatusWriter) Unwrap() http.ResponseWriter { return writer.ResponseWriter }
+
+func (h *Handler) observeHTTPStatus(writer *responseStatusWriter) {
+	switch writer.status {
+	case http.StatusUnauthorized:
+		h.metrics.httpUnauthenticated.Add(1)
+	case http.StatusForbidden:
+		h.metrics.httpForbidden.Add(1)
+	case http.StatusTooManyRequests:
+		h.metrics.httpRateLimited.Add(1)
+	}
 }
 
 type probeResponse struct {

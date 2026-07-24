@@ -13,6 +13,9 @@ ExecStart=/usr/local/libexec/meldbase/meldbase-single-node
 Restart=on-failure
 RestartSec=5s
 UMask=0077
+SyslogIdentifier=meldbase
+StandardOutput=journal
+StandardError=journal
 
 # The database is the only state that this unit may write.
 NoNewPrivileges=true

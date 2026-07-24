@@ -26,6 +26,7 @@ const (
 	// feed. Ordinary collection creation remains implicit for CRUD callers.
 	CreateCollectionOperation Operation = "create_collection"
 	CreateIndexOperation      Operation = "create_index"
+	ReplaceIndexOperation     Operation = "replace_index"
 )
 
 type IndexDefinition struct {

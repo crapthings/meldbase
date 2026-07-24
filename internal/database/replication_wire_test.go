@@ -18,6 +18,7 @@ func TestReplicationFrameRoundTripPreservesTypedBatch(t *testing.T) {
 			{Collection: "items", Operation: CreateCollectionOperation, ChangedPaths: []string{"_catalog"}},
 			{Collection: "items", Operation: UpdateOperation, DocumentID: id, Before: &before, After: &after, ChangedPaths: []string{"payload", "value"}},
 			{Collection: "items", Operation: CreateIndexOperation, Index: &IndexDefinition{Name: "by_value", Field: "value", Order: 1, Fields: []IndexField{{Field: "value", Order: 1}}, Unique: true}, ChangedPaths: []string{"_indexes.by_value"}},
+			{Collection: "items", Operation: ReplaceIndexOperation, Index: &IndexDefinition{Name: "by_value", Field: "value", Order: -1, Fields: []IndexField{{Field: "value", Order: -1}}}, ChangedPaths: []string{"_indexes.by_value"}},
 		},
 	}
 	identity := [16]byte{7}
@@ -36,9 +37,11 @@ func TestReplicationFrameRoundTripPreservesTypedBatch(t *testing.T) {
 	if change.Operation != UpdateOperation || change.DocumentID != id || change.Before == nil || !change.Before.Equal(before) || change.After == nil || !change.After.Equal(after) || strings.Join(change.ChangedPaths, ",") != "payload,value" {
 		t.Fatalf("decoded change=%+v", change)
 	}
-	index := decoded.Batch.Changes[2].Index
-	if index == nil || !equalIndexDefinitions(*index, *batch.Changes[2].Index) {
-		t.Fatalf("decoded index=%+v", index)
+	for _, position := range []int{2, 3} {
+		index := decoded.Batch.Changes[position].Index
+		if index == nil || decoded.Batch.Changes[position].Operation != batch.Changes[position].Operation || !equalIndexDefinitions(*index, *batch.Changes[position].Index) {
+			t.Fatalf("decoded index change=%+v", decoded.Batch.Changes[position])
+		}
 	}
 }
 

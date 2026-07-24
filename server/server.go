@@ -1,6 +1,10 @@
 // Package server exposes Meldbase's authenticated HTTP, WebSocket realtime and
 // data-only RPC transport. Protocol implementation remains isolated from the
 // storage engine; applications opt into this package explicitly.
+//
+// Stability: Alpha. This Go API can change between alpha releases. The
+// versioned HTTP and realtime wire contracts have their own compatibility
+// policy; see https://meldbase.com/protocol-stability.
 package server
 
 import (

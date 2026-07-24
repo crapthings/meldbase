@@ -1300,8 +1300,10 @@ func TestRealtimeResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
 	}
 	initial := readSnapshot(t, ctx, connection)
 	connection.CloseNow()
-	if _, err := db.Collection("items").UpdateOne(context.Background(), meldbase.Filter{"_id": id}, meldbase.Update{"$set": map[string]any{"title": "missed"}}); err != nil {
-		t.Fatal(err)
+	for _, title := range []string{"missed-1", "missed-2", "missed-3"} {
+		if _, err := db.Collection("items").UpdateOne(context.Background(), meldbase.Filter{"_id": id}, meldbase.Update{"$set": map[string]any{"title": title}}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ticket = obtainTicket(t, server.URL)
 	connection, _, err = websocket.Dial(ctx, ticket.URL, nil)
@@ -1323,17 +1325,27 @@ func TestRealtimeResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
 	if resumed["type"] != "resumed" || resumed["token"] != initial.Token {
 		t.Fatalf("resumed=%+v", resumed)
 	}
-	delta := readMap(t, ctx, connection)
-	if delta["type"] != "delta" || delta["requestId"] != "store-resume" || delta["subscriptionId"] != resumed["subscriptionId"] || delta["fromToken"] != initial.Token || delta["token"] == initial.Token {
-		t.Fatalf("delta=%+v", delta)
-	}
-	operations, ok := delta["operations"].([]any)
-	if !ok || len(operations) != 1 {
-		t.Fatalf("operations=%#v", delta["operations"])
-	}
-	operation, ok := operations[0].(map[string]any)
-	if !ok || operation["op"] != "change" || operation["id"] != id.String() {
-		t.Fatalf("operation=%#v", operations[0])
+	previousToken := initial.Token
+	seenTokens := map[string]struct{}{initial.Token: {}}
+	for expected := 0; expected < 3; expected++ {
+		delta := readMap(t, ctx, connection)
+		nextToken, ok := delta["token"].(string)
+		if !ok || delta["type"] != "delta" || delta["requestId"] != "store-resume" || delta["subscriptionId"] != resumed["subscriptionId"] || delta["fromToken"] != previousToken {
+			t.Fatalf("delta %d=%+v previous=%q", expected, delta, previousToken)
+		}
+		if _, duplicate := seenTokens[nextToken]; duplicate {
+			t.Fatalf("replay duplicated token %q in delta=%+v", nextToken, delta)
+		}
+		operations, ok := delta["operations"].([]any)
+		if !ok || len(operations) != 1 {
+			t.Fatalf("delta %d operations=%#v", expected, delta["operations"])
+		}
+		operation, ok := operations[0].(map[string]any)
+		if !ok || operation["op"] != "change" || operation["id"] != id.String() {
+			t.Fatalf("delta %d operation=%#v", expected, operations[0])
+		}
+		seenTokens[nextToken] = struct{}{}
+		previousToken = nextToken
 	}
 }
 
@@ -1377,6 +1389,66 @@ func TestStrictMessagesAndTicketTTLConfiguration(t *testing.T) {
 	}
 	if err := decodeStrict([]byte(`{"v":1,"extra":true}`), &target); err == nil {
 		t.Fatal("unknown message field accepted")
+	}
+}
+
+func TestRequestRateLimitUsesTrustedProxyOnlyAndPreservesProbes(t *testing.T) {
+	db := meldbase.New()
+	defer db.Close()
+	var audit strings.Builder
+	handler, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime",
+		RequestRateLimitPerMinute: 2, RequestRateLimitBurst: 2, RequestRateLimitMaxSubjects: 4, TrustedProxyCIDRs: []string{"127.0.0.0/8"}, AuditWriter: &audit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(path, remote, forwarded string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		input := httptest.NewRequest(http.MethodGet, path, nil)
+		input.RemoteAddr = remote
+		input.Header.Set("X-Forwarded-For", forwarded)
+		handler.ServeHTTP(recorder, input)
+		return recorder
+	}
+	if got := request("/missing", "127.0.0.1:1234", "198.51.100.8").Code; got != http.StatusNotFound {
+		t.Fatalf("first status=%d", got)
+	}
+	if got := request("/missing", "127.0.0.1:1234", "198.51.100.8").Code; got != http.StatusNotFound {
+		t.Fatalf("second status=%d", got)
+	}
+	limited := request("/missing", "127.0.0.1:1234", "198.51.100.8")
+	if limited.Code != http.StatusTooManyRequests || limited.Header().Get("retry-after") == "" {
+		t.Fatalf("limited status=%d headers=%v", limited.Code, limited.Header())
+	}
+	if got := request("/livez", "127.0.0.1:1234", "198.51.100.8").Code; got != http.StatusOK {
+		t.Fatalf("probe status=%d", got)
+	}
+	if got := request("/missing", "198.51.100.9:1234", "203.0.113.99").Code; got != http.StatusNotFound {
+		t.Fatalf("untrusted forwarded address changed identity: status=%d", got)
+	}
+	if _, err := New(Config{DB: db, Authenticator: testAuthenticator{}, Authorizer: testAuthorizer{}, PublicRealtimeURL: "ws://example/realtime", TrustedProxyCIDRs: []string{"127.0.0.0/8"}}); err == nil {
+		t.Fatal("trusted proxy without a rate limit was accepted")
+	}
+	unauthenticated := httptest.NewRecorder()
+	unauthenticatedRequest := httptest.NewRequest(http.MethodPost, "/v1/collections/customer-private-42/query?token=do-not-log", nil)
+	unauthenticatedRequest.RemoteAddr = "203.0.113.20:1234"
+	unauthenticatedRequest.Header.Set("authorization", "Bearer do-not-log")
+	handler.ServeHTTP(unauthenticated, unauthenticatedRequest)
+	forbidden := httptest.NewRecorder()
+	forbiddenRequest := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	forbiddenRequest.RemoteAddr = "203.0.113.21:1234"
+	forbiddenRequest.Header.Set("Origin", "https://untrusted.example")
+	handler.ServeHTTP(forbidden, forbiddenRequest)
+	stats := handler.Stats()
+	if stats.HTTPUnauthenticated != 1 || stats.HTTPForbidden != 1 || stats.HTTPRateLimited != 1 {
+		t.Fatalf("HTTP security stats=%+v", stats)
+	}
+	lines := strings.Split(strings.TrimSpace(audit.String()), "\n")
+	if len(lines) != 3 || strings.Contains(audit.String(), "198.51.100") || strings.Contains(audit.String(), "customer-private-42") || strings.Contains(audit.String(), "do-not-log") {
+		t.Fatalf("audit=%q", audit.String())
+	}
+	var event map[string]any
+	if err := json.Unmarshal([]byte(lines[1]), &event); err != nil || event["route"] != "/v1/collections/{collection}/query" || event["outcome"] != "unauthenticated" {
+		t.Fatalf("audit event=%v err=%v", event, err)
 	}
 }
 
@@ -1515,6 +1587,42 @@ func TestRealtimeTicketCapabilityDiscoveryIsExplicitAndFixed(t *testing.T) {
 		if capabilities[index] != capability {
 			t.Fatalf("protocol capability %d=%#v want=%q", index, capabilities[index], capability)
 		}
+	}
+}
+
+func TestRealtimeV1LegacyMinimalWireFramesRemainAccepted(t *testing.T) {
+	db, _, server := newTestServer(t)
+	insertServerDocument(t, db.Collection("items"), "mine", 1, "legacy")
+	ticket := obtainTicket(t, server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	connection, _, err := websocket.Dial(ctx, ticket.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	// These are the minimal v1 frames emitted by clients before capability
+	// discovery, delta mode, and resume support were added. Keep them raw so a
+	// future encoder cannot accidentally make this compatibility test tautological.
+	if err := connection.Write(ctx, websocket.MessageText, []byte(`{"v":1,"type":"authenticate","ticket":"`+ticket.Ticket+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if authenticated := readMap(t, ctx, connection); authenticated["type"] != "authenticated" || authenticated["v"] != float64(1) {
+		t.Fatalf("authenticated=%+v", authenticated)
+	}
+	legacySubscribe := []byte(`{"v":1,"type":"subscribe","requestId":"legacy-v1","collection":"items","query":{"version":1,"where":{"op":"true"}}}`)
+	if err := connection.Write(ctx, websocket.MessageText, legacySubscribe); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := readSnapshot(t, ctx, connection)
+	if snapshot.RequestID != "legacy-v1" || snapshot.SubscriptionID == "" || len(snapshot.Documents) != 1 {
+		t.Fatalf("legacy snapshot=%+v", snapshot)
+	}
+	if err := connection.Write(ctx, websocket.MessageText, []byte(`{"v":1,"type":"ping"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if pong := readMap(t, ctx, connection); pong["type"] != "pong" || pong["v"] != float64(1) {
+		t.Fatalf("pong=%+v", pong)
 	}
 }
 

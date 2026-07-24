@@ -70,6 +70,7 @@ type IndexBuildStatus struct {
 	Field           string            `json:"field"`
 	Fields          []IndexField      `json:"fields"`
 	Unique          bool              `json:"unique"`
+	ReplaceExisting bool              `json:"replaceExisting,omitempty"`
 	Phase           IndexBuildPhase   `json:"phase"`
 	Failure         IndexBuildFailure `json:"failure,omitempty"`
 	SourceSequence  uint64            `json:"sourceSequence"`
@@ -83,6 +84,17 @@ type IndexBuildStatus struct {
 // StartIndexBuild creates a durable private shadow index. It is Storage
 // only and does not scan documents or make the index query-visible.
 func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
+	return c.startIndexBuild(ctx, name, fields, options, false)
+}
+
+// StartIndexRebuild creates a durable private shadow index that will atomically
+// replace an already-published index with the same name. The old index remains
+// query-visible until final publication; the build is resumable or abortable.
+func (c *Collection) StartIndexRebuild(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
+	return c.startIndexBuild(ctx, name, fields, options, true)
+}
+
+func (c *Collection) startIndexBuild(ctx context.Context, name string, fields []IndexField, options IndexOptions, replaceExisting bool) (IndexBuildID, error) {
 	if err := contextError(ctx); err != nil {
 		return IndexBuildID{}, err
 	}
@@ -110,7 +122,7 @@ func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []
 	if err := contextError(ctx); err != nil {
 		return IndexBuildID{}, err
 	}
-	if err := c.indexBuildPreconditionLocked(definition); err != nil {
+	if err := c.indexBuildPreconditionLocked(definition, replaceExisting); err != nil {
 		return IndexBuildID{}, err
 	}
 	if c.db.indexBuildReservations == nil {
@@ -121,7 +133,7 @@ func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []
 	}
 	_, err = store.file.BeginIndexBuild(storage.BeginIndexBuildTransaction{
 		BuildID: [16]byte(id), Collection: c.name, Name: definition.Name,
-		FieldPath: definition.Field, Fields: storageIndexFields(definition), Unique: definition.Unique,
+		FieldPath: definition.Field, Fields: storageIndexFields(definition), Unique: definition.Unique, ReplaceExisting: replaceExisting,
 	})
 	if err != nil {
 		return IndexBuildID{}, c.db.handleIndexBuildErrorLocked(err)
@@ -139,6 +151,17 @@ func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []
 // IndexBuilds; use StartIndexBuild when the ID must be known before execution.
 func (c *Collection) CreateIndexOnline(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
 	id, err := c.StartIndexBuild(ctx, name, fields, options)
+	if err != nil {
+		return IndexBuildID{}, err
+	}
+	return id, c.db.ResumeIndexBuild(ctx, id)
+}
+
+// RebuildIndexOnline starts and runs an atomic replacement for an existing
+// durable index. A cancellation leaves the old index published and the private
+// replacement discoverable through IndexBuilds.
+func (c *Collection) RebuildIndexOnline(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
+	id, err := c.StartIndexRebuild(ctx, name, fields, options)
 	if err != nil {
 		return IndexBuildID{}, err
 	}
@@ -495,7 +518,11 @@ func (db *DB) finalizeIndexBuild(ctx context.Context, store *durableStore, meta 
 	db.token = sequence
 	delete(db.indexBuildReservations, indexBuildReservation(meta.Collection, meta.Name))
 	copyDefinition := definition
-	db.recordLiveCommit(ChangeBatch{Token: sequence, Changes: []Change{{Collection: meta.Collection, Operation: CreateIndexOperation, Index: &copyDefinition}}})
+	operation := CreateIndexOperation
+	if meta.ReplaceExisting {
+		operation = ReplaceIndexOperation
+	}
+	db.recordLiveCommit(ChangeBatch{Token: sequence, Changes: []Change{{Collection: meta.Collection, Operation: operation, Index: &copyDefinition}}})
 	return nil
 }
 
@@ -708,7 +735,7 @@ func publicIndexBuildStatus(meta storage.IndexBuildMeta) IndexBuildStatus {
 	return IndexBuildStatus{
 		ID: IndexBuildID(meta.BuildID), Collection: meta.Collection, Name: meta.Name, Field: meta.FieldPath,
 		Fields: fields,
-		Unique: meta.Unique, Phase: phase, Failure: failure, SourceSequence: meta.SourceSequence, AppliedSequence: meta.AppliedSequence,
+		Unique: meta.Unique, ReplaceExisting: meta.ReplaceExisting, Phase: phase, Failure: failure, SourceSequence: meta.SourceSequence, AppliedSequence: meta.AppliedSequence,
 		EntryCount: meta.EntryCount, CanonicalBytes: meta.CanonicalBytes, CreatedAt: meta.CreatedAt, UpdatedAt: meta.UpdatedAt,
 	}
 }

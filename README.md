@@ -178,6 +178,39 @@ meld restore --in /srv/meldbase/backups/app.meld \
 meld verify --db /srv/meldbase/rehearsals/app-restored.meld
 ```
 
+For lower storage and transfer cost in an offline window, add
+`--compression gzip` to `meld backup`; its receipt records a digest of the
+compressed artifact and `meld restore` verifies it before decompressing. This
+does not change the full-snapshot RPO or the source writer pause. See
+[single-node backup and restore](docs/production-backup-restore.md).
+
+For a running durable server, `serve` can create the same verified physical
+artifacts without taking the HTTP service offline. Each scheduled copy briefly
+blocks writers, leaves readers available, writes a private JSON receipt beside
+the artifact, and only prunes older receipt-backed pairs. All four scheduling
+flags are required together so an accidental partial configuration never starts
+a retention job:
+
+```sh
+meld serve --db /srv/meldbase/data/app.meld \
+  --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
+  --jwt-issuer example.internal \
+  --jwt-audience meldbase-api \
+  --access-policy-file /etc/meldbase/access-policy.json \
+  --backup-dir /srv/meldbase/backups \
+  --backup-interval 1h \
+  --backup-keep 168 \
+  --backup-timeout 10m
+```
+
+The interval is the upper bound for the **backup policy's RPO** only after a
+successful backup has been copied off the host; it is not a durability or
+availability guarantee. RTO is deployment-specific and must be measured by a
+regular restore drill using a separate rehearsal path. Point-in-time restore
+between physical backup artifacts is not supported. Keep the source database,
+backup directory, and rehearsal directory on deliberately chosen storage with
+restricted permissions.
+
 `export` and `import` provide a **logical archive** for portable data snapshots
 and import rehearsals. It carries collections, typed documents, and index
 definitions—not pages, database identity, commit history, or credentials. It is
@@ -207,7 +240,12 @@ fallback engine.
 The core, server, SDKs, and single-node tooling are implemented and tested, but
 the project does **not** claim blanket power-loss qualification for every
 filesystem, production-grade automatic HA, or the deferred features listed
-above.
+above. [Production qualification](docs/production-qualification.md) describes
+the repeatable single-node soak, benchmark, query-observer, and destructive
+fault-injection evidence, along with its safety boundaries. The supported
+[single-node deployment runbook](docs/production-single-node.md) covers the
+systemd template, probes, configuration, scheduled backups, and safe
+upgrade/rollback path.
 
 ## Documentation
 

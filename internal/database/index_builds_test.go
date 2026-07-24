@@ -86,6 +86,92 @@ func TestOnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
 	}
 }
 
+func TestOnlineIndexRebuildKeepsPublishedIndexUntilAtomicReplacementAfterReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "online-rebuild.meld")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := db.Collection("items")
+	for value := int64(0); value < 20; value++ {
+		if _, err := items.InsertOne(context.Background(), Document{"state": String("open"), "rank": Int(value)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := items.CreateIndex(context.Background(), "by_lookup", []IndexField{{Field: "state", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if explain, err := items.Explain(context.Background(), Filter{"state": "open"}); err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "by_lookup" {
+		t.Fatalf("initial index explain=%+v err=%v", explain, err)
+	}
+	build, err := items.StartIndexRebuild(context.Background(), "by_lookup", []IndexField{{Field: "rank", Order: -1}}, IndexOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := db.IndexBuild(build)
+	if err != nil || !status.ReplaceExisting || status.Name != "by_lookup" || status.Phase != IndexBuildPhaseScan {
+		t.Fatalf("rebuild status=%+v err=%v", status, err)
+	}
+	// Publication has not occurred: the old definition remains query-visible.
+	if explain, err := items.Explain(context.Background(), Filter{"state": "open"}); err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "by_lookup" {
+		t.Fatalf("old index disappeared during rebuild: explain=%+v err=%v", explain, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if pending, err := db.IndexBuild(build); err != nil || !pending.ReplaceExisting {
+		t.Fatalf("reopened rebuild=%+v err=%v", pending, err)
+	}
+	if err := db.ResumeIndexBuild(context.Background(), build); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.IndexBuild(build); !errors.Is(err, ErrIndexBuildNotFound) {
+		t.Fatalf("published rebuild lookup=%v", err)
+	}
+	if explain, err := db.Collection("items").Explain(context.Background(), Filter{"rank": int64(19)}); err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "by_lookup" {
+		t.Fatalf("replacement index explain=%+v err=%v", explain, err)
+	}
+	if explain, err := db.Collection("items").Explain(context.Background(), Filter{"state": "open"}); err != nil || explain.Stage != "COLLSCAN" {
+		t.Fatalf("old index definition remained after replacement: explain=%+v err=%v", explain, err)
+	}
+}
+
+func TestOnlineIndexRebuildFailureLeavesPublishedIndexUntouched(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "online-rebuild-conflict.meld"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	items := db.Collection("items")
+	for range 2 {
+		if _, err := items.InsertOne(context.Background(), Document{"value": Int(1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := items.CreateIndex(context.Background(), "by_value", []IndexField{{Field: "value", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	build, err := items.StartIndexRebuild(context.Background(), "by_value", []IndexField{{Field: "value", Order: 1}}, IndexOptions{Unique: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ResumeIndexBuild(context.Background(), build); !errors.Is(err, ErrDuplicateKey) {
+		t.Fatalf("rebuild unique conflict=%v", err)
+	}
+	if pending, err := db.IndexBuild(build); err != nil || !pending.ReplaceExisting {
+		t.Fatalf("failed rebuild no longer inspectable=%+v err=%v", pending, err)
+	}
+	if explain, err := items.Explain(context.Background(), Filter{"value": int64(1)}); err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "by_value" {
+		t.Fatalf("old index changed after failed replacement: explain=%+v err=%v", explain, err)
+	}
+}
+
 func TestOnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online-compound.meld")
 	db, err := Open(path)

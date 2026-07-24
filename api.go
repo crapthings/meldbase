@@ -60,6 +60,8 @@ const CreateCollectionOperation = database.CreateCollectionOperation
 
 const CreateIndexOperation = database.CreateIndexOperation
 
+const ReplaceIndexOperation = database.ReplaceIndexOperation
+
 type IndexDefinition = database.IndexDefinition
 
 type Change = database.Change

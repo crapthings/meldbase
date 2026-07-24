@@ -268,6 +268,48 @@ func TestIndexBuildCommandLeavesUniqueConflictInspectableThenAborts(t *testing.T
 	}
 }
 
+func TestIndexBuildCommandRebuildAtomicallyReplacesPublishedIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "index-rebuild.meld2")
+	db, err := meldbase.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := db.Collection("items")
+	if _, err := items.InsertOne(context.Background(), meldbase.Document{"state": meldbase.String("open"), "rank": meldbase.Int(7)}); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := items.CreateIndex(context.Background(), "by_lookup", []meldbase.IndexField{{Field: "state", Order: 1}}, meldbase.IndexOptions{}); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"index-build", "rebuild", "--db", path, "--collection", "items", "--name", "by_lookup", "--field", "rank:-1"}, &stdout, &stderr); err != nil {
+		t.Fatalf("rebuild=%v stderr=%s", err, stderr.String())
+	}
+	var started indexBuildCommandResult
+	if err := json.Unmarshal(stdout.Bytes(), &started); err != nil || started.Action != "rebuild" || started.BuildID == nil || started.Build == nil || !started.Build.ReplaceExisting {
+		t.Fatalf("rebuild result=%+v err=%v output=%s", started, err, stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := run([]string{"index-build", "resume", "--db", path, "--id", started.BuildID.String()}, &stdout, &stderr); err != nil {
+		t.Fatalf("resume replacement=%v stderr=%s", err, stderr.String())
+	}
+	reopened, err := meldbase.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explain, explainErr := reopened.Collection("items").Explain(context.Background(), meldbase.Filter{"rank": int64(7)})
+	closeErr := reopened.Close()
+	if explainErr != nil || closeErr != nil || explain.Stage != "IXSCAN" || explain.IndexName != "by_lookup" {
+		t.Fatalf("replacement explain=%+v explainErr=%v closeErr=%v", explain, explainErr, closeErr)
+	}
+}
+
 func TestIndexBuildCommandRejectsUnsafeArguments(t *testing.T) {
 	var output bytes.Buffer
 	if err := run([]string{"index-build"}, &output, &output); err == nil {
@@ -465,6 +507,123 @@ func TestRestoreCommandImportsVerifiedPhysicalBackup(t *testing.T) {
 	}
 }
 
+func TestBackupAndRestoreCommandSupportsVerifiedGzipArtifact(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source.meld2")
+	artifact := filepath.Join(directory, "backup.meld2.gz")
+	receiptPath := filepath.Join(directory, "backup.json")
+	restored := filepath.Join(directory, "restored.meld2")
+	db, err := meldbase.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("items").InsertOne(context.Background(), meldbase.Document{"kind": meldbase.String("compressible"), "payload": meldbase.String(strings.Repeat("same-value-", 4_000))}); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	identity, sequence := db.DatabaseIdentity(), db.Stats().CommitSequence
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var backupOutput, stderr bytes.Buffer
+	if err := run([]string{"backup", "--db", source, "--out", artifact, "--compression", "gzip"}, &backupOutput, &stderr); err != nil {
+		t.Fatalf("gzip backup error=%v stderr=%s", err, stderr.String())
+	}
+	var receipt backupCommandResult
+	if err := json.Unmarshal(backupOutput.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.ArtifactKind != gzipPhysicalRestoreArtifact || receipt.Compression != "gzip" || receipt.ArtifactBytes == 0 || receipt.ArtifactSHA256 == "" {
+		t.Fatalf("gzip receipt=%+v", receipt)
+	}
+	if err := os.WriteFile(receiptPath, backupOutput.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var restoreOutput bytes.Buffer
+	if err := run([]string{"restore", "--in", artifact, "--receipt", receiptPath, "--out", restored}, &restoreOutput, &stderr); err != nil {
+		t.Fatalf("gzip restore error=%v stderr=%s", err, stderr.String())
+	}
+	reopened, err := meldbase.Open(restored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if reopened.DatabaseIdentity() != identity || reopened.Stats().CommitSequence != sequence {
+		t.Fatalf("restored identity/sequence=%x/%d", reopened.DatabaseIdentity(), reopened.Stats().CommitSequence)
+	}
+	document, err := reopened.Collection("items").FindOne(context.Background(), meldbase.Filter{"kind": "compressible"})
+	if err != nil || document == nil {
+		t.Fatalf("restored gzip document=%v err=%v", document, err)
+	}
+	if info, err := os.Stat(artifact); err != nil || uint64(info.Size()) != receipt.ArtifactBytes {
+		t.Fatalf("artifact size=%v receipt=%d err=%v", info, receipt.ArtifactBytes, err)
+	}
+}
+
+func TestRestoreCommandRejectsGzipArtifactThatDoesNotMatchReceipt(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source.meld2")
+	artifact := filepath.Join(directory, "backup.meld2.gz")
+	receiptPath := filepath.Join(directory, "backup.json")
+	destination := filepath.Join(directory, "restored.meld2")
+	db, err := meldbase.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var output, stderr bytes.Buffer
+	if err := run([]string{"backup", "--db", source, "--out", artifact, "--compression", "gzip"}, &output, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(receiptPath, output.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact, []byte("not the compressed artifact"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"restore", "--in", artifact, "--receipt", receiptPath, "--out", destination}, &bytes.Buffer{}, &stderr); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("tampered gzip restore err=%v", err)
+	}
+	if _, err := os.Stat(destination); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("tampered gzip restore published destination: %v", err)
+	}
+}
+
+func TestReadServiceResourceLimitsAcceptsStrictPublicConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "limits.json")
+	if err := os.WriteFile(path, []byte(`{"maxDocumentBytes":1024,"maxTransactionBytes":2048,"maxQueryKeysExamined":12}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	limits, err := readServiceResourceLimits(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limits.MaxDocumentBytes != 1024 || limits.MaxTransactionBytes != 2048 || limits.MaxQueryKeysExamined != 12 {
+		t.Fatalf("limits=%+v", limits)
+	}
+	if err := os.WriteFile(path, []byte(`{"maxQueryKeysExamined":12,"unexpected":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readServiceResourceLimits(path); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unknown resource limit error=%v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{} {}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readServiceResourceLimits(path); err == nil || !strings.Contains(err.Error(), "multiple JSON") {
+		t.Fatalf("multiple resource limits error=%v", err)
+	}
+	if err := os.WriteFile(path, append([]byte(`{"maxQueryKeysExamined":12}`), bytes.Repeat([]byte(" "), serviceResourceLimitsMaxBytes)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readServiceResourceLimits(path); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("oversized resource limits error=%v", err)
+	}
+}
+
 func TestRestoreCommandFailsClosedForExistingDestinationAndInvalidReceipt(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
@@ -566,6 +725,28 @@ func TestServeRejectsInvalidCollectionAccessManifestBeforeOpeningDatabase(t *tes
 	}
 	if _, statErr := os.Stat(filepath.Join(directory, "app.meld")); !os.IsNotExist(statErr) {
 		t.Fatalf("invalid manifest opened database: %v", statErr)
+	}
+}
+
+func TestServeRequiresCurrentHS256SecretWhenPreviousSecretIsConfigured(t *testing.T) {
+	var output bytes.Buffer
+	err := run([]string{
+		"serve", "--db", filepath.Join(t.TempDir(), "app.meld"),
+		"--jwt-hs256-previous-secret-file", filepath.Join(t.TempDir(), "old.jwt"),
+	}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "requires --jwt-hs256-secret-file") {
+		t.Fatalf("previous-secret configuration error=%v output=%s", err, output.String())
+	}
+}
+
+func TestServeRejectsIndexBuildSchedulerTuningUnlessEnabled(t *testing.T) {
+	var output bytes.Buffer
+	err := run([]string{
+		"serve", "--db", filepath.Join(t.TempDir(), "app.meld"), "--dev-no-auth",
+		"--index-build-run-timeout", "500ms",
+	}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "require --index-build-scheduler") {
+		t.Fatalf("index scheduler configuration error=%v output=%s", err, output.String())
 	}
 }
 
@@ -918,6 +1099,104 @@ func TestServeProductionWiresJWTPolicyAndBrowserBoundary(t *testing.T) {
 		t.Fatalf("production serve shutdown: %v\nstderr=%s", err, stderr.String())
 	}
 	stopped = true
+}
+
+func TestServeIndexBuildSchedulerResumesDurableBuildAfterRestart(t *testing.T) {
+	const childEnvironment = "MELDBASE_TEST_SERVE_INDEX_SCHEDULER_CHILD"
+	if os.Getenv(childEnvironment) == "1" {
+		err := run([]string{
+			"serve", "--db", os.Getenv("MELDBASE_TEST_SERVE_DB"), "--addr", "127.0.0.1:0", "--dev-no-auth",
+			"--index-build-scheduler", "--index-build-run-timeout", "1s",
+		}, os.Stdout, os.Stderr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	path := filepath.Join(t.TempDir(), "app.meld")
+	db, err := meldbase.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := db.Collection("items")
+	for value := int64(0); value < 32; value++ {
+		if _, err := items.InsertOne(context.Background(), meldbase.Document{"value": meldbase.Int(value)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := items.StartIndexBuild(context.Background(), "by_value", []meldbase.IndexField{{Field: "value", Order: 1}}, meldbase.IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.Command(os.Args[0], "-test.run=^TestServeIndexBuildSchedulerResumesDurableBuildAfterRestart$")
+	command.Env = append(os.Environ(), childEnvironment+"=1", "MELDBASE_TEST_SERVE_DB="+path)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	defer func() {
+		if !stopped && command.Process != nil {
+			_ = command.Process.Signal(syscall.SIGTERM)
+			_ = command.Wait()
+		}
+	}()
+	startup := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		if scanner.Scan() {
+			startup <- scanner.Text()
+			return
+		}
+		startup <- ""
+	}()
+	select {
+	case line := <-startup:
+		if !strings.HasPrefix(line, "Meldbase listening on http://") {
+			_ = command.Process.Signal(syscall.SIGTERM)
+			waitErr := command.Wait()
+			stopped = true
+			t.Fatalf("scheduler serve startup=%q wait=%v stderr=%s", line, waitErr, stderr.String())
+		}
+	case <-time.After(5 * time.Second):
+		_ = command.Process.Signal(syscall.SIGTERM)
+		waitErr := command.Wait()
+		stopped = true
+		t.Fatalf("scheduler serve did not start: wait=%v stderr=%s", waitErr, stderr.String())
+	}
+	// The runner starts immediately and has a full second to finish this small
+	// durable build before shutdown; the reopen below verifies publication.
+	time.Sleep(250 * time.Millisecond)
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("scheduler serve shutdown: %v stderr=%s", err, stderr.String())
+	}
+	stopped = true
+
+	db, err = meldbase.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if builds, err := db.IndexBuilds(); err != nil || len(builds) != 0 {
+		t.Fatalf("remaining scheduled builds=%+v err=%v", builds, err)
+	}
+	explain, err := db.Collection("items").Explain(context.Background(), meldbase.Filter{"value": meldbase.Int(31)})
+	if err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "by_value" {
+		t.Fatalf("scheduled index explain=%+v err=%v", explain, err)
+	}
 }
 
 func signedServeTestJWT(t *testing.T, secret []byte, claims map[string]any) string {

@@ -58,11 +58,13 @@ type indexBuildCommandResult struct {
 
 func runIndexBuild(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: meld index-build <start|list|resume|abort>")
+		return errors.New("usage: meld index-build <start|rebuild|list|resume|abort>")
 	}
 	switch args[0] {
 	case "start":
-		return runIndexBuildStart(args[1:], stdout, stderr)
+		return runIndexBuildStart(args[1:], stdout, stderr, false)
+	case "rebuild":
+		return runIndexBuildStart(args[1:], stdout, stderr, true)
 	case "list":
 		return runIndexBuildList(args[1:], stdout, stderr)
 	case "resume":
@@ -74,8 +76,12 @@ func runIndexBuild(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-func runIndexBuildStart(args []string, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("index-build start", flag.ContinueOnError)
+func runIndexBuildStart(args []string, stdout, stderr io.Writer, replaceExisting bool) error {
+	action := "start"
+	if replaceExisting {
+		action = "rebuild"
+	}
+	flags := flag.NewFlagSet("index-build "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	path := flags.String("db", "", "existing compatible database path")
 	collection := flags.String("collection", "", "existing collection name")
@@ -88,7 +94,7 @@ func runIndexBuildStart(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if flags.NArg() != 0 || *path == "" || *collection == "" || *name == "" || len(fields) == 0 {
-		return errors.New("index-build start requires --db, --collection, --name and --field, with no positional arguments")
+		return errors.New("index-build " + action + " requires --db, --collection, --name and --field, with no positional arguments")
 	}
 	ctx, stop, err := indexBuildCommandContext(*timeout)
 	if err != nil {
@@ -99,8 +105,13 @@ func runIndexBuildStart(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	id, operationErr := db.Collection(*collection).StartIndexBuild(ctx, *name,
-		[]meldbase.IndexField(fields), meldbase.IndexOptions{Unique: *unique})
+	var id meldbase.IndexBuildID
+	var operationErr error
+	if replaceExisting {
+		id, operationErr = db.Collection(*collection).StartIndexRebuild(ctx, *name, []meldbase.IndexField(fields), meldbase.IndexOptions{Unique: *unique})
+	} else {
+		id, operationErr = db.Collection(*collection).StartIndexBuild(ctx, *name, []meldbase.IndexField(fields), meldbase.IndexOptions{Unique: *unique})
+	}
 	if operationErr != nil {
 		return errors.Join(operationErr, db.Close())
 	}
@@ -109,7 +120,7 @@ func runIndexBuildStart(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	return writeIndexBuildResult(stdout, indexBuildCommandResult{
-		SchemaVersion: indexBuildCommandSchemaVersion, Action: "start", BuildID: &id, Build: &status,
+		SchemaVersion: indexBuildCommandSchemaVersion, Action: action, BuildID: &id, Build: &status,
 	})
 }
 

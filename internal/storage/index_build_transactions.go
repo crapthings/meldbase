@@ -22,13 +22,14 @@ var (
 )
 
 type BeginIndexBuildTransaction struct {
-	BuildID    [16]byte
-	Collection string
-	Name       string
-	FieldPath  string
-	Fields     []IndexField
-	Unique     bool
-	CreatedAt  time.Time
+	BuildID         [16]byte
+	Collection      string
+	Name            string
+	FieldPath       string
+	Fields          []IndexField
+	Unique          bool
+	ReplaceExisting bool
+	CreatedAt       time.Time
 }
 
 type IndexBuildScanBatch struct {
@@ -177,11 +178,15 @@ func (f *File) BeginIndexBuild(transaction BeginIndexBuildTransaction) (IndexBui
 		if err != nil {
 			return DatabaseRoot{}, err
 		}
-		if _, exists, err := indexes.Get([]byte(transaction.Name)); err != nil || exists {
-			if err != nil {
-				return DatabaseRoot{}, err
+		_, existingIndex, err := indexes.Get([]byte(transaction.Name))
+		if err != nil {
+			return DatabaseRoot{}, err
+		}
+		if existingIndex != transaction.ReplaceExisting {
+			if existingIndex {
+				return DatabaseRoot{}, ErrIndexExists
 			}
-			return DatabaseRoot{}, ErrIndexExists
+			return DatabaseRoot{}, ErrIndexBuildState
 		}
 		builds, err := tx.OpenTree(base.IndexBuildCatalogRoot, TreeIndexBuildCatalog)
 		if err != nil {
@@ -219,7 +224,7 @@ func (f *File) BeginIndexBuild(transaction BeginIndexBuildTransaction) (IndexBui
 		}
 		result = IndexBuildMeta{
 			BuildID: transaction.BuildID, CollectionID: collection.ID, Collection: transaction.Collection,
-			Name: transaction.Name, FieldPath: fields[0].Path, Fields: fields, Unique: transaction.Unique,
+			Name: transaction.Name, FieldPath: fields[0].Path, Fields: fields, Unique: transaction.Unique, ReplaceExisting: transaction.ReplaceExisting,
 			Phase: IndexBuildScan, SourceSequence: tx.Sequence(), SourceCatalogRoot: base.CatalogRoot,
 			ShadowRoot: shadowRoot, AppliedSequence: tx.Sequence(), CreatedAt: transaction.CreatedAt.UTC(), UpdatedAt: transaction.CreatedAt.UTC(),
 		}
@@ -623,15 +628,27 @@ func (f *File) FinalizeIndexBuild(transaction FinalizeIndexBuildTransaction) (ui
 		if err != nil {
 			return DatabaseRoot{}, err
 		}
-		if _, exists, err := indexes.Get([]byte(build.Name)); err != nil || exists {
+		encodedPrevious, exists, err := indexes.Get([]byte(build.Name))
+		if err != nil {
+			return DatabaseRoot{}, err
+		}
+		if exists != build.ReplaceExisting {
+			if exists {
+				return DatabaseRoot{}, ErrIndexExists
+			}
+			return DatabaseRoot{}, ErrIndexBuildState
+		}
+		createdSequence := tx.Sequence()
+		if build.ReplaceExisting {
+			previous, err := decodeIndexMeta(build.Name, encodedPrevious)
 			if err != nil {
 				return DatabaseRoot{}, err
 			}
-			return DatabaseRoot{}, ErrIndexExists
+			createdSequence = previous.CreatedSequence
 		}
 		index := IndexMeta{
 			Name: build.Name, FieldPath: build.FieldPath, Fields: build.Fields, Unique: build.Unique, Root: build.ShadowRoot,
-			EntryCount: build.EntryCount, CreatedSequence: tx.Sequence(), UpdatedSequence: tx.Sequence(),
+			EntryCount: build.EntryCount, CreatedSequence: createdSequence, UpdatedSequence: tx.Sequence(),
 		}
 		encodedIndex, err := encodeIndexMeta(index)
 		if err != nil {
@@ -674,7 +691,7 @@ func (f *File) FinalizeIndexBuild(transaction FinalizeIndexBuildTransaction) (ui
 			CommitBatch{Sequence: tx.Sequence(), TransactionID: transaction.TransactionID, CommittedAt: transaction.CommittedAt,
 				CatalogRoot: base.CatalogRoot, Changes: []CommitChange{{
 					CollectionID: collection.ID, Operation: CommitCatalog,
-					ChangedPaths: []string{"_indexes." + build.Name}, After: encodedIndex,
+					ChangedPaths: []string{"_indexes." + build.Name}, Before: encodedPrevious, After: encodedIndex,
 				}}},
 		)
 		if err != nil {

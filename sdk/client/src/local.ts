@@ -1,3 +1,9 @@
+/**
+ * In-memory @meldbase/client entry point.
+ *
+ * @beta The local API follows the same pre-1.0 compatibility policy as the
+ * main client entry point.
+ */
 import type {
   DeleteResult,
   Document,

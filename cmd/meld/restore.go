@@ -1,7 +1,10 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -39,7 +42,7 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 		return errors.New("restore --timeout must not be negative")
 	}
 
-	expected, err := readPhysicalBackupReceipt(*receiptPath)
+	receipt, err := readBackupReceipt(*receiptPath)
 	if err != nil {
 		return err
 	}
@@ -66,7 +69,24 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 		ctx, cancel = context.WithTimeout(ctx, *timeout)
 		defer cancel()
 	}
-	result, restoreErr := meldbase.ImportPhysicalBackup(ctx, input, absoluteDestination, expected, meldbase.PhysicalBackupImportOptions{MaxBytes: *maxBytes})
+	var archive io.Reader = input
+	var compressed *gzip.Reader
+	if receipt.ArtifactKind == gzipPhysicalRestoreArtifact {
+		if err := verifyCompressedBackupArtifact(absoluteSource, receipt); err != nil {
+			_ = input.Close()
+			return err
+		}
+		compressed, err = gzip.NewReader(input)
+		if err != nil {
+			_ = input.Close()
+			return fmt.Errorf("invalid gzip backup artifact: %w", err)
+		}
+		archive = compressed
+	}
+	result, restoreErr := meldbase.ImportPhysicalBackup(ctx, archive, absoluteDestination, receipt.BackupResult, meldbase.PhysicalBackupImportOptions{MaxBytes: *maxBytes})
+	if compressed != nil {
+		restoreErr = errors.Join(restoreErr, compressed.Close())
+	}
 	if err := errors.Join(restoreErr, input.Close()); err != nil {
 		return err
 	}
@@ -77,26 +97,63 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 }
 
 func readPhysicalBackupReceipt(path string) (meldbase.BackupResult, error) {
-	input, err := os.Open(path)
+	receipt, err := readBackupReceipt(path)
 	if err != nil {
 		return meldbase.BackupResult{}, err
+	}
+	if receipt.ArtifactKind != physicalRestoreArtifact {
+		return meldbase.BackupResult{}, errors.New("backup receipt is not an uncompressed physical restore artifact")
+	}
+	return receipt.BackupResult, nil
+}
+
+func readBackupReceipt(path string) (backupCommandResult, error) {
+	input, err := os.Open(path)
+	if err != nil {
+		return backupCommandResult{}, err
 	}
 	defer input.Close()
 	decoder := json.NewDecoder(input)
 	decoder.DisallowUnknownFields()
 	var receipt backupCommandResult
 	if err := decoder.Decode(&receipt); err != nil {
-		return meldbase.BackupResult{}, fmt.Errorf("invalid backup receipt: %w", err)
+		return backupCommandResult{}, fmt.Errorf("invalid backup receipt: %w", err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return meldbase.BackupResult{}, errors.New("invalid backup receipt: multiple JSON values")
+			return backupCommandResult{}, errors.New("invalid backup receipt: multiple JSON values")
 		}
-		return meldbase.BackupResult{}, fmt.Errorf("invalid backup receipt: %w", err)
+		return backupCommandResult{}, fmt.Errorf("invalid backup receipt: %w", err)
 	}
-	if receipt.SchemaVersion != 1 || receipt.ArtifactKind != physicalRestoreArtifact {
-		return meldbase.BackupResult{}, errors.New("backup receipt is not a supported physical restore artifact")
+	if receipt.SchemaVersion != 1 {
+		return backupCommandResult{}, errors.New("backup receipt is not a supported physical restore artifact")
 	}
-	return receipt.BackupResult, nil
+	switch receipt.ArtifactKind {
+	case physicalRestoreArtifact:
+		if receipt.Compression != "" || receipt.ArtifactBytes != 0 || receipt.ArtifactSHA256 != "" {
+			return backupCommandResult{}, errors.New("invalid uncompressed backup receipt")
+		}
+	case gzipPhysicalRestoreArtifact:
+		if receipt.Compression != "gzip" || receipt.ArtifactBytes == 0 || len(receipt.ArtifactSHA256) != sha256.Size*2 {
+			return backupCommandResult{}, errors.New("invalid gzip backup receipt")
+		}
+		if _, err := hex.DecodeString(receipt.ArtifactSHA256); err != nil {
+			return backupCommandResult{}, errors.New("invalid gzip backup receipt")
+		}
+	default:
+		return backupCommandResult{}, errors.New("backup receipt is not a supported physical restore artifact")
+	}
+	return receipt, nil
+}
+
+func verifyCompressedBackupArtifact(path string, receipt backupCommandResult) error {
+	bytes, digest, err := backupArtifactDigest(path)
+	if err != nil {
+		return err
+	}
+	if bytes != receipt.ArtifactBytes || digest != receipt.ArtifactSHA256 {
+		return errors.New("compressed backup artifact does not match its receipt")
+	}
+	return nil
 }

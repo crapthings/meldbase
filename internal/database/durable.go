@@ -252,8 +252,8 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 				if data == nil {
 					return fail(fmt.Errorf("%w: index build collection metadata", ErrCorrupt))
 				}
-			} else if _, exists := data.indexes[build.Name]; exists {
-				return fail(fmt.Errorf("%w: index build is already published", ErrCorrupt))
+			} else if _, exists := data.indexes[build.Name]; exists != build.ReplaceExisting {
+				return fail(fmt.Errorf("%w: index build publication state", ErrCorrupt))
 			}
 			reservation := indexBuildReservation(build.Collection, build.Name)
 			if _, exists := db.indexBuildReservations[reservation]; exists {
@@ -522,7 +522,7 @@ func (store *durableStore) appendDBCommitWithSystem(
 	var sequence uint64
 	result := systemrecord.Result{}
 	var err error
-	if len(changes) == 1 && changes[0].Operation == CreateIndexOperation {
+	if len(changes) == 1 && (changes[0].Operation == CreateIndexOperation || changes[0].Operation == ReplaceIndexOperation) {
 		if len(systems) > 0 {
 			return systemrecord.Result{}, ErrInvalidIndex
 		}
@@ -548,7 +548,8 @@ func (store *durableStore) appendDBCommitWithSystem(
 		}
 		sequence, err = store.file.ApplyCreateIndex(storage.CreateIndexTransaction{
 			TransactionID: transactionID, Collection: change.Collection, Name: change.Index.Name,
-			FieldPath: change.Index.Field, Fields: storageIndexFields(*change.Index), Unique: change.Index.Unique, Entries: entries,
+			FieldPath: change.Index.Field, Fields: storageIndexFields(*change.Index), Unique: change.Index.Unique,
+			ReplaceExisting: change.Operation == ReplaceIndexOperation, Entries: entries,
 		})
 	} else {
 		documentTransaction, prepareErr := store.prepareDocumentTransaction(ctx, db, transactionID, changes, preconditions, collectionPreconditions)
@@ -1105,7 +1106,7 @@ func mapStorageError(err error) error {
 		return ErrDuplicateKey
 	case errors.Is(err, storage.ErrDocumentExists):
 		return ErrDuplicateID
-	case errors.Is(err, storage.ErrIndexExists):
+	case errors.Is(err, storage.ErrIndexExists), errors.Is(err, storage.ErrIndexNotFound):
 		return ErrInvalidIndex
 	case errors.Is(err, storage.ErrIndexBuildExists):
 		return ErrIndexBuildExists

@@ -1,3 +1,9 @@
+/**
+ * Shared public types for @meldbase/client.
+ *
+ * @beta These types are versioned with the client SDK and can change before a
+ * non-zero major release.
+ */
 import type { DocumentID } from "./safe-value.js";
 
 // bigint is the lossless JavaScript representation of Meldbase Int64. number

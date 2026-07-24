@@ -315,7 +315,7 @@ func convertDurableCatalogChange(change storage.CommitChange, collections map[ui
 	if !exists {
 		return Change{}, false, ErrCorrupt
 	}
-	if len(change.ChangedPaths) != 1 || !strings.HasPrefix(change.ChangedPaths[0], "_indexes.") || len(change.After) == 0 || len(change.Before) != 0 {
+	if len(change.ChangedPaths) != 1 || !strings.HasPrefix(change.ChangedPaths[0], "_indexes.") || len(change.After) == 0 {
 		return Change{}, false, ErrCorrupt
 	}
 	indexName := strings.TrimPrefix(change.ChangedPaths[0], "_indexes.")
@@ -331,7 +331,14 @@ func convertDurableCatalogChange(change storage.CommitChange, collections map[ui
 		return Change{}, false, ErrCorrupt
 	}
 	definition := IndexDefinition{Name: indexName, Field: fields[0].Field, Order: fields[0].Order, Fields: fields, Unique: meta.Unique}
-	return Change{Collection: collection, Operation: CreateIndexOperation, Index: &definition, ChangedPaths: append([]string(nil), change.ChangedPaths...)}, true, nil
+	operation := CreateIndexOperation
+	if len(change.Before) != 0 {
+		if _, err := storage.DecodeIndexMeta(indexName, change.Before); err != nil {
+			return Change{}, false, err
+		}
+		operation = ReplaceIndexOperation
+	}
+	return Change{Collection: collection, Operation: operation, Index: &definition, ChangedPaths: append([]string(nil), change.ChangedPaths...)}, true, nil
 }
 
 func durableDatabaseConsumerKey(name string) string {

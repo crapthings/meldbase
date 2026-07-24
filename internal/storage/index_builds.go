@@ -38,6 +38,7 @@ type IndexBuildMeta struct {
 	FieldPath         string
 	Fields            []IndexField
 	Unique            bool
+	ReplaceExisting   bool
 	Phase             IndexBuildPhase
 	Failure           IndexBuildFailure
 	SourceSequence    uint64
@@ -82,7 +83,10 @@ func encodeIndexBuildMeta(meta IndexBuildMeta) ([]byte, error) {
 	binary.LittleEndian.PutUint16(encoded[10:12], indexBuildMetaHeaderBytes)
 	encoded[12], encoded[13], encoded[14] = byte(meta.Phase), boolByte(meta.Unique), byte(meta.Failure)
 	if meta.AppliedCatalogRoot != 0 {
-		encoded[15] = 1
+		encoded[15] |= 1
+	}
+	if meta.ReplaceExisting {
+		encoded[15] |= 2
 	}
 	binary.LittleEndian.PutUint64(encoded[16:24], meta.SourceSequence)
 	binary.LittleEndian.PutUint64(encoded[24:32], meta.SourceCatalogRoot)
@@ -116,7 +120,7 @@ func decodeIndexBuildMeta(key, encoded []byte) (IndexBuildMeta, error) {
 	if len(key) != len(meta.BuildID) || allZero(key) || len(encoded) < indexBuildMetaHeaderBytes ||
 		string(encoded[:8]) != string(indexBuildMetaMagic[:]) ||
 		binary.LittleEndian.Uint16(encoded[8:10]) != FormatVersion ||
-		binary.LittleEndian.Uint16(encoded[10:12]) != indexBuildMetaHeaderBytes || encoded[13] > 1 || encoded[15] > 1 ||
+		binary.LittleEndian.Uint16(encoded[10:12]) != indexBuildMetaHeaderBytes || encoded[13] > 1 || encoded[15]&^byte(3) != 0 ||
 		!allZero(encoded[94:96]) || !allZero(encoded[120:indexBuildMetaHeaderBytes]) {
 		return meta, ErrCorrupt
 	}
@@ -131,6 +135,7 @@ func decodeIndexBuildMeta(key, encoded []byte) (IndexBuildMeta, error) {
 	}
 	copy(meta.BuildID[:], key)
 	meta.Phase, meta.Unique, meta.Failure = IndexBuildPhase(encoded[12]), encoded[13] == 1, IndexBuildFailure(encoded[14])
+	meta.ReplaceExisting = encoded[15]&2 != 0
 	meta.SourceSequence = binary.LittleEndian.Uint64(encoded[16:24])
 	meta.SourceCatalogRoot = binary.LittleEndian.Uint64(encoded[24:32])
 	meta.ShadowRoot = binary.LittleEndian.Uint64(encoded[32:40])
@@ -142,7 +147,7 @@ func decodeIndexBuildMeta(key, encoded []byte) (IndexBuildMeta, error) {
 	meta.CollectionID = binary.LittleEndian.Uint32(encoded[80:84])
 	copy(meta.ScanAfter[:], encoded[96:112])
 	meta.AppliedCatalogRoot = binary.LittleEndian.Uint64(encoded[112:120])
-	if (encoded[15] == 0) != (meta.AppliedCatalogRoot == 0) {
+	if (encoded[15]&1 == 0) != (meta.AppliedCatalogRoot == 0) {
 		return IndexBuildMeta{}, ErrCorrupt
 	}
 	cursor := indexBuildMetaHeaderBytes

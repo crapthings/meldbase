@@ -114,6 +114,59 @@ func TestFollowerAppliesArchiveTailInOrderAndRejectsWrites(t *testing.T) {
 	}
 }
 
+func TestFollowerAppliesAtomicIndexReplacement(t *testing.T) {
+	directory := t.TempDir()
+	source, err := Open(filepath.Join(directory, "source.meld2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if _, err := source.Collection("items").InsertOne(context.Background(), Document{"value": Int(1), "state": String("open")}); err != nil {
+		t.Fatal(err)
+	}
+	_, tail, err := source.BeginArchive(context.Background(), "index-replacement", filepath.Join(directory, "bootstrap.meld2"), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tail.Close()
+	follower, err := OpenFollower(filepath.Join(directory, "bootstrap.meld2"), OpenOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer follower.Close()
+	if err := source.Collection("items").CreateIndex(context.Background(), "by_lookup", []IndexField{{Field: "value", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	created := receiveDurableDatabaseBatch(t, tail)
+	if err := follower.Apply(context.Background(), created); err != nil {
+		t.Fatal(err)
+	}
+	if err := tail.Ack(created.Token); err != nil {
+		t.Fatal(err)
+	}
+	build, err := source.Collection("items").StartIndexRebuild(context.Background(), "by_lookup", []IndexField{{Field: "state", Order: 1}}, IndexOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.ResumeIndexBuild(context.Background(), build); err != nil {
+		t.Fatal(err)
+	}
+	replaced := receiveDurableDatabaseBatch(t, tail)
+	if len(replaced.Changes) != 1 || replaced.Changes[0].Operation != ReplaceIndexOperation {
+		t.Fatalf("replacement batch=%+v", replaced)
+	}
+	if err := follower.Apply(context.Background(), replaced); err != nil {
+		t.Fatal(err)
+	}
+	if err := tail.Ack(replaced.Token); err != nil {
+		t.Fatal(err)
+	}
+	explain, err := follower.DB().Collection("items").Explain(context.Background(), Filter{"state": "open"})
+	if err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "by_lookup" {
+		t.Fatalf("follower replacement explain=%+v err=%v", explain, err)
+	}
+}
+
 func TestFollowerPromotionRequiresMatchingExternalFence(t *testing.T) {
 	directory := t.TempDir()
 	source, err := Open(filepath.Join(directory, "source.meld2"))

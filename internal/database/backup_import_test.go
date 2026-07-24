@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -54,6 +55,121 @@ func TestImportPhysicalBackupVerifiesBeforeNoOverwritePublication(t *testing.T) 
 	document, err := follower.DB().Collection("items").FindOne(context.Background(), Filter{"_id": id})
 	if err != nil || !document["value"].Equal(Int(7)) {
 		t.Fatalf("imported follower document=%v err=%v", document, err)
+	}
+}
+
+func TestPhysicalBackupRestorePreservesIndexedQueryReplayAndRealtime(t *testing.T) {
+	directory := t.TempDir()
+	sourcePath := filepath.Join(directory, "source.meld2")
+	artifactPath := filepath.Join(directory, "artifact.meld2")
+	restoredPath := filepath.Join(directory, "restored.meld2")
+	source, err := Open(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	items := source.Collection("items")
+	ids, err := items.InsertMany(context.Background(), []Document{
+		{"state": String("open"), "rank": Int(3), "title": String("first")},
+		{"state": String("held"), "rank": Int(4), "title": String("second")},
+		{"state": String("done"), "rank": Int(5), "title": String("third")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := items.CreateIndex(context.Background(), "state_rank", []IndexField{{Field: "state", Order: 1}, {Field: "rank", Order: 1}}, IndexOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := CompileQuery(Filter{"state": "open"}, QueryOptions{Sort: []SortField{{Path: "rank", Direction: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	historyInitial, err := items.SnapshotQuery(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := items.UpdateOne(context.Background(), Filter{"_id": ids[0]}, Update{"$set": map[string]any{"rank": int64(6)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := items.UpdateOne(context.Background(), Filter{"_id": ids[1]}, Update{"$set": map[string]any{"state": "open", "rank": int64(2)}}); err != nil {
+		t.Fatal(err)
+	}
+	sourceSnapshot, err := items.SnapshotQuery(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := source.Backup(context.Background(), artifactPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := ImportPhysicalBackup(context.Background(), bytes.NewReader(artifact), restoredPath, receipt, PhysicalBackupImportOptions{MaxBytes: receipt.Bytes})
+	if err != nil || imported != receipt {
+		t.Fatalf("imported=%+v receipt=%+v err=%v", imported, receipt, err)
+	}
+	restored, err := Open(restoredPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	restoredItems := restored.Collection("items")
+	restoredSnapshot, err := restoredItems.SnapshotQuery(context.Background(), query)
+	if err != nil || restoredSnapshot.Token != sourceSnapshot.Token || !documentSlicesEqual(restoredSnapshot.Documents, sourceSnapshot.Documents) {
+		t.Fatalf("restored snapshot=%+v source=%+v err=%v", restoredSnapshot, sourceSnapshot, err)
+	}
+	explain, err := restoredItems.ExplainWithOptions(context.Background(), Filter{"state": "open"}, QueryOptions{Sort: []SortField{{Path: "rank", Direction: 1}}})
+	if err != nil || explain.Stage != "IXSCAN" || explain.IndexName != "state_rank" {
+		t.Fatalf("restored explain=%+v err=%v", explain, err)
+	}
+
+	replay, err := restored.OpenQueryReplay(context.Background(), "items", query, historyInitial.Token, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replay.Close()
+	if replay.Initial.Token != historyInitial.Token || !documentSlicesEqual(replay.Initial.Documents, historyInitial.Documents) {
+		t.Fatalf("replay initial=%+v history initial=%+v", replay.Initial, historyInitial)
+	}
+	replayed := replay.Initial
+	for range 2 {
+		delta := receiveQueryDelta(t, replay.Deltas)
+		if delta.FromToken != replayed.Token || delta.Token <= replayed.Token {
+			t.Fatalf("replay delta token chain=%d->%d previous=%d", delta.FromToken, delta.Token, replayed.Token)
+		}
+		replayed, err = ApplyQueryDelta(replayed, delta)
+		if err != nil {
+			t.Fatalf("apply replay delta=%v", err)
+		}
+	}
+	if replayed.Token != sourceSnapshot.Token || !documentSlicesEqual(replayed.Documents, sourceSnapshot.Documents) {
+		t.Fatalf("replayed=%+v source=%+v", replayed, sourceSnapshot)
+	}
+
+	live, err := restoredItems.SubscribeQueryDeltas(context.Background(), query, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close()
+	if live.Initial.Token != sourceSnapshot.Token || !documentSlicesEqual(live.Initial.Documents, sourceSnapshot.Documents) {
+		t.Fatalf("live initial=%+v source=%+v", live.Initial, sourceSnapshot)
+	}
+	if _, err := restoredItems.UpdateOne(context.Background(), Filter{"_id": ids[2]}, Update{"$set": map[string]any{"state": "open", "rank": int64(1)}}); err != nil {
+		t.Fatal(err)
+	}
+	delta := receiveQueryDelta(t, live.Deltas)
+	liveState, err := ApplyQueryDelta(live.Initial, delta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := restoredItems.SnapshotQuery(context.Background(), query)
+	if err != nil || liveState.Token != full.Token || !documentSlicesEqual(liveState.Documents, full.Documents) {
+		t.Fatalf("live state=%+v full=%+v err=%v", liveState, full, err)
+	}
+	if gotIDs := queryIDs(t, restoredItems, Filter{"state": "open"}, QueryOptions{Sort: []SortField{{Path: "rank", Direction: 1}}}); !reflect.DeepEqual(gotIDs, []DocumentID{ids[2], ids[1], ids[0]}) {
+		t.Fatalf("restored indexed IDs=%v", gotIDs)
 	}
 }
 

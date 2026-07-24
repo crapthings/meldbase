@@ -23,6 +23,7 @@ var indexMetaMagic = [8]byte{'M', 'E', 'L', 'D', 'I', 'D', 'X', '2'}
 
 var (
 	ErrIndexExists      = errors.New("meldbase storage: index name exists")
+	ErrIndexNotFound    = errors.New("meldbase storage: index name not found")
 	ErrUniqueConflict   = errors.New("meldbase storage: unique index conflict")
 	ErrIndexKeyTooLarge = errors.New("meldbase storage: index key is too large")
 )
@@ -53,13 +54,14 @@ type IndexEntry struct {
 }
 
 type CreateIndexTransaction struct {
-	TransactionID [16]byte
-	CommittedAt   time.Time
-	Collection    string
-	Name          string
-	FieldPath     string
-	Fields        []IndexField
-	Unique        bool
+	TransactionID   [16]byte
+	CommittedAt     time.Time
+	Collection      string
+	Name            string
+	FieldPath       string
+	Fields          []IndexField
+	Unique          bool
+	ReplaceExisting bool
 	// Entries is consumed and may be reordered/populated by ApplyCreateIndex.
 	// Callers must not reuse or mutate it once the call begins.
 	Entries []IndexEntry
@@ -534,11 +536,15 @@ func (f *File) ApplyCreateIndex(transaction CreateIndexTransaction) (uint64, err
 		if err != nil {
 			return DatabaseRoot{}, err
 		}
-		if _, duplicate, err := indexCatalog.Get([]byte(transaction.Name)); err != nil || duplicate {
-			if err != nil {
-				return DatabaseRoot{}, err
+		encodedPrevious, duplicate, err := indexCatalog.Get([]byte(transaction.Name))
+		if err != nil {
+			return DatabaseRoot{}, err
+		}
+		if duplicate != transaction.ReplaceExisting {
+			if duplicate {
+				return DatabaseRoot{}, ErrIndexExists
 			}
-			return DatabaseRoot{}, ErrIndexExists
+			return DatabaseRoot{}, ErrIndexNotFound
 		}
 		primary, err := tx.OpenTree(collection.PrimaryRoot, TreePrimary)
 		if err != nil {
@@ -600,9 +606,17 @@ func (f *File) ApplyCreateIndex(transaction CreateIndexTransaction) (uint64, err
 		if err != nil {
 			return DatabaseRoot{}, err
 		}
+		createdSequence := tx.Sequence()
+		if transaction.ReplaceExisting {
+			previous, err := decodeIndexMeta(transaction.Name, encodedPrevious)
+			if err != nil {
+				return DatabaseRoot{}, err
+			}
+			createdSequence = previous.CreatedSequence
+		}
 		meta := IndexMeta{
 			Name: transaction.Name, FieldPath: fields[0].Path, Fields: fields, Unique: transaction.Unique,
-			Root: secondaryRoot, EntryCount: uint64(len(entries)), CreatedSequence: tx.Sequence(),
+			Root: secondaryRoot, EntryCount: uint64(len(entries)), CreatedSequence: createdSequence,
 			UpdatedSequence: tx.Sequence(),
 		}
 		encodedIndex, err := encodeIndexMeta(meta)
@@ -637,7 +651,7 @@ func (f *File) ApplyCreateIndex(transaction CreateIndexTransaction) (uint64, err
 		}
 		changes = append(changes, CommitChange{
 			CollectionID: collection.ID, Operation: CommitCatalog,
-			ChangedPaths: []string{"_indexes." + transaction.Name}, After: encodedIndex,
+			ChangedPaths: []string{"_indexes." + transaction.Name}, Before: encodedPrevious, After: encodedIndex,
 		})
 		commitLogRoot, oldest, err := tx.AppendCommitRetained(base.CommitLogRoot, base.OldestRetainedSequence, CommitBatch{
 			Sequence: tx.Sequence(), TransactionID: transaction.TransactionID, CommittedAt: transaction.CommittedAt,
