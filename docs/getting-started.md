@@ -1,8 +1,7 @@
-# Five-minute embedded Go tour
+# Five-minute Go tour
 
-This tour creates one durable local file, performs CRUD, adds an index, and
-receives a live query snapshot. It is the fastest way to evaluate Meldbase's
-embedded core; it does not start an HTTP server or weaken authentication.
+This is the shortest path to a durable Meldbase database. It creates one file,
+writes a todo, reads it back, and leaves the file on disk for the next run.
 
 ```sh
 mkdir meldbase-tour && cd meldbase-tour
@@ -16,111 +15,56 @@ Create `main.go`:
 package main
 
 import (
-    "context"
-    "fmt"
-    "log"
+	"context"
+	"fmt"
+	"log"
 
-    "github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase"
 )
 
 func main() {
-    ctx := context.Background()
-    db, err := meldbase.Open("todos.meld") // durable file; use meldbase.New() for memory only
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer db.Close()
+	ctx := context.Background()
+	db, err := meldbase.Open("todos.meld")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
-    todos := db.Collection("todos")
+	todos := db.Collection("todos")
+	_, err = todos.InsertOne(ctx, meldbase.Document{
+		"title": meldbase.String("Read the docs"),
+		"done":  meldbase.Bool(false),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    // Create and index data. Values deliberately use the typed Go constructors.
-    id, err := todos.InsertOne(ctx, meldbase.Document{
-        "title": meldbase.String("Ship the tour"),
-        "done":  meldbase.Bool(false),
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    if err := todos.CreateIndex(ctx, "by_done", []meldbase.IndexField{{Field: "done", Order: 1}}, meldbase.IndexOptions{}); err != nil {
-        log.Fatal(err)
-    }
-
-    // Read and update by a selection condition. The same filter grammar is used
-    // for Find, Update, Delete, indexes, subscriptions, and the remote SDK.
-    cursor, err := todos.Find(ctx, meldbase.Filter{"done": false})
-    if err != nil {
-        log.Fatal(err)
-    }
-    open, err := cursor.All(ctx)
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("open todos:", len(open))
-    if _, err := todos.UpdateOne(ctx, meldbase.Filter{"_id": id}, meldbase.Update{
-        "$set": map[string]any{"done": true},
-    }); err != nil {
-        log.Fatal(err)
-    }
-
-    // A live query first delivers a complete snapshot, then another snapshot
-    // whenever this query's result changes. Always close subscriptions.
-    query, err := meldbase.CompileQuery(meldbase.Filter{"done": true}, meldbase.QueryOptions{})
-    if err != nil {
-        log.Fatal(err)
-    }
-    subscription, err := todos.SubscribeQuery(ctx, query, 4)
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer subscription.Close()
-    snapshot := <-subscription.Snapshots
-    fmt.Println("completed todos:", len(snapshot.Documents))
-
-    if _, err := todos.DeleteOne(ctx, meldbase.Filter{"_id": id}); err != nil {
-        log.Fatal(err)
-    }
+	cursor, err := todos.Find(ctx, meldbase.Filter{"done": false})
+	if err != nil {
+		log.Fatal(err)
+	}
+	open, err := cursor.All(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("open todos:", len(open))
 }
 ```
 
-Run it twice:
+Run it:
 
 ```sh
 go run .
-go run .
 ```
 
-`todos.meld` persists between runs. Only one writable process may open that
-path. Use `meldbase.New()` when data may disappear with the process; use
-`meldbase.Open(path)` for the single-file durable mode. For an executable tour
-of the same lifecycle, including reopen and verification, run
-`go run ./cmd/meld demo` in the Meldbase repository.
+You should see `open todos: 1`. Run it again and the count grows: `todos.meld`
+is the durable database file.
 
-## Query, sorting, and pagination
+## Next step
 
-Use `Find` for ordinary reads and pass a `QueryOptions` value when a result
-needs sort, limit, skip, or seek pagination. A deterministic sort is required
-for durable pagination; inspect the complete filter and budget behavior in
-[query semantics](/query-semantics). Explain before adding an index, because
-every index also adds write and storage cost.
+Add an index before a query needs to be fast at scale. Run `meld serve` when a
+browser or another process needs access to the same file. Read the
+[Browser guide](/browser) or [Node.js guide](/node) for that remote client path.
 
-```go
-limit := 20
-cursor, err := todos.Find(ctx, meldbase.Filter{"done": false}, meldbase.QueryOptions{
-    Sort:  []meldbase.SortField{{Path: "title", Direction: 1}},
-    Limit: &limit,
-})
-```
-
-For a changing remote UI, use seek pagination (`first`/`after`) in the
-[TypeScript SDK guide](/sdk); it adds a stable `_id` tie-breaker and validates
-the cursor against the requested sort.
-
-## Moving beyond the embedded process
-
-The Go database is the source of truth. The optional server lets a browser or
-separate process access that database through JWT-derived workspace policy,
-HTTP, and ticket-authenticated realtime WebSockets. Do not treat an in-memory
-`LocalCollection` as a durable replica or automatic offline cache: it is an
-explicit application-owned store. The supported choices and their boundaries
-are summarized in [product scope](/product-scope), while remote TypeScript,
-React, and worker usage is covered in the [SDK guide](/sdk).
+Use `meldbase.New()` instead of `meldbase.Open(path)` only when in-memory data
+is enough. One writable process may open a durable file at a time.

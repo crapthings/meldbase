@@ -3,73 +3,31 @@ layout: home
 
 hero:
   name: Meldbase
-  text: Documentation is being rebuilt
-  tagline: The previous documentation set has been retired so the next version can start from the current product contract.
+  text: A document database that starts with one file
+  tagline: Use it directly from Go, or add a small HTTP service when another process needs access.
   actions:
     - theme: brand
-      text: Query semantics
-      link: /query-semantics
-    - theme: brand
-      text: TypeScript API
-      link: /api/typescript/
-    - theme: brand
-      text: SDK guide
-      link: /sdk
-    - theme: brand
-      text: Five-minute Go tour
+      text: Start in five minutes
       link: /getting-started
-    - theme: brand
-      text: Product scope
-      link: /product-scope
-    - theme: brand
-      text: API lifecycle
-      link: /api-lifecycle
     - theme: alt
-      text: Backup and restore
-      link: /production-backup-restore
-    - theme: alt
-      text: Storage migration
-      link: /storage-format-migration
-    - theme: alt
-      text: Changelog
-      link: /changelog
-    - theme: alt
-      text: Metrics and OpenTelemetry
-      link: /observability
-    - theme: alt
-      text: Production qualification
-      link: /production-qualification
-    - theme: alt
-      text: Test databases and CI
-      link: /testing-and-ci
-    - theme: alt
-      text: Event consumption
-      link: /event-consumption
-    - theme: alt
-      text: Stable CLI contract
-      link: /cli-contract
-    - theme: alt
-      text: Embedded admin API
-      link: /admin-api
-    - theme: alt
-      text: Single-node deployment
-      link: /production-single-node
-    - theme: alt
-      text: Container image
-      link: /container-image
-    - theme: alt
-      text: Homebrew alpha tap
-      link: /homebrew
-    - theme: alt
-      text: Security and isolation
-      link: /production-security
-    - theme: alt
-      text: Troubleshooting
-      link: /troubleshooting
-    - theme: alt
-      text: Protocol stability
-      link: /protocol-stability
-    - theme: alt
-      text: View the source
+      text: View on GitHub
       link: https://github.com/crapthings/meldbase
+
+features:
+  - title: One durable file
+    details: Open a file from Go. There is no separate database service for the embedded path.
+  - title: Add a server only when needed
+    details: Run meld serve to expose the same database to a browser or another process.
+  - title: Start small
+    details: Documents, queries, indexes, and live updates are available without operating a distributed system.
 ---
+
+## Where to go next
+
+- [Five-minute Go tour](/getting-started) — create a database file, write a
+  document, query it, and reopen it.
+- [Browser](/browser) — connect a web application to a running `meld serve`.
+- [Node.js](/node) — connect another server process to a running `meld serve`.
+
+Meldbase is currently alpha software. Keep it local while evaluating it; do not
+put irreplaceable production data in it yet.

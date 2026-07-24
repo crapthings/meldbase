@@ -11,10 +11,8 @@ export default defineConfig({
     logo: "/mark.svg",
     nav: [
       { text: "Five-minute Go tour", link: "/getting-started" },
-      { text: "SDK guide", link: "/sdk" },
-      { text: "SDK beta checklist", link: "/sdk-beta-checklist" },
-      { text: "TypeScript API", link: "/api/typescript/" },
-      { text: "Query semantics", link: "/query-semantics" },
+      { text: "Browser", link: "/browser" },
+      { text: "Node.js", link: "/node" },
       { text: "GitHub", link: "https://github.com/crapthings/meldbase" },
     ],
     socialLinks: [{ icon: "github", link: "https://github.com/crapthings/meldbase" }],

@@ -1,33 +1,42 @@
 # Meldbase
 
-> A local document database that keeps application data live.
+Meldbase is a single-file document database for Go applications. Open a file,
+write documents, query them, and close it. When a browser or another process
+needs access, run the optional `meld` server in front of the same file.
 
-Meldbase is an experimental, embedded reactive document database for Go and
-TypeScript applications. It stores documents in one local durable file, exposes
-typed queries and indexes, and can keep those queries live over HTTP and
-WebSockets when an application needs a server boundary.
-
-It is designed for product teams that want a small, application-owned data
-layer—not a hosted MongoDB clone, an ORM, or a distributed database to operate.
-
-**[Read the documentation →](https://crapthings.github.io/meldbase/)**
-
-## Why Meldbase
-
-- **Start local.** Open one file from Go; there is no separate database service
-  required for the embedded path.
-- **Keep reads live.** The same query model powers local collections, server
-  fetches, and ordered realtime updates.
-- **Own the boundary.** A declarative collection policy enforces JWT-derived
-  workspace and owner scope; your application keeps ownership of users, roles,
-  and identity.
-- **Operate with evidence.** Health probes, an authenticated dashboard,
-  physical backup/restore, logical export/import, offline verification, and a
-  single-node runbook are part of the project—not afterthoughts.
+It is an alpha project. It is a good fit for local development and
+single-node applications; do not use it for data you cannot afford to lose.
 
 ## Start in two minutes
 
-### Embed it in Go
+Install the CLI on macOS:
+
+```sh
+brew tap crapthings/tap
+brew trust --tap crapthings/tap
+brew install crapthings/tap/meldbase
+```
+
+Start a local database and HTTP server:
+
+```sh
+mkdir -p ./data
+meld serve --db ./data/app.meld --dev-no-auth
+```
+
+The server listens on `http://127.0.0.1:8080`. In another terminal, check that
+it is ready:
+
+```sh
+curl http://127.0.0.1:8080/readyz
+```
+
+`--dev-no-auth` is intentionally for local development only. Do not expose
+that server to a network.
+
+## Embed it in Go
+
+For the smallest setup, use the database directly from your Go process:
 
 ```sh
 go get github.com/crapthings/meldbase@latest
@@ -37,239 +46,59 @@ go get github.com/crapthings/meldbase@latest
 package main
 
 import (
-    "context"
-    "log"
+	"context"
+	"log"
 
-    "github.com/crapthings/meldbase"
+	"github.com/crapthings/meldbase"
 )
 
 func main() {
-    ctx := context.Background()
-    db, err := meldbase.Open("app.meld")
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer db.Close()
+	ctx := context.Background()
+	db, err := meldbase.Open("app.meld")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
-    users := db.Collection("users")
-    _, err = users.InsertOne(ctx, meldbase.Document{
-        "name": meldbase.String("Ada"),
-        "role": meldbase.String("engineer"),
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
+	todos := db.Collection("todos")
+	_, err = todos.InsertOne(ctx, meldbase.Document{
+		"title": meldbase.String("Ship something"),
+		"done":  meldbase.Bool(false),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
-For a runnable tour of durable writes, indexes, reactive queries, reopen and
-verification:
+The `app.meld` file remains after the process exits. One writable process owns
+one database file at a time.
 
-```sh
-go run ./cmd/meld demo
-```
+## Choose a path
 
-### Create a secured local node
-
-`meld init` creates a new, non-overwriting single-node bundle with private
-credentials, a data directory, backup/rehearsal directories, and a loopback
-launcher. It does not create users or weaken authentication.
-
-```sh
-go build -o ./meld ./cmd/meld
-./meld init --dir ./meldbase-local
-MELDBASE_BIN="$(pwd)/meld" ./meldbase-local/start.sh
-```
-
-The API starts on `127.0.0.1:8080` and the embedded operator dashboard on
-`127.0.0.1:9091`. Your identity service signs the JWTs; the server verifies
-them and applies the configured collection-access boundary. Use `meld --help`
-and the generated API reference while the task-oriented documentation is
-rebuilt.
-
-## What you can build today
-
-| Need | Meldbase provides |
+| If you want to… | Start here |
 | --- | --- |
-| Product data | Typed documents, CRUD, safe filters and updates, compound and unique indexes. |
-| Live UI | Reactive queries with snapshots, ordered deltas, resume tokens, and a React adapter. |
-| Application API | HTTP fetch/mutation endpoints plus ticket-authenticated WebSocket realtime. |
-| Workspace boundary | JWT-derived workspace/owner scoping, optional field limits, and RPC-only collections; clients never choose a trusted workspace. |
-| Business logic | Typed RPC, durable idempotency, and an optional authenticated Node.js worker boundary. |
-| Operations | `/livez`, `/readyz`, authenticated metrics/dashboard, inspect, verify, backup, restore, export/import, and restore drills. |
+| Put durable documents in a Go application | [Five-minute Go tour](docs/getting-started.md) |
+| Use Meldbase from a browser | Run `meld serve`, then read the [Browser guide](docs/browser.md) |
+| Use Meldbase from another Node.js process | Run `meld serve`, then read the [Node.js guide](docs/node.md) |
 
-### TypeScript and React
+## What it is — and is not
 
-The TypeScript packages are currently a repository-workspace preview; they are
-not yet published to npm. The client uses one data-only query contract locally
-and remotely:
+Meldbase gives one application a durable document file, typed queries, indexes,
+and live query updates. It can add an HTTP and WebSocket boundary when needed.
 
-```ts
-import { MeldbaseClient } from "@meldbase/client"
+It is not a hosted database, a MongoDB-compatible service, or a distributed
+system. It does not provide automatic failover, sharding, or built-in user
+identity.
 
-const db = new MeldbaseClient({
-  baseUrl: "https://data.example.com",
-  accessToken: () => auth.currentAccessToken(),
-})
+## Next
 
-const query = db.collection("todos").find({ done: false })
-const stop = query.subscribe(render, {
-  onStatus: (status) => showSyncState(status.state),
-})
+- [Five-minute Go tour](docs/getting-started.md)
+- [Browser](docs/browser.md)
+- [Node.js](docs/node.md)
 
-const todo = await db.collection("todos").insertOne({
-  title: "Build something live",
-  done: false,
-})
-```
-
-React is a thin adapter over the same query object:
-
-```tsx
-const query = useMemo(() => db.collection("todos").find({ done: false }), [db])
-const { documents, status, error } = useLiveQuery(query)
-```
-
-See [`examples/realtime-todos`](examples/realtime-todos) for a runnable browser
-example.
-
-## How the pieces fit
-
-```text
-your Go process                    your application boundary
-┌──────────────────┐              ┌─────────────────────────┐
-│ core             │              │ HTTP + WebSocket server │
-│ documents/indexes│── optional ─▶│ JWT + workspace policy  │
-│ durable .meld    │              │ SDKs / browser clients  │
-└──────────────────┘              └─────────────────────────┘
-```
-
-The embedded core is useful on its own. Add the server only when another
-process, browser, or service needs access. The server does not become your user
-directory: it trusts a verified identity provider, derives an actor and active
-workspace from the token, and constrains configured business collections.
-
-## Use it when
-
-Meldbase is a good fit when you want application-owned documents, reactive UI
-state, and a small operational footprint—for example, a local-first product
-component, an internal tool, an edge-adjacent service, or a Go application that
-needs durable live queries without introducing a separate database product.
-
-It is deliberately not a fit when you need MongoDB wire compatibility,
-sharding, distributed transactions, automatic HA/failover, offline conflict
-resolution, complex aggregation, or built-in end-user identity. Those are not
-hidden roadmap promises.
-
-## Durable data and operations
-
-Meldbase uses a checksummed copy-on-write format with a durable Commit Log,
-bounded history, crash recovery, and full offline verification. A physical
-backup retains database identity and history for recovery; `Compact` creates an
-independent file with a new identity when that is what you need.
-
-```sh
-# The source must be offline: both commands take the exclusive process lock.
-meld backup --db /srv/meldbase/data/app.meld \
-  --out /srv/meldbase/backups/app.meld > app.receipt.json
-meld restore --in /srv/meldbase/backups/app.meld \
-  --receipt app.receipt.json \
-  --out /srv/meldbase/rehearsals/app-restored.meld
-meld verify --db /srv/meldbase/rehearsals/app-restored.meld
-```
-
-For lower storage and transfer cost in an offline window, add
-`--compression gzip` to `meld backup`; its receipt records a digest of the
-compressed artifact and `meld restore` verifies it before decompressing. This
-does not change the full-snapshot RPO or the source writer pause. See
-[single-node backup and restore](docs/production-backup-restore.md).
-
-For a running durable server, `serve` can create the same verified physical
-artifacts without taking the HTTP service offline. Each scheduled copy briefly
-blocks writers, leaves readers available, writes a private JSON receipt beside
-the artifact, and only prunes older receipt-backed pairs. All four scheduling
-flags are required together so an accidental partial configuration never starts
-a retention job:
-
-```sh
-meld serve --db /srv/meldbase/data/app.meld \
-  --jwt-hs256-secret-file /etc/meldbase/jwt-hs256.secret \
-  --jwt-issuer example.internal \
-  --jwt-audience meldbase-api \
-  --access-policy-file /etc/meldbase/access-policy.json \
-  --backup-dir /srv/meldbase/backups \
-  --backup-interval 1h \
-  --backup-keep 168 \
-  --backup-timeout 10m
-```
-
-The interval is the upper bound for the **backup policy's RPO** only after a
-successful backup has been copied off the host; it is not a durability or
-availability guarantee. RTO is deployment-specific and must be measured by a
-regular restore drill using a separate rehearsal path. Point-in-time restore
-between physical backup artifacts is not supported. Keep the source database,
-backup directory, and rehearsal directory on deliberately chosen storage with
-restricted permissions.
-
-`export` and `import` provide a **logical archive** for portable data snapshots
-and import rehearsals. It carries collections, typed documents, and index
-definitions—not pages, database identity, commit history, or credentials. It is
-not a replacement for the physical recovery backup above; both paths must be
-new.
-
-```sh
-meld export --db /srv/meldbase/data/app.meld \
-  --out /srv/meldbase/archives/app.jsonl
-meld import --in /srv/meldbase/archives/app.jsonl \
-  --out /srv/meldbase/rehearsals/app-imported.meld
-meld verify --db /srv/meldbase/rehearsals/app-imported.meld
-```
-
-Before operating real data, verify backup and restore on a disposable copy and
-inspect the command help for the exact operational contract.
-
-## Current alpha status
-
-Meldbase is early-stage and should not yet hold production data. The current
-format is revision 3 and intentionally evolves during alpha; older alpha files
-are unsupported. There is no cross-version compatibility promise yet: a future
-breaking change will receive release-specific guidance when it is actually
-planned. The project has one current storage path—there is no legacy runtime or
-fallback engine.
-
-The core, server, SDKs, and single-node tooling are implemented and tested, but
-the project does **not** claim blanket power-loss qualification for every
-filesystem, production-grade automatic HA, or the deferred features listed
-above. [Production qualification](docs/production-qualification.md) describes
-the repeatable single-node soak, benchmark, query-observer, and destructive
-fault-injection evidence, along with its safety boundaries. The supported
-[single-node deployment runbook](docs/production-single-node.md) covers the
-systemd template, probes, configuration, scheduled backups, and safe
-upgrade/rollback path.
-
-[ROADMAP.md](ROADMAP.md) is the evidence-oriented readiness checklist. It does
-not expand the supported single-node alpha boundary.
-
-## Documentation
-
-The documentation is being rebuilt around the current product contract. The
-generated [TypeScript API](https://crapthings.github.io/meldbase/api/typescript/)
-remains available; use the source, tests, and [CONTRIBUTING.md](CONTRIBUTING.md)
-as the current implementation reference.
-
-## Contributing and verification
-
-```sh
-go test ./...
-go test -race ./...
-go vet ./...
-pnpm check
-pnpm test
-pnpm build:example
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance,
-[SECURITY.md](SECURITY.md) for private vulnerability reporting.
+For project contributors, see [CONTRIBUTING.md](CONTRIBUTING.md). Security
+reports are covered by [SECURITY.md](SECURITY.md).
 
 ## License
 
