@@ -7,12 +7,20 @@ on:
       - ".github/workflows/sdk-compatibility.yml"
       - "docs/**"
       - "examples/realtime-todos/**"
+      - "examples/npm-react-todos/**"
       - "scripts/test-sdk-browser.mjs"
+      - "scripts/test-npm-starter.mjs"
+      - "scripts/lib/**"
       - "scripts/check-sdk-release-readiness.mjs"
       - "scripts/check-sdk-api.mjs"
       - "scripts/verify-sdk-api-docs.mjs"
       - "scripts/verify-sdk-packages.mjs"
       - "sdk/**"
+      - "cmd/meld/**"
+      - "internal/server/**"
+      - "*.go"
+      - "go.mod"
+      - "go.sum"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -23,12 +31,20 @@ on:
       - ".github/workflows/sdk-compatibility.yml"
       - "docs/**"
       - "examples/realtime-todos/**"
+      - "examples/npm-react-todos/**"
       - "scripts/test-sdk-browser.mjs"
+      - "scripts/test-npm-starter.mjs"
+      - "scripts/lib/**"
       - "scripts/check-sdk-release-readiness.mjs"
       - "scripts/check-sdk-api.mjs"
       - "scripts/verify-sdk-api-docs.mjs"
       - "scripts/verify-sdk-packages.mjs"
       - "sdk/**"
+      - "cmd/meld/**"
+      - "internal/server/**"
+      - "*.go"
+      - "go.mod"
+      - "go.sum"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -104,3 +120,26 @@ jobs:
       - name: Verify real browser HTTP, realtime, and hydration
         if: matrix.node == 24
         run: pnpm test:sdk:browser
+
+  npm-starter:
+    name: Published npm starter
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.34.5
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install test runner dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify published npm installation against the real Go service
+        run: pnpm test:sdk:npm

@@ -19,6 +19,7 @@ export default defineConfig({
         items: [
           { text: "Go tour", link: "/getting-started" },
           { text: "Browser", link: "/browser" },
+          { text: "React starter", link: "/react-starter" },
           { text: "Node.js", link: "/node" },
         ],
       },
@@ -33,6 +34,7 @@ export default defineConfig({
           { text: "Installation", link: "/installation" },
           { text: "Go quickstart", link: "/getting-started" },
           { text: "Browser quickstart", link: "/browser" },
+          { text: "React starter", link: "/react-starter" },
           { text: "Node.js quickstart", link: "/node" },
         ],
       },

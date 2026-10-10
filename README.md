@@ -95,6 +95,7 @@ identity.
 
 - [Five-minute Go tour](docs/getting-started.md)
 - [Browser](docs/browser.md)
+- [React starter from npm](docs/react-starter.md)
 - [Node.js](docs/node.md)
 
 For project contributors, see [CONTRIBUTING.md](CONTRIBUTING.md). Security

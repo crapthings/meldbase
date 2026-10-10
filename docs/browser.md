@@ -12,6 +12,8 @@ npm install @meldbase/client@beta
 
 The package is published as `0.1.0-beta.1`; see the
 [SDK compatibility policy](/sdk-status) before upgrading.
+For an independently installable React application with authentication and
+browser CRUD, start with the [React starter](/react-starter).
 To run the included browser example, use a Meldbase checkout:
 
 ```sh

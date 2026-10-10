@@ -2,3 +2,4 @@ packages:
   - admin/*
   - sdk/*
   - examples/*
+  - "!examples/npm-react-todos"

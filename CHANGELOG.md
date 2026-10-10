@@ -18,6 +18,12 @@ they are assigned to a release.
 
 ### Added
 
+- Standalone npm-installed React starter with local JWT authentication, CRUD,
+  and live queries, plus CI checks against the real Go service for workspace
+  isolation and offline subscription recovery.
+- A verification-only SDK release workflow mode checks each package's GitHub
+  OIDC trust without publishing a new version.
+
 - Scheduled verified physical backups with optional automatic restore drills.
 - Operator JSONL audit events for admin requests and data API security
   rejections, plus bounded request rate limiting.

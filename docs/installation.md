@@ -51,6 +51,8 @@ reproducible builds. Node.js 20 or later is required for Node applications.
 See [SDK compatibility and release status](/sdk-status) for the beta API policy.
 
 Continue with the [Browser guide](/browser) or [Node.js guide](/node).
+For a complete npm-installed React application with local JWT authentication,
+use the [React starter](/react-starter).
 
 ## Run the repository example
 

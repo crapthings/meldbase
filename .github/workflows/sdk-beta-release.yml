@@ -3,6 +3,10 @@ name: SDK beta release
 on:
   workflow_dispatch:
     inputs:
+      verify_oidc_only:
+        description: "Verify trusted publishing for all packages without publishing a version"
+        type: boolean
+        default: false
       prepare_only:
         description: "Build verified beta tarballs without publishing to npm"
         type: boolean
@@ -45,20 +49,31 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ inputs.bootstrap && secrets.NPM_BOOTSTRAP_TOKEN || '' }}
           BOOTSTRAP: ${{ inputs.bootstrap }}
+          VERIFY_OIDC_ONLY: ${{ inputs.verify_oidc_only }}
         run: |
+          if [ "$VERIFY_OIDC_ONLY" = "true" ] && [ "$BOOTSTRAP" = "true" ]; then
+            echo "OIDC verification cannot use bootstrap authentication."
+            exit 1
+          fi
           if [ "$BOOTSTRAP" = "true" ] && [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "Bootstrap publication requires repository secret NPM_BOOTSTRAP_TOKEN."
             exit 1
           fi
           node --version
           npm --version
+      - name: Verify package trusted publishers without bootstrap credentials
+        if: inputs.verify_oidc_only
+        run: node scripts/verify-npm-oidc.mjs
       - name: Install locked dependencies
+        if: ${{ !inputs.verify_oidc_only }}
         run: pnpm install --frozen-lockfile
       - name: Re-run beta quality and documentation gates
+        if: ${{ !inputs.verify_oidc_only }}
         run: |
           pnpm quality:sdk
           pnpm docs:build
       - name: Verify and publish beta tarballs with npm provenance
+        if: ${{ !inputs.verify_oidc_only }}
         env:
           NODE_AUTH_TOKEN: ${{ inputs.bootstrap && secrets.NPM_BOOTSTRAP_TOKEN || '' }}
           MELDBASE_SDK_PACK_DIR: ${{ runner.temp }}/meldbase-sdk-beta

@@ -50,6 +50,18 @@ After the packages exist, configure each package's trusted publisher for:
 - GitHub owner: `crapthings`
 - Repository: `meldbase`
 - Workflow filename: `sdk-beta-release.yml`
+- Environment: leave empty (this workflow does not use a GitHub environment)
+- Allowed actions: permit direct `npm publish`
+
+Configure all three packages separately in their npm **Settings → Trusted
+Publisher** section. Then dispatch the same workflow with `verify_oidc_only`
+enabled and `bootstrap` disabled. This exchanges a fresh GitHub identity for
+each package's short-lived npm credential without publishing a new version or
+reading the bootstrap secret. A successful exchange verifies the configured
+trust; the next release still verifies actual publication and registry content.
+
+`prepare_only` verifies archives but does not test npm authentication.
+Do not rerun publication for a version that already exists.
 
 Subsequent releases leave `bootstrap` disabled and use OIDC. Remove the bootstrap
 secret after completing initial publication and publisher setup. See the
