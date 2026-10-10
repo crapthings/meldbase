@@ -1,8 +1,8 @@
 /**
  * Public React integration for Meldbase live queries.
  *
- * @beta The hook API is semantically versioned but can change before the first
- * non-zero major release.
+ * @beta Public signatures are reviewed against sdk/api before each release.
+ * Breaking changes require an explicit beta migration note.
  */
 import { useMemo, useSyncExternalStore } from "react";
 import type { LiveQuery, Unsubscribe } from "@meldbase/client/local";

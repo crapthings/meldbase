@@ -1,6 +1,6 @@
 {
   "name": "@meldbase/react",
-  "version": "0.1.0-alpha.12",
+  "version": "0.1.0-beta.1",
   "description": "Thin React adapter for Meldbase live queries",
   "license": "Apache-2.0",
   "repository": {
@@ -46,5 +46,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "beta"
   }
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +9,9 @@ import { fileURLToPath } from "node:url";
 // Locates the repository used for SDK release checks and packaging.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Creates a temporary directory for the SDK archives to publish.
-const staging = mkdtempSync(join(tmpdir(), "meldbase-sdk-beta-"));
+const artifactDirectory = process.env.MELDBASE_SDK_PACK_DIR;
+const staging = artifactDirectory ? resolve(artifactDirectory) : mkdtempSync(join(tmpdir(), "meldbase-sdk-beta-"));
+mkdirSync(staging, { recursive: true });
 // Lists SDK packages published together under the beta tag.
 const packages = [
   { directory: "sdk/client", name: "@meldbase/client" },
@@ -40,17 +43,34 @@ try {
     });
     const archives = readdirSync(destination).filter((name) => name.endsWith(".tgz"));
     assert.equal(archives.length, 1, `${definition.name}: expected exactly one tarball`);
-    execFileSync(
-      "npm",
-      ["publish", join(destination, archives[0]), "--access", "public", "--tag", "beta", "--provenance"],
-      {
-        cwd: root,
-        stdio: "inherit",
-      },
-    );
+    definition.archive = join(destination, archives[0]);
   }
+
+  // Binds all verified archives to the source commit before any registry write.
+  const receipt = {
+    version,
+    commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
+    packages: manifests.map((definition) => ({
+      name: definition.name,
+      archive: definition.archive.slice(staging.length + 1),
+      integrity: `sha512-${createHash("sha512").update(readFileSync(definition.archive)).digest("base64")}`,
+    })),
+  };
+  writeFileSync(join(staging, "receipt.json"), JSON.stringify(receipt, null, 2) + "\n");
+  for (const definition of manifests) {
+    if (process.argv.includes("--pack-only")) continue;
+    execFileSync("npm", ["publish", definition.archive, "--access", "public", "--tag", "beta", "--provenance"], {
+      cwd: root,
+      stdio: "inherit",
+    });
+  }
+  console.log(
+    process.argv.includes("--pack-only")
+      ? "Verified beta archives prepared without registry publication."
+      : `Published SDK beta ${version}.`,
+  );
 } finally {
-  rmSync(staging, { recursive: true, force: true });
+  if (!artifactDirectory) rmSync(staging, { recursive: true, force: true });
 }
 
 // Rejects SDK publishing when the repository worktree has changes.

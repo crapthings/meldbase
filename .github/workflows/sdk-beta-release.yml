@@ -2,6 +2,15 @@ name: SDK beta release
 
 on:
   workflow_dispatch:
+    inputs:
+      prepare_only:
+        description: "Build verified beta tarballs without publishing to npm"
+        type: boolean
+        default: false
+      bootstrap:
+        description: "Use the configured bootstrap credential for first npm publication"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,6 +22,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.ref == 'refs/heads/main'
     name: Publish npm beta packages
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -24,13 +34,24 @@ jobs:
           run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify publication authentication
+        env:
+          NODE_AUTH_TOKEN: ${{ inputs.bootstrap && secrets.NPM_BOOTSTRAP_TOKEN || '' }}
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+        run: |
+          if [ "$BOOTSTRAP" = "true" ] && [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "Bootstrap publication requires repository secret NPM_BOOTSTRAP_TOKEN."
+            exit 1
+          fi
+          node --version
+          npm --version
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
       - name: Re-run beta quality and documentation gates
@@ -38,4 +59,19 @@ jobs:
           pnpm quality:sdk
           pnpm docs:build
       - name: Verify and publish beta tarballs with npm provenance
-        run: pnpm release:sdk:beta
+        env:
+          NODE_AUTH_TOKEN: ${{ inputs.bootstrap && secrets.NPM_BOOTSTRAP_TOKEN || '' }}
+          MELDBASE_SDK_PACK_DIR: ${{ runner.temp }}/meldbase-sdk-beta
+        run: |
+          if [ "${{ inputs.prepare_only }}" = "true" ]; then
+            pnpm release:sdk:beta --pack-only
+          else
+            pnpm release:sdk:beta
+          fi
+      - name: Retain verified beta tarballs and source receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: meldbase-sdk-beta
+          path: ${{ runner.temp }}/meldbase-sdk-beta
+          if-no-files-found: ignore

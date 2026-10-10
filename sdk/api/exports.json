@@ -1,0 +1,507 @@
+{
+  "client/index": [
+    {
+      "name": "CallOptions",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "ClientOptions",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "CompareOperator",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Comparison",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "CountResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "DEFAULT_QUERY_LIMITS",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "DeleteResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Document",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "documentID",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "DocumentID",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Filter",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "FindOneOptions",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "GroupCountResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "InputDocument",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "InsertDocument",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "isDocumentID",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "isDocumentIDValue",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "MeldbaseClient",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "MeldbaseClientClosedError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "MeldbaseError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "MeldbaseErrorData",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "MeldbaseInternalError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "MeldbaseProtocolError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "MutationOperation",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "MutationResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "MutationSpec",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "newDocumentID",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "PageResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Primitive",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "ProtocolDescriptor",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryExpr",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryLimits",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryOptions",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QuerySpec",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryTypeName",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryValidationError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "RealtimeTicket",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "RemoteCollection",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "RemoteLiveQuery",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "RPCTransport",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "SortField",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "SubscribeOptions",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "SyncState",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "SyncStatus",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Update",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Value",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "WebSocketLike",
+      "type": true,
+      "value": false
+    }
+  ],
+  "client/local": [
+    {
+      "name": "LiveQuery",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "LocalCollection",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "SnapshotListener",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Unsubscribe",
+      "type": true,
+      "value": false
+    }
+  ],
+  "client/types": [
+    {
+      "name": "CompareOperator",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Comparison",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "CountResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "DEFAULT_QUERY_LIMITS",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "DeleteResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Document",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "ElementQueryExpr",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "ElemMatchScalar",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Filter",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "GroupCountResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "InputDocument",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "InsertDocument",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "MutationOperation",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "MutationResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "MutationSpec",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Primitive",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryExpr",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryLimits",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QuerySpec",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryTypeName",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "QueryValidationError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "SortField",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Update",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "Value",
+      "type": true,
+      "value": false
+    }
+  ],
+  "react/index": [
+    {
+      "name": "LiveQueryResult",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "SupportedLiveQuery",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "useLiveQuery",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "UseLiveQueryOptions",
+      "type": true,
+      "value": false
+    }
+  ],
+  "worker/index": [
+    {
+      "name": "Actor",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "MeldbaseError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "MeldbaseInternalError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "MeldbaseWorker",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "MeldbaseWorkerProtocolError",
+      "type": true,
+      "value": true
+    },
+    {
+      "name": "readPolicy",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "ReadPolicyContext",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "ReadPolicyDefinition",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "ReadPolicyHandler",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "ReadPolicyOptions",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "rpc",
+      "type": false,
+      "value": true
+    },
+    {
+      "name": "RPCContext",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "RPCDefinition",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "RPCHandler",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "TransactionalRPCHandler",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "WorkerOptions",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "WorkerSocket",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "WorkerSocketFactory",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "WorkerState",
+      "type": true,
+      "value": false
+    },
+    {
+      "name": "WriteTransaction",
+      "type": true,
+      "value": false
+    }
+  ]
+}

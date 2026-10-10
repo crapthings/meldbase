@@ -1,8 +1,8 @@
 /**
  * Public trusted-worker SDK entry point.
  *
- * @beta The worker API is semantically versioned but can change before the
- * first non-zero major release.
+ * @beta Public signatures are reviewed against sdk/api before each release.
+ * Breaking changes require an explicit beta migration note.
  */
 export {
   MeldbaseError,

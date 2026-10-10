@@ -18,8 +18,10 @@ const requiredDocumentation = [
   "sdk/client/README.md",
   "sdk/worker/README.md",
   "sdk/react/README.md",
-  "docs-old/sdk-beta-release.md",
-  "docs-old/sdk-beta-checklist.md",
+  "docs/sdk-beta-release.md",
+  "docs/sdk-beta-checklist.md",
+  "docs/sdk-status.md",
+  "sdk/api/README.md",
 ];
 
 // Loads package manifests alongside their expected names and locations.
@@ -57,10 +59,10 @@ for (const path of requiredDocumentation) {
   assert(content.trim().length > 0, `${path}: SDK documentation must not be empty`);
 }
 // Loads the checklist that must state the current SDK version.
-const checklist = readText("docs-old/sdk-beta-checklist.md");
+const checklist = readText("docs/sdk-beta-checklist.md");
 assert(
   checklist.includes(`Workspace SDK version: \`${version}\``),
-  "docs-old/sdk-beta-checklist.md must state the current SDK package version",
+  "docs/sdk-beta-checklist.md must state the current SDK package version",
 );
 // Loads documentation navigation to check the current SDK guide links.
 const docsConfig = readText("docs/.vitepress/config.mts");

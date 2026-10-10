@@ -1,8 +1,8 @@
 /**
  * Public entry point for @meldbase/client.
  *
- * @beta The package is semantically versioned, but its API is not yet stable
- * until the first non-zero major release. Do not import ./internal from an
+ * @beta Public signatures are reviewed against sdk/api before each release.
+ * Breaking changes require an explicit beta migration note. Do not import ./internal from an
  * application; that entry point is experimental.
  */
 export type { FindOneOptions, QueryOptions } from "./query.js";
