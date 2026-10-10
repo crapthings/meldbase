@@ -4,6 +4,7 @@ import { createServer as createNetServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startLocalServer } from "./local-server.mjs";
+import { checkStarter } from "./preflight.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -35,8 +36,8 @@ export async function startStarter({ binary = process.env.MELDBASE_BIN ?? "meld"
         port,
         strictPort: true,
         proxy: {
-          "/api": { target: backend.baseUrl, rewrite: (path) => path.replace(/^\/api/, "") },
-          "/v1/realtime": { target: backend.baseUrl, ws: true },
+          "/api": { target: backend.baseUrl, changeOrigin: false, rewrite: (path) => path.replace(/^\/api/, "") },
+          "/v1/realtime": { target: backend.baseUrl, changeOrigin: false, ws: true },
         },
       },
       plugins: [
@@ -64,8 +65,10 @@ export async function startStarter({ binary = process.env.MELDBASE_BIN ?? "meld"
       ],
     });
     await vite.listen();
+    const checks = await checkStarter(url);
     return {
       url,
+      checks,
       backend,
       async close() {
         await vite.close();
@@ -81,6 +84,7 @@ export async function startStarter({ binary = process.env.MELDBASE_BIN ?? "meld"
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const starter = await startStarter();
+  console.log(`Startup checks passed: ${starter.checks.join(", ")}.`);
   console.log(`Meldbase starter: ${starter.url}`);
   console.log("Local JWT demo identity; data stays in .meldbase-starter/todos.meld. Ctrl+C to stop.");
   let stopping = false;

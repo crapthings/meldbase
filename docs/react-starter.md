@@ -22,6 +22,18 @@ and delete it. Both windows update through the same live query.
 Ctrl+C stops the starter. Your documents remain in its ignored
 `.meldbase-starter/todos.meld` file across restarts.
 
+If `meld` is already installed through Homebrew and available on your PATH,
+you can skip the Go build and run `npm ci` followed by `npm run dev` inside
+`examples/npm-react-todos`.
+
+Before printing the application URL, the launcher checks `/session`, an
+authenticated `todos` query, and realtime ticket issuance through the application
+proxy. A failed check reports its stage, HTTP status when available, and a
+suggested fix, then stops the services. Each request has a five-second timeout.
+The check reads at most one document and does not write or delete application
+data. Ticket issuance does not prove a WebSocket subscription works; CI also
+verifies actual browser subscriptions and offline recovery.
+
 ## Use it in your application
 
 Copy `examples/npm-react-todos` into your project and run `npm ci` there.
@@ -59,6 +71,23 @@ without automatic retries.
 
 ## Authentication
 
+When signing JWTs in an existing Node.js or Express server, read the HS256
+secret as raw bytes, using exactly the same file supplied to
+`meld serve --jwt-hs256-secret-file`:
+
+```js
+import { readFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
+
+const secret = readFileSync(process.env.MELDBASE_JWT_HS256_SECRET_FILE);
+// unsignedToken is the base64url-encoded JWT header and payload, joined by a dot.
+const signature = createHmac("sha256", secret).update(unsignedToken).digest("base64url");
+```
+
+Do not call `.trim()` or remove a trailing newline. `meld init` generates a
+secret file with a trailing newline, and the Go server includes that byte in
+the signing key. Keep this code and the key in your application server.
+
 The launcher generates a temporary signing key on the server and issues
 five-minute JWTs for one local demo identity. The browser fetches a fresh token
 for HTTP and realtime authentication. Go validates issuer, audience, and
@@ -70,6 +99,21 @@ runs only in the loopback development launcher; it is absent from the static
 build. HTTP and realtime use the same application origin through its proxy.
 With a separate realtime origin, configure the client's
 `allowedRealtimeOrigins` explicitly.
+
+## Integrating an existing Vite application
+
+Use object-form proxy entries with `changeOrigin: false`, as the starter does.
+This preserves the browser application's Host header. The starter's `/session`
+endpoint checks Host, Origin, and fetch metadata before issuing a local token;
+a proxy that rewrites Host can cause a 403 response. Configure the database's
+HTTP and realtime origin allowlists for your actual application origin too.
+
+A token endpoint returning 200 only proves token issuance succeeded. Verify
+an authenticated collection query and realtime ticket request as well. Inspect
+the failing request's HTTP status and response body: 401 indicates rejected
+authentication; 403 may indicate a session-origin check or collection policy.
+Check that the signing bytes, issuer, audience, expiry, and workspace claim
+match the server configuration. Do not print tokens or signing keys in logs.
 
 ## Verified integration
 

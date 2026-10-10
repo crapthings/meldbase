@@ -54,6 +54,12 @@ The Vite development session endpoint is not part of the static production build
 
 ## End-to-end verification
 
+The launcher checks session issuance, an authenticated collection query, and
+realtime ticket issuance through the application proxy before printing the URL.
+Each request times out after five seconds. Failure stops the services and prints
+the failing stage and a suggested fix, without exposing credentials. It does
+not write test documents. Actual WebSocket subscriptions are verified below.
+
 From the Meldbase repository root:
 
 ```sh

@@ -45,6 +45,30 @@ try {
   execFileSync("go", ["build", "-o", binary, "./cmd/meld"], { cwd: root, stdio: "inherit" });
   const { startStarter } = await import(pathToFileURL(join(application, "scripts/dev.mjs")));
   starter = await startStarter({ binary, database: join(directory, "test.meld"), port: 0 });
+  assert.deepEqual(starter.checks, ["session", "collection query", "realtime ticket"]);
+  const { checkStarter } = await import(pathToFileURL(join(application, "scripts/preflight.mjs")));
+  await assert.rejects(
+    checkStarter(starter.url, { fetch: () => Promise.resolve(new Response(null, { status: 403 })) }),
+    /session \(HTTP 403\).*changeOrigin: false/,
+  );
+  await assert.rejects(
+    checkStarter(starter.url, {
+      fetch: (input, init) =>
+        String(input).endsWith("/session")
+          ? Promise.resolve(Response.json({ accessToken: "invalid-token" }))
+          : fetch(input, init),
+    }),
+    /collection query \(HTTP 401\).*no trim/,
+  );
+  await assert.rejects(
+    checkStarter(starter.url, {
+      fetch: (input, init) =>
+        String(input).endsWith("/v1/realtime/tickets")
+          ? Promise.resolve(new Response(null, { status: 403 }))
+          : fetch(input, init),
+    }),
+    /realtime ticket \(HTTP 403\)/,
+  );
   assert.equal(
     (await fetch(`${starter.url}/session`, { headers: { origin: "https://untrusted.example" } })).status,
     403,

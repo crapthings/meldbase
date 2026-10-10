@@ -14,7 +14,21 @@ The module targets Go 1.23 or later. Continue with the
 [complete Go example](/getting-started); no database service is required.
 Pin a release in `go.mod` when reproducible builds matter.
 
-## CLI and server from source
+## CLI and server
+
+On macOS, install the released CLI with Homebrew:
+
+```sh
+brew tap crapthings/tap
+brew trust --tap crapthings/tap
+brew install crapthings/tap/meldbase
+meld version
+meld --help
+```
+
+The Homebrew package is named `meldbase`; the installed command is `meld`.
+
+### Install from source
 
 With Go installed:
 
