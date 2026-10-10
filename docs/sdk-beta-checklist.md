@@ -15,7 +15,7 @@ link before packaging or publishing.
 | `@meldbase/worker` | `0.1.0-beta.2`    | strict worker protocol framing, transaction regressions, Worker Hub end-to-end test |
 | `@meldbase/react`  | `0.1.0-beta.2`    | live-query hydration test and packed React consumer                                 |
 
-The workspace prepares `0.1.0-beta.2`. All three packages are published as `0.1.0-beta.1` on npm. The database remains
+All three packages are published as `0.1.0-beta.2` on npm through the verified GitHub OIDC trusted publisher. The database remains
 alpha. For subsequent versions, verify the registry and the successful release
 workflow before announcing availability.
 

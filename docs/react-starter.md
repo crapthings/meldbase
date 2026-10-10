@@ -27,7 +27,7 @@ Ctrl+C stops the starter. Your documents remain in its ignored
 Copy `examples/npm-react-todos` into your project and run `npm ci` there.
 It is an independent npm project, excluded from the repository's pnpm
 workspace, with `@meldbase/client` and `@meldbase/react` pinned to
-`0.1.0-beta.1`. No workspace package links are needed.
+`0.1.0-beta.2`. No workspace package links are needed.
 
 The React component uses a module-level client and query, so React renders
 subscribe to a stable query rather than opening a new connection each time:

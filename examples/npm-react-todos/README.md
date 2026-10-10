@@ -1,7 +1,7 @@
 # React starter from npm
 
 A standalone React application using the published `@meldbase/client` and
-`@meldbase/react` `0.1.0-beta.1` packages. It has its own npm lockfile and is
+`@meldbase/react` `0.1.0-beta.2` packages. It has its own npm lockfile and is
 excluded from the pnpm workspace. Copy this directory into your own project;
 there are no imports from the Meldbase SDK source tree.
 

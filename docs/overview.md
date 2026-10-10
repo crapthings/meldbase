@@ -39,7 +39,7 @@ the server. Distributed replication and a multi-node cluster are outside the
 current product scope.
 
 The Go module and CLI releases are available today. The TypeScript SDKs are
-published as `0.1.0-beta.1` on npm under the `beta` tag.
+published as `0.1.0-beta.2` on npm under the `beta` tag.
 See [SDK compatibility and release status](/sdk-status) for the reviewed public
 API boundary and release evidence.
 

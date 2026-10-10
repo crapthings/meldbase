@@ -31,9 +31,12 @@ try {
   });
   execFileSync("npm", ["ci", "--no-audit", "--no-fund"], { cwd: application, stdio: "inherit" });
   const lock = JSON.parse(readFileSync(join(application, "package-lock.json"), "utf8"));
+  const manifest = JSON.parse(readFileSync(join(application, "package.json"), "utf8"));
   for (const name of ["client", "react"]) {
     const entry = lock.packages[`node_modules/@meldbase/${name}`];
-    assert.equal(entry.version, "0.1.0-beta.1");
+    const expected = manifest.dependencies[`@meldbase/${name}`];
+    assert.match(expected, /^\d+\.\d+\.\d+-beta\.\d+$/);
+    assert.equal(entry.version, expected);
     assert(entry.resolved.startsWith("https://registry.npmjs.org/"));
     assert(entry.integrity.startsWith("sha512-"));
   }

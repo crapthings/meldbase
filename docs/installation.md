@@ -46,7 +46,7 @@ npm install @meldbase/react@beta react
 npm install @meldbase/worker@beta
 ```
 
-All three packages are published as `0.1.0-beta.1`. Pin that exact version for
+All three packages are published as `0.1.0-beta.2`. Pin that exact version for
 reproducible builds. Node.js 20 or later is required for Node applications.
 See [SDK compatibility and release status](/sdk-status) for the beta API policy.
 

@@ -1,6 +1,6 @@
 # SDK compatibility and release status
 
-TypeScript SDK `0.1.0-beta.1` is published on npm under the `beta` tag.
+TypeScript SDK `0.1.0-beta.2` is published on npm under the `beta` tag.
 Install the client with `npm install @meldbase/client@beta`.
 The Go database remains alpha.
 
@@ -47,5 +47,5 @@ version change. Update mode is a maintainer action and is not run in CI.
 
 The [beta checklist](/sdk-beta-checklist) describes the required validation.
 The [publishing guide](/sdk-beta-release) covers initial npm authentication and
-subsequent trusted publishing. The [SDK beta release](https://github.com/crapthings/meldbase/releases/tag/sdk-v0.1.0-beta.1)
+subsequent trusted publishing. The [SDK beta release](https://github.com/crapthings/meldbase/releases/tag/sdk-v0.1.0-beta.2)
 includes verified archives and a source-commit/integrity receipt.
