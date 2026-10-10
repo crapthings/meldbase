@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import assert from "node:assert/strict";
 import WebSocket from "ws";
@@ -8,7 +8,8 @@ import WebSocket from "ws";
 // Starts headless Chrome with the isolated test profile and debugging port.
 export function launchChrome(debugPort, profile) {
   const executable = chromeExecutable();
-  return spawn(
+  mkdirSync(profile, { recursive: true, mode: 0o700 });
+  const child = spawn(
     executable,
     [
       "--headless=new",
@@ -21,6 +22,11 @@ export function launchChrome(debugPort, profile) {
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
+  // Retain startup diagnostics so CI failures identify the browser's actual error.
+  child.stderr.on("data", (data) => process.stderr.write(data));
+  child.stdout.resume();
+  child.on("error", (error) => console.error(`Chrome startup failed: ${error.message}`));
+  return child;
 }
 
 // Selects a configured or conventional Chrome executable candidate.

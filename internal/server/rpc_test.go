@@ -430,7 +430,12 @@ func TestWebSocketRPCCancelDuplicateLimitAndDisconnect(t *testing.T) {
 		t.Fatal("disconnect did not cancel method")
 	}
 	deadline := time.Now().Add(time.Second)
-	for handler.Stats().ActiveConnections != 0 && time.Now().Before(deadline) {
+	// Connection teardown and RPC completion are recorded independently.
+	for time.Now().Before(deadline) {
+		stats := handler.Stats()
+		if stats.ActiveConnections == 0 && stats.RPCActive == 0 && stats.RPCCanceled == 2 {
+			break
+		}
 		time.Sleep(time.Millisecond)
 	}
 	stats := handler.Stats()
