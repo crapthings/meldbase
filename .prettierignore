@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 coverage-*/
-docs/.vitepress/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
 docs/public/api/
 local-playground/

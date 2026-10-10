@@ -9,13 +9,19 @@ public package name will be `@meldbase/client`. Until publication, use the
 included browser example from a Meldbase checkout:
 
 ```sh
-pnpm install
-go run ./cmd/meld serve --db /tmp/meldbase-todos.meld --dev-no-auth
+pnpm install --frozen-lockfile
+go run ./cmd/meld serve --db /tmp/meldbase-todos.meld --addr 127.0.0.1:8080 --dev-no-auth
+```
+
+In a second terminal, from the same checkout:
+
+```sh
 pnpm --filter @meldbase/example-realtime-todos dev
 ```
 
 Open `http://127.0.0.1:5173`. Open it in two windows to see a query update in
-both places.
+both places. The public example uses a `completed` field for todo state;
+the API excerpts below use `done` to match the other guides.
 
 `--dev-no-auth` is for local development only. Do not expose that server to a
 network.

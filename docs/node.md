@@ -13,7 +13,7 @@ the Meldbase workspace today.
 From a Meldbase checkout, start an explicitly local development server:
 
 ```sh
-go run ./cmd/meld serve --db /tmp/meldbase-node.meld --dev-no-auth
+go run ./cmd/meld serve --db /tmp/meldbase-node.meld --addr 127.0.0.1:8080 --dev-no-auth
 ```
 
 `--dev-no-auth` is for local development only. Do not expose that server to a
@@ -21,24 +21,40 @@ network.
 
 ## Create a client
 
-Node.js 20 or later is required. Install a WebSocket implementation for live
-queries:
+Node.js 20 or later is required. In another terminal, from the checkout root:
 
 ```sh
-npm install ws
+pnpm install --frozen-lockfile
+pnpm --filter @meldbase/client build
 ```
+
+Save this as `node-tour.mjs` in the checkout root. It uses the built workspace
+SDK and the workspace's WebSocket dependency:
 
 ```js
 import WebSocket from "ws";
-import { MeldbaseClient } from "@meldbase/client";
+import { MeldbaseClient } from "./sdk/client/dist/index.js";
 
 const client = new MeldbaseClient({
-  baseUrl: process.env.MELDBASE_URL ?? "http://127.0.0.1:8080",
+  baseUrl: "http://127.0.0.1:8080",
   webSocketFactory: (url) => new WebSocket(url),
 });
-
 const todos = client.collection("todos");
+try {
+  await todos.insertOne({ title: "Process a job", done: false });
+  console.log(await todos.find({ done: false }).fetch());
+} finally {
+  client.close();
+}
 ```
+
+```sh
+node node-tour.mjs
+```
+
+You should see an array containing your new todo and its `_id`. Run it again
+and the collection grows. The excerpts below assume an open `client` and its
+`todos` collection, as above.
 
 For an authenticated service, supply a token issued by your identity system:
 
