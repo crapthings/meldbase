@@ -1,5 +1,9 @@
 # @meldbase/client
 
+```sh
+npm install @meldbase/client@beta
+```
+
 Isomorphic TypeScript client for Meldbase. The root entry is the authenticated
 remote client; the explicit `@meldbase/client/local` subpath provides a
 standalone in-memory state collection with the same bounded query grammar. The
@@ -88,8 +92,8 @@ server policy and visibility limits. Do not substitute an exact local count for
 a remote dashboard or permission decision. Use a named transactional RPC when a
 server-owned full replacement must be atomic.
 
-See the [client protocol](https://crapthings.github.io/meldbase/client-protocol#local-and-remote-collection-boundary)
-for the complete authority and API-boundary contract.
+See the [SDK compatibility policy](https://crapthings.github.io/meldbase/sdk-status)
+for the reviewed public API boundary.
 
 ## Seek pagination
 
@@ -168,5 +172,7 @@ dispatched are reported directly instead of as an unknown outcome.
 The explicit subpaths are `@meldbase/client/local` and
 `@meldbase/client/types`; remote APIs are imported from the root package.
 
-See the [SDK guide](https://crapthings.github.io/meldbase/sdk) for client,
-React, worker, retry, security, pagination, and compatibility guidance.
+See the [Node.js guide](https://crapthings.github.io/meldbase/node),
+[React starter](https://crapthings.github.io/meldbase/react-starter), and
+[API reference](https://crapthings.github.io/meldbase/api/typescript/) for
+installation, authentication, live queries, and exact signatures.

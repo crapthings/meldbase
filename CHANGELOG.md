@@ -4,6 +4,13 @@ All notable public-contract changes are recorded here. Meldbase remains alpha;
 entries under **Unreleased** are not a published compatibility commitment until
 they are assigned to a release.
 
+## TypeScript SDK 0.1.0-beta.2 (pending npm publication)
+
+- Fix npm README links to current installation, React starter, API reference,
+  and worker integration documentation; update package homepages.
+- Publish through the configured GitHub OIDC trusted publisher. Public API
+  signatures and runtime behavior are unchanged from beta.1.
+
 ## TypeScript SDK 0.1.0-beta.1 — 2026-10-10
 
 - Establish reviewed public API reports for the client, local collection,

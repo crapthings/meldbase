@@ -58,7 +58,9 @@ Publisher** section. Then dispatch the same workflow with `verify_oidc_only`
 enabled and `bootstrap` disabled. This exchanges a fresh GitHub identity for
 each package's short-lived npm credential without publishing a new version or
 reading the bootstrap secret. A successful exchange verifies the configured
-trust; the next release still verifies actual publication and registry content.
+trust, but npm may keep a newly added connection pending validation until an
+actual publication. Complete that publication within the deadline shown by npm
+and verify the registry content before removing bootstrap authentication.
 
 `prepare_only` verifies archives but does not test npm authentication.
 Do not rerun publication for a version that already exists.

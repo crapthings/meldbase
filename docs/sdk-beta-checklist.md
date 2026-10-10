@@ -1,6 +1,6 @@
 # SDK beta readiness checklist
 
-Workspace SDK version: `0.1.0-beta.1`
+Workspace SDK version: `0.1.0-beta.2`
 
 This page is the release-facing status record for `@meldbase/client`,
 `@meldbase/worker`, and `@meldbase/react`. Keep the version above synchronized
@@ -11,11 +11,11 @@ link before packaging or publishing.
 
 | Package            | Workspace version | Beta readiness evidence                                                             |
 | ------------------ | ----------------- | ----------------------------------------------------------------------------------- |
-| `@meldbase/client` | `0.1.0-beta.1`    | typed writes, strict wire boundaries, NodeNext/Bundler tarball consumers            |
-| `@meldbase/worker` | `0.1.0-beta.1`    | strict worker protocol framing, transaction regressions, Worker Hub end-to-end test |
-| `@meldbase/react`  | `0.1.0-beta.1`    | live-query hydration test and packed React consumer                                 |
+| `@meldbase/client` | `0.1.0-beta.2`    | typed writes, strict wire boundaries, NodeNext/Bundler tarball consumers            |
+| `@meldbase/worker` | `0.1.0-beta.2`    | strict worker protocol framing, transaction regressions, Worker Hub end-to-end test |
+| `@meldbase/react`  | `0.1.0-beta.2`    | live-query hydration test and packed React consumer                                 |
 
-All three packages are published as `0.1.0-beta.1` on npm. The database remains
+The workspace prepares `0.1.0-beta.2`. All three packages are published as `0.1.0-beta.1` on npm. The database remains
 alpha. For subsequent versions, verify the registry and the successful release
 workflow before announcing availability.
 

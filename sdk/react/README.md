@@ -1,5 +1,9 @@
 # @meldbase/react
 
+```sh
+npm install @meldbase/client@beta @meldbase/react@beta react
+```
+
 Thin React adapter for local and remote Meldbase live queries. It uses
 `useSyncExternalStore`, supports server snapshots for hydration, and does not
 introduce another cache or query language. It is a beta adapter for queries
@@ -40,5 +44,6 @@ if (result.status === "error") return <RetryView error={result.error} />;
 return <TodoList todos={result.documents} stale={result.status === "stale"} />;
 ```
 
-See the [SDK guide](https://crapthings.github.io/meldbase/sdk#react-hydration-and-live-state)
-for hydration and reconnect behavior.
+See the [React starter](https://crapthings.github.io/meldbase/react-starter)
+for a complete npm-installed application and
+[live-query guide](https://crapthings.github.io/meldbase/realtime) for connection state.

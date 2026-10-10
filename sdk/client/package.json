@@ -1,6 +1,6 @@
 {
   "name": "@meldbase/client",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Isomorphic reactive query client for Meldbase",
   "license": "Apache-2.0",
   "repository": {
@@ -8,7 +8,7 @@
     "url": "https://github.com/crapthings/meldbase.git",
     "directory": "sdk/client"
   },
-  "homepage": "https://github.com/crapthings/meldbase#readme",
+  "homepage": "https://crapthings.github.io/meldbase/node",
   "bugs": "https://github.com/crapthings/meldbase/issues",
   "type": "module",
   "sideEffects": false,

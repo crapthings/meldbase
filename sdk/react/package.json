@@ -1,6 +1,6 @@
 {
   "name": "@meldbase/react",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Thin React adapter for Meldbase live queries",
   "license": "Apache-2.0",
   "repository": {
@@ -8,7 +8,7 @@
     "url": "https://github.com/crapthings/meldbase.git",
     "directory": "sdk/react"
   },
-  "homepage": "https://github.com/crapthings/meldbase#readme",
+  "homepage": "https://crapthings.github.io/meldbase/react-starter",
   "bugs": "https://github.com/crapthings/meldbase/issues",
   "type": "module",
   "sideEffects": false,

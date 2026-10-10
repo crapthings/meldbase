@@ -1,5 +1,9 @@
 # @meldbase/worker
 
+```sh
+npm install @meldbase/worker@beta ws
+```
+
 Trusted Node.js worker SDK for Meldbase RPC methods, `rpc.transactional` point writes,
 and data-only read policies. The worker runs outside the Go database
 process and connects to a private authenticated control listener. The package is
@@ -59,7 +63,7 @@ data-only `QuerySpec` constraint or `null`. Keep worker URLs, tokens, and the
 worker control listener private. The SDK rejects credentials in the URL and
 does not put the token in the URL.
 
-See the [SDK guide](https://crapthings.github.io/meldbase/sdk#worker-rpc-and-read-policies)
+See the [worker integration guide](https://github.com/crapthings/meldbase/blob/main/docs-old/sdk.md#worker-rpc-and-read-policies)
 for the operational and compatibility contract.
 
 ## Internal layout
