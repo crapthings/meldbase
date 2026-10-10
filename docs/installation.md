@@ -93,4 +93,8 @@ For a runnable Node script using the published SDK, follow
 
 ## Next step
 
+For a coding assistant integrating Meldbase into another project, start with
+the [LLM documentation index](/llms.txt). It links to Markdown guides generated
+from the same source as this website.
+
 Learn the [document model](/documents), then [query your collection](/queries).

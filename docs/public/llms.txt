@@ -1,0 +1,35 @@
+# Meldbase
+
+> Meldbase is a single-file Go document database with document queries, indexes, and live updates. Embed it in a Go application or run the `meld` server and connect through the TypeScript SDK over HTTP and WebSocket.
+
+The database and CLI are alpha; the TypeScript SDKs are beta. Read the compatibility policy and release notes before upgrading. One writable process owns each persistent database file; other processes connect through the server.
+
+For a new browser application, read Installation, then React starter, then the API reference. The Homebrew package is `crapthings/tap/meldbase`, but the executable is `meld`. npm packages are client libraries, not the database server; install `@meldbase/client@beta` and, for React, `@meldbase/react@beta`.
+
+Keep signing keys on the application server. Read HS256 key files as raw bytes without `.trim()`; `meld init` includes a trailing newline that participates in signing. The starter preserves the proxy Host with `changeOrigin: false`. A successful token endpoint alone does not prove database authentication works: verify a collection query and realtime ticket too. Failed ordinary writes must not be automatically retried under an assumed idempotency guarantee.
+
+## Start here
+
+- [Overview](https://crapthings.github.io/meldbase/overview.md): Architecture, embedded versus remote access, and product scope.
+- [Installation](https://crapthings.github.io/meldbase/installation.md): Homebrew, source builds, CLI verification, and npm SDK installation.
+- [React starter](https://crapthings.github.io/meldbase/react-starter.md): Persistent local database, JWT identity fixture, proxy setup, startup checks, and authentication troubleshooting.
+- [Node.js guide](https://crapthings.github.io/meldbase/node.md): Backend application integration using the published SDK.
+- [Browser guide](https://crapthings.github.io/meldbase/browser.md): Browser CRUD and realtime integration.
+- [Go quickstart](https://crapthings.github.io/meldbase/getting-started.md): Embedded database access without a separate server.
+
+## Database and SDK contracts
+
+- [Documents](https://crapthings.github.io/meldbase/documents.md): Document identifiers, values, and mutations.
+- [Queries](https://crapthings.github.io/meldbase/queries.md): Filtering, ordering, and pagination.
+- [Indexes](https://crapthings.github.io/meldbase/indexes.md): Index definitions and query access patterns.
+- [Live queries](https://crapthings.github.io/meldbase/realtime.md): Subscriptions, reconnect behavior, and error handling.
+- [SDK compatibility](https://crapthings.github.io/meldbase/sdk-status.md): Public entry points and beta compatibility boundaries.
+- [TypeScript API reference](https://crapthings.github.io/meldbase/api/typescript/): Generated HTML reference for exact public SDK signatures.
+- [Public API baseline](https://github.com/crapthings/meldbase/tree/main/sdk/api): Reviewed Markdown signature reports and runtime/type export manifest.
+
+## Optional
+
+- [React starter source](https://github.com/crapthings/meldbase/tree/main/examples/npm-react-todos): Standalone npm application and launcher scripts; use these instead of inventing configuration or API calls.
+- [Release checklist](https://crapthings.github.io/meldbase/sdk-beta-checklist.md): Verification required for an SDK beta release.
+- [Publishing guide](https://crapthings.github.io/meldbase/sdk-beta-release.md): Maintainer workflow for npm publishing and OIDC.
+- [Releases](https://github.com/crapthings/meldbase/releases): Version history and published artifacts.

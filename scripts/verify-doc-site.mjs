@@ -17,4 +17,19 @@ for (const name of readdirSync(output)) {
   }
 }
 assert(links > 0, "No API reference links found in the published documentation");
+const index = readFileSync(join(output, "llms.txt"), "utf8");
+assert(index.startsWith("# Meldbase\n"), "LLM index is missing its project heading");
+const prefix = "https://crapthings.github.io/meldbase/";
+let markdownLinks = 0;
+for (const match of index.matchAll(/\]\((https:\/\/[^)]+)\)/g)) {
+  if (!match[1].startsWith(prefix)) continue;
+  const path = match[1].slice(prefix.length);
+  assert(
+    existsSync(join(output, path.endsWith("/") ? `${path}index.html` : path)),
+    `LLM index target is missing: ${path}`,
+  );
+  if (path.endsWith(".md")) markdownLinks++;
+}
+assert(markdownLinks > 0, "LLM index must link to generated Markdown documents");
 console.log(`Verified API entry and ${links} links bypass the documentation router.`);
+console.log(`Verified llms.txt and ${markdownLinks} Markdown entry points.`);

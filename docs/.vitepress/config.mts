@@ -9,6 +9,7 @@ export default defineConfig({
   description: "A single-file Go document database with queries and live updates.",
   base: isGitHubPagesBuild ? "/meldbase/" : "/",
   cleanUrls: true,
+  head: [["link", { rel: "describedby", href: `${isGitHubPagesBuild ? "/meldbase" : ""}/llms.txt` }]],
   themeConfig: {
     logo: "/mark.svg",
     search: { provider: "local" },
