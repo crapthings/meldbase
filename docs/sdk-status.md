@@ -1,7 +1,7 @@
 # SDK compatibility and release status
 
-The workspace targets TypeScript SDK `0.1.0-beta.1`. npm publication is pending;
-a version number in source is not proof that a package can be installed.
+TypeScript SDK `0.1.0-beta.1` is published on npm under the `beta` tag.
+Install the client with `npm install @meldbase/client@beta`.
 The Go database remains alpha.
 
 ## Public application entry points
@@ -47,5 +47,5 @@ version change. Update mode is a maintainer action and is not run in CI.
 
 The [beta checklist](/sdk-beta-checklist) describes the required validation.
 The [publishing guide](/sdk-beta-release) covers initial npm authentication and
-subsequent trusted publishing. Continue using the workspace quickstarts until
-registry publication is confirmed.
+subsequent trusted publishing. The [SDK beta release](https://github.com/crapthings/meldbase/releases/tag/sdk-v0.1.0-beta.1)
+includes verified archives and a source-commit/integrity receipt.

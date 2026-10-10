@@ -36,9 +36,25 @@ Keep this development server local. An externally reachable service requires
 an authentication and collection-policy configuration; inspect `meld serve --help`
 and the server configuration in the repository before deploying it.
 
-## TypeScript workspace preview
+## TypeScript SDK beta
 
-The SDK packages are not yet published to npm. Use the public workspace:
+Install the packages your application needs:
+
+```sh
+npm install @meldbase/client@beta
+npm install @meldbase/react@beta react
+npm install @meldbase/worker@beta
+```
+
+All three packages are published as `0.1.0-beta.1`. Pin that exact version for
+reproducible builds. Node.js 20 or later is required for Node applications.
+See [SDK compatibility and release status](/sdk-status) for the beta API policy.
+
+Continue with the [Browser guide](/browser) or [Node.js guide](/node).
+
+## Run the repository example
+
+To explore the public browser example, use the repository workspace:
 
 ```sh
 git clone https://github.com/crapthings/meldbase.git
@@ -56,7 +72,7 @@ pnpm --filter @meldbase/example-realtime-todos dev
 ```
 
 Start the server in another terminal and follow the [Browser guide](/browser).
-For a runnable Node script importing the built workspace SDK, follow
+For a runnable Node script using the published SDK, follow
 [Node.js](/node).
 
 ## Next step

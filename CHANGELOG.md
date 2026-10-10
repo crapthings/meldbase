@@ -4,7 +4,7 @@ All notable public-contract changes are recorded here. Meldbase remains alpha;
 entries under **Unreleased** are not a published compatibility commitment until
 they are assigned to a release.
 
-## TypeScript SDK 0.1.0-beta.1 (pending npm publication)
+## TypeScript SDK 0.1.0-beta.1 — 2026-10-10
 
 - Establish reviewed public API reports for the client, local collection,
   shared types, React, and trusted-worker entry points. CI rejects unreviewed

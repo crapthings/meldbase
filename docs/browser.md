@@ -4,9 +4,15 @@ Use the Meldbase client in a browser when a web application needs documents and
 live queries. The browser connects to a running `meld serve`; it never opens a
 `.meld` file directly.
 
-The SDK is currently a workspace preview and is not yet published to npm. Its
-public package name will be `@meldbase/client`. Until publication, use the
-included browser example from a Meldbase checkout:
+Install the SDK in your browser application:
+
+```sh
+npm install @meldbase/client@beta
+```
+
+The package is published as `0.1.0-beta.1`; see the
+[SDK compatibility policy](/sdk-status) before upgrading.
+To run the included browser example, use a Meldbase checkout:
 
 ```sh
 pnpm install --frozen-lockfile

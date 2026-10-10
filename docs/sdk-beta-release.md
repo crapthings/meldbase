@@ -33,8 +33,8 @@ retag a different version as `beta`; those practices weaken the release receipt.
 ## First publication
 
 The `@meldbase` npm organization must exist, and the publishing account must
-have permission to create public packages within it. The three packages do not
-yet exist, so a trusted publisher cannot be assumed to be configured.
+have permission to create public packages within it. For a new package,
+a trusted publisher cannot be assumed to be configured before its first publication.
 
 Use `prepare_only` to produce verified archives and a source-commit/integrity
 receipt as the `meldbase-sdk-beta` workflow artifact without publishing.

@@ -111,7 +111,7 @@ async function copy() {
         </div>
         <pre role="tabpanel" :aria-label="`${tab} API excerpt`"><code>{{ snippets[tab] }}</code></pre>
         <a class="editor-footer" :href="withBase(guides[tab])"
-          >{{ tab === "Go" ? "Run the complete Go example" : "Workspace SDK preview · Follow the setup guide" }}
+          >{{ tab === "Go" ? "Run the complete Go example" : "TypeScript SDK beta · Follow the setup guide" }}
           <span>→</span></a
         >
       </div>

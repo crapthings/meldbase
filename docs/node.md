@@ -4,9 +4,8 @@ Use the Meldbase client in Node.js when another server process needs to work
 with a running Meldbase service. Node connects over HTTP and WebSocket; it does
 not open a `.meld` file directly.
 
-The SDK is currently a workspace preview and is not yet published to npm. Its
-public package name will be `@meldbase/client`. The API below is available from
-the Meldbase workspace today.
+The `@meldbase/client` SDK is available on npm under the `beta` tag.
+See [SDK compatibility and release status](/sdk-status) before upgrading.
 
 ## Start a local service
 
@@ -21,19 +20,17 @@ network.
 
 ## Create a client
 
-Node.js 20 or later is required. In another terminal, from the checkout root:
+Node.js 20 or later is required. In another terminal, in your application directory:
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm --filter @meldbase/client build
+npm install @meldbase/client@beta ws
 ```
 
-Save this as `node-tour.mjs` in the checkout root. It uses the built workspace
-SDK and the workspace's WebSocket dependency:
+Save this as `node-tour.mjs` in your application directory:
 
 ```js
 import WebSocket from "ws";
-import { MeldbaseClient } from "./sdk/client/dist/index.js";
+import { MeldbaseClient } from "@meldbase/client";
 
 const client = new MeldbaseClient({
   baseUrl: "http://127.0.0.1:8080",
