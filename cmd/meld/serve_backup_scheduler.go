@@ -16,8 +16,10 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// scheduledBackupPrefix identifies files created by the scheduled backup service.
 const scheduledBackupPrefix = "meldbase-backup-"
 
+// serveBackupSchedule configures backup timing, retention, and optional restore drills.
 type serveBackupSchedule struct {
 	Directory string
 	Interval  time.Duration
@@ -26,6 +28,7 @@ type serveBackupSchedule struct {
 	DrillDir  string
 }
 
+// serveBackupScheduler runs periodic backups and tracks the worker until shutdown.
 type serveBackupScheduler struct {
 	db       *meldbase.DB
 	schedule serveBackupSchedule
@@ -34,6 +37,7 @@ type serveBackupScheduler struct {
 	group    sync.WaitGroup
 }
 
+// newServeBackupScheduler validates the schedule and prepares private backup and drill directories.
 func newServeBackupScheduler(db *meldbase.DB, schedule serveBackupSchedule, logger *serviceLogger) (*serveBackupScheduler, error) {
 	if schedule.Directory == "" && schedule.Interval == 0 && schedule.Keep == 0 && schedule.Timeout == 0 && schedule.DrillDir == "" {
 		return nil, nil
@@ -85,6 +89,7 @@ func newServeBackupScheduler(db *meldbase.DB, schedule serveBackupSchedule, logg
 	}, logger: logger, now: time.Now}, nil
 }
 
+// start launches periodic backup attempts until the context ends.
 func (scheduler *serveBackupScheduler) start(ctx context.Context) {
 	if scheduler == nil {
 		return
@@ -107,12 +112,14 @@ func (scheduler *serveBackupScheduler) start(ctx context.Context) {
 	}()
 }
 
+// wait waits for the scheduled backup worker to finish.
 func (scheduler *serveBackupScheduler) wait() {
 	if scheduler != nil {
 		scheduler.group.Wait()
 	}
 }
 
+// runOnce creates a backup and receipt, applies retention, and performs any configured restore drill.
 func (scheduler *serveBackupScheduler) runOnce(parent context.Context) (meldbase.BackupResult, error) {
 	if scheduler == nil || scheduler.db == nil {
 		return meldbase.BackupResult{}, errors.New("scheduled backup is not configured")
@@ -143,6 +150,7 @@ func (scheduler *serveBackupScheduler) runOnce(parent context.Context) (meldbase
 	return result, nil
 }
 
+// drill restores and verifies a backup in a temporary directory and records the result.
 func (scheduler *serveBackupScheduler) drill(ctx context.Context, artifact string, expected meldbase.BackupResult) error {
 	createdAt := scheduler.now().UTC()
 	directory, err := os.MkdirTemp(scheduler.schedule.DrillDir, ".meldbase-restore-drill-")
@@ -184,6 +192,7 @@ func (scheduler *serveBackupScheduler) drill(ctx context.Context, artifact strin
 	return nil
 }
 
+// writeScheduledBackupReceipt creates a private receipt and syncs both the file and its directory.
 func writeScheduledBackupReceipt(path string, result meldbase.BackupResult) error {
 	encoded, err := json.MarshalIndent(backupCommandResult{SchemaVersion: 1, ArtifactKind: physicalRestoreArtifact, BackupResult: result}, "", "  ")
 	if err != nil {
@@ -209,6 +218,7 @@ func writeScheduledBackupReceipt(path string, result meldbase.BackupResult) erro
 	return errors.Join(directory.Sync(), directory.Close())
 }
 
+// prune removes backup pairs beyond the configured retention count and syncs the directory.
 func (scheduler *serveBackupScheduler) prune() error {
 	pairs, err := scheduledBackupPairs(scheduler.schedule.Directory)
 	if err != nil {
@@ -232,11 +242,13 @@ func (scheduler *serveBackupScheduler) prune() error {
 	return nil
 }
 
+// scheduledBackupPair links a backup artifact to its receipt file.
 type scheduledBackupPair struct {
 	artifact string
 	receipt  string
 }
 
+// scheduledBackupPairs lists regular backup files with readable receipts in newest-name-first order.
 func scheduledBackupPairs(directory string) ([]scheduledBackupPair, error) {
 	entries, err := os.ReadDir(directory)
 	if err != nil {

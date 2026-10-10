@@ -22,25 +22,30 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// testWorkerToken authenticates test workers on the control channel.
 const testWorkerToken = "worker-control-token-0123456789abcdef"
 
+// synchronizedBuffer captures test process output with synchronized reads and writes.
 type synchronizedBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer
 }
 
+// Write appends bytes to the buffer while holding its lock.
 func (buffer *synchronizedBuffer) Write(value []byte) (int, error) {
 	buffer.mu.Lock()
 	defer buffer.mu.Unlock()
 	return buffer.b.Write(value)
 }
 
+// String returns the captured output while holding the buffer lock.
 func (buffer *synchronizedBuffer) String() string {
 	buffer.mu.Lock()
 	defer buffer.mu.Unlock()
 	return buffer.b.String()
 }
 
+// TestWorkerHubWorkerSDKEndToEnd checks that a Node worker SDK process handles RPC, transactional writes, and read policies through the Go server.
 func TestWorkerHubWorkerSDKEndToEnd(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -187,6 +192,7 @@ func TestWorkerHubWorkerSDKEndToEnd(t *testing.T) {
 	}
 }
 
+// TestWorkerHubRoutesTypedRPCAndUnregistersOnDisconnect checks typed RPC routing, call counters, and method removal after a normal worker disconnect.
 func TestWorkerHubRoutesTypedRPCAndUnregistersOnDisconnect(t *testing.T) {
 	hub := newTestWorkerHub(t)
 	control := httptest.NewServer(hub)
@@ -245,6 +251,7 @@ func TestWorkerHubRoutesTypedRPCAndUnregistersOnDisconnect(t *testing.T) {
 	}
 }
 
+// TestWorkerHubCountsMalformedFrameAndUnregistersWorker checks that an unknown frame disconnects the worker, removes its methods, and counts a protocol failure.
 func TestWorkerHubCountsMalformedFrameAndUnregistersWorker(t *testing.T) {
 	hub := newTestWorkerHub(t)
 	control := httptest.NewServer(hub)
@@ -266,6 +273,7 @@ func TestWorkerHubCountsMalformedFrameAndUnregistersWorker(t *testing.T) {
 	}
 }
 
+// TestWorkerHubRejectsDuplicateJSONKeysBeforeRegistration checks that duplicate registration keys are rejected before any worker methods are registered.
 func TestWorkerHubRejectsDuplicateJSONKeysBeforeRegistration(t *testing.T) {
 	hub := newTestWorkerHub(t)
 	control := httptest.NewServer(hub)
@@ -288,6 +296,7 @@ func TestWorkerHubRejectsDuplicateJSONKeysBeforeRegistration(t *testing.T) {
 	}
 }
 
+// TestWorkerHubRequiresCapabilityDiscoveryAndUsesFixedV1Descriptor checks that connections require capability discovery and registration returns the expected protocol descriptor.
 func TestWorkerHubRequiresCapabilityDiscoveryAndUsesFixedV1Descriptor(t *testing.T) {
 	hub := newTestWorkerHub(t)
 	control := httptest.NewServer(hub)
@@ -332,6 +341,7 @@ func TestWorkerHubRequiresCapabilityDiscoveryAndUsesFixedV1Descriptor(t *testing
 	}
 }
 
+// TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath checks that worker writes and policy invalidation commit atomically and replay avoids another worker call.
 func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "worker-transaction.meld2"))
 	if err != nil {
@@ -523,6 +533,7 @@ func TestWorkerHubTransactionalOpsCommitThroughGoAtomicPath(t *testing.T) {
 	}
 }
 
+// TestWorkerTransactionUpdateRejectsAmbiguousAndMalformedFrames checks that invalid worker update frames are rejected without adding a database commit.
 func TestWorkerTransactionUpdateRejectsAmbiguousAndMalformedFrames(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "worker-update-validation.meld2"))
 	if err != nil {
@@ -570,6 +581,7 @@ func TestWorkerTransactionUpdateRejectsAmbiguousAndMalformedFrames(t *testing.T)
 	}
 }
 
+// TestWorkerReadPolicyNarrowsBasePolicyAndRevokesOnDisconnect checks that worker policies narrow visible documents and fields and deny managed queries after disconnect.
 func TestWorkerReadPolicyNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) {
 	authenticator, err := NewWorkerTokenAuthenticator(testWorkerToken)
 	if err != nil {
@@ -685,6 +697,7 @@ func TestWorkerReadPolicyNarrowsBasePolicyAndRevokesOnDisconnect(t *testing.T) {
 	}
 }
 
+// TestWorkerReadPolicyEvaluationHasIndependentDeadline checks that policy evaluation times out, cancels the worker request, and records a failed evaluation.
 func TestWorkerReadPolicyEvaluationHasIndependentDeadline(t *testing.T) {
 	authenticator, _ := NewWorkerTokenAuthenticator(testWorkerToken)
 	hub, err := NewWorkerHub(WorkerHubConfig{
@@ -727,6 +740,7 @@ func TestWorkerReadPolicyEvaluationHasIndependentDeadline(t *testing.T) {
 	}
 }
 
+// TestWorkerReadPolicyDisconnectRevokesCompositeRealtimePolicy checks that worker disconnect forces subscription resynchronization while preserving the base policy lease.
 func TestWorkerReadPolicyDisconnectRevokesCompositeRealtimePolicy(t *testing.T) {
 	authenticator, _ := NewWorkerTokenAuthenticator(testWorkerToken)
 	hub, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, ReadPolicyCollections: []string{"items"}})
@@ -804,6 +818,7 @@ func TestWorkerReadPolicyDisconnectRevokesCompositeRealtimePolicy(t *testing.T) 
 	}
 }
 
+// TestWorkerHubRejectsUnauthenticatedBrowserAndConflictingRegistration checks that missing authentication, browser origins, and conflicting method registrations are rejected.
 func TestWorkerHubRejectsUnauthenticatedBrowserAndConflictingRegistration(t *testing.T) {
 	hub := newTestWorkerHub(t)
 	control := httptest.NewServer(hub)
@@ -838,6 +853,7 @@ func TestWorkerHubRejectsUnauthenticatedBrowserAndConflictingRegistration(t *tes
 	}
 }
 
+// TestWorkerHubRejectsUndeclaredReadPolicyAuthority checks that invalid managed collection settings and undeclared worker read policies are rejected.
 func TestWorkerHubRejectsUndeclaredReadPolicyAuthority(t *testing.T) {
 	authenticator, _ := NewWorkerTokenAuthenticator(testWorkerToken)
 	if _, err := NewWorkerHub(WorkerHubConfig{Authenticator: authenticator, ReadPolicyCollections: []string{"bad/name"}}); err == nil {
@@ -868,6 +884,7 @@ func TestWorkerHubRejectsUndeclaredReadPolicyAuthority(t *testing.T) {
 	}
 }
 
+// TestWorkerHubCannotShadowReservedLocalMethod checks that workers cannot register a method name reserved by a local RPC handler.
 func TestWorkerHubCannotShadowReservedLocalMethod(t *testing.T) {
 	hub := newTestWorkerHub(t)
 	db := meldbase.New()
@@ -900,6 +917,7 @@ func TestWorkerHubCannotShadowReservedLocalMethod(t *testing.T) {
 	}
 }
 
+// newTestWorkerHub creates a test worker hub authenticated by the shared test token.
 func newTestWorkerHub(t *testing.T) *WorkerHub {
 	t.Helper()
 	authenticator, err := NewWorkerTokenAuthenticator(testWorkerToken)
@@ -913,6 +931,7 @@ func newTestWorkerHub(t *testing.T) *WorkerHub {
 	return hub
 }
 
+// dialTestWorker opens an authenticated worker control socket with capability discovery and a test deadline.
 func dialTestWorker(t *testing.T, controlURL string) (*websocket.Conn, context.Context) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -925,6 +944,7 @@ func dialTestWorker(t *testing.T, controlURL string) (*websocket.Conn, context.C
 	return connection, ctx
 }
 
+// openTestWorker opens a test worker socket and registers the supplied methods.
 func openTestWorker(t *testing.T, controlURL string, methods []map[string]any) (*websocket.Conn, context.Context) {
 	t.Helper()
 	connection, ctx := dialTestWorker(t, controlURL)

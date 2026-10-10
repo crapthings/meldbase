@@ -12,13 +12,19 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// IndexBuildID identifies one durable, resumable Storage  index build.
+// IndexBuildID identifies one durable, resumable index build.
 type IndexBuildID [16]byte
 
-func (id IndexBuildID) String() string               { return hex.EncodeToString(id[:]) }
-func (id IndexBuildID) IsZero() bool                 { return id == IndexBuildID{} }
+// String returns the build ID as lowercase hexadecimal text.
+func (id IndexBuildID) String() string { return hex.EncodeToString(id[:]) }
+
+// IsZero reports whether the build ID is empty.
+func (id IndexBuildID) IsZero() bool { return id == IndexBuildID{} }
+
+// MarshalText encodes the build ID as hexadecimal text.
 func (id IndexBuildID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 
+// UnmarshalText parses a nonzero hexadecimal build ID into the receiver.
 func (id *IndexBuildID) UnmarshalText(value []byte) error {
 	if id == nil {
 		return ErrIndexBuildNotFound
@@ -31,6 +37,7 @@ func (id *IndexBuildID) UnmarshalText(value []byte) error {
 	return nil
 }
 
+// ParseIndexBuildID parses a hexadecimal index-build identifier.
 func ParseIndexBuildID(value string) (IndexBuildID, error) {
 	var id IndexBuildID
 	decoded, err := hex.DecodeString(value)
@@ -44,25 +51,40 @@ func ParseIndexBuildID(value string) (IndexBuildID, error) {
 	return id, nil
 }
 
+// IndexBuildPhase identifies the current stage of a resumable index build.
 type IndexBuildPhase string
+
+// IndexBuildFailure identifies why an index build stopped permanently.
 type IndexBuildFailure string
 
 const (
-	IndexBuildPhaseScan    IndexBuildPhase = "scan"
+	// IndexBuildPhaseScan marks a build scanning its initial document snapshot.
+	IndexBuildPhaseScan IndexBuildPhase = "scan"
+	// IndexBuildPhaseCatchUp marks a build applying changes after its initial snapshot.
 	IndexBuildPhaseCatchUp IndexBuildPhase = "catch_up"
-	IndexBuildPhaseReady   IndexBuildPhase = "ready"
-	IndexBuildPhaseFailed  IndexBuildPhase = "failed"
+	// IndexBuildPhaseReady marks a build ready for publication.
+	IndexBuildPhaseReady IndexBuildPhase = "ready"
+	// IndexBuildPhaseFailed marks a build that stopped with a terminal failure.
+	IndexBuildPhaseFailed IndexBuildPhase = "failed"
 
-	IndexBuildFailureNone           IndexBuildFailure = ""
+	// IndexBuildFailureNone marks the absence of an index-build failure.
+	IndexBuildFailureNone IndexBuildFailure = ""
+	// IndexBuildFailureUniqueConflict marks a duplicate key found while building a unique index.
 	IndexBuildFailureUniqueConflict IndexBuildFailure = "unique_conflict"
-	IndexBuildFailureResourceLimit  IndexBuildFailure = "resource_limit"
-	IndexBuildFailureHistoryLost    IndexBuildFailure = "history_lost"
-	IndexBuildFailureCanceled       IndexBuildFailure = "canceled"
-	IndexBuildFailureInvalidIndex   IndexBuildFailure = "invalid_index"
+	// IndexBuildFailureResourceLimit marks an index build that exceeded a resource limit.
+	IndexBuildFailureResourceLimit IndexBuildFailure = "resource_limit"
+	// IndexBuildFailureHistoryLost marks a build whose required change history was lost.
+	IndexBuildFailureHistoryLost IndexBuildFailure = "history_lost"
+	// IndexBuildFailureCanceled marks a canceled index build.
+	IndexBuildFailureCanceled IndexBuildFailure = "canceled"
+	// IndexBuildFailureInvalidIndex marks a build with invalid index data.
+	IndexBuildFailureInvalidIndex IndexBuildFailure = "invalid_index"
 )
 
-// IndexBuildStatus is durable progress. EntryCount and CanonicalBytes describe
-// the current private Secondary tree, not transient Go heap usage.
+// IndexBuildStatus reports the stored progress and outcome of a resumable index build.
+//
+// EntryCount and CanonicalBytes describe the pending index tree, not transient
+// Go heap usage.
 type IndexBuildStatus struct {
 	ID              IndexBuildID      `json:"id"`
 	Collection      string            `json:"collection"`
@@ -81,19 +103,23 @@ type IndexBuildStatus struct {
 	UpdatedAt       time.Time         `json:"updatedAt"`
 }
 
-// StartIndexBuild creates a durable private shadow index. It is Storage
-// only and does not scan documents or make the index query-visible.
+// StartIndexBuild creates a stored, resumable build for a new index.
+//
+// It requires a durable database and does not yet scan documents or expose
+// the index to queries.
 func (c *Collection) StartIndexBuild(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
 	return c.startIndexBuild(ctx, name, fields, options, false)
 }
 
-// StartIndexRebuild creates a durable private shadow index that will atomically
-// replace an already-published index with the same name. The old index remains
-// query-visible until final publication; the build is resumable or abortable.
+// StartIndexRebuild creates a resumable build to replace a published index with the same name.
+//
+// The old index remains available to queries until atomic publication of its
+// replacement; the build can be resumed or aborted.
 func (c *Collection) StartIndexRebuild(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
 	return c.startIndexBuild(ctx, name, fields, options, true)
 }
 
+// startIndexBuild reserves an index name and creates a persistent private build for creation or replacement.
 func (c *Collection) startIndexBuild(ctx context.Context, name string, fields []IndexField, options IndexOptions, replaceExisting bool) (IndexBuildID, error) {
 	if err := contextError(ctx); err != nil {
 		return IndexBuildID{}, err
@@ -146,8 +172,9 @@ func (c *Collection) startIndexBuild(ctx context.Context, name string, fields []
 	return id, nil
 }
 
-// CreateIndexOnline starts and runs one durable build to publication. A
-// context cancellation leaves the returned build discoverable through
+// CreateIndexOnline creates and runs a resumable index build until publication or interruption.
+//
+// Context cancellation leaves the returned build discoverable through
 // IndexBuilds; use StartIndexBuild when the ID must be known before execution.
 func (c *Collection) CreateIndexOnline(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
 	id, err := c.StartIndexBuild(ctx, name, fields, options)
@@ -157,8 +184,9 @@ func (c *Collection) CreateIndexOnline(ctx context.Context, name string, fields 
 	return id, c.db.ResumeIndexBuild(ctx, id)
 }
 
-// RebuildIndexOnline starts and runs an atomic replacement for an existing
-// durable index. A cancellation leaves the old index published and the private
+// RebuildIndexOnline builds and atomically publishes a replacement for an existing durable index.
+//
+// A cancellation leaves the old index published and the private
 // replacement discoverable through IndexBuilds.
 func (c *Collection) RebuildIndexOnline(ctx context.Context, name string, fields []IndexField, options IndexOptions) (IndexBuildID, error) {
 	id, err := c.StartIndexRebuild(ctx, name, fields, options)
@@ -168,8 +196,9 @@ func (c *Collection) RebuildIndexOnline(ctx context.Context, name string, fields
 	return id, c.db.ResumeIndexBuild(ctx, id)
 }
 
-// IndexBuilds returns all durable unfinished builds. The result survives a
-// clean close, process crash, and reopen.
+// IndexBuilds returns the stored status of all unfinished index builds.
+//
+// Build records survive a clean close, process crash, and reopen.
 func (db *DB) IndexBuilds() ([]IndexBuildStatus, error) {
 	store, err := db.durableIndexBuildStore()
 	if err != nil {
@@ -186,6 +215,7 @@ func (db *DB) IndexBuilds() ([]IndexBuildStatus, error) {
 	return result, nil
 }
 
+// IndexBuild returns the persisted status of one unfinished index build.
 func (db *DB) IndexBuild(id IndexBuildID) (IndexBuildStatus, error) {
 	store, err := db.durableIndexBuildStore()
 	if err != nil {
@@ -201,8 +231,10 @@ func (db *DB) IndexBuild(id IndexBuildID) (IndexBuildStatus, error) {
 	return publicIndexBuildStatus(meta), nil
 }
 
-// ResumeIndexBuild scans bounded batches, catches up retained commits, and
-// atomically publishes the index. Only one caller should resume a given build;
+// ResumeIndexBuild continues a stored index build until publication or interruption.
+//
+// It scans bounded batches, applies retained changes, and publishes atomically.
+// Only one caller should resume a given build;
 // stale concurrent callers receive ErrWriteConflict from durable CAS checks.
 func (db *DB) ResumeIndexBuild(ctx context.Context, id IndexBuildID) error {
 	store, err := db.durableIndexBuildStore()
@@ -282,6 +314,7 @@ func (db *DB) ResumeIndexBuild(ctx context.Context, id IndexBuildID) error {
 	})
 }
 
+// indexBuildPublished checks whether the collection has a published index matching the build definition.
 func (db *DB) indexBuildPublished(meta storage.IndexBuildMeta) bool {
 	if db == nil || meta.Name == "" {
 		return false
@@ -300,6 +333,7 @@ func (db *DB) indexBuildPublished(meta storage.IndexBuildMeta) bool {
 	return state != nil && equalIndexDefinitions(state.definition, newIndexDefinition(meta.Name, fields, meta.Unique))
 }
 
+// resumeIndexBuildScan adds one bounded batch of source documents to the private index and saves scan progress.
 func (db *DB) resumeIndexBuildScan(ctx context.Context, store *durableStore, meta storage.IndexBuildMeta, budget *indexBuildBudget) (resultErr error) {
 	opened, iterator, err := store.file.OpenIndexBuildScanIterator(meta.BuildID, storage.MaxIndexBuildBatchEntries)
 	if err != nil {
@@ -371,6 +405,7 @@ func (db *DB) resumeIndexBuildScan(ctx context.Context, store *durableStore, met
 	return nil
 }
 
+// resumeIndexBuildCatchUp applies a bounded range of retained commits to the private index and saves its position.
 func (db *DB) resumeIndexBuildCatchUp(ctx context.Context, store *durableStore, meta storage.IndexBuildMeta, budget *indexBuildBudget) error {
 	opened, snapshot, err := store.file.OpenIndexBuildCatchUpSnapshot(meta.BuildID)
 	if err != nil {
@@ -461,6 +496,7 @@ func (db *DB) resumeIndexBuildCatchUp(ctx context.Context, store *durableStore, 
 	return nil
 }
 
+// finalizeIndexBuild commits a caught-up private index as the query-visible index and publishes its catalog change.
 func (db *DB) finalizeIndexBuild(ctx context.Context, store *durableStore, meta storage.IndexBuildMeta) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -526,6 +562,7 @@ func (db *DB) finalizeIndexBuild(ctx context.Context, store *durableStore, meta 
 	return nil
 }
 
+// AbortIndexBuild removes an unfinished private index build and releases its name reservation.
 func (db *DB) AbortIndexBuild(ctx context.Context, id IndexBuildID) error {
 	store, err := db.durableIndexBuildStore()
 	if err != nil {
@@ -557,6 +594,7 @@ func (db *DB) AbortIndexBuild(ctx context.Context, id IndexBuildID) error {
 	return nil
 }
 
+// failIndexBuild persists a terminal build failure and returns the resulting status.
 func (db *DB) failIndexBuild(ctx context.Context, id IndexBuildID, failure storage.IndexBuildFailure) (IndexBuildStatus, error) {
 	if err := contextError(ctx); err != nil {
 		return IndexBuildStatus{}, err
@@ -584,6 +622,7 @@ func (db *DB) failIndexBuild(ctx context.Context, id IndexBuildID, failure stora
 	return publicIndexBuildStatus(meta), nil
 }
 
+// durableIndexBuildStore returns the storage backend when the database is open and supports durable builds.
 func (db *DB) durableIndexBuildStore() (*durableStore, error) {
 	if db == nil {
 		return nil, ErrClosed
@@ -600,6 +639,7 @@ func (db *DB) durableIndexBuildStore() (*durableStore, error) {
 	return store, nil
 }
 
+// handleIndexBuildError maps a storage error and disables writes when the error is unsafe to recover from.
 func (db *DB) handleIndexBuildError(err error) error {
 	mapped := mapStorageError(err)
 	if safeIndexBuildError(mapped) {
@@ -613,8 +653,10 @@ func (db *DB) handleIndexBuildError(err error) error {
 	return mapped
 }
 
-// handleIndexBuildErrorLocked is for storage calls deliberately serialized
-// by db.mu, including begin/finalize/abort publication coordination.
+// handleIndexBuildErrorLocked maps build errors and disables unsafe writes while the database lock is held.
+//
+// It handles storage calls serialized by db.mu, including build creation,
+// publication, and cancellation.
 func (db *DB) handleIndexBuildErrorLocked(err error) error {
 	mapped := mapStorageError(err)
 	if safeIndexBuildError(mapped) {
@@ -623,6 +665,7 @@ func (db *DB) handleIndexBuildErrorLocked(err error) error {
 	return db.poisonIndexBuildLocked(mapped)
 }
 
+// safeIndexBuildError identifies expected build errors that do not require disabling database writes.
 func safeIndexBuildError(err error) bool {
 	return err == nil || errors.Is(err, ErrIndexBuildNotFound) || errors.Is(err, ErrIndexBuildExists) ||
 		errors.Is(err, ErrWriteConflict) || errors.Is(err, ErrHistoryLost) || errors.Is(err, ErrDuplicateKey) ||
@@ -630,6 +673,7 @@ func safeIndexBuildError(err error) bool {
 		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrClosed)
 }
 
+// poisonIndexBuildLocked records a fatal durability error while the caller holds the database write lock.
 func (db *DB) poisonIndexBuildLocked(err error) error {
 	if db == nil {
 		return err
@@ -643,6 +687,7 @@ func (db *DB) poisonIndexBuildLocked(err error) error {
 	return db.fatalErr
 }
 
+// validateIndexDefinition checks the index name, field paths, ordering, and duplicate fields.
 func validateIndexDefinition(name string, fields []IndexField, options IndexOptions) (IndexDefinition, error) {
 	if !indexNamePattern.MatchString(name) || len(fields) == 0 || len(fields) > maxCompoundIndexFields {
 		return IndexDefinition{}, fmt.Errorf("%w: indexes require one to %d fields", ErrInvalidIndex, maxCompoundIndexFields)
@@ -660,6 +705,7 @@ func validateIndexDefinition(name string, fields []IndexField, options IndexOpti
 	return newIndexDefinition(name, fields, options.Unique), nil
 }
 
+// indexBuildPath splits a dotted field path into byte segments for stored document projection.
 func indexBuildPath(field string) [][]byte {
 	parts := strings.Split(field, ".")
 	result := make([][]byte, len(parts))
@@ -669,6 +715,7 @@ func indexBuildPath(field string) [][]byte {
 	return result
 }
 
+// projectedIndexBuildKey constructs an index key from scalar fields projected directly from a stored document.
 func projectedIndexBuildKey(encoded []byte, definition IndexDefinition, id DocumentID) ([]byte, bool, error) {
 	fields := indexDefinitionFields(definition)
 	values := make([]Value, len(fields))
@@ -706,8 +753,10 @@ func projectedIndexBuildKey(encoded []byte, definition IndexDefinition, id Docum
 	return key, true, nil
 }
 
+// indexBuildReservation combines a collection and index name into an unambiguous reservation key.
 func indexBuildReservation(collection, name string) string { return collection + "\x00" + name }
 
+// publicIndexBuildStatus converts stored build metadata into the public progress report.
 func publicIndexBuildStatus(meta storage.IndexBuildMeta) IndexBuildStatus {
 	phase := IndexBuildPhaseFailed
 	failure := IndexBuildFailureNone

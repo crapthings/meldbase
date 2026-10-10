@@ -3,28 +3,36 @@ import { QueryValidationError } from "./types.js";
 import { getPath, isDocumentIDValue } from "./safe-value.js";
 import { decodeValue, encodeValue, type WireValue } from "./wire.js";
 
+/** Marks a sort field that is absent from the cursor document. */
 interface CursorMissing {
   readonly missing: true;
 }
+/** Stores an encoded sort value or an absent-field marker. */
 type CursorValue = WireValue | CursorMissing;
+/** Stores the cursor version, sort order, and last document values. */
 interface CursorPayload {
   readonly version: 1;
   readonly sort: readonly SortField[];
   readonly values: readonly CursorValue[];
 }
+/** Holds a decoded cursor value and whether its field exists. */
 interface CursorComponent {
   readonly found: boolean;
   readonly value?: Value;
 }
 
+/** Limits the length of an encoded page cursor. */
 const MAX_CURSOR_CHARACTERS = 16_384;
+/** Limits cursor JSON bytes before base64 encoding. */
 const MAX_CURSOR_PAYLOAD_BYTES = Math.floor(MAX_CURSOR_CHARACTERS / 4) * 3;
 
+/** Holds one page of documents and an optional cursor for the next page. */
 export interface PageResult<T extends Document> {
   readonly documents: readonly T[];
   readonly nextCursor?: string;
 }
 
+/** Encodes a document’s sort values into a cursor for the next page. */
 export function pageCursorFor(document: Document, sort: readonly SortField[]): string {
   const normalized = normalizePageSort(sort);
   const values = normalized.map((field) => {
@@ -37,6 +45,7 @@ export function pageCursorFor(document: Document, sort: readonly SortField[]): s
   return encodeCursor({ version: 1, sort: normalized, values });
 }
 
+/** Builds a filter for documents that follow the cursor in the requested sort order. */
 export function pageFilterAfter(cursor: string, sort: readonly SortField[]): Filter {
   const normalized = normalizePageSort(sort);
   const payload = decodeCursor(cursor);
@@ -58,6 +67,7 @@ export function pageFilterAfter(cursor: string, sort: readonly SortField[]): Fil
   return branches.length === 1 ? branches[0]! : { $or: branches };
 }
 
+/** Checks page sort fields and adds a document ID tie breaker when needed. */
 export function normalizePageSort(sort: readonly SortField[]): readonly SortField[] {
   if (!Array.isArray(sort) || sort.length === 0)
     throw new QueryValidationError("Seek pagination requires at least one sort field");
@@ -72,10 +82,12 @@ export function normalizePageSort(sort: readonly SortField[]): readonly SortFiel
   return Object.freeze(normalized);
 }
 
+/** Matches a preceding sort field to its cursor value or absence. */
 function equalFilter(field: SortField, value: CursorComponent): Filter {
   return value.found ? { [field.path]: value.value! } : { [field.path]: { $exists: false } };
 }
 
+/** Matches values after one cursor component while respecting sort direction and missing fields. */
 function afterFilter(field: SortField, value: CursorComponent): Filter | undefined {
   if (!value.found) return field.direction === 1 ? { [field.path]: { $exists: true } } : undefined;
   const comparison: Comparison = field.direction === 1 ? { $gt: value.value! } : { $lt: value.value! };
@@ -83,6 +95,7 @@ function afterFilter(field: SortField, value: CursorComponent): Filter | undefin
   return { $or: [{ [field.path]: comparison }, { [field.path]: { $exists: false } }] };
 }
 
+/** Checks whether a value can be encoded as one scalar cursor component. */
 function isCursorScalar(value: Value): boolean {
   return (
     !Array.isArray(value) &&
@@ -94,6 +107,7 @@ function isCursorScalar(value: Value): boolean {
   );
 }
 
+/** Decodes a scalar cursor component or preserves its missing-field marker. */
 function decodeCursorValue(value: CursorValue): CursorComponent {
   if (isCursorMissing(value)) return { found: false };
   const decoded = decodeValue(value);
@@ -101,6 +115,7 @@ function decodeCursorValue(value: CursorValue): CursorComponent {
   return { found: true, value: decoded };
 }
 
+/** Checks for an object containing only the missing-field marker. */
 function isCursorMissing(value: unknown): value is CursorMissing {
   return (
     value !== null &&
@@ -111,6 +126,7 @@ function isCursorMissing(value: unknown): value is CursorMissing {
   );
 }
 
+/** Encodes bounded cursor JSON as URL-safe base64. */
 function encodeCursor(payload: CursorPayload): string {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
   if (bytes.byteLength > MAX_CURSOR_PAYLOAD_BYTES) throw new QueryValidationError("Page cursor exceeds size limit");
@@ -121,6 +137,7 @@ function encodeCursor(payload: CursorPayload): string {
   return cursor;
 }
 
+/** Decodes a bounded cursor and checks its version and sort fields. */
 function decodeCursor(cursor: string): CursorPayload {
   if (
     typeof cursor !== "string" ||
@@ -151,6 +168,7 @@ function decodeCursor(cursor: string): CursorPayload {
   }
 }
 
+/** Checks whether two sort lists have the same ordered paths and directions. */
 function sameSort(left: readonly SortField[], right: readonly SortField[]): boolean {
   return (
     left.length === right.length &&

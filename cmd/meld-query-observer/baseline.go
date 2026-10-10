@@ -8,15 +8,13 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// observationReportSet groups backend observation reports under one schema version.
 type observationReportSet struct {
 	SchemaVersion int                 `json:"schemaVersion"`
 	Reports       []observationReport `json:"reports"`
 }
 
-// stableObservationReport deliberately excludes setup/query timings, temporary
-// database paths, and free-form error text. Its remaining fields are suitable
-// for exact CI comparison for the same observer version, backend, dataset, and
-// resource limits.
+// stableObservationReport stores query observations without timings, temporary paths, or free-form errors.
 type stableObservationReport struct {
 	SchemaVersion  int                         `json:"schemaVersion"`
 	Format         string                      `json:"format"`
@@ -25,12 +23,14 @@ type stableObservationReport struct {
 	MeasuredTotals queryCounters               `json:"measuredTotals"`
 }
 
+// stableObservationReportSet groups reports prepared for repeatable comparisons.
 type stableObservationReportSet struct {
 	SchemaVersion int                       `json:"schemaVersion"`
 	Format        string                    `json:"format"`
 	Reports       []stableObservationReport `json:"reports"`
 }
 
+// stableReportConfig records dataset, scenario, and resource settings without temporary paths.
 type stableReportConfig struct {
 	Backend               string                  `json:"backend"`
 	Profile               string                  `json:"profile"`
@@ -46,6 +46,7 @@ type stableReportConfig struct {
 	Limits                meldbase.ResourceLimits `json:"limits"`
 }
 
+// stableScenarioObservation records query plans and execution counters without timings or free-form errors.
 type stableScenarioObservation struct {
 	Name               string                 `json:"name"`
 	Family             string                 `json:"family"`
@@ -61,6 +62,7 @@ type stableScenarioObservation struct {
 	Ratios             explainRatios          `json:"ratios"`
 }
 
+// makeStableObservationReport copies an observation report while omitting timings, temporary paths, and free-form errors.
 func makeStableObservationReport(report observationReport) stableObservationReport {
 	stable := stableObservationReport{
 		SchemaVersion: report.SchemaVersion,
@@ -101,6 +103,7 @@ func makeStableObservationReport(report observationReport) stableObservationRepo
 	return stable
 }
 
+// cloneScenarioParametersPointer copies optional scenario parameters while preserving a missing value.
 func cloneScenarioParametersPointer(parameters *scenarioParameters) *scenarioParameters {
 	if parameters == nil {
 		return nil
@@ -108,6 +111,7 @@ func cloneScenarioParametersPointer(parameters *scenarioParameters) *scenarioPar
 	return cloneScenarioParameters(*parameters)
 }
 
+// writeBackendComparison prints plan-work differences for scenarios shared by memory and durable reports.
 func writeBackendComparison(output io.Writer, reports []observationReport) error {
 	var memory, durable *observationReport
 	for index := range reports {

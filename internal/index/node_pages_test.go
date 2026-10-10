@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestIndependentlyAddressedNodePagesRoundTrip checks page identifiers and tree entries after encoding and decoding separate node pages.
 func TestIndependentlyAddressedNodePagesRoundTrip(t *testing.T) {
 	tree := NewWithOrder(5)
 	for number := 0; number < 1000; number++ {
@@ -36,6 +37,7 @@ func TestIndependentlyAddressedNodePagesRoundTrip(t *testing.T) {
 	}
 }
 
+// TestNodePagesRejectMissingAndCorruptLinks checks that decoding rejects missing node pages and a corrupted node link.
 func TestNodePagesRejectMissingAndCorruptLinks(t *testing.T) {
 	tree := NewWithOrder(5)
 	for number := 0; number < 100; number++ {

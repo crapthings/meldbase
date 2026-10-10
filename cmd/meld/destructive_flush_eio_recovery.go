@@ -14,8 +14,10 @@ import (
 	"time"
 )
 
+// destructiveFlushEIORecoveryBindingSchema identifies the recovery plan and raw-device receipt format.
 const destructiveFlushEIORecoveryBindingSchema uint32 = 1
 
+// destructiveFlushEIORecoveryPlan binds a stopped target image's hash and size to the flush fault evidence.
 type destructiveFlushEIORecoveryPlan struct {
 	SchemaVersion     uint32    `json:"schemaVersion"`
 	TargetImage       string    `json:"targetImage"`
@@ -26,6 +28,7 @@ type destructiveFlushEIORecoveryPlan struct {
 	CreatedAt         time.Time `json:"createdAt"`
 }
 
+// destructiveFlushEIORecoveryReady records the raw recovery device's contents and fresh boot identity.
 type destructiveFlushEIORecoveryReady struct {
 	SchemaVersion   uint32    `json:"schemaVersion"`
 	PlanSHA256      string    `json:"planSha256"`
@@ -36,6 +39,7 @@ type destructiveFlushEIORecoveryReady struct {
 	ObservedAt      time.Time `json:"observedAt"`
 }
 
+// hashOpenFile reads a file or device to return its SHA-256 hash and byte count.
 func hashOpenFile(path string) (string, int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -50,6 +54,7 @@ func hashOpenFile(path string) (string, int64, error) {
 	return hex.EncodeToString(hash.Sum(nil)), size, nil
 }
 
+// validateDestructiveFlushEIORecoveryPlan checks that the recovery plan binds the stopped image to the fault proof.
 func validateDestructiveFlushEIORecoveryPlan(plan destructiveFlushEIORecoveryPlan, faultRaw, proofRaw []byte, proof destructiveQMPFlushEIOProof) error {
 	if plan.SchemaVersion != destructiveFlushEIORecoveryBindingSchema || !filepath.IsAbs(plan.TargetImage) || !qualificationHexDigest(plan.TargetImageSHA256) || plan.TargetImageSize <= 0 || plan.FaultSHA256 != qualificationSHA256(faultRaw) || plan.ProofSHA256 != qualificationSHA256(proofRaw) || plan.TargetImage != proof.TargetImage || plan.FaultSHA256 != proof.FaultSHA256 || plan.CreatedAt.Before(proof.FinishedAt) {
 		return errors.New("flush EIO recovery plan is incomplete or not bound to the stopped fault image")
@@ -57,6 +62,7 @@ func validateDestructiveFlushEIORecoveryPlan(plan destructiveFlushEIORecoveryPla
 	return nil
 }
 
+// validateDestructiveFlushEIORecoveryReady checks that a fresh boot observes exactly the image contents recorded in the recovery plan.
 func validateDestructiveFlushEIORecoveryReady(ready destructiveFlushEIORecoveryReady, planRaw []byte, plan destructiveFlushEIORecoveryPlan, fault destructiveFlushEIOFaultResult) error {
 	if ready.SchemaVersion != destructiveFlushEIORecoveryBindingSchema || ready.PlanSHA256 != qualificationSHA256(planRaw) || ready.RawDevice != "/dev/vda" || ready.RawDeviceSHA256 != plan.TargetImageSHA256 || ready.RawDeviceSize != plan.TargetImageSize || !qualificationSafeName(ready.BootID, 64) || ready.BootID == fault.BootID || ready.ObservedAt.Before(plan.CreatedAt) {
 		return errors.New("flush EIO recovery ready receipt does not bind a fresh boot to the exact stopped image")
@@ -64,6 +70,7 @@ func validateDestructiveFlushEIORecoveryReady(ready destructiveFlushEIORecoveryR
 	return nil
 }
 
+// runDestructiveFlushEIORecoveryPlan hashes the stopped fault image and publishes a recovery plan beside it.
 func runDestructiveFlushEIORecoveryPlan(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-flush-eio-recovery-plan", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -121,6 +128,7 @@ func runDestructiveFlushEIORecoveryPlan(args []string, stdout, stderr io.Writer)
 	return json.NewEncoder(stdout).Encode(plan)
 }
 
+// runDestructiveFlushEIORecoveryPreflight checks the fresh-boot raw device against the recovery plan and publishes its receipt.
 func runDestructiveFlushEIORecoveryPreflight(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-flush-eio-recovery-preflight", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -187,6 +195,7 @@ func runDestructiveFlushEIORecoveryPreflight(args []string, stdout, stderr io.Wr
 	return json.NewEncoder(stdout).Encode(ready)
 }
 
+// makeQualificationArtifactReadable grants artifact read access to all users and syncs the file and parent directory.
 func makeQualificationArtifactReadable(path string) error {
 	if err := os.Chmod(path, 0o644); err != nil {
 		return err

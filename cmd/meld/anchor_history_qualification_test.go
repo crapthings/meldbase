@@ -17,6 +17,7 @@ import (
 	"github.com/crapthings/meldbase/internal/qualification"
 )
 
+// TestSignedAnchorHistoryReceiptRejectsTamperWrongKeyAndChangedController checks that signed history verification rejects altered evidence, incorrect keys, and results unsupported by the recorded history or replicas.
 func TestSignedAnchorHistoryReceiptRejectsTamperWrongKeyAndChangedController(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -167,6 +168,7 @@ func TestSignedAnchorHistoryReceiptRejectsTamperWrongKeyAndChangedController(t *
 	}
 }
 
+// TestAnchorHistorySignRejectsNonLinearizableControllerBeforeRemoteAccess checks that history signing rejects a history inconsistent with sequential execution before accessing a signing key.
 func TestAnchorHistorySignRejectsNonLinearizableControllerBeforeRemoteAccess(t *testing.T) {
 	directory := t.TempDir()
 	target := anchorHistoryWireValue{Exists: true, DatabaseIDHex: strings.Repeat("01", 16), MinimumCommitSequence: 1, MinimumGeneration: 2}
@@ -191,15 +193,18 @@ func TestAnchorHistorySignRejectsNonLinearizableControllerBeforeRemoteAccess(t *
 	}
 }
 
+// base64PublicKey encodes an Ed25519 public key as standard base64.
 func base64PublicKey(key ed25519.PublicKey) string {
 	return base64.StdEncoding.EncodeToString(key)
 }
 
+// attachAnchorHistoryTestAgentEvidence adds signed agent evidence to a test controller record.
 func attachAnchorHistoryTestAgentEvidence(t *testing.T, controller *anchorHistoryControllerRecord) {
 	t.Helper()
 	_ = attachAnchorHistoryTestAgentEvidenceWithKeys(t, controller)
 }
 
+// attachAnchorHistoryTestAgentEvidenceWithKeys adds signed evidence for each recorded operation and returns the test agent signing keys.
 func attachAnchorHistoryTestAgentEvidenceWithKeys(t *testing.T, controller *anchorHistoryControllerRecord) []ed25519.PrivateKey {
 	t.Helper()
 	if controller.SourceRevision == "" {

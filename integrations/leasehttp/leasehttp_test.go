@@ -18,6 +18,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// TestMemberServesStrictAuthenticatedLoadAndCAS checks that an authorized member serves lease reads and conditional writes while rejecting duplicate creation and malformed requests.
 func TestMemberServesStrictAuthenticatedLoadAndCAS(t *testing.T) {
 	store := primarylease.NewMemoryStore()
 	member, err := NewMember(MemberConfig{Store: store, Authorize: func(*http.Request) (string, error) { return "controller-a", nil }})
@@ -75,6 +76,7 @@ func TestMemberServesStrictAuthenticatedLoadAndCAS(t *testing.T) {
 	}
 }
 
+// TestMemberRejectsOriginsUnauthenticatedAndUnsafePaths checks that lease endpoints reject unverified peers, browser origins, invalid paths, and denied authorization.
 func TestMemberRejectsOriginsUnauthenticatedAndUnsafePaths(t *testing.T) {
 	member, err := NewMember(MemberConfig{Store: primarylease.NewMemoryStore(), Authorize: func(*http.Request) (string, error) { return "controller-a", nil }})
 	if err != nil {
@@ -112,6 +114,7 @@ func TestMemberRejectsOriginsUnauthenticatedAndUnsafePaths(t *testing.T) {
 	}
 }
 
+// TestClientUsesVerifiedHTTPSAndExactWireContract checks that the lease client uses the expected protocol and rejects insecure transport or invalid certificate pins.
 func TestClientUsesVerifiedHTTPSAndExactWireContract(t *testing.T) {
 	databaseID := [16]byte{11: 3}
 	now := time.Date(2026, 7, 18, 1, 2, 3, 0, time.UTC)
@@ -172,6 +175,7 @@ func TestClientUsesVerifiedHTTPSAndExactWireContract(t *testing.T) {
 	}
 }
 
+// memberRequest creates a test request with simulated verified TLS peer state.
 func memberRequest(method, endpoint string, body []byte) *http.Request {
 	request := httptest.NewRequest(method, endpoint, bytes.NewReader(body))
 	request.TLS = &tls.ConnectionState{Version: tls.VersionTLS13, VerifiedChains: [][]*x509.Certificate{{{Raw: []byte("verified-peer")}}}}

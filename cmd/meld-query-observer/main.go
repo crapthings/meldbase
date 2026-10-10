@@ -15,6 +15,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// main runs the query observer and reports command failures through its exit status.
 func main() {
 	if err := runCLI(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -25,6 +26,7 @@ func main() {
 	}
 }
 
+// runCLI runs query observations within the configured timeout and writes the selected report format.
 func runCLI(args []string, stdout, stderr io.Writer) error {
 	config, err := parseObserverConfig(args, stderr)
 	if err != nil {
@@ -49,6 +51,7 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// parseObserverConfig parses and validates the dataset, backend, scenario, output, and resource-limit options.
 func parseObserverConfig(args []string, stderr io.Writer) (observerConfig, error) {
 	config := observerConfig{
 		Backend:               "memory",
@@ -139,6 +142,7 @@ func parseObserverConfig(args []string, stderr io.Writer) (observerConfig, error
 	return config, nil
 }
 
+// observeReports collects query observations for each requested backend.
 func observeReports(ctx context.Context, config observerConfig) ([]observationReport, error) {
 	backends := []string{config.Backend}
 	if config.Backend == "both" {
@@ -160,6 +164,7 @@ func observeReports(ctx context.Context, config observerConfig) ([]observationRe
 	return reports, nil
 }
 
+// writeJSONReports writes one report or a report set as JSON, optionally omitting variable timing and path fields.
 func writeJSONReports(output io.Writer, reports []observationReport, stable bool) error {
 	encoder := json.NewEncoder(output)
 	encoder.SetIndent("", "  ")
@@ -183,6 +188,7 @@ func writeJSONReports(output io.Writer, reports []observationReport, stable bool
 	return encoder.Encode(observationReportSet{SchemaVersion: reportSchemaVersion, Reports: reports})
 }
 
+// writeTableReports prints backend reports and adds a comparison when two reports are supplied.
 func writeTableReports(output io.Writer, reports []observationReport) error {
 	for index, report := range reports {
 		if index > 0 {
@@ -200,6 +206,7 @@ func writeTableReports(output io.Writer, reports []observationReport) error {
 	return nil
 }
 
+// writeTableReport prints query plans, measured execution results, and errors for one backend report.
 func writeTableReport(output io.Writer, report observationReport) error {
 	if _, err := fmt.Fprintf(
 		output,
@@ -360,6 +367,7 @@ func writeTableReport(output io.Writer, report observationReport) error {
 	return nil
 }
 
+// formatBudgetPeak formats an exceeded budget, current pressure, or peak resource usage for the report.
 func formatBudgetPeak(observation scenarioObservation) string {
 	explain := observation.Explain
 	switch {
@@ -374,6 +382,7 @@ func formatBudgetPeak(observation scenarioObservation) string {
 	}
 }
 
+// formatEarlyStop formats whether a query stopped early or could do so, including its scope and reason.
 func formatEarlyStop(explain meldbase.ExplainResult) string {
 	reason := emptyAs(explain.EarlyStopReason, "unknown")
 	switch {
@@ -386,6 +395,7 @@ func formatEarlyStop(explain meldbase.ExplainResult) string {
 	}
 }
 
+// formatAdvice joins query advice codes for display or returns a placeholder when none exist.
 func formatAdvice(advice []meldbase.ExplainAdvice) string {
 	if len(advice) == 0 {
 		return "-"
@@ -397,6 +407,7 @@ func formatAdvice(advice []meldbase.ExplainAdvice) string {
 	return strings.Join(codes, ",")
 }
 
+// formatBytes formats a byte count using binary units for larger values.
 func formatBytes(bytes uint64) string {
 	const (
 		kib = 1 << 10
@@ -415,6 +426,7 @@ func formatBytes(bytes uint64) string {
 	}
 }
 
+// formatDurationMillis formats milliseconds with microsecond precision below one millisecond and millisecond precision otherwise.
 func formatDurationMillis(milliseconds float64) string {
 	duration := time.Duration(milliseconds * float64(time.Millisecond))
 	if duration < time.Millisecond {
@@ -423,6 +435,7 @@ func formatDurationMillis(milliseconds float64) string {
 	return duration.Round(time.Millisecond).String()
 }
 
+// formatMicros formats positive microseconds as a rounded duration and maps nonpositive values to zero.
 func formatMicros(microseconds float64) string {
 	duration := time.Duration(microseconds * float64(time.Microsecond))
 	if duration <= 0 {
@@ -431,6 +444,7 @@ func formatMicros(microseconds float64) string {
 	return duration.Round(time.Microsecond).String()
 }
 
+// emptyAs returns the fallback when the supplied string is empty.
 func emptyAs(value, fallback string) string {
 	if value == "" {
 		return fallback

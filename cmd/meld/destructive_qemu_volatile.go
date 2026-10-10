@@ -15,8 +15,10 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// destructiveQMPVolatileLossProofSchema identifies the QEMU lost-write proof format.
 const destructiveQMPVolatileLossProofSchema uint32 = 1
 
+// destructiveVolatileLossControllerEvent links the discarded overlay and replacement boot to their retained evidence.
 type destructiveVolatileLossControllerEvent struct {
 	SchemaVersion       uint32    `json:"schemaVersion"`
 	Method              string    `json:"method"`
@@ -29,6 +31,7 @@ type destructiveVolatileLossControllerEvent struct {
 	RestartedAt         time.Time `json:"restartedAt"`
 }
 
+// destructiveQMPVolatileLossProof records the QEMU processes, unchanged base image, and control exchanges for a discarded-overlay test.
 type destructiveQMPVolatileLossProof struct {
 	SchemaVersion         uint32                   `json:"schemaVersion"`
 	QEMUExecutable        string                   `json:"qemuExecutable"`
@@ -57,6 +60,7 @@ type destructiveQMPVolatileLossProof struct {
 	RestartQMPExchanges   []destructiveQMPExchange `json:"restartQmpExchanges"`
 }
 
+// runDestructiveQEMUVolatileLoss discards a QEMU write overlay with SIGKILL and records recovery from the unchanged base image.
 func runDestructiveQEMUVolatileLoss(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-volatile-loss", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -327,6 +331,7 @@ func runDestructiveQEMUVolatileLoss(args []string, stdout, stderr io.Writer) err
 	return encoder.Encode(proof)
 }
 
+// qmpVolatileQuerySnapshot checks that QEMU uses a writable overlay backed by the expected base image.
 func qmpVolatileQuerySnapshot(client *qmpRecordingClient, id, base string) error {
 	if err := client.send(map[string]string{"execute": "query-block", "id": id}); err != nil {
 		return err
@@ -336,6 +341,7 @@ func qmpVolatileQuerySnapshot(client *qmpRecordingClient, id, base string) error
 	})
 }
 
+// qmpVolatileQueryBase checks that QEMU exposes the expected base image directly.
 func qmpVolatileQueryBase(client *qmpRecordingClient, id, base string) error {
 	if err := client.send(map[string]string{"execute": "query-block", "id": id}); err != nil {
 		return err
@@ -343,6 +349,7 @@ func qmpVolatileQueryBase(client *qmpRecordingClient, id, base string) error {
 	return receiveQMPResponse(client.receive, id, func(envelope qmpMessageEnvelope) error { return validateQMPBlockInventory(envelope.Return, base) })
 }
 
+// validateQMPVolatileSnapshotInventory requires a writable qcow2 overlay whose backing paths match the expected base image.
 func validateQMPVolatileSnapshotInventory(raw json.RawMessage, base string) error {
 	var blocks []struct {
 		Inserted *struct {
@@ -367,6 +374,7 @@ func validateQMPVolatileSnapshotInventory(raw json.RawMessage, base string) erro
 	return errors.New("QMP inventory does not prove a writable temporary qcow2 overlay backed by the exact durable image")
 }
 
+// waitForVolatileLossReceipt retries reading and validating a receipt until the deadline.
 func waitForVolatileLossReceipt(path string, deadline time.Time, target any, validate func() error) ([]byte, error) {
 	var lastErr error
 	for time.Now().Before(deadline) {
@@ -382,6 +390,7 @@ func waitForVolatileLossReceipt(path string, deadline time.Time, target any, val
 	return nil, errors.Join(errors.New("timed out waiting for volatile-loss receipt"), lastErr)
 }
 
+// validateDestructiveVolatileLossControllerEvent requires a timed overlay-loss event linked to the marker and distinct boots.
 func validateDestructiveVolatileLossControllerEvent(event destructiveVolatileLossControllerEvent, markerSHA string) error {
 	if event.SchemaVersion != 1 || event.Method != "qemu-temporary-overlay-loss" || event.MarkerSHA256 != markerSHA || !qualificationHexDigest(event.RecoveryReadySHA256) || !qualificationHexDigest(event.ProofSHA256) || !qualificationSafeName(event.BootIDBefore, 64) || !qualificationSafeName(event.BootIDAfter, 64) || event.BootIDBefore == event.BootIDAfter || event.CutAt.IsZero() || !event.RestartedAt.After(event.CutAt) {
 		return errors.New("volatile-loss controller event is incomplete")
@@ -389,6 +398,7 @@ func validateDestructiveVolatileLossControllerEvent(event destructiveVolatileLos
 	return nil
 }
 
+// validateQMPVolatileLossProofStructure checks the snapshot request, process termination, restart timing, and recorded QMP exchanges.
 func validateQMPVolatileLossProofStructure(proof destructiveQMPVolatileLossProof) error {
 	if proof.SchemaVersion != destructiveQMPVolatileLossProofSchema || !filepath.IsAbs(proof.QEMUExecutable) || len(proof.QEMUArguments) < 2 || len(proof.QEMUArguments) > 256 || !qualificationHexDigest(proof.QEMUExecutableSHA256) || !qualificationHexDigest(proof.QEMUArgumentsSHA256) || !filepath.IsAbs(proof.BaseImage) || !filepath.IsAbs(proof.BaseImageArtifact) || proof.BaseImage == proof.BaseImageArtifact || !qualificationHexDigest(proof.BaseBeforeSHA256) || proof.BaseAfterKillSHA256 != proof.BaseBeforeSHA256 || !qualificationHexDigest(proof.MarkerSHA256) || !qualificationHexDigest(proof.RecoveryReadySHA256) || proof.StartedAt.IsZero() || proof.MarkerObservedAt.Before(proof.StartedAt) || proof.KillRequestedAt.Before(proof.MarkerObservedAt) || !proof.KilledProcessExitedAt.After(proof.KillRequestedAt) || !proof.RestartContinuedAt.After(proof.KilledProcessExitedAt) || !proof.RecoveryReadyAt.After(proof.RestartContinuedAt) || proof.FinishedAt.Before(proof.RecoveryReadyAt) || proof.KilledPID <= 0 || proof.RestartPID <= 0 || proof.KilledPID == proof.RestartPID || proof.Signal != "SIGKILL" || proof.SnapshotMode != "qemu-temporary-overlay" {
 		return errors.New("QMP volatile-loss proof identity, hashes, timing or process evidence is invalid")
@@ -417,6 +427,7 @@ func validateQMPVolatileLossProofStructure(proof destructiveQMPVolatileLossProof
 	return validateQMPOrderedExchanges(proof.RestartQMPExchanges, []qmpExpectedCommand{{execute: "qmp_capabilities", id: "volatile-restart-capabilities"}, {execute: "query-status", id: "restart-query-status"}, {execute: "query-block", id: "volatile-restart-query-block", validate: func(e qmpMessageEnvelope) error { return validateQMPBlockInventory(e.Return, proof.BaseImage) }}, {execute: "cont", id: "volatile-restart-cont"}})
 }
 
+// validateRetainedQMPVolatileLossProof checks the proof and hashes its retained executable, arguments, and base image artifact.
 func validateRetainedQMPVolatileLossProof(proof destructiveQMPVolatileLossProof) error {
 	if err := validateQMPVolatileLossProofStructure(proof); err != nil {
 		return err
@@ -436,6 +447,7 @@ func validateRetainedQMPVolatileLossProof(proof destructiveQMPVolatileLossProof)
 	return nil
 }
 
+// runDestructiveQMPVolatileLossProofCheck verifies retained QEMU evidence and its links to the marker and replacement boot.
 func runDestructiveQMPVolatileLossProofCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-volatile-loss-proof-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -482,6 +494,7 @@ func runDestructiveQMPVolatileLossProofCheck(args []string, stdout, stderr io.Wr
 	}{1, qualificationSHA256(proofRaw), true})
 }
 
+// runDestructiveVolatileLossBundleCheck checks that all lost-write evidence describes one transition back to the durable seed state.
 func runDestructiveVolatileLossBundleCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-volatile-loss-bundle-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)

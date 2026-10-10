@@ -22,10 +22,13 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// destructiveProcessReceiptSchema identifies the process-kill receipt format.
 const destructiveProcessReceiptSchema uint32 = 2
 
+// errDestructiveOracleIncomplete marks a reference log that has no complete prepared operation yet.
 var errDestructiveOracleIncomplete = errors.New("destructive oracle is incomplete")
 
+// destructiveProcessReceipt records the environment, retained evidence, and results of process-kill trials.
 type destructiveProcessReceipt struct {
 	SchemaVersion      uint32                          `json:"schemaVersion"`
 	SourceRevision     string                          `json:"sourceRevision,omitempty"`
@@ -48,11 +51,13 @@ type destructiveProcessReceipt struct {
 	Verifications      []meldbase.VerificationReport   `json:"verifications"`
 }
 
+// destructiveLedgerRecord records a counter update before or after its database commit.
 type destructiveLedgerRecord struct {
 	Phase   string `json:"phase"`
 	Counter uint64 `json:"counter"`
 }
 
+// runDestructiveProcessCheck runs independent process-kill recovery trials and publishes their receipt.
 func runDestructiveProcessCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-process-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -148,6 +153,7 @@ func runDestructiveProcessCheck(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(receipt)
 }
 
+// runDestructiveProcessTrial kills a paused writer and checks its recovered state against the retained reference log.
 func runDestructiveProcessTrial(target, artifactsRoot, executable string, ordinal int, stderr io.Writer) (artifactTrial string, trial qualificationDestructiveTrial, verification meldbase.VerificationReport, resultErr error) {
 	trialDirectory, err := os.MkdirTemp(target, fmt.Sprintf(".meldbase-process-kill-%04d-", ordinal))
 	if err != nil {
@@ -246,11 +252,13 @@ func runDestructiveProcessTrial(target, artifactsRoot, executable string, ordina
 	return artifactTrial, trial, verification, nil
 }
 
+// destructiveCounterStateSHA256 hashes a counter value in a repeatable text format.
 func destructiveCounterStateSHA256(counter uint64) string {
 	digest := sha256.Sum256([]byte(fmt.Sprintf("counter:%d\n", counter)))
 	return hex.EncodeToString(digest[:])
 }
 
+// runDestructiveProcessWorker logs counter updates and pauses at the requested phase for the controller to kill it.
 func runDestructiveProcessWorker(args []string, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-process-worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -300,12 +308,14 @@ func runDestructiveProcessWorker(args []string, stderr io.Writer) error {
 	}
 }
 
+// waitForDestructiveKill keeps the worker paused until its process is terminated.
 func waitForDestructiveKill() {
 	for {
 		time.Sleep(time.Hour)
 	}
 }
 
+// seedDestructiveProcessDatabase creates a zero counter and returns its verified commit sequence.
 func seedDestructiveProcessDatabase(path string) (uint64, error) {
 	db, err := meldbase.Open(path)
 	if err != nil {
@@ -324,6 +334,7 @@ func seedDestructiveProcessDatabase(path string) (uint64, error) {
 	return report.CommitSequence, nil
 }
 
+// waitForDestructivePhase waits for the reference log to reach the requested update phase before a deadline.
 func waitForDestructivePhase(path, phase string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -341,6 +352,7 @@ func waitForDestructivePhase(path, phase string, timeout time.Duration) error {
 	return errors.New("timed out waiting for destructive worker progress")
 }
 
+// appendDestructiveLedger appends and syncs one reference-log record.
 func appendDestructiveLedger(file *os.File, record destructiveLedgerRecord) error {
 	encoded, err := json.Marshal(record)
 	if err != nil {
@@ -355,6 +367,7 @@ func appendDestructiveLedger(file *os.File, record destructiveLedgerRecord) erro
 	return file.Sync()
 }
 
+// readDestructiveLedger checks complete reference-log records and returns their counters with the original bytes.
 func readDestructiveLedger(path string) (confirmed, prepared uint64, raw []byte, resultErr error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -402,6 +415,7 @@ func readDestructiveLedger(path string) (confirmed, prepared uint64, raw []byte,
 	return confirmed, prepared, raw, nil
 }
 
+// recoverDestructiveCounter reads the recovered counter and reports whether the database opened successfully.
 func recoverDestructiveCounter(path string) (uint64, bool, error) {
 	db, err := meldbase.Open(path)
 	if err != nil {
@@ -419,6 +433,7 @@ func recoverDestructiveCounter(path string) (uint64, bool, error) {
 	return uint64(value), true, nil
 }
 
+// destructiveProcessWasKilled reports whether a command exited because of SIGKILL.
 func destructiveProcessWasKilled(err error) bool {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ProcessState == nil {
@@ -428,6 +443,7 @@ func destructiveProcessWasKilled(err error) bool {
 	return ok && status.Signaled() && status.Signal() == syscall.SIGKILL
 }
 
+// writeDestructiveReceipt creates and syncs a private receipt, removing it if publication fails.
 func writeDestructiveReceipt(path string, receipt destructiveProcessReceipt) error {
 	raw, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {

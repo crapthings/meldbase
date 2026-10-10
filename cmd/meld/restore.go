@@ -18,9 +18,10 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
-// runRestore imports exactly one physical backup. The receipt is required:
-// it binds the input's expected identity, shape and digest before the artifact
-// is published at its new path.
+// runRestore restores a physical backup to a new database path using its required receipt.
+//
+// The receipt supplies the expected database identity, file structure, and
+// checksum, which are checked before publishing the restored file.
 func runRestore(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -96,6 +97,7 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(output)
 }
 
+// readPhysicalBackupReceipt reads a supported receipt and requires an uncompressed physical artifact.
 func readPhysicalBackupReceipt(path string) (meldbase.BackupResult, error) {
 	receipt, err := readBackupReceipt(path)
 	if err != nil {
@@ -107,6 +109,7 @@ func readPhysicalBackupReceipt(path string) (meldbase.BackupResult, error) {
 	return receipt.BackupResult, nil
 }
 
+// readBackupReceipt validates the receipt format and its compression metadata.
 func readBackupReceipt(path string) (backupCommandResult, error) {
 	input, err := os.Open(path)
 	if err != nil {
@@ -147,6 +150,7 @@ func readBackupReceipt(path string) (backupCommandResult, error) {
 	return receipt, nil
 }
 
+// verifyCompressedBackupArtifact checks the artifact byte count and digest against its receipt.
 func verifyCompressedBackupArtifact(path string, receipt backupCommandResult) error {
 	bytes, digest, err := backupArtifactDigest(path)
 	if err != nil {

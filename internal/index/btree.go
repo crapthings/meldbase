@@ -5,13 +5,17 @@ import (
 	"sort"
 )
 
+// defaultMaxKeys sets the default maximum number of keys in a tree node.
 const defaultMaxKeys = 32
 
+// Tree stores sorted byte keys with one or more distinct byte values per key.
 type Tree struct {
 	root    *node
 	maxKeys int
 	size    int
 }
+
+// node holds leaf entries or links to child nodes in the tree.
 type node struct {
 	leaf     bool
 	keys     [][]byte
@@ -19,20 +23,28 @@ type node struct {
 	children []*node
 	next     *node
 }
+
+// split carries the right node and separator created when a node overflows.
 type split struct {
 	separator []byte
 	right     *node
 }
 
+// New creates an empty tree with the default node size.
 func New() *Tree { return &Tree{root: &node{leaf: true}, maxKeys: defaultMaxKeys} }
+
+// NewWithOrder creates an empty tree with at least three keys allowed per node.
 func NewWithOrder(maxKeys int) *Tree {
 	if maxKeys < 3 {
 		maxKeys = 3
 	}
 	return &Tree{root: &node{leaf: true}, maxKeys: maxKeys}
 }
+
+// Len returns the number of distinct key-value pairs.
 func (t *Tree) Len() int { return t.size }
 
+// Insert adds a copied key-value pair and reports whether it was new.
 func (t *Tree) Insert(key, value []byte) bool {
 	if len(key) == 0 {
 		return false
@@ -49,6 +61,7 @@ func (t *Tree) Insert(key, value []byte) bool {
 	return true
 }
 
+// insert adds a pair to a subtree and returns any split needed by its parent.
 func (t *Tree) insert(current *node, key, value []byte) (bool, *split) {
 	if current.leaf {
 		position := sort.Search(len(current.keys), func(i int) bool { return bytes.Compare(current.keys[i], key) >= 0 })
@@ -94,6 +107,7 @@ func (t *Tree) insert(current *node, key, value []byte) (bool, *split) {
 	return true, &split{separator: clone(minKey(right)), right: right}
 }
 
+// Get returns copies of the values stored under a key.
 func (t *Tree) Get(key []byte) [][]byte {
 	leaf := t.findLeaf(key)
 	position := sort.Search(len(leaf.keys), func(i int) bool { return bytes.Compare(leaf.keys[i], key) >= 0 })
@@ -103,6 +117,7 @@ func (t *Tree) Get(key []byte) [][]byte {
 	return cloneKeys(leaf.values[position])
 }
 
+// Delete removes a key-value pair and reports whether it existed.
 func (t *Tree) Delete(key, value []byte) bool {
 	if t == nil || t.root == nil || len(key) == 0 || !t.delete(t.root, key, value) {
 		return false
@@ -117,6 +132,7 @@ func (t *Tree) Delete(key, value []byte) bool {
 	return true
 }
 
+// delete removes a pair from a subtree and rebalances its affected child.
 func (t *Tree) delete(current *node, key, value []byte) bool {
 	if current.leaf {
 		position := sort.Search(len(current.keys), func(index int) bool { return bytes.Compare(current.keys[index], key) >= 0 })
@@ -146,6 +162,7 @@ func (t *Tree) delete(current *node, key, value []byte) bool {
 	return true
 }
 
+// rebalanceChild restores node occupancy by borrowing from or merging with a sibling.
 func (t *Tree) rebalanceChild(parent *node, childIndex int) {
 	if parent == nil || parent.leaf || childIndex < 0 || childIndex >= len(parent.children) {
 		return
@@ -177,6 +194,7 @@ func (t *Tree) rebalanceChild(parent *node, childIndex int) {
 	parent.children = removeNode(parent.children, 1)
 }
 
+// underfilled reports whether a node has fewer entries or children than required.
 func (t *Tree) underfilled(current *node) bool {
 	if current.leaf {
 		return len(current.keys) < (t.maxKeys+1)/2
@@ -184,6 +202,7 @@ func (t *Tree) underfilled(current *node) bool {
 	return len(current.children) < (t.maxKeys+2)/2
 }
 
+// canLend reports whether a node can give an entry or child to its sibling.
 func (t *Tree) canLend(current *node) bool {
 	if current.leaf {
 		return len(current.keys) > (t.maxKeys+1)/2
@@ -191,6 +210,7 @@ func (t *Tree) canLend(current *node) bool {
 	return len(current.children) > (t.maxKeys+2)/2
 }
 
+// borrowFromLeft moves the left sibling's last entry or child to the current node.
 func (t *Tree) borrowFromLeft(left, current *node) {
 	if current.leaf {
 		last := len(left.keys) - 1
@@ -207,6 +227,7 @@ func (t *Tree) borrowFromLeft(left, current *node) {
 	recompute(current)
 }
 
+// borrowFromRight moves the right sibling's first entry or child to the current node.
 func (t *Tree) borrowFromRight(current, right *node) {
 	if current.leaf {
 		current.keys = append(current.keys, right.keys[0])
@@ -221,6 +242,7 @@ func (t *Tree) borrowFromRight(current, right *node) {
 	recompute(right)
 }
 
+// mergeNodes appends the right node to the left node and preserves leaf links.
 func (t *Tree) mergeNodes(left, right *node) {
 	if left.leaf {
 		left.keys = append(left.keys, right.keys...)
@@ -232,8 +254,10 @@ func (t *Tree) mergeNodes(left, right *node) {
 	recompute(left)
 }
 
+// Pair holds one byte key and its byte value.
 type Pair struct{ Key, Value []byte }
 
+// Scan returns copied pairs in key order within the requested bounds.
 func (t *Tree) Scan(start, end []byte, includeEnd bool) []Pair {
 	leaf := t.findLeaf(start)
 	result := []Pair{}
@@ -257,6 +281,7 @@ func (t *Tree) Scan(start, end []byte, includeEnd bool) []Pair {
 	return result
 }
 
+// findLeaf follows separator keys to the leaf that can contain the requested key.
 func (t *Tree) findLeaf(key []byte) *node {
 	current := t.root
 	for !current.leaf {
@@ -266,6 +291,7 @@ func (t *Tree) findLeaf(key []byte) *node {
 	return current
 }
 
+// recompute rebuilds an internal node's separator keys from its children.
 func recompute(current *node) {
 	if current.leaf {
 		return
@@ -286,46 +312,64 @@ func recompute(current *node) {
 		current.keys[i-1] = append(current.keys[i-1][:0], minKey(current.children[i])...)
 	}
 }
+
+// minKey returns the first key in a nonempty subtree.
 func minKey(current *node) []byte {
 	for !current.leaf {
 		current = current.children[0]
 	}
 	return current.keys[0]
 }
+
+// insertBytes inserts a byte slice at the requested position.
 func insertBytes(values [][]byte, index int, value []byte) [][]byte {
 	values = append(values, nil)
 	copy(values[index+1:], values[index:])
 	values[index] = value
 	return values
 }
+
+// insertValues inserts a value list at the requested position.
 func insertValues(values [][][]byte, index int, value [][]byte) [][][]byte {
 	values = append(values, nil)
 	copy(values[index+1:], values[index:])
 	values[index] = value
 	return values
 }
+
+// insertNode inserts a child node at the requested position.
 func insertNode(values []*node, index int, value *node) []*node {
 	values = append(values, nil)
 	copy(values[index+1:], values[index:])
 	values[index] = value
 	return values
 }
+
+// removeBytes removes a byte slice and clears the unused slot.
 func removeBytes(values [][]byte, index int) [][]byte {
 	copy(values[index:], values[index+1:])
 	values[len(values)-1] = nil
 	return values[:len(values)-1]
 }
+
+// removeValueList removes a value list and clears the unused slot.
 func removeValueList(values [][][]byte, index int) [][][]byte {
 	copy(values[index:], values[index+1:])
 	values[len(values)-1] = nil
 	return values[:len(values)-1]
 }
+
+// removeNode removes a child node and clears the unused slot.
 func removeNode(values []*node, index int) []*node {
 	copy(values[index:], values[index+1:])
 	values[len(values)-1] = nil
 	return values[:len(values)-1]
 }
+
+// clone copies a byte slice.
 func clone(value []byte) []byte { return append([]byte(nil), value...) }
+
+// cloneKeys copies a slice of byte slices.
 func cloneKeys(values [][]byte) [][]byte {
 	result := make([][]byte, len(values))
 	for i := range values {
@@ -333,6 +377,8 @@ func cloneKeys(values [][]byte) [][]byte {
 	}
 	return result
 }
+
+// cloneValueLists copies every byte slice in a set of value lists.
 func cloneValueLists(values [][][]byte) [][][]byte {
 	result := make([][][]byte, len(values))
 	for i := range values {

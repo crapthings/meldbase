@@ -10,8 +10,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// commitCoordinator is a bounded, single-writer admission boundary for the
-// first public group-commit path: ordinary  collection CRUD mutations.
+// commitCoordinator queues prepared writes and combines them into ordered durable commits.
 //
 // It deliberately owns neither authorization nor user callbacks. Input has
 // already been cloned/selected, validated and resource-admitted by the public
@@ -44,6 +43,7 @@ type commitCoordinator struct {
 	testBeforeCoalesce func()
 }
 
+// commitResult carries a write request's document IDs, operation counts, and error.
 type commitResult struct {
 	ids    []DocumentID
 	update UpdateResult
@@ -51,6 +51,7 @@ type commitResult struct {
 	err    error
 }
 
+// commitRequest holds prepared changes, read conditions, and result delivery for one admitted write.
 type commitRequest struct {
 	collection        string
 	ids               []DocumentID
@@ -72,6 +73,7 @@ type commitRequest struct {
 	result         chan commitResult
 }
 
+// newCommitCoordinator starts a bounded queue that combines prepared writes into commits.
 func newCommitCoordinator(db *DB, store *durableStore, options CommitCoordinatorOptions) *commitCoordinator {
 	coordinator := &commitCoordinator{
 		db: db, store: store, options: options,
@@ -81,6 +83,7 @@ func newCommitCoordinator(db *DB, store *durableStore, options CommitCoordinator
 	return coordinator
 }
 
+// submit prepares an insert request for admission and returns its result.
 func (coordinator *commitCoordinator) submit(
 	ctx context.Context,
 	collection string,
@@ -109,6 +112,7 @@ func (coordinator *commitCoordinator) submit(
 	return result.ids, nil
 }
 
+// admit queues a prepared write and waits for its outcome under the request cancellation rules.
 func (coordinator *commitCoordinator) admit(ctx context.Context, request *commitRequest) (commitResult, error) {
 	if coordinator == nil || coordinator.db == nil || coordinator.store == nil || request == nil {
 		return commitResult{}, ErrCorrupt
@@ -151,11 +155,13 @@ func (coordinator *commitCoordinator) admit(ctx context.Context, request *commit
 	}
 }
 
+// signalLocked wakes queue waiters while the caller holds the coordinator lock.
 func (coordinator *commitCoordinator) signalLocked() {
 	close(coordinator.changed)
 	coordinator.changed = make(chan struct{})
 }
 
+// run commits queued groups until the coordinator stops.
 func (coordinator *commitCoordinator) run() {
 	defer close(coordinator.stopped)
 	for {
@@ -170,6 +176,7 @@ func (coordinator *commitCoordinator) run() {
 	}
 }
 
+// nextGroup waits for queued requests and combines them within configured batch limits.
 func (coordinator *commitCoordinator) nextGroup() ([]*commitRequest, bool) {
 	for {
 		coordinator.mu.Lock()
@@ -232,6 +239,7 @@ func (coordinator *commitCoordinator) nextGroup() ([]*commitRequest, bool) {
 	return requests, true
 }
 
+// commitGroup publishes ordered requests together and retries logical conflicts as individual writes.
 func (coordinator *commitCoordinator) commitGroup(requests []*commitRequest) {
 	if len(requests) == 0 {
 		return
@@ -292,6 +300,7 @@ func (coordinator *commitCoordinator) commitGroup(requests []*commitRequest) {
 	}
 }
 
+// stats samples queue occupancy and cumulative admission and commit counters.
 func (coordinator *commitCoordinator) stats() CommitCoordinatorStats {
 	if coordinator == nil {
 		return CommitCoordinatorStats{}
@@ -308,11 +317,13 @@ func (coordinator *commitCoordinator) stats() CommitCoordinatorStats {
 	}
 }
 
+// commitLogicalConflict identifies rejections that allow a group to fall back to individual writes.
 func commitLogicalConflict(err error) bool {
 	return errors.Is(err, ErrDuplicateID) || errors.Is(err, ErrDuplicateKey) || errors.Is(err, ErrInvalidIndex) ||
 		errors.Is(err, ErrResourceLimit) || errors.Is(err, ErrWriteConflict)
 }
 
+// commitFallbackLocked commits one request using its individual write path under the database lock.
 func (coordinator *commitCoordinator) commitFallbackLocked(request *commitRequest) commitResult {
 	if request == nil {
 		return commitResult{err: ErrCorrupt}
@@ -326,6 +337,7 @@ func (coordinator *commitCoordinator) commitFallbackLocked(request *commitReques
 	return result
 }
 
+// requestsAfter returns the requests following a specified request in admission order.
 func requestsAfter(requests []*commitRequest, current *commitRequest) []*commitRequest {
 	for index, request := range requests {
 		if request == current {
@@ -335,18 +347,21 @@ func requestsAfter(requests []*commitRequest, current *commitRequest) []*commitR
 	return nil
 }
 
+// finish delivers the same result to every request in a group.
 func (coordinator *commitCoordinator) finish(requests []*commitRequest, result commitResult) {
 	for _, request := range requests {
 		coordinator.finishOne(request, result)
 	}
 }
 
+// finishOne delivers a result to one waiting request.
 func (coordinator *commitCoordinator) finishOne(request *commitRequest, result commitResult) {
 	if request != nil {
 		request.result <- result
 	}
 }
 
+// close stops admission, rejects queued requests, and waits for the commit worker to exit.
 func (coordinator *commitCoordinator) close() {
 	if coordinator == nil {
 		return

@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestRandomUpdateSequencesMatchSimpleReferenceModel checks randomized numeric, string, and array updates against an independent reference model.
 func TestRandomUpdateSequencesMatchSimpleReferenceModel(t *testing.T) {
 	for seed := uint64(1); seed <= 12; seed++ {
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {

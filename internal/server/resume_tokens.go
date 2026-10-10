@@ -13,14 +13,17 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// errInvalidResumeToken reports a malformed, expired, or mismatched subscription resume token.
 var errInvalidResumeToken = errors.New("meldbase server: invalid resume token")
 
+// resumeTokenService signs and verifies expiring subscription positions with a shared secret.
 type resumeTokenService struct {
 	key []byte
 	ttl time.Duration
 	now func() time.Time
 }
 
+// resumeClaims binds a saved position to a database, actor, workspace, collection, query, and policy version.
 type resumeClaims struct {
 	Version       int    `json:"v"`
 	Database      string `json:"db"`
@@ -33,10 +36,12 @@ type resumeClaims struct {
 	Expires       int64  `json:"expires"`
 }
 
+// newResumeTokenService copies the signing key and configures the resume token lifetime.
 func newResumeTokenService(key []byte, ttl time.Duration) *resumeTokenService {
 	return &resumeTokenService{key: append([]byte(nil), key...), ttl: ttl, now: time.Now}
 }
 
+// issue signs an expiring resume token bound to the supplied subscription identity and position.
 func (s *resumeTokenService) issue(database [16]byte, actor Actor, collection string, query meldbase.QuerySpec, policyVersion string, position uint64) (string, error) {
 	queryBytes, err := meldbase.MarshalQuerySpecJSON(query)
 	if err != nil || policyVersion == "" || len(policyVersion) > 128 || len(actor.ID) > 512 || len(actor.WorkspaceID) > 512 {
@@ -56,6 +61,7 @@ func (s *resumeTokenService) issue(database [16]byte, actor Actor, collection st
 	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
+// validate checks a resume token's signature, expiration, and subscription binding before returning its position.
 func (s *resumeTokenService) validate(token string, database [16]byte, actor Actor, collection string, query meldbase.QuerySpec, policyVersion string) (uint64, error) {
 	if len(token) == 0 || len(token) > 4096 || strings.Count(token, ".") != 1 {
 		return 0, errInvalidResumeToken
@@ -86,6 +92,7 @@ func (s *resumeTokenService) validate(token string, database [16]byte, actor Act
 	return claims.Position, nil
 }
 
+// sign computes the HMAC-SHA256 signature of a resume token payload.
 func (s *resumeTokenService) sign(payload []byte) []byte {
 	mac := hmac.New(sha256.New, s.key)
 	_, _ = mac.Write(payload)

@@ -10,7 +10,8 @@ import (
 	"syscall"
 )
 
-// VerificationResult describes a read-only, full protected-page graph audit.
+// VerificationResult records the results of checking all protected database pages.
+//
 // ReachablePages excludes the two Meta pages and optional FreeSpace acceleration
 // pages, matching ReachabilityStats.
 type VerificationResult struct {
@@ -28,16 +29,18 @@ type VerificationResult struct {
 	SHA256                      [sha256.Size]byte
 }
 
-// VerifyPathContext opens an existing file read-only under a non-blocking
-// shared advisory lock. It never creates, truncates, repairs, reclaims, or
-// publishes a Meta generation. A running writer's exclusive lock fails closed.
+// VerifyPathContext audits an existing database file under a shared read-only lock.
+//
+// It never creates, truncates, repairs, reclaims, or publishes a generation.
+// A running writer's exclusive lock prevents verification from starting.
 func VerifyPathContext(ctx context.Context, path string) (result VerificationResult, resultErr error) {
 	return VerifyPathContextWithIndexAudit(ctx, path, nil)
 }
 
-// VerifyPathContextWithIndexAudit additionally proves logical Secondary keys
-// against canonical stored documents. The callback runs only under the offline
-// shared lock and must be deterministic, bounded and side-effect free.
+// VerifyPathContextWithIndexAudit audits a database and optionally verifies index keys against stored documents.
+//
+// The callback runs under the offline shared lock and must be deterministic,
+// bounded, and free of side effects.
 func VerifyPathContextWithIndexAudit(ctx context.Context, path string, indexAudit IndexAuditFunc) (result VerificationResult, resultErr error) {
 	if path == "" {
 		return result, errors.New("meldbase storage: empty path")
@@ -110,6 +113,7 @@ func VerifyPathContextWithIndexAudit(ctx context.Context, path string, indexAudi
 	}, nil
 }
 
+// hashReadOnlyFileContext hashes the requested file bytes while checking cancellation.
 func hashReadOnlyFileContext(ctx context.Context, file *os.File, size uint64) ([sha256.Size]byte, error) {
 	var result [sha256.Size]byte
 	if file == nil {

@@ -17,12 +17,17 @@ import (
 )
 
 const (
-	logicalArchiveFormat         = "meldbase-logical-archive"
-	logicalArchiveVersion        = 1
+	// logicalArchiveFormat identifies the portable archive format.
+	logicalArchiveFormat = "meldbase-logical-archive"
+	// logicalArchiveVersion identifies the portable archive revision.
+	logicalArchiveVersion = 1
+	// logicalArchiveMaxRecordBytes bounds the encoded byte size of one archive record.
 	logicalArchiveMaxRecordBytes = 64 << 20
 )
 
-// LogicalArchiveResult is the portable, data-only archive receipt. SHA256
+// LogicalArchiveResult records archive counts, byte size, and checksum.
+//
+// SHA256
 // covers every JSONL record before the final end record; the end record stores
 // the same digest so an importer can reject truncation or alteration.
 type LogicalArchiveResult struct {
@@ -35,24 +40,32 @@ type LogicalArchiveResult struct {
 	SHA256      string `json:"sha256"`
 }
 
-// LogicalArchiveImportOptions bounds an untrusted logical archive. Zero
-// MaxBytes selects the normal storage-file limit; the receiver owns this cap.
+// LogicalArchiveImportOptions limits the size of an archive accepted for import.
+//
+// Zero MaxBytes selects the normal storage-file limit; the receiver owns this cap.
 type LogicalArchiveImportOptions struct{ MaxBytes uint64 }
 
+// logicalArchiveHeader identifies the archive format and revision.
 type logicalArchiveHeader struct {
 	Kind    string `json:"kind"`
 	Format  string `json:"format"`
 	Version int    `json:"version"`
 }
+
+// logicalArchiveCollectionRecord declares a collection in a portable archive.
 type logicalArchiveCollectionRecord struct {
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 }
+
+// logicalArchiveDocumentRecord carries a typed document and its collection name.
 type logicalArchiveDocumentRecord struct {
 	Kind       string          `json:"kind"`
 	Collection string          `json:"collection"`
 	Document   json.RawMessage `json:"document"`
 }
+
+// logicalArchiveIndexRecord carries an index definition and its collection name.
 type logicalArchiveIndexRecord struct {
 	Kind       string       `json:"kind"`
 	Collection string       `json:"collection"`
@@ -60,6 +73,8 @@ type logicalArchiveIndexRecord struct {
 	Fields     []IndexField `json:"fields"`
 	Unique     bool         `json:"unique"`
 }
+
+// logicalArchiveEndRecord closes an archive with record counts and a checksum.
 type logicalArchiveEndRecord struct {
 	Kind        string `json:"kind"`
 	Collections uint64 `json:"collections"`
@@ -68,10 +83,10 @@ type logicalArchiveEndRecord struct {
 	SHA256      string `json:"sha256"`
 }
 
-// ExportLogicalArchive writes a versioned JSON Lines snapshot that contains
-// collections, typed documents and index definitions, but no pages, database
-// identity or commit history. The source is pinned at one durable snapshot;
-// writes committed after that point are deliberately absent.
+// ExportLogicalArchive saves collections, documents, and indexes from one database snapshot as JSON Lines.
+//
+// The archive excludes storage pages, database identity, and commit history.
+// Writes committed after the snapshot are absent.
 func (db *DB) ExportLogicalArchive(ctx context.Context, destination string) (result LogicalArchiveResult, resultErr error) {
 	if db == nil {
 		return result, ErrLogicalArchiveUnsupported
@@ -231,9 +246,10 @@ func (db *DB) ExportLogicalArchive(ctx context.Context, destination string) (res
 	return result, nil
 }
 
-// ImportLogicalArchive validates and applies a portable archive into a private
-// temporary database, verifies that database offline, then atomically publishes
-// it at destination. A malformed archive never leaves a destination database.
+// ImportLogicalArchive creates a new database from a validated logical archive.
+//
+// Import and offline verification run in a private temporary database before
+// atomic publication, so a malformed archive leaves no destination database.
 func ImportLogicalArchive(ctx context.Context, source io.Reader, destination string, options LogicalArchiveImportOptions) (result LogicalArchiveResult, resultErr error) {
 	if source == nil {
 		return result, ErrCorrupt
@@ -307,6 +323,7 @@ func ImportLogicalArchive(ctx context.Context, source io.Reader, destination str
 	return result, nil
 }
 
+// importLogicalArchiveInto validates archive records and applies them to a private database within a byte limit.
 func importLogicalArchiveInto(ctx context.Context, source io.Reader, db *DB, maxBytes uint64) (LogicalArchiveResult, error) {
 	limited := &logicalArchiveLimitReader{source: source, maximum: maxBytes}
 	reader := bufio.NewReaderSize(limited, 128*1024)
@@ -430,16 +447,19 @@ func importLogicalArchiveInto(ctx context.Context, source io.Reader, db *DB, max
 	return result, nil
 }
 
+// logicalArchiveWriter buffers archive records and tracks their checksum.
 type logicalArchiveWriter struct {
 	file   *os.File
 	writer *bufio.Writer
 	hash   hash.Hash
 }
 
+// newLogicalArchiveWriter creates a buffered record writer with checksum tracking.
 func newLogicalArchiveWriter(file *os.File) *logicalArchiveWriter {
 	return &logicalArchiveWriter{file: file, writer: bufio.NewWriterSize(file, 128*1024), hash: sha256.New()}
 }
 
+// write encodes one bounded JSON line and optionally includes it in the archive checksum.
 func (writer *logicalArchiveWriter) write(ctx context.Context, record any, includeHash bool) error {
 	if err := contextError(ctx); err != nil {
 		return err
@@ -461,6 +481,7 @@ func (writer *logicalArchiveWriter) write(ctx context.Context, record any, inclu
 	return writer.writer.WriteByte('\n')
 }
 
+// flushAndSync flushes buffered archive bytes, syncs the file, and closes it.
 func (writer *logicalArchiveWriter) flushAndSync() error {
 	if err := writer.writer.Flush(); err != nil {
 		return err
@@ -471,12 +492,14 @@ func (writer *logicalArchiveWriter) flushAndSync() error {
 	return writer.file.Close()
 }
 
+// logicalArchiveLimitReader rejects source data exceeding the archive byte limit.
 type logicalArchiveLimitReader struct {
 	source  io.Reader
 	maximum uint64
 	read    uint64
 }
 
+// Read reads source bytes while enforcing the total archive byte limit.
 func (reader *logicalArchiveLimitReader) Read(target []byte) (int, error) {
 	if reader.source == nil || reader.maximum == 0 {
 		return 0, ErrResourceLimit
@@ -498,6 +521,7 @@ func (reader *logicalArchiveLimitReader) Read(target []byte) (int, error) {
 	return count, err
 }
 
+// readLogicalArchiveLine reads a bounded record and reports whether it ended with a newline.
 func readLogicalArchiveLine(reader *bufio.Reader) ([]byte, bool, error) {
 	line, err := reader.ReadBytes('\n')
 	if len(line) > logicalArchiveMaxRecordBytes+1 {
@@ -515,6 +539,7 @@ func readLogicalArchiveLine(reader *bufio.Reader) ([]byte, bool, error) {
 	return line[:len(line)-1], true, nil
 }
 
+// logicalArchiveKind reads a required nonempty record kind from a JSON object.
 func logicalArchiveKind(line []byte) (string, error) {
 	fields, err := rawObject(line)
 	if err != nil {
@@ -531,10 +556,12 @@ func logicalArchiveKind(line []byte) (string, error) {
 	return kind, nil
 }
 
+// logicalArchiveWireLimits supplies typed value decoding limits for archive records.
 func logicalArchiveWireLimits() QueryLimits {
 	return QueryLimits{MaxWireBytes: logicalArchiveMaxRecordBytes, MaxDepth: 64, MaxNodes: 1 << 20, MaxArrayItems: 1 << 20, MaxValueBytes: logicalArchiveMaxRecordBytes, MaxSortFields: 4, MaxLimit: 10_000}
 }
 
+// logicalArchiveError attaches an archive line number to a corruption error.
 func logicalArchiveError(line uint64, err error) error {
 	if err == nil {
 		err = ErrCorrupt

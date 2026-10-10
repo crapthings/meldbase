@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// TestFlushEIOHandshakeRejectsMismatchedReady checks that fault arming follows and matches the readiness receipt.
 func TestFlushEIOHandshakeRejectsMismatchedReady(t *testing.T) {
 	readyAt := time.Now().UTC()
 	armed := destructiveFlushEIOArmed{SchemaVersion: 1, ReadySHA256: strings.Repeat("a", 64), QMPArmSHA256: strings.Repeat("b", 64), ArmedAt: readyAt.Add(time.Millisecond)}
@@ -22,6 +23,7 @@ func TestFlushEIOHandshakeRejectsMismatchedReady(t *testing.T) {
 	}
 }
 
+// TestFlushEIOEvidencePreservesCompoundWriteClassification checks that flush fault evidence counts write errors while excluding read errors.
 func TestFlushEIOEvidencePreservesCompoundWriteClassification(t *testing.T) {
 	raw := json.RawMessage(`{"event":"BLOCK_IO_ERROR","data":{"operation":"write","action":"report","nospace":false,"reason":"Input/output error"}}`)
 	exchanges := []destructiveQMPExchange{{Direction: "receive", At: time.Now().UTC(), Message: raw}}
@@ -37,6 +39,7 @@ func TestFlushEIOEvidencePreservesCompoundWriteClassification(t *testing.T) {
 	}
 }
 
+// TestFlushArmExchangeSHAStopsAtArmedInventory checks that the arming checksum ends at the matching disk inventory response.
 func TestFlushArmExchangeSHAStopsAtArmedInventory(t *testing.T) {
 	exchanges := []destructiveQMPExchange{
 		{Direction: "send", Message: json.RawMessage(`{"execute":"query-named-block-nodes","id":"flush-query-nodes-armed"}`)},
@@ -60,6 +63,7 @@ func TestFlushArmExchangeSHAStopsAtArmedInventory(t *testing.T) {
 	}
 }
 
+// TestFlushArmCommandEvidenceRejectsRuleWidening checks that flush fault commands reject an error rule that repeats indefinitely.
 func TestFlushArmCommandEvidenceRejectsRuleWidening(t *testing.T) {
 	valid := []destructiveQMPExchange{
 		{Direction: "send", Message: json.RawMessage(`{"execute":"blockdev-add","arguments":{"driver":"blkdebug","image":"meld-file","inject-error":[{"errno":5,"event":"flush_to_disk","iotype":"flush","once":true}],"node-name":"meld-flush-debug"},"id":"flush-arm-add"}`)},
@@ -75,6 +79,7 @@ func TestFlushArmCommandEvidenceRejectsRuleWidening(t *testing.T) {
 	}
 }
 
+// TestFlushEIORecoveryResultRequiresFreshBootAndEvidenceBinding checks that flush fault recovery requires a new boot and a proof checksum.
 func TestFlushEIORecoveryResultRequiresFreshBootAndEvidenceBinding(t *testing.T) {
 	now := time.Now().UTC()
 	result := destructiveFlushEIOWorkerResult{
@@ -98,6 +103,7 @@ func TestFlushEIORecoveryResultRequiresFreshBootAndEvidenceBinding(t *testing.T)
 	}
 }
 
+// TestFlushEIORecoveryBindingRejectsImageSubstitution checks that recovery readiness rejects a substituted disk image or an unchanged boot identity.
 func TestFlushEIORecoveryBindingRejectsImageSubstitution(t *testing.T) {
 	now := time.Now().UTC()
 	faultRaw := []byte(`{"fault":true}`)

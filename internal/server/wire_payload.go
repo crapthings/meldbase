@@ -8,15 +8,19 @@ import (
 )
 
 const (
-	// The outer realtime envelope contains request/subscription IDs and opaque
-	// resume tokens. Reserve bounded room before accumulating document bytes so
+	// realtimeEnvelopeBytes reserves response space for realtime IDs and resume tokens.
+	//
+	// Reserve bounded room before accumulating document bytes so
 	// oversized snapshots and deltas fail before the final WebSocket marshal.
-	realtimeEnvelopeBytes  = 512
+	realtimeEnvelopeBytes = 512
+	// httpQueryEnvelopeBytes reserves bytes for the outer HTTP query response.
 	httpQueryEnvelopeBytes = 64
 )
 
+// wirePayloadBudget tracks encoded item bytes within the space left after reserving the response envelope.
 type wirePayloadBudget struct{ limit, used int }
 
+// newWirePayloadBudget reserves envelope bytes and rejects a limit that leaves no room for items.
 func newWirePayloadBudget(limit, reserved int) (*wirePayloadBudget, error) {
 	if limit <= reserved {
 		return nil, fmt.Errorf("%w: result budget %d cannot hold envelope", meldbase.ErrResourceLimit, limit)
@@ -24,6 +28,7 @@ func newWirePayloadBudget(limit, reserved int) (*wirePayloadBudget, error) {
 	return &wirePayloadBudget{limit: limit - reserved}, nil
 }
 
+// add charges an encoded item and its delimiter against the remaining payload budget.
 func (budget *wirePayloadBudget) add(raw []byte) error {
 	// One byte covers either the surrounding array delimiter or the comma before
 	// this item. The check is overflow-safe because lengths are non-negative.
@@ -34,6 +39,7 @@ func (budget *wirePayloadBudget) add(raw []byte) error {
 	return nil
 }
 
+// encodeProjectedDocuments projects and encodes documents within a payload limit and envelope reservation.
 func encodeProjectedDocuments(documents []meldbase.Document, policy QueryPolicy, limit, reserved int) ([]json.RawMessage, error) {
 	budget, err := newWirePayloadBudget(limit, reserved)
 	if err != nil {
@@ -53,6 +59,7 @@ func encodeProjectedDocuments(documents []meldbase.Document, policy QueryPolicy,
 	return encoded, nil
 }
 
+// encodeVisibleDocuments encodes already-visible documents within the realtime payload limit.
 func encodeVisibleDocuments(documents []meldbase.Document, limit int) ([]json.RawMessage, error) {
 	budget, err := newWirePayloadBudget(limit, realtimeEnvelopeBytes)
 	if err != nil {
@@ -72,6 +79,7 @@ func encodeVisibleDocuments(documents []meldbase.Document, limit int) ([]json.Ra
 	return encoded, nil
 }
 
+// encodeVisibleDelta encodes already-visible delta operations within the realtime payload limit.
 func encodeVisibleDelta(delta meldbase.QueryDelta, limit int) ([]json.RawMessage, error) {
 	budget, err := newWirePayloadBudget(limit, realtimeEnvelopeBytes)
 	if err != nil {

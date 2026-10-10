@@ -15,18 +15,26 @@ import (
 )
 
 const (
+	// reportSchemaVersion identifies the query-observer report format.
 	reportSchemaVersion = 1
-	observerCollection  = "query_observer"
+	// observerCollection names the synthetic document collection.
+	observerCollection = "query_observer"
+	// observerBucketCount sets the number of buckets used to distribute synthetic documents.
 	observerBucketCount = 64
-	standardProfile     = "standard"
-	matrixProfile       = "matrix"
+	// standardProfile names the standard query scenario profile.
+	standardProfile = "standard"
+	// matrixProfile names the profile that varies candidate overlap and result limits.
+	matrixProfile = "matrix"
 )
 
 var (
+	// defaultMatrixOverlaps supplies the default overlap percentages for matrix scenarios.
 	defaultMatrixOverlaps = []int{0, 10, 25, 50}
-	defaultMatrixLimits   = []string{"1", "10", "100", "none"}
+	// defaultMatrixLimits supplies the default result limits for matrix scenarios.
+	defaultMatrixLimits = []string{"1", "10", "100", "none"}
 )
 
+// observerConfig holds the requested dataset, scenarios, backend, output format, and resource limits.
 type observerConfig struct {
 	Backend               string
 	DatabasePath          string
@@ -45,6 +53,7 @@ type observerConfig struct {
 	Limits                meldbase.ResourceLimits
 }
 
+// reportConfig records the settings and database location used for an observation run.
 type reportConfig struct {
 	Backend               string                  `json:"backend"`
 	DatabasePath          string                  `json:"databasePath,omitempty"`
@@ -62,6 +71,7 @@ type reportConfig struct {
 	Limits                meldbase.ResourceLimits `json:"limits"`
 }
 
+// observationReport groups setup timing, scenario results, and measured query counters for one backend.
 type observationReport struct {
 	SchemaVersion  int                   `json:"schemaVersion"`
 	Config         reportConfig          `json:"config"`
@@ -70,6 +80,7 @@ type observationReport struct {
 	MeasuredTotals queryCounters         `json:"measuredTotals"`
 }
 
+// scenarioObservation records one scenario's query plan, execution timings, counters, and failures.
 type scenarioObservation struct {
 	Name                 string                 `json:"name"`
 	Family               string                 `json:"family"`
@@ -94,6 +105,7 @@ type scenarioObservation struct {
 	Ratios               explainRatios          `json:"ratios"`
 }
 
+// explainRatios summarizes query-plan work and peak resource-budget usage as ratios.
 type explainRatios struct {
 	KeysPerUniqueCandidate    float64 `json:"keysPerUniqueCandidate"`
 	KeysPerDocumentExamined   float64 `json:"keysPerDocumentExamined"`
@@ -105,8 +117,7 @@ type explainRatios struct {
 	PeakBudgetUtilizationPct  float64 `json:"peakBudgetUtilizationPercent"`
 }
 
-// queryCounters deliberately excludes ActiveCursors because it is a gauge,
-// while every field below is a monotonic process-session counter.
+// queryCounters holds cumulative query-work counters without the active-cursor gauge.
 type queryCounters struct {
 	Total                 uint64 `json:"total"`
 	Failed                uint64 `json:"failed"`
@@ -127,6 +138,7 @@ type queryCounters struct {
 	BudgetRejections      uint64 `json:"budgetRejections"`
 }
 
+// observerScenario pairs a named test scenario and its parameters with a compiled query.
 type observerScenario struct {
 	name       string
 	family     string
@@ -135,11 +147,13 @@ type observerScenario struct {
 	query      meldbase.QuerySpec
 }
 
+// observerIndex describes an index to create for an observer dataset.
 type observerIndex struct {
 	name   string
 	fields []meldbase.IndexField
 }
 
+// scenarioParameters records optional overlap, limit, and array settings for a query scenario.
 type scenarioParameters struct {
 	TargetOverlapPercent  *int   `json:"targetOverlapPercent,omitempty"`
 	Limit                 *int   `json:"limit,omitempty"`
@@ -148,12 +162,14 @@ type scenarioParameters struct {
 	ArrayDuplicatePercent *int   `json:"arrayDuplicatePercent,omitempty"`
 }
 
+// observerDatabase holds an open observer database, its retained path, and its cleanup function.
 type observerDatabase struct {
 	db           *meldbase.DB
 	retainedPath string
 	cleanup      func() error
 }
 
+// observe prepares the selected dataset and indexes, measures its query scenarios, and closes the observer database.
 func observe(ctx context.Context, config observerConfig) (report observationReport, resultErr error) {
 	profile := normalizedObserverProfile(config.Profile)
 	matrixOverlaps := normalizedMatrixOverlaps(config.MatrixOverlaps)
@@ -223,6 +239,7 @@ func observe(ctx context.Context, config observerConfig) (report observationRepo
 	return report, nil
 }
 
+// openObserverDatabase creates the requested memory or durable database with the configured resource limits.
 func openObserverDatabase(config observerConfig) (observerDatabase, error) {
 	switch config.Backend {
 	case "memory":
@@ -241,6 +258,7 @@ func openObserverDatabase(config observerConfig) (observerDatabase, error) {
 	}
 }
 
+// openDurableObserverDatabase opens a new retained or temporary database and provides cleanup for its resources.
 func openDurableObserverDatabase(config observerConfig) (observerDatabase, error) {
 	path := config.DatabasePath
 	temporaryDirectory := ""
@@ -295,6 +313,7 @@ func openDurableObserverDatabase(config observerConfig) (observerDatabase, error
 	}, nil
 }
 
+// seedObserverCollection inserts deterministic synthetic documents for the selected query profile in bounded batches.
 func seedObserverCollection(
 	ctx context.Context,
 	collection *meldbase.Collection,
@@ -356,6 +375,7 @@ func seedObserverCollection(
 	return nil
 }
 
+// observerArrayPredicateValues builds repeatable tag, score, and object arrays for array-predicate scenarios.
 func observerArrayPredicateValues(index, items, duplicatePercent int) (meldbase.Value, meldbase.Value, meldbase.Value) {
 	unique := max(1, items*(100-duplicatePercent)/100)
 	tags := make([]meldbase.Value, 0, items)
@@ -381,6 +401,7 @@ func observerArrayPredicateValues(index, items, duplicatePercent int) (meldbase.
 	return meldbase.Array(tags...), meldbase.Array(scores...), meldbase.Array(parts...)
 }
 
+// createObserverIndexes creates the indexes required by the selected query profile.
 func createObserverIndexes(ctx context.Context, collection *meldbase.Collection, profile string, matrixOverlaps []int) error {
 	indexes := []observerIndex{singleObserverIndex("by_bucket", "bucket")}
 	if profile == matrixProfile {
@@ -412,10 +433,12 @@ func createObserverIndexes(ctx context.Context, collection *meldbase.Collection,
 	return nil
 }
 
+// singleObserverIndex describes an ascending index on one field.
 func singleObserverIndex(name, field string) observerIndex {
 	return observerIndex{name: name, fields: []meldbase.IndexField{{Field: field, Order: 1}}}
 }
 
+// buildConfiguredObserverScenarios builds the requested scenario profile after checking its matrix parameters.
 func buildConfiguredObserverScenarios(documentCount int, profile string, matrixOverlaps []int, matrixLimits []string, arrayItems, arrayDuplicatePercent int) ([]observerScenario, error) {
 	switch profile {
 	case standardProfile:
@@ -433,6 +456,7 @@ func buildConfiguredObserverScenarios(documentCount int, profile string, matrixO
 	}
 }
 
+// buildObserverScenarios compiles the standard queries for observing index access, sorting, limits, and array predicates.
 func buildObserverScenarios(documentCount, arrayItems, arrayDuplicatePercent int) ([]observerScenario, error) {
 	window := min(20, max(1, documentCount/(observerBucketCount*2)))
 	halfBuckets := make([]any, observerBucketCount/2)
@@ -516,6 +540,7 @@ func buildObserverScenarios(documentCount, arrayItems, arrayDuplicatePercent int
 	return scenarios, nil
 }
 
+// buildMatrixObserverScenarios compiles queries that vary index-branch overlap and exact-lookup result limits.
 func buildMatrixObserverScenarios(overlaps []int, limits []string) ([]observerScenario, error) {
 	scenarios := make([]observerScenario, 0, len(overlaps)+len(limits))
 	for _, overlap := range overlaps {
@@ -561,6 +586,7 @@ func buildMatrixObserverScenarios(overlaps []int, limits []string) ([]observerSc
 	return scenarios, nil
 }
 
+// selectObserverScenarios selects named scenarios in request order while rejecting unknown names and skipping duplicates.
 func selectObserverScenarios(all []observerScenario, requested string) ([]observerScenario, error) {
 	if requested == "" || requested == "all" {
 		return append([]observerScenario(nil), all...), nil
@@ -592,6 +618,7 @@ func selectObserverScenarios(all []observerScenario, requested string) ([]observ
 	return selected, nil
 }
 
+// observeScenario explains and warms up a query before recording execution timings, counters, and failures.
 func observeScenario(ctx context.Context, db *meldbase.DB, collection *meldbase.Collection, scenario observerScenario, config observerConfig) scenarioObservation {
 	observation := scenarioObservation{
 		Name: scenario.name, Family: scenario.family, Intent: scenario.intent,
@@ -653,6 +680,7 @@ func observeScenario(ctx context.Context, db *meldbase.DB, collection *meldbase.
 	return observation
 }
 
+// observerPercentileMicros selects a duration from sorted samples at the requested percentile and returns it in microseconds.
 func observerPercentileMicros(samples []time.Duration, percentile float64) float64 {
 	if len(samples) == 0 {
 		return 0
@@ -663,6 +691,7 @@ func observerPercentileMicros(samples []time.Duration, percentile float64) float
 	return float64(sorted[index].Nanoseconds()) / 1_000
 }
 
+// executeObserverQuery executes a query, collects its documents, and returns their count with any error.
 func executeObserverQuery(ctx context.Context, collection *meldbase.Collection, query meldbase.QuerySpec) (int, error) {
 	cursor, err := collection.FindQuery(ctx, query)
 	if err != nil {
@@ -676,6 +705,7 @@ func executeObserverQuery(ctx context.Context, collection *meldbase.Collection, 
 	return len(documents), nil
 }
 
+// calculateExplainRatios calculates query-work ratios and identifies the budget with the highest relative usage.
 func calculateExplainRatios(explain meldbase.ExplainResult) explainRatios {
 	ratios := explainRatios{
 		KeysPerUniqueCandidate:    divideInt64(explain.KeysExamined, explain.UniqueCandidateIDs),
@@ -706,6 +736,7 @@ func calculateExplainRatios(explain meldbase.ExplainResult) explainRatios {
 	return ratios
 }
 
+// observerErrorCode maps query-budget and context errors to report codes, using a general code for other failures.
 func observerErrorCode(err error) string {
 	switch {
 	case err == nil:
@@ -721,6 +752,7 @@ func observerErrorCode(err error) string {
 	}
 }
 
+// queryStatsDelta subtracts cumulative query statistics to isolate work performed between two measurements.
 func queryStatsDelta(before, after meldbase.QueryStats) queryCounters {
 	return queryCounters{
 		Total:                 counterDelta(before.Total, after.Total),
@@ -743,6 +775,7 @@ func queryStatsDelta(before, after meldbase.QueryStats) queryCounters {
 	}
 }
 
+// addQueryCounters adds corresponding query-work counters from two measurements.
 func addQueryCounters(left, right queryCounters) queryCounters {
 	return queryCounters{
 		Total:                 left.Total + right.Total,
@@ -765,6 +798,7 @@ func addQueryCounters(left, right queryCounters) queryCounters {
 	}
 }
 
+// counterDelta returns the increase in a counter or zero if the counter decreased.
 func counterDelta(before, after uint64) uint64 {
 	if after < before {
 		return 0
@@ -772,6 +806,7 @@ func counterDelta(before, after uint64) uint64 {
 	return after - before
 }
 
+// divideInt64 divides signed counts as floating-point values and returns zero for a nonpositive denominator.
 func divideInt64(numerator, denominator int64) float64 {
 	if denominator <= 0 {
 		return 0
@@ -779,6 +814,7 @@ func divideInt64(numerator, denominator int64) float64 {
 	return float64(numerator) / float64(denominator)
 }
 
+// divideUint64 divides unsigned counts as floating-point values and returns zero for a zero denominator.
 func divideUint64(numerator, denominator uint64) float64 {
 	if denominator == 0 {
 		return 0
@@ -786,6 +822,7 @@ func divideUint64(numerator, denominator uint64) float64 {
 	return float64(numerator) / float64(denominator)
 }
 
+// divideUint64ByInt64 divides an unsigned count by a signed count and returns zero for a nonpositive denominator.
 func divideUint64ByInt64(numerator uint64, denominator int64) float64 {
 	if denominator <= 0 {
 		return 0
@@ -793,6 +830,7 @@ func divideUint64ByInt64(numerator uint64, denominator int64) float64 {
 	return float64(numerator) / float64(denominator)
 }
 
+// percentInt64 expresses signed counts as a percentage and returns zero for a nonpositive denominator.
 func percentInt64(numerator, denominator int64) float64 {
 	if denominator <= 0 {
 		return 0
@@ -800,6 +838,7 @@ func percentInt64(numerator, denominator int64) float64 {
 	return float64(numerator) / float64(denominator) * 100
 }
 
+// percentUint64 expresses unsigned counts as a percentage and returns zero for a zero denominator.
 func percentUint64(numerator, denominator uint64) float64 {
 	if denominator == 0 {
 		return 0
@@ -807,10 +846,12 @@ func percentUint64(numerator, denominator uint64) float64 {
 	return float64(numerator) / float64(denominator) * 100
 }
 
+// durationMillis converts a duration to fractional milliseconds.
 func durationMillis(duration time.Duration) float64 {
 	return float64(duration.Nanoseconds()) / 1_000_000
 }
 
+// normalizedObserverProfile uses the standard scenario profile when no profile is supplied.
 func normalizedObserverProfile(profile string) string {
 	if profile == "" {
 		return standardProfile
@@ -818,6 +859,7 @@ func normalizedObserverProfile(profile string) string {
 	return profile
 }
 
+// normalizedMatrixOverlaps copies supplied overlap percentages or the defaults when none are supplied.
 func normalizedMatrixOverlaps(overlaps []int) []int {
 	if len(overlaps) == 0 {
 		return append([]int(nil), defaultMatrixOverlaps...)
@@ -825,6 +867,7 @@ func normalizedMatrixOverlaps(overlaps []int) []int {
 	return append([]int(nil), overlaps...)
 }
 
+// normalizedMatrixLimits copies supplied result limits or the defaults when none are supplied.
 func normalizedMatrixLimits(limits []string) []string {
 	if len(limits) == 0 {
 		return append([]string(nil), defaultMatrixLimits...)
@@ -832,6 +875,7 @@ func normalizedMatrixLimits(limits []string) []string {
 	return append([]string(nil), limits...)
 }
 
+// parseMatrixOverlaps parses a comma-separated list of distinct overlap percentages from zero through fifty.
 func parseMatrixOverlaps(raw string) ([]int, error) {
 	parts := strings.Split(raw, ",")
 	overlaps := make([]int, 0, len(parts))
@@ -848,6 +892,7 @@ func parseMatrixOverlaps(raw string) ([]int, error) {
 	return overlaps, nil
 }
 
+// validateMatrixOverlaps requires at least one distinct overlap percentage within the supported range.
 func validateMatrixOverlaps(overlaps []int) error {
 	if len(overlaps) == 0 {
 		return fmt.Errorf("at least one overlap is required")
@@ -865,6 +910,7 @@ func validateMatrixOverlaps(overlaps []int) error {
 	return nil
 }
 
+// parseMatrixLimits normalizes and validates comma-separated positive result limits or none.
 func parseMatrixLimits(raw string) ([]string, error) {
 	parts := strings.Split(raw, ",")
 	limits := make([]string, 0, len(parts))
@@ -885,6 +931,7 @@ func parseMatrixLimits(raw string) ([]string, error) {
 	return limits, nil
 }
 
+// validateMatrixLimits requires at least one supported result limit and rejects repeated strings.
 func validateMatrixLimits(limits []string) error {
 	if len(limits) == 0 {
 		return fmt.Errorf("at least one limit is required")
@@ -904,6 +951,7 @@ func validateMatrixLimits(limits []string) error {
 	return nil
 }
 
+// parseMatrixLimit parses a positive result limit within the default query limit.
 func parseMatrixLimit(raw string) (int, error) {
 	limit, err := strconv.Atoi(raw)
 	if err != nil || limit < 1 || limit > meldbase.DefaultQueryLimits.MaxLimit {
@@ -912,14 +960,17 @@ func parseMatrixLimit(raw string) (int, error) {
 	return limit, nil
 }
 
+// matrixRightField names the right-hand query field for an overlap percentage.
 func matrixRightField(overlap int) string {
 	return fmt.Sprintf("or_right_%02d", overlap)
 }
 
+// matrixRightIndex names the right-hand query index for an overlap percentage.
 func matrixRightIndex(overlap int) string {
 	return fmt.Sprintf("by_or_right_%02d", overlap)
 }
 
+// matrixRightMember selects right-hand candidates with the requested overlap against the first half of the dataset.
 func matrixRightMember(index, documentCount, overlapPercent int) bool {
 	half := documentCount / 2
 	candidateIDs := half * 2
@@ -929,6 +980,7 @@ func matrixRightMember(index, documentCount, overlapPercent int) bool {
 	return index < overlap || (index >= half && index < half+outside)
 }
 
+// cloneScenarioParameters copies populated scenario parameters and their integer pointers or returns nil for empty parameters.
 func cloneScenarioParameters(parameters scenarioParameters) *scenarioParameters {
 	if parameters.TargetOverlapPercent == nil && parameters.Limit == nil && parameters.LimitMode == "" && parameters.ArrayItems == nil && parameters.ArrayDuplicatePercent == nil {
 		return nil
@@ -953,6 +1005,7 @@ func cloneScenarioParameters(parameters scenarioParameters) *scenarioParameters 
 	return &clone
 }
 
+// intPointer returns a pointer to a copy of an integer.
 func intPointer(value int) *int {
 	return &value
 }

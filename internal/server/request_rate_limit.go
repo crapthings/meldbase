@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// requestRateLimit tracks token buckets by client IP with a bounded number of client entries.
 type requestRateLimit struct {
 	perMinute int
 	burst     int
@@ -18,11 +19,13 @@ type requestRateLimit struct {
 	keys      map[string]requestRateLimitBucket
 }
 
+// requestRateLimitBucket stores a client's available tokens and last refill time.
 type requestRateLimitBucket struct {
 	tokens float64
 	at     time.Time
 }
 
+// newRequestRateLimit creates a client-IP limiter or returns nil when limiting is disabled.
 func newRequestRateLimit(perMinute, burst, maxKeys int, trusted []*net.IPNet) *requestRateLimit {
 	if perMinute <= 0 {
 		return nil
@@ -30,6 +33,7 @@ func newRequestRateLimit(perMinute, burst, maxKeys int, trusted []*net.IPNet) *r
 	return &requestRateLimit{perMinute: perMinute, burst: burst, maxKeys: maxKeys, trusted: trusted, now: time.Now, keys: make(map[string]requestRateLimitBucket)}
 }
 
+// allow consumes a client token when available or returns a suggested retry delay.
 func (limit *requestRateLimit) allow(request *http.Request) (bool, time.Duration) {
 	if limit == nil {
 		return true, 0
@@ -66,6 +70,7 @@ func (limit *requestRateLimit) allow(request *http.Request) (bool, time.Duration
 	return false, seconds
 }
 
+// key derives the client IP from the peer address or the first forwarded address supplied by a trusted proxy.
 func (limit *requestRateLimit) key(request *http.Request) (string, bool) {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err != nil {

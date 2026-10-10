@@ -9,14 +9,22 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
 
+// Locates the repository used to start the browser test fixture.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Identifies the document returned by the simulated realtime server.
 const documentID = "00000000000000000000000000000001";
+// Creates an isolated temporary Chrome profile for the browser test.
 const profile = mkdtempSync(join(tmpdir(), "meldbase-browser-profile-"));
+// Retains the simulated API server for cleanup.
 let api;
+// Retains the Vite process for cleanup.
 let vite;
+// Retains the Chrome process for cleanup.
 let chrome;
+// Retains the browser debugging connection for cleanup.
 let devtools;
 
+// Checks realtime delivery and React hydration in Chrome and releases the test resources.
 async function main() {
   try {
     api = await startRealtimeServer();
@@ -78,6 +86,7 @@ async function main() {
   }
 }
 
+// Starts the example’s local Vite server against the simulated API endpoint.
 function startVite(port, baseURL) {
   const child = spawn(
     "pnpm",
@@ -102,6 +111,7 @@ function startVite(port, baseURL) {
   return child;
 }
 
+// Starts a simulated ticket and WebSocket server that returns one query snapshot.
 async function startRealtimeServer() {
   const server = createServer((request, response) => {
     response.setHeader("access-control-allow-origin", "*");
@@ -188,6 +198,7 @@ async function startRealtimeServer() {
   };
 }
 
+// Builds the browser expression used to inspect rendered query state.
 function browserViewExpression() {
   return `JSON.stringify({
     status: document.querySelector("#status")?.textContent,
@@ -196,6 +207,7 @@ function browserViewExpression() {
   })`;
 }
 
+// Starts headless Chrome with the isolated test profile and debugging port.
 function launchChrome(debugPort) {
   const executable = chromeExecutable();
   return spawn(
@@ -213,6 +225,7 @@ function launchChrome(debugPort) {
   );
 }
 
+// Selects a configured or conventional Chrome executable candidate.
 function chromeExecutable() {
   const candidates = [
     process.env.CHROME_BIN,
@@ -228,6 +241,7 @@ function chromeExecutable() {
   throw new Error("Google Chrome or Chromium is required for the browser compatibility test");
 }
 
+// Creates a browser tab through Chrome’s local debugging endpoint.
 async function createChromeTarget(port, url) {
   const endpoint = `http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`;
   let response = await fetch(endpoint, { method: "PUT" });
@@ -236,6 +250,7 @@ async function createChromeTarget(port, url) {
   return response.json();
 }
 
+// Finds a currently available local TCP port and releases it.
 async function availablePort() {
   const server = createNetServer();
   await new Promise((resolve, reject) => {
@@ -249,6 +264,7 @@ async function availablePort() {
   return port;
 }
 
+// Polls an asynchronous check for a truthy result until the test deadline.
 async function waitFor(check, message) {
   const deadline = Date.now() + 20_000;
   let lastError;
@@ -264,6 +280,7 @@ async function waitFor(check, message) {
   throw new Error(`${message}${lastError ? `: ${lastError.message}` : ""}`);
 }
 
+// Requests process termination and forcefully stops it if it outlasts the grace period.
 async function stopProcess(child) {
   if (!child || child.exitCode !== null || child.killed) return;
   child.kill("SIGTERM");
@@ -271,6 +288,7 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+// Matches Chrome debugging responses to requests and dispatches browser events.
 class DevTools {
   #socket;
   #nextID = 1;

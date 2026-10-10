@@ -9,16 +9,20 @@ import (
 
 var (
 	// ErrLeaseQuorum means too few configured independent members completed an
-	// operation. It is deliberately distinct from a CAS conflict.
+	// operation.
+	//
+	// It is deliberately distinct from a CAS conflict.
 	ErrLeaseQuorum = errors.New("meldbase primary lease: quorum unavailable")
 	// ErrLeaseConflict means a read quorum observed no exact majority record.
+	//
 	// This can occur after interrupted or crossed partial writes; choosing a
 	// plausible-looking highest epoch would be unsafe.
 	ErrLeaseConflict = errors.New("meldbase primary lease: quorum state conflict")
 )
 
-// QuorumReplica binds one independent, statically identified controller member
-// to a local LeaseStore adapter. Store typically represents an authenticated
+// QuorumReplica pairs a configured controller member with its lease store adapter.
+//
+// Store typically represents an authenticated
 // HTTPS/mTLS RPC client. MemberID must be stable configuration, not a value
 // supplied by a request or endpoint response.
 type QuorumReplica struct {
@@ -26,14 +30,16 @@ type QuorumReplica struct {
 	Store    LeaseStore
 }
 
-// quorumMemberIdentity is the legacy single-identity form optionally supplied
-// by a transport adapter whose remote member identity is cryptographically
-// bound (for example an expected mTLS leaf fingerprint).
+// quorumMemberIdentity supplies one verified remote member identity through the legacy interface.
+//
+// The transport must cryptographically bind the identity to the remote member,
+// for example with an expected mTLS leaf fingerprint.
 type quorumMemberIdentity interface {
 	PrimaryLeaseMemberIdentity() string
 }
 
-// quorumMemberIdentities is the rotation-aware form of quorumMemberIdentity.
+// quorumMemberIdentities supplies verified identities for one remote member during credential rotation.
+//
 // Every identity must be cryptographically bound to the same configured remote
 // member. QuorumStore rejects any overlap between replicas: during a leaf
 // certificate rotation, accepting the old and new leaves for one member must
@@ -42,16 +48,18 @@ type quorumMemberIdentities interface {
 	PrimaryLeaseMemberIdentities() []string
 }
 
-// quorumFatalError lets a transport report an authentication, identity or wire
-// contract failure that a majority must not silently mask as an ordinary slow
-// member. It is intentionally private but structural, so adapters in other
+// quorumFatalError marks transport failures that a successful majority must not hide.
+//
+// Authentication, identity, and wire contract failures cannot be treated as
+// ordinary slow members. The interface is private but structural, so adapters in other
 // packages can implement it without a dependency cycle.
 type quorumFatalError interface {
 	PrimaryLeaseQuorumFatal() bool
 }
 
-// QuorumStore turns independent linearizable member stores into a fail-closed
-// LeaseStore. A successful CAS is persisted on a strict majority. Reads accept
+// QuorumStore reads and updates lease records only when a strict majority agrees.
+//
+// Member stores must be linearizable. A successful CAS is persisted on a strict majority. Reads accept
 // only a record (or absence) held identically by a strict majority; they never
 // choose a maximum from crossed or partial histories.
 //
@@ -63,6 +71,7 @@ type QuorumStore struct {
 	metrics  quorumStoreMetrics
 }
 
+// quorumStoreMetrics counts store operations, member failures, and conflicting results.
 type quorumStoreMetrics struct {
 	loads            atomic.Uint64
 	compareAndSwaps  atomic.Uint64
@@ -71,14 +80,16 @@ type quorumStoreMetrics struct {
 	conflicts        atomic.Uint64
 }
 
+// quorumLoadResult holds one member's lease record or read error.
 type quorumLoadResult struct {
 	record LeaseRecord
 	exists bool
 	err    error
 }
 
-// QuorumStats is a fixed, identity-free operational snapshot. It intentionally
-// omits endpoint and database identities.
+// QuorumStats reports aggregate lease-store operations, failures, and conflicts.
+//
+// It omits endpoint and database identities.
 type QuorumStats struct {
 	Replicas         uint64
 	Quorum           uint64
@@ -89,8 +100,10 @@ type QuorumStats struct {
 	Conflicts        uint64
 }
 
-// NewQuorumStore accepts one development member or an odd number of at least
-// three members. Duplicate IDs are rejected so endpoint aliases cannot create
+// NewQuorumStore validates member identities and creates a majority-based lease store.
+//
+// It accepts one development member or an odd number of at least three
+// members. Duplicate IDs are rejected so endpoint aliases cannot create
 // a fake quorum.
 func NewQuorumStore(replicas []QuorumReplica) (*QuorumStore, error) {
 	if len(replicas) != 1 && (len(replicas) < 3 || len(replicas)%2 == 0) {
@@ -134,6 +147,7 @@ func NewQuorumStore(replicas []QuorumReplica) (*QuorumStore, error) {
 	return &QuorumStore{replicas: configured}, nil
 }
 
+// leaseMemberIdentities reads the remote identities supplied by a member store.
 func leaseMemberIdentities(store LeaseStore) ([]string, bool) {
 	if identities, ok := store.(quorumMemberIdentities); ok {
 		return identities.PrimaryLeaseMemberIdentities(), true
@@ -144,6 +158,7 @@ func leaseMemberIdentities(store LeaseStore) ([]string, bool) {
 	return nil, false
 }
 
+// LoadPrimaryLease returns a lease record or absence agreed on by a strict majority.
 func (store *QuorumStore) LoadPrimaryLease(ctx context.Context, databaseID [16]byte) (LeaseRecord, bool, error) {
 	if store == nil || ctx == nil || databaseID == [16]byte{} {
 		return LeaseRecord{}, false, ErrLeaseQuorum
@@ -190,6 +205,7 @@ func (store *QuorumStore) LoadPrimaryLease(ctx context.Context, databaseID [16]b
 	return LeaseRecord{}, false, ErrLeaseConflict
 }
 
+// CompareAndSwapPrimaryLease succeeds when a strict majority accepts the requested lease change.
 func (store *QuorumStore) CompareAndSwapPrimaryLease(ctx context.Context, databaseID [16]byte, previous *LeaseRecord, next LeaseRecord) (bool, error) {
 	if store == nil || ctx == nil || databaseID == [16]byte{} || !validLeaseRecord(next, databaseID) || (previous != nil && !validLeaseRecord(*previous, databaseID)) {
 		return false, ErrLeaseQuorum
@@ -243,6 +259,7 @@ func (store *QuorumStore) CompareAndSwapPrimaryLease(ctx context.Context, databa
 	return false, ErrLeaseQuorum
 }
 
+// isQuorumFatal checks whether a member error must stop the quorum operation.
 func isQuorumFatal(err error) bool {
 	var fatal quorumFatalError
 	return errors.As(err, &fatal) && fatal.PrimaryLeaseQuorumFatal()
@@ -261,6 +278,7 @@ func (store *QuorumStore) Stats() QuorumStats {
 	}
 }
 
+// majorityLeaseRecord finds a lease record or absence shared by enough read results.
 func majorityLeaseRecord(results []quorumLoadResult, quorum int) (LeaseRecord, bool, bool) {
 	if quorum < 1 || len(results) < quorum {
 		return LeaseRecord{}, false, false
@@ -279,8 +297,10 @@ func majorityLeaseRecord(results []quorumLoadResult, quorum int) (LeaseRecord, b
 	return LeaseRecord{}, false, false
 }
 
+// Verify at compile time that QuorumStore implements LeaseStore.
 var _ LeaseStore = (*QuorumStore)(nil)
 
+// String describes the replica count and majority size without exposing member identities.
 func (store *QuorumStore) String() string {
 	if store == nil {
 		return "primarylease.QuorumStore<nil>"

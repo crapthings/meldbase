@@ -17,6 +17,7 @@ import { pageCursorFor, type PageResult } from "../cursor.js";
 import type { MeldbaseClient } from "./client.js";
 import type { SubscribeOptions } from "./types.js";
 
+/** Provides typed query, aggregation, and document operations for one remote collection. */
 export class RemoteCollection<T extends Document> {
   constructor(
     readonly name: string,
@@ -94,6 +95,7 @@ export class RemoteCollection<T extends Document> {
   }
 }
 
+/** Holds a compiled remote query that can fetch pages or subscribe to changing results. */
 export class RemoteLiveQuery<T extends Document> {
   readonly mode = "remote" as const;
   constructor(

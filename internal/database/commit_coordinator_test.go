@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// openWithCommitCoordinator opens a test database with an enabled commit coordinator and registers cleanup.
 func openWithCommitCoordinator(t *testing.T, options CommitCoordinatorOptions) *DB {
 	t.Helper()
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "coordinator.meld2"), OpenOptions{CommitCoordinator: options})
@@ -23,6 +24,7 @@ func openWithCommitCoordinator(t *testing.T, options CommitCoordinatorOptions) *
 	return db
 }
 
+// waitForCoordinatorPending waits up to one second for the coordinator queue to contain enough requests or fails the test.
 func waitForCoordinatorPending(t *testing.T, coordinator *commitCoordinator, want int, description string) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -40,6 +42,7 @@ func waitForCoordinatorPending(t *testing.T, coordinator *commitCoordinator, wan
 	}
 }
 
+// TestCommitCoordinatorGroupsPublicInsertMany checks that two public inserts share one storage generation while retaining separate commit positions.
 func TestCommitCoordinatorGroupsPublicInsertMany(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond})
 	coordinator := db.commitCoordinator
@@ -101,6 +104,7 @@ func TestCommitCoordinatorGroupsPublicInsertMany(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorGroupsIndependentPublicWriteTransactions checks that independent write transactions share one storage generation.
 func TestCommitCoordinatorGroupsIndependentPublicWriteTransactions(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second})
 	coordinator := db.commitCoordinator
@@ -163,6 +167,7 @@ func TestCommitCoordinatorGroupsIndependentPublicWriteTransactions(t *testing.T)
 	}
 }
 
+// TestCommitCoordinatorGroupsRangeFencedWriteTransactions checks that transactions reading an unchanged collection can be grouped while writing other documents.
 func TestCommitCoordinatorGroupsRangeFencedWriteTransactions(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Second})
 	if _, err := db.Collection("readset").InsertOne(context.Background(), Document{"rank": Int(1)}); err != nil {
@@ -227,6 +232,7 @@ func TestCommitCoordinatorGroupsRangeFencedWriteTransactions(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorTransactionConflictNeverRerunsCallback checks that conflicting transaction updates commit once and reject the stale transaction.
 func TestCommitCoordinatorTransactionConflictNeverRerunsCallback(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond})
 	items := db.Collection("items")
@@ -293,6 +299,7 @@ func TestCommitCoordinatorTransactionConflictNeverRerunsCallback(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorTransactionWaitsForDurableOutcomeAfterCancellation checks that an admitted write transaction waits for its durable result after cancellation.
 func TestCommitCoordinatorTransactionWaitsForDurableOutcomeAfterCancellation(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond})
 	coordinator := db.commitCoordinator
@@ -335,6 +342,7 @@ func TestCommitCoordinatorTransactionWaitsForDurableOutcomeAfterCancellation(t *
 	}
 }
 
+// TestCommitCoordinatorFallsBackPerRequestOnUniqueConflict checks that conflicting unique inserts are handled individually so one succeeds without disabling writes.
 func TestCommitCoordinatorFallsBackPerRequestOnUniqueConflict(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond})
 	items := db.Collection("items")
@@ -408,6 +416,7 @@ func TestCommitCoordinatorFallsBackPerRequestOnUniqueConflict(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorBoundsAdmissionAndReportsCanceledOutcome checks that a full admission queue rejects extra writes and canceled requests are not admitted.
 func TestCommitCoordinatorBoundsAdmissionAndReportsCanceledOutcome(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 2, MaxDelay: time.Millisecond})
 	coordinator := db.commitCoordinator
@@ -472,6 +481,7 @@ func TestCommitCoordinatorBoundsAdmissionAndReportsCanceledOutcome(t *testing.T)
 	}
 }
 
+// TestCommitCoordinatorCancellationAfterAdmissionIsReconciliable checks that canceled admitted inserts return their identifiers and an unknown outcome before the durable write can be found.
 func TestCommitCoordinatorCancellationAfterAdmissionIsReconciliable(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond})
 	coordinator := db.commitCoordinator
@@ -514,6 +524,7 @@ func TestCommitCoordinatorCancellationAfterAdmissionIsReconciliable(t *testing.T
 	}
 }
 
+// TestCommitCoordinatorConcurrentWritesPreserveRealtimeAndReplayOrder checks that concurrent grouped writes produce ordered live and replay deltas matching the final query result.
 func TestCommitCoordinatorConcurrentWritesPreserveRealtimeAndReplayOrder(t *testing.T) {
 	const writers = 16
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{
@@ -601,6 +612,7 @@ func TestCommitCoordinatorConcurrentWritesPreserveRealtimeAndReplayOrder(t *test
 	}
 }
 
+// TestCommitCoordinatorOptionsAreExplicit checks that coordination requires valid opt-in settings and works with rollback protection.
 func TestCommitCoordinatorOptionsAreExplicit(t *testing.T) {
 	if _, err := normalizeCommitCoordinatorOptions(CommitCoordinatorOptions{Enabled: true, MaxBatch: 1}); !errors.Is(err, ErrInvalidCommitCoordinatorOptions) {
 		t.Fatalf("invalid batch error=%v", err)
@@ -630,6 +642,7 @@ func TestCommitCoordinatorOptionsAreExplicit(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorAnchorsWholeGroupAndRejectsRollback checks that a rollback anchor covers every grouped write and rejects an older database file.
 func TestCommitCoordinatorAnchorsWholeGroupAndRejectsRollback(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "anchored-group.meld2")
 	anchor, err := NewFileRollbackAnchorStore(filepath.Join(t.TempDir(), "anchored-group.anchor"))
@@ -704,6 +717,7 @@ func TestCommitCoordinatorAnchorsWholeGroupAndRejectsRollback(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorAnchorAcknowledgementFailureIsFailStop checks that lost anchor acknowledgement disables writes and reopening recovers the entire durable group.
 func TestCommitCoordinatorAnchorAcknowledgementFailureIsFailStop(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "anchored-group-failure.meld2")
 	seed, err := Open(path)
@@ -790,6 +804,7 @@ func TestCommitCoordinatorAnchorAcknowledgementFailureIsFailStop(t *testing.T) {
 	}
 }
 
+// TestDuplicateDocumentIDIsLogicalAndDoesNotDisableWrites checks that a duplicate document identifier is rejected while later writes remain possible.
 func TestDuplicateDocumentIDIsLogicalAndDoesNotDisableWrites(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "duplicate-id.meld2"))
 	if err != nil {
@@ -811,6 +826,7 @@ func TestDuplicateDocumentIDIsLogicalAndDoesNotDisableWrites(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorCloseDrainsOwnedGroupBeforeFileClose checks that database closing waits for an owned write group to finish.
 func TestCommitCoordinatorCloseDrainsOwnedGroupBeforeFileClose(t *testing.T) {
 	db := openWithCommitCoordinator(t, CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond})
 	coordinator := db.commitCoordinator
@@ -858,6 +874,7 @@ func TestCommitCoordinatorCloseDrainsOwnedGroupBeforeFileClose(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorGroupsIndependentUpdateAndDelete checks that independent update and delete requests share one storage generation.
 func TestCommitCoordinatorGroupsIndependentUpdateAndDelete(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mutation-group.meld2")
 	seed, err := Open(path)
@@ -941,6 +958,7 @@ func TestCommitCoordinatorGroupsIndependentUpdateAndDelete(t *testing.T) {
 	}
 }
 
+// TestCommitCoordinatorReevaluatesConflictingUpdatesInAdmissionOrder checks that conflicting increments fall back to sequential commits without losing either update.
 func TestCommitCoordinatorReevaluatesConflictingUpdatesInAdmissionOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mutation-conflict.meld2")
 	seed, err := Open(path)
@@ -1018,6 +1036,7 @@ func TestCommitCoordinatorReevaluatesConflictingUpdatesInAdmissionOrder(t *testi
 	}
 }
 
+// TestCommitCoordinatorMutationCancellationReturnsReconciliationResult checks that a canceled admitted update returns operation counts and an unknown outcome before its durable result can be verified.
 func TestCommitCoordinatorMutationCancellationReturnsReconciliationResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mutation-cancel.meld2")
 	seed, err := Open(path)

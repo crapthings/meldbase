@@ -1,5 +1,4 @@
-// Package replicationauth provides shared identity primitives for trusted
-// server-to-server replication transports.
+// Package replicationauth verifies peer identities for server-to-server replication.
 package replicationauth
 
 import (
@@ -10,28 +9,26 @@ import (
 	"net/http"
 )
 
-// Authorize authenticates a server-to-server request and returns its stable
-// durable-consumer name. Transport adapters must never take that name from an
+// Authorize verifies a replication peer and returns its server-assigned durable consumer name.
+//
+// Transport adapters must never take that name from an
 // untrusted frame, URL, or request header.
 type Authorize func(*http.Request) (consumerName string, err error)
 
-// MTLSConfig maps lowercase SHA-256 fingerprints of already verified peer leaf
-// certificates (over certificate.Raw) to stable durable-consumer names.
-// Fingerprints avoid ambiguous subject/SAN matching and make rotation an
+// MTLSConfig maps verified client certificate fingerprints to durable consumer names.
+//
+// Fingerprints are lowercase SHA-256 hashes of certificate.Raw. They avoid ambiguous subject/SAN matching and make rotation an
 // explicit configuration change.
 type MTLSConfig struct {
 	PeerConsumers map[string]string
 }
 
-// ErrTLSUnverified means a replication receiver did not obtain a verified
-// TLS 1.2-or-newer peer chain. It deliberately rejects clients configured with
-// InsecureSkipVerify: encryption without authenticated peer identity is not a
-// safe replication transport.
+// ErrTLSUnverified reports a connection without TLS 1.2 or later and a verified peer chain.
 var ErrTLSUnverified = errors.New("replication peer TLS connection is not verified")
 
-// RequireVerifiedTLS validates the receiver-side transport state shared by
-// HTTPS bootstrap and WSS tail clients. Server-side adapters retain an
-// Authorize callback because deployments may use this package's strict mTLS
+// RequireVerifiedTLS checks for TLS 1.2 or later and a verified peer certificate chain.
+//
+// Server-side adapters retain an Authorize callback because deployments may use this package's strict mTLS
 // authorizer or an equivalent private identity system.
 func RequireVerifiedTLS(state *tls.ConnectionState) error {
 	if state == nil || state.Version < tls.VersionTLS12 || len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
@@ -40,9 +37,10 @@ func RequireVerifiedTLS(state *tls.ConnectionState) error {
 	return nil
 }
 
-// NewMTLSAuthorizer returns an Authorize callback for a net/http server whose
-// TLS configuration requires and verifies client certificates. This function
-// intentionally does not configure TLS itself: callers must set ClientAuth and
+// NewMTLSAuthorizer creates a peer authorizer using verified client certificate fingerprints.
+//
+// The enclosing net/http server must require and verify client certificates.
+// This function does not configure TLS: callers must set ClientAuth and
 // trusted roots before a request reaches a replication handler.
 func NewMTLSAuthorizer(config MTLSConfig) (Authorize, error) {
 	if len(config.PeerConsumers) == 0 || len(config.PeerConsumers) > 1024 {
@@ -84,6 +82,7 @@ func NewMTLSAuthorizer(config MTLSConfig) (Authorize, error) {
 	}, nil
 }
 
+// validConsumerName accepts bounded names containing only letters, digits, underscores, and hyphens.
 func validConsumerName(name string) bool {
 	if len(name) == 0 || len(name) > 128 {
 		return false

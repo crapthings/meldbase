@@ -7,16 +7,17 @@ import (
 	"io"
 )
 
+// PhysicalCopyResult records the copied database version, byte count, and checksum.
 type PhysicalCopyResult struct {
 	Meta   Meta
 	Bytes  uint64
 	SHA256 [32]byte
 }
 
-// CopyPhysicalToContext copies the complete page-aligned file while holding a
-// storage read lock. Writers are blocked for the copy duration; readers remain
-// available. The caller owns destination creation, fsync, verification and
-// publication.
+// CopyPhysicalToContext copies the page-aligned database file and computes its checksum.
+//
+// A storage read lock blocks writers during the copy while readers remain available.
+// The caller creates, syncs, verifies, and publishes the destination.
 func (f *File) CopyPhysicalToContext(ctx context.Context, destination io.Writer) (PhysicalCopyResult, error) {
 	if f == nil || destination == nil {
 		return PhysicalCopyResult{}, ErrCorrupt

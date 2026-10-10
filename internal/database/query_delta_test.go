@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestQueryDeltaDeterministicallyTransformsOrderedResults checks that deterministic deltas produce the next ordered result and expose independent document copies.
 func TestQueryDeltaDeterministicallyTransformsOrderedResults(t *testing.T) {
 	old := deltaDocuments(1, 2, 3, 4, 5)
 	next := []Document{
@@ -42,6 +43,7 @@ func TestQueryDeltaDeterministicallyTransformsOrderedResults(t *testing.T) {
 	}
 }
 
+// TestQueryDeltaRandomizedPermutationAddRemoveAndChange checks that deltas reproduce randomized result reordering, additions, removals, and document changes.
 func TestQueryDeltaRandomizedPermutationAddRemoveAndChange(t *testing.T) {
 	random := rand.New(rand.NewSource(20260715))
 	current := deltaDocuments(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
@@ -80,6 +82,7 @@ func TestQueryDeltaRandomizedPermutationAddRemoveAndChange(t *testing.T) {
 	}
 }
 
+// TestApplyQueryDeltaRejectsAmbiguousOrInvalidOperations checks that delta application rejects invalid tokens, identities, and operations.
 func TestApplyQueryDeltaRejectsAmbiguousOrInvalidOperations(t *testing.T) {
 	base := QuerySnapshot{Token: 5, Documents: deltaDocuments(1, 2)}
 	validAdd := QueryDeltaOperation{Kind: QueryDeltaAdd, DocumentID: deterministicDocumentID(2), Document: deltaDocument(3, "same")}
@@ -99,6 +102,7 @@ func TestApplyQueryDeltaRejectsAmbiguousOrInvalidOperations(t *testing.T) {
 	}
 }
 
+// TestSharedViewGeneratesOneDeltaForMultipleSubscribers checks that subscribers share delta computation while receiving independent documents that match full query results.
 func TestSharedViewGeneratesOneDeltaForMultipleSubscribers(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -202,6 +206,7 @@ func TestSharedViewGeneratesOneDeltaForMultipleSubscribers(t *testing.T) {
 	}
 }
 
+// receiveQueryDelta waits for a query delta and fails if the channel closes or times out.
 func receiveQueryDelta(t *testing.T, deltas <-chan QueryDelta) QueryDelta {
 	t.Helper()
 	select {
@@ -216,6 +221,7 @@ func receiveQueryDelta(t *testing.T, deltas <-chan QueryDelta) QueryDelta {
 	}
 }
 
+// deltaDocuments creates ordered test documents with the supplied identifiers and a shared value.
 func deltaDocuments(ids ...int) []Document {
 	result := make([]Document, len(ids))
 	for index, id := range ids {
@@ -224,6 +230,7 @@ func deltaDocuments(ids ...int) []Document {
 	return result
 }
 
+// deltaDocument creates a test document with a repeatable identifier and the supplied string value.
 func deltaDocument(id int, value string) Document {
 	return Document{"_id": ID(deterministicDocumentID(id - 1)), "value": String(value)}
 }

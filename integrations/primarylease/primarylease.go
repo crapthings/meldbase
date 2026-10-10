@@ -23,20 +23,27 @@ import (
 )
 
 const (
-	certificateVersion      byte = 1
-	certificatePrefix            = "MLP"
-	maxOwnerBytes                = 48
-	maxCertificateBytes          = 4 + 16 + 1 + maxOwnerBytes + 8 + 8 + 8 + 8 + ed25519.SignatureSize
-	defaultMaxLeaseDuration      = 30 * time.Second
-	hardMaxLeaseDuration         = 10 * time.Minute
-	// Four base64 characters encode each complete or partial three-byte group.
-	// This is a safe upper bound for RawURLEncoding (which omits padding).
+	// certificateVersion identifies the signed certificate payload layout.
+	certificateVersion byte = 1
+	// certificatePrefix identifies primary lease certificate payloads.
+	certificatePrefix = "MLP"
+	// maxOwnerBytes limits the byte length of a certificate owner identifier.
+	maxOwnerBytes = 48
+	// maxCertificateBytes bounds the binary payload and signature size.
+	maxCertificateBytes = 4 + 16 + 1 + maxOwnerBytes + 8 + 8 + 8 + 8 + ed25519.SignatureSize
+	// defaultMaxLeaseDuration sets the guard's default accepted lease lifetime.
+	defaultMaxLeaseDuration = 30 * time.Second
+	// hardMaxLeaseDuration bounds the configurable accepted lease lifetime.
+	hardMaxLeaseDuration = 10 * time.Minute
+	// maxCertificateText bounds the URL-safe base64 length of a signed certificate.
 	maxCertificateText = 4 * ((maxCertificateBytes + 2) / 3)
 )
 
 var (
 	// ErrCertificate reports a malformed, invalid or unsuitable lease
-	// certificate. It intentionally gives no signature-verification detail.
+	// certificate.
+	//
+	// It intentionally gives no signature-verification detail.
 	ErrCertificate = errors.New("meldbase primary lease: invalid certificate")
 	// ErrLeaseExpired reports a certificate that is not currently valid.
 	ErrLeaseExpired = errors.New("meldbase primary lease: lease is not currently valid")
@@ -47,8 +54,9 @@ var (
 	ErrLeaseEpoch = errors.New("meldbase primary lease: stale controller epoch")
 )
 
-// Certificate is a controller-issued, signed authority to accept writes for a
-// bounded time. CommitSequence is the source position at which the authority
+// Certificate gives a database owner signed permission to accept writes for a limited time.
+//
+// CommitSequence is the source position at which the authority
 // was issued; the first accepted write must advance beyond it. Epoch must grow
 // monotonically in the controller, but the guard treats it as opaque ordering
 // data because it cannot contact the controller in the write path.
@@ -61,8 +69,10 @@ type Certificate struct {
 	NotAfter       time.Time
 }
 
-// Sign returns a compact URL-safe certificate suitable for
-// FollowerPromotionFence.Epoch. privateKey belongs only to the controller; a
+// Sign creates a signed, URL-safe certificate using the controller's private key.
+//
+// The result is suitable for FollowerPromotionFence.Epoch. privateKey belongs
+// only to the controller; a
 // database process needs the corresponding public key.
 func Sign(certificate Certificate, privateKey ed25519.PrivateKey) (string, error) {
 	if len(privateKey) != ed25519.PrivateKeySize {
@@ -76,7 +86,9 @@ func Sign(certificate Certificate, privateKey ed25519.PrivateKey) (string, error
 	return base64.RawURLEncoding.EncodeToString(append(payload, signature...)), nil
 }
 
-// Parse verifies and decodes an opaque signed certificate. The returned value
+// Parse verifies and decodes an opaque signed certificate.
+//
+// The returned value
 // has millisecond precision because that is the signed wire representation.
 func Parse(encoded string, publicKey ed25519.PublicKey) (Certificate, error) {
 	if len(publicKey) != ed25519.PublicKeySize || len(encoded) == 0 || len(encoded) > maxCertificateText {
@@ -99,7 +111,9 @@ func Parse(encoded string, publicKey ed25519.PublicKey) (Certificate, error) {
 	return unmarshalCertificate(payload)
 }
 
-// GuardOptions configures a local primary write guard. Owner is a stable,
+// GuardOptions sets the local write owner, maximum lease duration, and clock.
+//
+// Owner is a stable,
 // controller-defined process identity; it is not supplied by an untrusted
 // client. Clock is intended for deterministic tests; production callers leave
 // it nil.
@@ -109,8 +123,10 @@ type GuardOptions struct {
 	Clock            func() time.Time
 }
 
-// Guard implements meldbase.PrimaryWriteFence and
-// meldbase.FollowerPromotionFenceBinder. Install is used for an already
+// Guard permits database writes only while a valid certificate authorizes its configured owner.
+//
+// It implements meldbase.PrimaryWriteFence and meldbase.FollowerPromotionFenceBinder.
+// Install is used for an already
 // elected primary; follower promotion binds the certificate returned by the
 // external promotion authority automatically.
 type Guard struct {
@@ -124,8 +140,9 @@ type Guard struct {
 	installed    bool
 }
 
-// GuardLeaseStatus is a fixed local snapshot for a renewal supervisor. It
-// contains no certificate text or owner identity. Installed does not imply the
+// GuardLeaseStatus reports the installed lease position and time window for renewal scheduling.
+//
+// It contains no certificate text or owner identity. Installed does not imply the
 // lease is still time-valid; callers evaluate NotAfter against their own
 // trusted local clock.
 type GuardLeaseStatus struct {
@@ -136,9 +153,9 @@ type GuardLeaseStatus struct {
 	NotAfter       time.Time
 }
 
-// NewGuard creates an initially closed guard. A database using it rejects all
+// NewGuard creates a write guard that rejects writes until a valid certificate is installed.
 //
-//	business writes until Install or follower promotion binds a certificate.
+// Install or follower promotion binds the certificate.
 func NewGuard(publicKey ed25519.PublicKey, options GuardOptions) (*Guard, error) {
 	if len(publicKey) != ed25519.PublicKeySize || !validOwner(options.Owner) {
 		return nil, ErrCertificate
@@ -157,7 +174,9 @@ func NewGuard(publicKey ed25519.PublicKey, options GuardOptions) (*Guard, error)
 	return &Guard{publicKey: append(ed25519.PublicKey(nil), publicKey...), owner: options.Owner, now: now, maxLease: maxLease}, nil
 }
 
-// Install verifies and atomically replaces the locally accepted lease. An
+// Install verifies and atomically replaces the locally accepted lease.
+//
+// An
 // external controller renews authority by signing a new certificate and
 // calling Install before the old one expires. Revocation clears it locally.
 func (guard *Guard) Install(encoded string) error {
@@ -181,7 +200,9 @@ func (guard *Guard) Install(encoded string) error {
 	return nil
 }
 
-// Revoke immediately closes local write admission. It is safe to call more
+// Revoke immediately blocks local database writes.
+//
+// It is safe to call more
 // than once. A partitioned old primary remains bounded by NotAfter even if it
 // never receives this local revocation.
 func (guard *Guard) Revoke() {
@@ -196,7 +217,9 @@ func (guard *Guard) Revoke() {
 	guard.mu.Unlock()
 }
 
-// LeaseStatus returns an O(1), allocation-free local lease snapshot. It is for
+// LeaseStatus returns the installed lease position and time window without allocating.
+//
+// It runs in O(1) and is for
 // a renewal supervisor's scheduling and must never replace the hot-path write
 // fence, which validates the certificate again for every commit.
 func (guard *Guard) LeaseStatus() GuardLeaseStatus {
@@ -212,7 +235,9 @@ func (guard *Guard) LeaseStatus() GuardLeaseStatus {
 	return GuardLeaseStatus{Installed: true, Epoch: certificate.Epoch, CommitSequence: certificate.CommitSequence, NotBefore: certificate.NotBefore, NotAfter: certificate.NotAfter}
 }
 
-// ValidatePrimaryWrite is the hot-path Meldbase fence. It performs no I/O,
+// ValidatePrimaryWrite checks that the installed lease permits the next database commit.
+//
+// It performs no I/O,
 // allocation or controller call; its only synchronization is an RLock around
 // the installed immutable certificate.
 func (guard *Guard) ValidatePrimaryWrite(request meldbase.PrimaryWriteFenceRequest) error {
@@ -254,6 +279,7 @@ func (guard *Guard) BindFollowerPromotion(ctx context.Context, fence meldbase.Fo
 	return nil
 }
 
+// acceptable checks a certificate's owner, identity, epoch, duration, and current validity.
 func (guard *Guard) acceptable(certificate Certificate, now time.Time) error {
 	if !validOwner(certificate.Owner) || subtle.ConstantTimeCompare([]byte(certificate.Owner), []byte(guard.owner)) != 1 {
 		return ErrLeaseOwner
@@ -271,6 +297,7 @@ func (guard *Guard) acceptable(certificate Certificate, now time.Time) error {
 	return nil
 }
 
+// acceptEpochLocked rejects revoked or older epochs and inconsistent renewals while the caller holds the guard lock.
 func (guard *Guard) acceptEpochLocked(certificate Certificate) error {
 	if certificate.Epoch < guard.minimumEpoch {
 		return ErrLeaseEpoch
@@ -287,6 +314,7 @@ func (guard *Guard) acceptEpochLocked(certificate Certificate) error {
 	return nil
 }
 
+// marshalCertificate validates and encodes the certificate fields covered by its signature.
 func marshalCertificate(certificate Certificate) ([]byte, error) {
 	if certificate.DatabaseID == [16]byte{} || !validOwner(certificate.Owner) || certificate.Epoch == 0 || certificate.Epoch == ^uint64(0) || certificate.NotBefore.IsZero() || certificate.NotAfter.IsZero() {
 		return nil, ErrCertificate
@@ -312,6 +340,7 @@ func marshalCertificate(certificate Certificate) ([]byte, error) {
 	return payload, nil
 }
 
+// unmarshalCertificate validates and decodes a certificate payload without checking its signature.
 func unmarshalCertificate(payload []byte) (Certificate, error) {
 	if len(payload) < 4+16+1+8+8+8+8 || string(payload[:3]) != certificatePrefix || payload[3] != certificateVersion {
 		return Certificate{}, ErrCertificate
@@ -338,6 +367,7 @@ func unmarshalCertificate(payload []byte) (Certificate, error) {
 	return certificate, nil
 }
 
+// validOwner checks the length and allowed ASCII characters of a lease owner identifier.
 func validOwner(value string) bool {
 	if len(value) == 0 || len(value) > maxOwnerBytes {
 		return false
@@ -350,6 +380,7 @@ func validOwner(value string) bool {
 	return true
 }
 
+// contextError rejects a missing context or returns its cancellation error.
 func contextError(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("meldbase primary lease: context is required")
@@ -357,13 +388,19 @@ func contextError(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// CertificateTextLimit is the maximum encoded certificate length. It remains
+// CertificateTextLimit is the maximum encoded certificate length.
+//
+// It remains
 // below Meldbase's promotion-fence epoch limit.
 func CertificateTextLimit() int { return maxCertificateText }
 
+// Guard must satisfy the database write-fence contract.
 var _ meldbase.PrimaryWriteFence = (*Guard)(nil)
+
+// Guard must satisfy the follower promotion binding contract.
 var _ meldbase.FollowerPromotionFenceBinder = (*Guard)(nil)
 
+// String returns the certificate's epoch and commit position without exposing its owner or signed text.
 func (certificate Certificate) String() string {
 	return fmt.Sprintf("primary-lease(epoch=%d, sequence=%d)", certificate.Epoch, certificate.CommitSequence)
 }

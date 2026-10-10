@@ -5,6 +5,7 @@ import { executeQuery } from "./query.js";
 import { decodeQuerySpec, decodeValue } from "./wire.js";
 import type { Document } from "./index.js";
 
+/** Describes a shared query fixture with encoded documents and expected result IDs. */
 interface CorpusCase {
   name: string;
   documents: unknown[];

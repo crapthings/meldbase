@@ -1,12 +1,16 @@
+/** Identifies the protocol version used by this SDK. */
 export const MELDBASE_PROTOCOL_VERSION = 1 as const;
 
+/** Lists the protocol versions and capabilities supported by a server. */
 export interface ProtocolDescriptor {
   readonly versions: readonly number[];
   readonly capabilities: readonly string[];
 }
 
+/** Defines the accepted shape of a protocol capability name. */
 const CAPABILITY_PATTERN = /^[a-z][a-z0-9]*(?:[._][a-z][a-z0-9_]*){0,7}$/;
 
+/** Validates a server protocol descriptor and freezes its ordered version and capability lists. */
 export function decodeProtocolDescriptor(input: unknown): ProtocolDescriptor {
   if (
     !record(input) ||
@@ -49,6 +53,7 @@ export function decodeProtocolDescriptor(input: unknown): ProtocolDescriptor {
   });
 }
 
+/** Checks that a descriptor supports the requested version and every required capability. */
 export function supportsProtocol(
   descriptor: ProtocolDescriptor,
   version: number,
@@ -58,10 +63,12 @@ export function supportsProtocol(
   return required.every((capability) => descriptor.capabilities.includes(capability));
 }
 
+/** Checks whether a value is a non-null object other than an array. */
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Checks that an object contains exactly the expected field names. */
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();

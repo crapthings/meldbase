@@ -1,5 +1,6 @@
-// Package authorityhttp exposes a narrow, mTLS-authenticated primary-lease
-// Authority control endpoint. It is intentionally separate from the public
+// Package authorityhttp serves write lease grants and revocations over authenticated HTTPS.
+//
+// It uses mTLS and is separate from the public
 // database HTTP/RPC surface and from the quorum-member LeaseStore endpoint.
 package authorityhttp
 
@@ -24,28 +25,42 @@ import (
 )
 
 const (
-	protocolVersion   uint32 = 1
-	grantPath                = "/v1/authority/grant/"
-	revokePath               = "/v1/authority/revoke/"
-	maximumBodyBytes  int64  = 1024
-	maximumServerPins        = 4
+	// protocolVersion identifies the authority JSON protocol.
+	protocolVersion uint32 = 1
+	// grantPath prefixes routes for issuing database leases.
+	grantPath = "/v1/authority/grant/"
+	// revokePath prefixes routes for revoking database leases.
+	revokePath = "/v1/authority/revoke/"
+	// maximumBodyBytes bounds JSON reads for requests and responses.
+	maximumBodyBytes int64 = 1024
+	// maximumServerPins limits the certificate fingerprints accepted for one authority.
+	maximumServerPins = 4
 )
 
 var (
 	// ErrHTTPSRequired means the client did not obtain a verified, pinned HTTPS
-	// response. It is fatal for a caller: treating it as a temporary controller
+	// response.
+	//
+	// It is fatal for a caller: treating it as a temporary controller
 	// outage could hide an identity configuration error.
 	ErrHTTPSRequired = errors.New("meldbase authority HTTP: verified pinned HTTPS is required")
 	// ErrProtocol means an authenticated peer violated this strict control-plane
-	// protocol. It is fatal for a caller and never permits a blind retry.
+	// protocol.
+	//
+	// It is fatal for a caller and never permits a blind retry.
 	ErrProtocol = errors.New("meldbase authority HTTP: invalid protocol response")
 )
 
+// fatalError wraps a failure classified as fatal by the authority client.
 type fatalError struct{ err error }
 
+// Error returns the underlying failure message.
 func (err fatalError) Error() string { return err.err.Error() }
+
+// Unwrap exposes the underlying failure.
 func (err fatalError) Unwrap() error { return err.err }
 
+// fatal wraps a nonnil failure as a fatal client error.
 func fatal(err error) error {
 	if err == nil {
 		return nil
@@ -53,16 +68,22 @@ func fatal(err error) error {
 	return fatalError{err: err}
 }
 
-// Authorize returns an identity derived from a verified server-to-server peer
-// certificate. It must never take that identity from an HTTP field.
+// Authorize maps a verified peer certificate to a trusted node or operator identity.
+//
+// It must never take that identity from an HTTP field.
 type Authorize = replicationauth.Authorize
+
+// MTLSConfig maps verified certificate fingerprints to trusted peer identities.
 type MTLSConfig = replicationauth.MTLSConfig
 
+// NewMTLSAuthorizer creates an authorizer for configured and verified client certificates.
 func NewMTLSAuthorizer(config MTLSConfig) (Authorize, error) {
 	return replicationauth.NewMTLSAuthorizer(config)
 }
 
-// HandlerConfig configures the private Authority API. NodeAuthorize maps each
+// HandlerConfig sets the lease controller and separate node and operator authorization rules.
+//
+// NodeAuthorize maps each
 // verified node certificate to the immutable lease Owner used by Grant. Revoke
 // requires a separately configured operator authorizer; granting node identity
 // alone never conveys the ability to fence another primary.
@@ -72,7 +93,9 @@ type HandlerConfig struct {
 	OperatorAuthorize Authorize
 }
 
-// Handler serves one controller issuer. It does not expose promotion because
+// Handler serves authenticated lease grant and revocation requests for one controller.
+//
+// It does not expose promotion because
 // promotion must execute a deployment-specific, local history-readiness proof.
 type Handler struct {
 	authority         *primarylease.Authority
@@ -80,6 +103,7 @@ type Handler struct {
 	operatorAuthorize Authorize
 }
 
+// NewHandler creates an authority handler with separate node and operator authorizers.
 func NewHandler(config HandlerConfig) (*Handler, error) {
 	if config.Authority == nil || config.NodeAuthorize == nil || config.OperatorAuthorize == nil {
 		return nil, errors.New("meldbase authority HTTP: incomplete handler configuration")
@@ -87,6 +111,7 @@ func NewHandler(config HandlerConfig) (*Handler, error) {
 	return &Handler{authority: config.Authority, nodeAuthorize: config.NodeAuthorize, operatorAuthorize: config.OperatorAuthorize}, nil
 }
 
+// ServeHTTP checks the transport and routes a lease grant or revocation request.
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
@@ -123,6 +148,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	writeError(writer, http.StatusNotFound, "not_found", 0)
 }
 
+// grant authenticates a node and requests a lease for its identity and commit sequence.
 func (handler *Handler) grant(writer http.ResponseWriter, request *http.Request, databaseID [16]byte) {
 	owner, err := handler.nodeAuthorize(request)
 	if err != nil || owner == "" {
@@ -151,6 +177,7 @@ func (handler *Handler) grant(writer http.ResponseWriter, request *http.Request,
 	}
 }
 
+// revoke authenticates an operator and requests revocation of the specified lease epoch.
 func (handler *Handler) revoke(writer http.ResponseWriter, request *http.Request, databaseID [16]byte) {
 	if identity, err := handler.operatorAuthorize(request); err != nil || identity == "" {
 		writeError(writer, http.StatusUnauthorized, "authentication_failed", 0)
@@ -172,7 +199,9 @@ func (handler *Handler) revoke(writer http.ResponseWriter, request *http.Request
 	writer.WriteHeader(http.StatusNoContent)
 }
 
-// ClientOptions configures a private Authority API client. HTTPClient carries
+// ClientOptions sets the controller endpoint, expected server certificates, and HTTP client.
+//
+// HTTPClient carries
 // the caller's mTLS certificate and trusted roots. Exactly one of the legacy
 // single pin or the rotation-aware pin list must be supplied.
 type ClientOptions struct {
@@ -182,7 +211,9 @@ type ClientOptions struct {
 	HTTPClient                 *http.Client
 }
 
-// Client is a node or operator control-plane client. It cannot impersonate an
+// Client requests write leases or revocations from an authenticated controller.
+//
+// It cannot impersonate an
 // owner because the handler derives Owner from its verified mTLS identity.
 type Client struct {
 	endpoint     string
@@ -190,6 +221,7 @@ type Client struct {
 	client       *http.Client
 }
 
+// NewClient creates an authority client with validated server pins and redirects disabled.
 func NewClient(options ClientOptions) (*Client, error) {
 	endpoint, err := parseEndpoint(options.Endpoint)
 	if err != nil {
@@ -208,8 +240,9 @@ func NewClient(options ClientOptions) (*Client, error) {
 	return &Client{endpoint: endpoint, fingerprints: fingerprints, client: &copy}, nil
 }
 
-// Grant requests a primary certificate for the caller's configured mTLS node
-// identity. RetryAfter is set only when ErrLeaseActive is returned.
+// Grant requests a primary certificate for the caller's configured mTLS node identity.
+//
+// Use RetryAfter to extract a handoff time from an ErrLeaseActive error.
 func (client *Client) Grant(ctx context.Context, databaseID [16]byte, commitSequence uint64) (primarylease.Grant, error) {
 	if client == nil || client.client == nil || ctx == nil || databaseID == [16]byte{} {
 		return primarylease.Grant{}, fatal(ErrProtocol)
@@ -233,8 +266,10 @@ func (client *Client) Grant(ctx context.Context, databaseID [16]byte, commitSequ
 	return primarylease.Grant{}, client.grantError(response)
 }
 
-// Revoke requests a controller-side epoch advancement using the caller's
-// separately authorized operator mTLS identity.
+// Revoke requests lease revocation using the caller's separately authorized operator identity.
+//
+// The controller advances its stored epoch; this does not shorten a certificate
+// already held by an unreachable owner.
 func (client *Client) Revoke(ctx context.Context, databaseID [16]byte, epoch uint64) error {
 	if client == nil || client.client == nil || ctx == nil || databaseID == [16]byte{} || epoch == 0 {
 		return fatal(ErrProtocol)
@@ -254,6 +289,7 @@ func (client *Client) Revoke(ctx context.Context, databaseID [16]byte, epoch uin
 	return client.statusError(response)
 }
 
+// request sends a control request and checks the verified server certificate against configured pins.
 func (client *Client) request(ctx context.Context, prefix string, databaseID [16]byte, body []byte) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.endpoint+prefix+hex.EncodeToString(databaseID[:]), bytes.NewReader(body))
 	if err != nil {
@@ -280,6 +316,7 @@ func (client *Client) request(ctx context.Context, prefix string, databaseID [16
 	return response, nil
 }
 
+// grantError decodes a grant rejection and preserves any lease handoff retry time.
 func (client *Client) grantError(response *http.Response) error {
 	var wire wireError
 	if !decodeResponse(response.Body, &wire) || wire.Version != protocolVersion {
@@ -303,6 +340,7 @@ func (client *Client) grantError(response *http.Response) error {
 	}
 }
 
+// statusError decodes an error response and classifies its status and error code.
 func (client *Client) statusError(response *http.Response) error {
 	var wire wireError
 	if !decodeResponse(response.Body, &wire) || wire.Version != protocolVersion {
@@ -311,6 +349,7 @@ func (client *Client) statusError(response *http.Response) error {
 	return client.statusErrorDecoded(response.StatusCode, wire.Error)
 }
 
+// statusErrorDecoded distinguishes controller outages from fatal protocol or authentication failures.
 func (client *Client) statusErrorDecoded(status int, code string) error {
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -327,8 +366,9 @@ func (client *Client) statusErrorDecoded(status int, code string) error {
 	}
 }
 
-// RetryAfter extracts the retry point returned with ErrLeaseActive. The value
-// is intentionally absent for all other failures and has no owner/state data.
+// RetryAfter returns the earliest retry time supplied with a lease handoff error.
+//
+// The value is absent for other failures and contains no owner or state data.
 func RetryAfter(err error) (time.Time, bool) {
 	var retry retryAfterError
 	if !errors.As(err, &retry) {
@@ -337,33 +377,40 @@ func RetryAfter(err error) (time.Time, bool) {
 	return retry.at, true
 }
 
+// retryAfterError carries the earliest retry time supplied by the authority.
 type retryAfterError struct{ at time.Time }
 
+// Error describes the lease handoff wait without exposing lease state.
 func (err retryAfterError) Error() string {
 	return "meldbase authority HTTP: retry after lease handoff"
 }
 
+// wireGrantRequest carries the commit sequence a node wants certified.
 type wireGrantRequest struct {
 	Version        uint32 `json:"v"`
 	CommitSequence uint64 `json:"commitSequence"`
 }
 
+// wireRevokeRequest carries the lease epoch an operator wants revoked.
 type wireRevokeRequest struct {
 	Version uint32 `json:"v"`
 	Epoch   uint64 `json:"epoch"`
 }
 
+// wireGrantResponse carries the issued certificate and protocol version.
 type wireGrantResponse struct {
 	Version     uint32 `json:"v"`
 	Certificate string `json:"certificate"`
 }
 
+// wireError carries an error code and optional lease handoff retry time.
 type wireError struct {
 	Version      uint32 `json:"v"`
 	Error        string `json:"error"`
 	RetryAfterMS int64  `json:"retryAfterMs,omitempty"`
 }
 
+// parseEndpoint accepts an HTTPS server URL without credentials, routing paths, queries, or fragments.
 func parseEndpoint(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
@@ -372,6 +419,7 @@ func parseEndpoint(raw string) (string, error) {
 	return strings.TrimSuffix(parsed.String(), "/"), nil
 }
 
+// configuredFingerprints validates a bounded set of unique lowercase certificate fingerprints.
 func configuredFingerprints(options ClientOptions) (map[[sha256.Size]byte]struct{}, error) {
 	if options.ExpectedServerFingerprint != "" && len(options.ExpectedServerFingerprints) != 0 {
 		return nil, ErrHTTPSRequired
@@ -402,6 +450,7 @@ func configuredFingerprints(options ClientOptions) (map[[sha256.Size]byte]struct
 	return fingerprints, nil
 }
 
+// databaseIDFromPath extracts a nonzero database identity from an unescaped control route.
 func databaseIDFromPath(endpoint *url.URL, prefix string) ([16]byte, bool) {
 	var databaseID [16]byte
 	if endpoint == nil || endpoint.RawQuery != "" || endpoint.EscapedPath() != endpoint.Path || !strings.HasPrefix(endpoint.Path, prefix) {
@@ -419,14 +468,17 @@ func databaseIDFromPath(endpoint *url.URL, prefix string) ([16]byte, bool) {
 	return databaseID, databaseID != [16]byte{}
 }
 
+// decodeBody decodes a request using the configured JSON read limit.
 func decodeBody(reader io.Reader, target any) bool {
 	return decodeJSON(io.LimitReader(reader, maximumBodyBytes+1), target)
 }
 
+// decodeResponse decodes a response using the configured JSON read limit.
 func decodeResponse(reader io.Reader, target any) bool {
 	return decodeJSON(io.LimitReader(reader, maximumBodyBytes+1), target)
 }
 
+// decodeJSON reads one JSON value and rejects unknown fields or trailing values.
 func decodeJSON(reader io.Reader, target any) bool {
 	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
@@ -437,12 +489,14 @@ func decodeJSON(reader io.Reader, target any) bool {
 	return errors.Is(decoder.Decode(&trailing), io.EOF)
 }
 
+// writeJSON sends a JSON value with the supplied HTTP status.
 func writeJSON(writer http.ResponseWriter, status int, value any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(value)
 }
 
+// writeError sends a versioned error code and optional retry time.
 func writeError(writer http.ResponseWriter, status int, code string, retryAfterMS int64) {
 	writeJSON(writer, status, wireError{Version: protocolVersion, Error: code, RetryAfterMS: retryAfterMS})
 }

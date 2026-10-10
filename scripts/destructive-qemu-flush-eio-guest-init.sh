@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+# Reports an unexpected guest exit and powers off the test machine.
 qualification_failure() {
 	status=$?
 	trap - EXIT
@@ -10,7 +11,9 @@ qualification_failure() {
 }
 trap qualification_failure EXIT
 
+# Selects the guest directories used to find system commands.
 export PATH=/usr/bin:/usr/sbin:/bin:/sbin
+# Locates BusyBox so its commands can be installed in the guest.
 busybox=/bin/busybox
 [ -x "$busybox" ] || busybox=/usr/bin/busybox
 "$busybox" --install -s /bin
@@ -21,7 +24,9 @@ mdev -s
 modprobe virtio_blk
 mdev -s
 
+# Holds the trial name read from the guest boot arguments.
 trial=
+# Selects fault injection or recovery from the guest boot arguments.
 phase=
 for argument in $(cat /proc/cmdline); do
 	case "$argument" in

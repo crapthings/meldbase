@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// destructiveBootID reads and validates the current Linux boot identity.
 func destructiveBootID() (string, error) {
 	raw, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
 	if err != nil {

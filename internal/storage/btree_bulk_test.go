@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestSortedTreeBuilderBuildsMultiLevelTree checks range reads and entry counts in a tree built from many sorted entries.
 func TestSortedTreeBuilderBuildsMultiLevelTree(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "bulk.meld2"))
 	if err != nil {
@@ -51,6 +52,7 @@ func TestSortedTreeBuilderBuildsMultiLevelTree(t *testing.T) {
 	}
 }
 
+// TestSortedTreeBuilderRejectsNonIncreasingKeysAndSupportsEmpty checks duplicate-key rejection and construction of a readable empty tree.
 func TestSortedTreeBuilderRejectsNonIncreasingKeysAndSupportsEmpty(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "bulk-empty.meld2"))
 	if err != nil {
@@ -91,6 +93,7 @@ func TestSortedTreeBuilderRejectsNonIncreasingKeysAndSupportsEmpty(t *testing.T)
 	}
 }
 
+// TestSortedTreeBuilderBuildsDeepTreeWithLargeSeparators checks that large sorted keys produce a tree at least three levels deep with all entries readable.
 func TestSortedTreeBuilderBuildsDeepTreeWithLargeSeparators(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "bulk-deep.meld2"))
 	if err != nil {

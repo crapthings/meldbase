@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// newIndexDefinition creates an index definition from a nonempty list of copied fields.
 func newIndexDefinition(name string, fields []IndexField, unique bool) IndexDefinition {
 	cloned := cloneIndexFields(fields)
 	return IndexDefinition{
@@ -13,6 +14,7 @@ func newIndexDefinition(name string, fields []IndexField, unique bool) IndexDefi
 	}
 }
 
+// cloneIndexFields copies the ordered field definitions.
 func cloneIndexFields(fields []IndexField) []IndexField {
 	if len(fields) == 0 {
 		return nil
@@ -20,6 +22,7 @@ func cloneIndexFields(fields []IndexField) []IndexField {
 	return append([]IndexField(nil), fields...)
 }
 
+// indexDefinitionFields returns the ordered fields, including legacy single-field definitions.
 func indexDefinitionFields(definition IndexDefinition) []IndexField {
 	if len(definition.Fields) > 0 {
 		return definition.Fields
@@ -30,6 +33,7 @@ func indexDefinitionFields(definition IndexDefinition) []IndexField {
 	return []IndexField{{Field: definition.Field, Order: definition.Order}}
 }
 
+// cloneIndexDefinition copies an index definition and keeps its legacy fields in sync.
 func cloneIndexDefinition(definition IndexDefinition) IndexDefinition {
 	definition.Fields = cloneIndexFields(indexDefinitionFields(definition))
 	if len(definition.Fields) > 0 {
@@ -38,6 +42,7 @@ func cloneIndexDefinition(definition IndexDefinition) IndexDefinition {
 	return definition
 }
 
+// equalIndexDefinitions compares index names, uniqueness, and ordered fields.
 func equalIndexDefinitions(left, right IndexDefinition) bool {
 	if left.Name != right.Name || left.Unique != right.Unique {
 		return false
@@ -54,11 +59,13 @@ func equalIndexDefinitions(left, right IndexDefinition) bool {
 	return true
 }
 
+// usesCompoundIndexCodec reports whether an index needs tuple or descending-order encoding.
 func usesCompoundIndexCodec(definition IndexDefinition) bool {
 	fields := indexDefinitionFields(definition)
 	return len(fields) != 1 || (len(fields) == 1 && fields[0].Order != 1)
 }
 
+// indexDocumentKey derives a full or partial index key and reports whether the document is indexed.
 func indexDocumentKey(definition IndexDefinition, document Document) ([]byte, bool, error) {
 	fields := indexDefinitionFields(definition)
 	if len(fields) == 0 {
@@ -98,6 +105,7 @@ func indexDocumentKey(definition IndexDefinition, document Document) ([]byte, bo
 	return key, true, nil
 }
 
+// compoundIndexQueryBounds derives a scan interval from leading equalities and the next field range.
 func compoundIndexQueryBounds(definition IndexDefinition, expression expr) (start, end []byte, ok, exact bool) {
 	fields := indexDefinitionFields(definition)
 	if !usesCompoundIndexCodec(definition) || len(fields) == 0 {
@@ -175,10 +183,10 @@ func compoundIndexQueryBounds(definition IndexDefinition, expression expr) (star
 	return start, end, true, false
 }
 
-// compoundIndexValueSpans handles a singleton or multi-value equality union
-// on the leading compound component. Each value owns one contiguous prefix
-// span; later conditions remain residual predicates unless the ordinary
-// compound-bound planner can prove a narrower span first.
+// compoundIndexValueSpans builds scan intervals for allowed values of the first index field.
+//
+// Each value owns one contiguous prefix span; later conditions remain residual
+// predicates unless the compound-bound planner proves a narrower span.
 func compoundIndexValueSpans(definition IndexDefinition, expression expr) ([]indexScanSpan, bool) {
 	fields := indexDefinitionFields(definition)
 	if !usesCompoundIndexCodec(definition) || len(fields) == 0 {
@@ -203,9 +211,10 @@ func compoundIndexValueSpans(definition IndexDefinition, expression expr) ([]ind
 	return spans, true
 }
 
-// indexQueryScore ranks usable indexes by the constrained left prefix. An
-// equality component contributes two points and one range component contributes
-// one, so a longer compound prefix wins while exact matches beat ranges.
+// indexQueryScore ranks indexes by how many leading fields the query constrains.
+//
+// Each equality adds two points and a range adds one, favoring longer prefixes
+// and exact matches.
 func indexQueryScore(definition IndexDefinition, expression expr) int {
 	fields := indexDefinitionFields(definition)
 	if len(fields) == 0 {

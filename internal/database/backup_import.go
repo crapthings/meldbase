@@ -15,19 +15,20 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// PhysicalBackupImportOptions bounds an untrusted physical-backup stream
-// before it can consume local disk. Zero selects the normal file limit.
+// PhysicalBackupImportOptions limits the bytes accepted from a physical backup stream.
+//
+// Zero selects the normal file limit.
 // Deployments with a deliberately larger database must set MaxBytes
 // explicitly on the receiving side; a sender never chooses that authority.
 type PhysicalBackupImportOptions struct {
 	MaxBytes uint64
 }
 
-// ImportPhysicalBackup receives one exact Backup artifact into a new local
-// path. It writes a private temporary file, checks the claimed byte count and
-// SHA-256 while streaming, runs the complete offline  graph/index verifier,
-// then publishes with the same no-overwrite link-and-directory-sync commit
-// point as backup and migration.
+// ImportPhysicalBackup verifies a physical backup stream and publishes it at a new path.
+//
+// It writes a private temporary file, checks the claimed byte count and
+// SHA-256 while streaming, verifies the stored page structure and index contents,
+// then publishes without overwriting an existing file and syncs the directory.
 //
 // source is intentionally transport-neutral. A WebSocket, HTTP response, QUIC
 // stream, or removable-media reader may supply it, but transport cancellation
@@ -100,11 +101,12 @@ func ImportPhysicalBackup(ctx context.Context, source io.Reader, destination str
 	return expected, nil
 }
 
+// validatePhysicalBackupReceipt checks backup metadata against format and receiver size limits.
 func validatePhysicalBackupReceipt(expected BackupResult, maxBytes uint64) error {
 	if maxBytes < storage.PageSize || maxBytes%storage.PageSize != 0 || expected.Bytes < 2*storage.PageSize ||
 		expected.Bytes > maxBytes || expected.Bytes%storage.PageSize != 0 || expected.Pages != expected.Bytes/storage.PageSize ||
-		expected.MetaGeneration == 0 || len(expected.DatabaseIDHex) != 32 || stringsLower(expected.DatabaseIDHex) != expected.DatabaseIDHex ||
-		len(expected.SHA256) != sha256.Size*2 || stringsLower(expected.SHA256) != expected.SHA256 {
+		expected.MetaGeneration == 0 || len(expected.DatabaseIDHex) != 32 || hasUppercaseHex(expected.DatabaseIDHex) ||
+		len(expected.SHA256) != sha256.Size*2 || hasUppercaseHex(expected.SHA256) {
 		return ErrCorrupt
 	}
 	identity, err := hex.DecodeString(expected.DatabaseIDHex)
@@ -118,6 +120,7 @@ func validatePhysicalBackupReceipt(expected BackupResult, maxBytes uint64) error
 	return nil
 }
 
+// copyAndVerifyPhysicalBackup copies an exact-size stream and checks its claimed checksum.
 func copyAndVerifyPhysicalBackup(ctx context.Context, destination *os.File, source io.Reader, expected BackupResult) error {
 	if destination == nil || source == nil {
 		return ErrCorrupt
@@ -157,15 +160,17 @@ func copyAndVerifyPhysicalBackup(ctx context.Context, destination *os.File, sour
 	return nil
 }
 
-func stringsLower(value string) string {
+// hasUppercaseHex reports whether a string contains uppercase hexadecimal letters.
+func hasUppercaseHex(value string) bool {
 	for index := range len(value) {
 		if value[index] >= 'A' && value[index] <= 'F' {
-			return ""
+			return true
 		}
 	}
-	return value
+	return false
 }
 
+// allZeroBytes reports whether every byte is zero.
 func allZeroBytes(value []byte) bool {
 	var found byte
 	for _, item := range value {

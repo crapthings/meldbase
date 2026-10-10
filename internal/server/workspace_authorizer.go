@@ -14,33 +14,39 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// workspaceIdentifier defines simple names for workspace fields and collection declarations.
 var workspaceIdentifier = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,127}$`)
+
+// rpcMethodIdentifier defines the allowed spelling and length of declared RPC method names.
 var rpcMethodIdentifier = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
 
-// CollectionAccessMode defines one of the small, server-enforced generic data
-// API surfaces for a collection. Modes only produce the existing policy types;
+// CollectionAccessMode selects the read and write permissions for a collection.
+//
+// Modes only produce the existing policy types;
 // they do not introduce a second authorization engine or client-side checks.
 type CollectionAccessMode string
 
 const (
-	// CollectionAccessCollaborative allows every verified workspace member to
-	// read and mutate documents in the collection. The server owns the workspace
-	// field, so this mode is suitable only for genuinely collaborative data.
+	// CollectionAccessCollaborative allows verified workspace members to read and change collection documents.
+	//
+	// The server owns the workspace field; use this mode for shared workspace data.
 	CollectionAccessCollaborative CollectionAccessMode = "collaborative"
-	// CollectionAccessOwner allows an actor to access only documents it owns
-	// inside its verified workspace. The server owns both the workspace and owner
+	// CollectionAccessOwner limits access to documents the actor owns within its verified workspace.
+	//
+	// The server owns both the workspace and owner
 	// fields for inserts and makes them immutable afterwards.
 	CollectionAccessOwner CollectionAccessMode = "owner"
-	// CollectionAccessRPCOnly rejects every generic query and mutation. An
-	// application may still expose named RPC methods with its own RPCAuthorizer.
+	// CollectionAccessRPCOnly rejects generic queries and mutations while allowing separately authorized RPC methods.
 	CollectionAccessRPCOnly CollectionAccessMode = "rpc_only"
-	// CollectionAccessReadOnly permits generic workspace-scoped reads and
-	// subscriptions, but rejects every generic mutation. It is intended for
+	// CollectionAccessReadOnly allows workspace reads and subscriptions while rejecting generic mutations.
+	//
+	// It is intended for
 	// business records whose writes are named server RPC operations.
 	CollectionAccessReadOnly CollectionAccessMode = "read_only"
 )
 
-// CollectionAccess declares the generic data API surface for one collection.
+// CollectionAccess declares the read and write rules for one collection.
+//
 // OwnerField is required only for CollectionAccessOwner.
 type CollectionAccess struct {
 	Collection string                  `json:"collection"`
@@ -49,8 +55,9 @@ type CollectionAccess struct {
 	Fields     *CollectionAccessFields `json:"fields,omitempty"`
 }
 
-// CollectionAccessFields is an optional static field boundary for generic
-// client access. A nil list allows every field for that operation; an explicit
+// CollectionAccessFields lists the fields clients may use for each operation.
+//
+// A nil list allows every field for that operation; an explicit
 // empty list allows none. Server-owned workspace and owner fields remain
 // immutable regardless of these declarations.
 type CollectionAccessFields struct {
@@ -61,9 +68,10 @@ type CollectionAccessFields struct {
 	UpdatePaths     []string `json:"updatePaths,omitempty"`
 }
 
-// WorkspaceAuthorizerConfig declares the manifest-provided collections scoped
-// to the authenticated actor's current workspace. The workspace field is
-// owned by the server: inserts set it and updates may never modify it.
+// WorkspaceAuthorizerConfig sets collection and RPC permissions within the authenticated workspace.
+//
+// The server owns the workspace field: inserts set it and updates may never
+// modify it.
 type WorkspaceAuthorizerConfig struct {
 	CollectionAccess []CollectionAccess
 	WorkspaceField   string
@@ -72,9 +80,10 @@ type WorkspaceAuthorizerConfig struct {
 	MaxAffected      int
 }
 
-// WorkspaceAuthorizer is a data-only Authorizer for ordinary application
-// collections. It is intentionally not a user or membership store; an external
-// identity provider supplies Actor.WorkspaceID from the active workspace claim.
+// WorkspaceAuthorizer enforces declared collection and RPC permissions within the actor's active workspace.
+//
+// An external identity provider supplies Actor.WorkspaceID from the active
+// workspace claim; this authorizer does not store users or memberships.
 type WorkspaceAuthorizer struct {
 	collections    map[string]workspaceCollectionAccess
 	rpcMethods     map[string]struct{}
@@ -83,11 +92,13 @@ type WorkspaceAuthorizer struct {
 	maxAffected    int
 }
 
+// workspaceCollectionAccess pairs a normalized collection rule with its policy version.
 type workspaceCollectionAccess struct {
 	CollectionAccess
 	policyVersion string
 }
 
+// NewWorkspaceAuthorizer validates collection rules and creates workspace-scoped access policies.
 func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthorizer, error) {
 	if !workspaceIdentifier.MatchString(config.WorkspaceField) {
 		return nil, errors.New("workspace field must be a simple document field name")
@@ -166,6 +177,7 @@ func NewWorkspaceAuthorizer(config WorkspaceAuthorizerConfig) (*WorkspaceAuthori
 	}, nil
 }
 
+// AuthorizeQuery returns field permissions and workspace or owner constraints for a collection read.
 func (a *WorkspaceAuthorizer) AuthorizeQuery(_ context.Context, actor Actor, collection string, _ meldbase.QuerySpec) (QueryPolicy, error) {
 	rule, err := a.allow(actor, collection)
 	if err != nil {
@@ -186,6 +198,7 @@ func (a *WorkspaceAuthorizer) AuthorizeQuery(_ context.Context, actor Actor, col
 	}, nil
 }
 
+// AuthorizeInsert returns insert permissions and server-owned workspace and owner fields.
 func (a *WorkspaceAuthorizer) AuthorizeInsert(_ context.Context, actor Actor, collection string, _ meldbase.Document) (InsertPolicy, error) {
 	rule, err := a.allow(actor, collection)
 	if err != nil {
@@ -212,6 +225,7 @@ func (a *WorkspaceAuthorizer) AuthorizeInsert(_ context.Context, actor Actor, co
 	}, nil
 }
 
+// AuthorizeUpdate returns scoped update permissions that keep workspace and owner fields immutable.
 func (a *WorkspaceAuthorizer) AuthorizeUpdate(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec, _ meldbase.MutationSpec) (UpdatePolicy, error) {
 	rule, err := a.allow(actor, collection)
 	if err != nil {
@@ -235,6 +249,7 @@ func (a *WorkspaceAuthorizer) AuthorizeUpdate(ctx context.Context, actor Actor, 
 	}, nil
 }
 
+// AuthorizeDelete returns scoped deletion permissions and the affected-document limit.
 func (a *WorkspaceAuthorizer) AuthorizeDelete(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (DeletePolicy, error) {
 	rule, err := a.allow(actor, collection)
 	if err != nil {
@@ -251,7 +266,9 @@ func (a *WorkspaceAuthorizer) AuthorizeDelete(ctx context.Context, actor Actor, 
 }
 
 // AuthorizeRPC accepts only exact method names declared by the manifest, for a
-// verified workspace actor. The allowlist deliberately grants no role or
+// verified workspace actor.
+//
+// The allowlist deliberately grants no role or
 // record-level authority; those decisions remain in the named RPC handler.
 func (a *WorkspaceAuthorizer) AuthorizeRPC(_ context.Context, actor Actor, method string) error {
 	if actor.ID == "" || actor.WorkspaceID == "" {
@@ -263,6 +280,7 @@ func (a *WorkspaceAuthorizer) AuthorizeRPC(_ context.Context, actor Actor, metho
 	return nil
 }
 
+// constraint compiles the workspace and optional owner filter for a collection rule.
 func (a *WorkspaceAuthorizer) constraint(actor Actor, rule workspaceCollectionAccess) (meldbase.QuerySpec, error) {
 	filter := meldbase.Filter{a.workspaceField: actor.WorkspaceID}
 	if rule.Mode == CollectionAccessOwner {
@@ -271,6 +289,7 @@ func (a *WorkspaceAuthorizer) constraint(actor Actor, rule workspaceCollectionAc
 	return meldbase.CompileQuery(filter, meldbase.QueryOptions{})
 }
 
+// allow rejects missing actor identities and collections that do not permit generic data access.
 func (a *WorkspaceAuthorizer) allow(actor Actor, collection string) (workspaceCollectionAccess, error) {
 	if actor.ID == "" || actor.WorkspaceID == "" {
 		return workspaceCollectionAccess{}, ErrForbidden
@@ -282,6 +301,7 @@ func (a *WorkspaceAuthorizer) allow(actor Actor, collection string) (workspaceCo
 	return rule, nil
 }
 
+// normalizeCollectionAccessFields copies, validates, and sorts optional collection field permissions.
 func normalizeCollectionAccessFields(fields *CollectionAccessFields) (*CollectionAccessFields, error) {
 	if fields == nil {
 		return nil, nil
@@ -309,6 +329,7 @@ func normalizeCollectionAccessFields(fields *CollectionAccessFields) (*Collectio
 	return result, nil
 }
 
+// cloneCollectionAccessStrings copies a permission list while preserving the distinction between nil and empty.
 func cloneCollectionAccessStrings(values []string) []string {
 	if values == nil {
 		return nil
@@ -316,6 +337,7 @@ func cloneCollectionAccessStrings(values []string) []string {
 	return append([]string{}, values...)
 }
 
+// validateCollectionAccessPathList checks bounded unique non-ID paths and sorts the list in place.
 func validateCollectionAccessPathList(paths []string, kind string) error {
 	if paths == nil {
 		return nil
@@ -338,6 +360,7 @@ func validateCollectionAccessPathList(paths []string, kind string) error {
 	return nil
 }
 
+// validateCollectionAccessFieldList checks bounded unique top-level field names and sorts the list in place.
 func validateCollectionAccessFieldList(fields []string, kind string) error {
 	if fields == nil {
 		return nil
@@ -356,6 +379,7 @@ func validateCollectionAccessFieldList(fields []string, kind string) error {
 	return nil
 }
 
+// collectionAccessFieldSet converts an optional permission list into an allow-all flag or explicit field set.
 func collectionAccessFieldSet(fields *CollectionAccessFields, selectFields func(*CollectionAccessFields) []string) (bool, map[string]struct{}) {
 	if fields == nil {
 		return true, nil
@@ -371,6 +395,8 @@ func collectionAccessFieldSet(fields *CollectionAccessFields, selectFields func(
 	return false, result
 }
 
+// collectionAccessAggregateFieldSet grants only aggregate fields explicitly listed in the collection rule.
+//
 // Aggregates enumerate values and can reveal distributions a normal filtered
 // read does not. Unlike the ordinary field lists, built-in manifest aggregate
 // access is therefore opt-in: omitted means none, including when fields itself
@@ -382,6 +408,7 @@ func collectionAccessAggregateFieldSet(fields *CollectionAccessFields) (bool, ma
 	return false, collectionAccessStringSet(fields.AggregateFields)
 }
 
+// collectionAccessStringSet converts a permission list into a lookup set.
 func collectionAccessStringSet(values []string) map[string]struct{} {
 	result := make(map[string]struct{}, len(values))
 	for _, value := range values {

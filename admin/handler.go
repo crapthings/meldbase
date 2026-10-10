@@ -17,18 +17,22 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// Authorizer decides whether a request may access the operator API.
 type Authorizer func(*http.Request) bool
 
+// DiagnosticSource supplies bounded diagnostic snapshots after an event sequence.
 type DiagnosticSource interface {
 	DiagnosticSnapshotAfter(after uint64, limit int) meldbase.DiagnosticSnapshot
 }
 
-// IndexCatalogSource supplies only published index definitions. Its output is
-// exposed exclusively from the authenticated operator API.
+// IndexCatalogSource supplies published index definitions for the operator API.
+//
+// Its output is exposed only after operator authentication.
 type IndexCatalogSource interface {
 	IndexCatalog(context.Context) ([]meldbase.IndexCatalogEntry, error)
 }
 
+// HandlerOptions configures operator access, sampled data, and optional dashboard and diagnostic routes.
 type HandlerOptions struct {
 	Sampler        *Sampler
 	Authorize      Authorizer
@@ -41,6 +45,7 @@ type HandlerOptions struct {
 	AuditWriter    io.Writer
 }
 
+// Handler serves operator statistics and optional dashboard, metrics, and diagnostic endpoints.
 type Handler struct {
 	sampler        *Sampler
 	authorize      Authorizer
@@ -53,16 +58,23 @@ type Handler struct {
 	audit          *auditLogger
 }
 
+// dashboardHTML contains the bundled dashboard page.
+//
 //go:embed dashboard/index.html
 var dashboardHTML []byte
 
+// dashboardJavaScript contains the bundled dashboard script.
+//
 //go:embed dashboard/app.js
 var dashboardJavaScript []byte
 
+// dashboardCSS contains the bundled dashboard styles.
+//
 //go:embed dashboard/style.css
 var dashboardCSS []byte
 
-// NewBearerTokenAuthorizer creates a constant-time Authorization header check.
+// NewBearerTokenAuthorizer creates an operator access check using constant-time bearer token comparisons.
+//
 // Tokens are intentionally not accepted in URLs, where they leak into logs and
 // browser history.
 func NewBearerTokenAuthorizer(token string) (Authorizer, error) {
@@ -76,6 +88,7 @@ func NewBearerTokenAuthorizer(token string) (Authorizer, error) {
 	}, nil
 }
 
+// NewHandler validates operator settings and registers the enabled HTTP routes.
 func NewHandler(options HandlerOptions) (*Handler, error) {
 	if options.Sampler == nil {
 		return nil, errors.New("meldbase admin: sampler is required")
@@ -124,6 +137,10 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 	return handler, nil
 }
 
+// ServeHTTP routes operator requests through origin checks, authorization, and auditing.
+//
+// Dashboard pages and assets are public after the origin check; API requests
+// require operator authorization. Preflight requests use their own validation.
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	observed := &adminResponseStatusWriter{ResponseWriter: writer}
 	defer h.audit.record(request, observed)
@@ -153,11 +170,13 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	h.mux.ServeHTTP(writer, request)
 }
 
+// adminResponseStatusWriter records the first response status for request auditing.
 type adminResponseStatusWriter struct {
 	http.ResponseWriter
 	status int
 }
 
+// WriteHeader records the first status and forwards the header write.
 func (writer *adminResponseStatusWriter) WriteHeader(status int) {
 	if writer.status == 0 {
 		writer.status = status
@@ -165,6 +184,7 @@ func (writer *adminResponseStatusWriter) WriteHeader(status int) {
 	writer.ResponseWriter.WriteHeader(status)
 }
 
+// Write records an implicit success status and forwards response bytes.
 func (writer *adminResponseStatusWriter) Write(body []byte) (int, error) {
 	if writer.status == 0 {
 		writer.status = http.StatusOK
@@ -172,8 +192,10 @@ func (writer *adminResponseStatusWriter) Write(body []byte) (int, error) {
 	return writer.ResponseWriter.Write(body)
 }
 
+// Unwrap returns the underlying response writer.
 func (writer *adminResponseStatusWriter) Unwrap() http.ResponseWriter { return writer.ResponseWriter }
 
+// Flush records an implicit success status and flushes the underlying writer when supported.
 func (writer *adminResponseStatusWriter) Flush() {
 	if writer.status == 0 {
 		writer.status = http.StatusOK
@@ -183,10 +205,12 @@ func (writer *adminResponseStatusWriter) Flush() {
 	}
 }
 
+// isDashboardPath identifies the dashboard page and its two bundled assets.
 func isDashboardPath(path string) bool {
 	return path == "/" || path == "/assets/app.js" || path == "/assets/style.css"
 }
 
+// preflight permits cross-origin GET requests using only the authorization header.
 func (h *Handler) preflight(writer http.ResponseWriter, request *http.Request) {
 	if request.Header.Get("Origin") == "" || request.Header.Get("Access-Control-Request-Method") != http.MethodGet {
 		writeAdminError(writer, http.StatusForbidden, "preflight_forbidden")
@@ -205,6 +229,7 @@ func (h *Handler) preflight(writer http.ResponseWriter, request *http.Request) {
 	writer.WriteHeader(http.StatusNoContent)
 }
 
+// originAllowed accepts absent origins, configured origins, or origins matching the request host and scheme.
 func (h *Handler) originAllowed(request *http.Request, origin string) bool {
 	if origin == "" {
 		return true
@@ -223,6 +248,7 @@ func (h *Handler) originAllowed(request *http.Request, origin string) bool {
 	return parsed.Scheme == scheme
 }
 
+// stats sends the latest sample as JSON or reports that statistics are unavailable.
 func (h *Handler) stats(writer http.ResponseWriter, _ *http.Request) {
 	sample, ok := h.sampler.Latest()
 	if !ok {
@@ -236,6 +262,7 @@ func (h *Handler) stats(writer http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// history sends the retained sample history as JSON.
 func (h *Handler) history(writer http.ResponseWriter, _ *http.Request) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("Cache-Control", "no-store")
@@ -244,6 +271,7 @@ func (h *Handler) history(writer http.ResponseWriter, _ *http.Request) {
 	}{Samples: h.sampler.History()})
 }
 
+// diagnosticEvents validates the cursor and limit and sends a bounded diagnostic snapshot.
 func (h *Handler) diagnosticEvents(writer http.ResponseWriter, request *http.Request) {
 	after := uint64(0)
 	limit := 100
@@ -267,6 +295,7 @@ func (h *Handler) diagnosticEvents(writer http.ResponseWriter, request *http.Req
 	_ = json.NewEncoder(writer).Encode(h.diagnostics.DiagnosticSnapshotAfter(after, limit))
 }
 
+// indexes sends published index definitions using a consistent ordered-field representation.
 func (h *Handler) indexes(writer http.ResponseWriter, request *http.Request) {
 	entries, err := h.indexCatalog.IndexCatalog(request.Context())
 	if err != nil {
@@ -302,6 +331,7 @@ func (h *Handler) indexes(writer http.ResponseWriter, request *http.Request) {
 	}{Indexes: result})
 }
 
+// prometheusMetrics sends the latest sample in Prometheus text format.
 func (h *Handler) prometheusMetrics(writer http.ResponseWriter, _ *http.Request) {
 	sample, ok := h.sampler.Latest()
 	if !ok {
@@ -315,6 +345,7 @@ func (h *Handler) prometheusMetrics(writer http.ResponseWriter, _ *http.Request)
 	_, _ = writer.Write(payload)
 }
 
+// dashboard serves the bundled HTML page at the root path.
 func (h *Handler) dashboard(writer http.ResponseWriter, request *http.Request) {
 	if request.URL.Path != "/" {
 		http.NotFound(writer, request)
@@ -325,23 +356,27 @@ func (h *Handler) dashboard(writer http.ResponseWriter, request *http.Request) {
 	_, _ = writer.Write(dashboardHTML)
 }
 
+// dashboardJavaScript serves the bundled dashboard script.
 func (h *Handler) dashboardJavaScript(writer http.ResponseWriter, _ *http.Request) {
 	setDashboardHeaders(writer)
 	writer.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	_, _ = writer.Write(dashboardJavaScript)
 }
 
+// dashboardStyles serves the bundled dashboard stylesheet.
 func (h *Handler) dashboardStyles(writer http.ResponseWriter, _ *http.Request) {
 	setDashboardHeaders(writer)
 	writer.Header().Set("Content-Type", "text/css; charset=utf-8")
 	_, _ = writer.Write(dashboardCSS)
 }
 
+// setDashboardHeaders disables caching and restricts dashboard resources to the same origin.
 func setDashboardHeaders(writer http.ResponseWriter) {
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 }
 
+// stream delivers sampler updates as server-sent events with per-write deadlines when supported.
 func (h *Handler) stream(writer http.ResponseWriter, request *http.Request) {
 	flusher, ok := writer.(http.Flusher)
 	if !ok {
@@ -377,6 +412,7 @@ func (h *Handler) stream(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
+// setSecurityHeaders applies restrictive browser security headers to admin responses.
 func setSecurityHeaders(writer http.ResponseWriter) {
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
 	writer.Header().Set("Referrer-Policy", "no-referrer")
@@ -384,6 +420,7 @@ func setSecurityHeaders(writer http.ResponseWriter) {
 	writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 }
 
+// writeAdminError sends a JSON error code with caching disabled.
 func writeAdminError(writer http.ResponseWriter, status int, code string) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("Cache-Control", "no-store")

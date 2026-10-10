@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 
+# Prints the capacity evidence collection options.
 usage() {
   cat <<'EOF'
 Usage:
@@ -18,12 +19,19 @@ hardware and synthetic workload; it is not an SLA or a release gate.
 EOF
 }
 
+# Holds the new directory where capacity evidence will be saved.
 out_dir=""
+# Lists the document counts to measure.
 documents="1024,8192,65536"
+# Sets the number of measured queries for each scenario.
 iterations=200
+# Sets how many times each runtime benchmark runs.
 runtime_count=5
+# Sets the duration of each runtime benchmark run.
 runtime_benchtime=3s
+# Sets the time limit for each query observer run.
 timeout=10m
+# Holds the optional resource limit configuration to identify in the evidence.
 resource_limits_file=""
 while (($#)); do
   case "$1" in
@@ -50,6 +58,7 @@ if [[ -n "$resource_limits_file" ]]; then
 fi
 
 mkdir -m 700 "$out_dir"
+# Names the report containing host capabilities and resource limits.
 host="$out_dir/host-capacity.txt"
 {
   printf 'capturedAtUtc='; date -u +%Y-%m-%dT%H:%M:%SZ

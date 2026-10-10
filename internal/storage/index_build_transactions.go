@@ -7,20 +7,30 @@ import (
 )
 
 const (
-	MaxConcurrentIndexBuilds      = 64
-	MaxIndexBuildBatchEntries     = 4096
-	MaxIndexBuildBatchBytes       = 16 << 20
-	MaxIndexBuildCatchUpCommits   = 1024
+	// MaxConcurrentIndexBuilds bounds the number of persistent build records stored at one time.
+	MaxConcurrentIndexBuilds = 64
+	// MaxIndexBuildBatchEntries bounds the entries in one source scan batch.
+	MaxIndexBuildBatchEntries = 4096
+	// MaxIndexBuildBatchBytes bounds the accounted entry bytes in one source scan batch.
+	MaxIndexBuildBatchBytes = 16 << 20
+	// MaxIndexBuildCatchUpCommits bounds the commit range in one catch-up batch.
+	MaxIndexBuildCatchUpCommits = 1024
+	// MaxIndexBuildCatchUpMutations bounds the document changes in one catch-up batch.
 	MaxIndexBuildCatchUpMutations = 10_000
 )
 
 var (
-	ErrIndexBuildExists      = errors.New("meldbase storage: index build exists")
-	ErrIndexBuildNotFound    = errors.New("meldbase storage: index build not found")
-	ErrIndexBuildState       = errors.New("meldbase storage: invalid index build state")
+	// ErrIndexBuildExists reports a conflicting index build already stored.
+	ErrIndexBuildExists = errors.New("meldbase storage: index build exists")
+	// ErrIndexBuildNotFound reports a missing persistent index build.
+	ErrIndexBuildNotFound = errors.New("meldbase storage: index build not found")
+	// ErrIndexBuildState reports a build phase or progress that does not permit the requested operation.
+	ErrIndexBuildState = errors.New("meldbase storage: invalid index build state")
+	// ErrIndexBuildHistoryLost reports source commit history that a build can no longer replay.
 	ErrIndexBuildHistoryLost = errors.New("meldbase storage: index build commit history lost")
 )
 
+// BeginIndexBuildTransaction describes an index to build from a protected collection snapshot.
 type BeginIndexBuildTransaction struct {
 	BuildID         [16]byte
 	Collection      string
@@ -32,6 +42,7 @@ type BeginIndexBuildTransaction struct {
 	CreatedAt       time.Time
 }
 
+// IndexBuildScanBatch adds source snapshot entries and advances an expected scan position.
 type IndexBuildScanBatch struct {
 	BuildID           [16]byte
 	ExpectedScanAfter [16]byte
@@ -41,6 +52,7 @@ type IndexBuildScanBatch struct {
 	UpdatedAt         time.Time
 }
 
+// IndexBuildCatchUpMutation records index value changes for a document at one commit.
 type IndexBuildCatchUpMutation struct {
 	Sequence   uint64
 	DocumentID [16]byte
@@ -49,6 +61,7 @@ type IndexBuildCatchUpMutation struct {
 	AfterKey   []byte
 }
 
+// IndexBuildCatchUpBatch advances a build through a contiguous range of source commits.
 type IndexBuildCatchUpBatch struct {
 	BuildID                 [16]byte
 	ExpectedAppliedSequence uint64
@@ -57,6 +70,7 @@ type IndexBuildCatchUpBatch struct {
 	UpdatedAt               time.Time
 }
 
+// FinalizeIndexBuildTransaction publishes a build at its expected applied commit sequence.
 type FinalizeIndexBuildTransaction struct {
 	BuildID                 [16]byte
 	TransactionID           [16]byte
@@ -64,6 +78,7 @@ type FinalizeIndexBuildTransaction struct {
 	CommittedAt             time.Time
 }
 
+// FailIndexBuildTransaction records why a persistent build stopped.
 type FailIndexBuildTransaction struct {
 	BuildID   [16]byte
 	Failure   IndexBuildFailure
@@ -71,7 +86,9 @@ type FailIndexBuildTransaction struct {
 }
 
 // FailIndexBuild durably stops automatic progress without publishing or
-// deleting the private tree. Failed builds no longer pin Commit Log history;
+// deleting the private tree.
+//
+// Failed builds no longer pin Commit Log history;
 // their source/shadow pages remain reachable until explicit abort.
 func (f *File) FailIndexBuild(transaction FailIndexBuildTransaction) (IndexBuildMeta, error) {
 	if f == nil || allZero(transaction.BuildID[:]) || transaction.Failure == IndexBuildFailureNone ||
@@ -132,7 +149,9 @@ func (f *File) FailIndexBuild(transaction FailIndexBuildTransaction) (IndexBuild
 }
 
 // BeginIndexBuild protects the current CatalogRoot and one empty shadow
-// Secondary root in a physical maintenance generation. It does not advance the
+// Secondary root in a physical maintenance generation.
+//
+// It does not advance the
 // logical commit sequence or publish an ordinary index definition.
 func (f *File) BeginIndexBuild(transaction BeginIndexBuildTransaction) (IndexBuildMeta, error) {
 	fields, validFields := normalizeIndexFields(transaction.FieldPath, transaction.Fields)
@@ -246,7 +265,9 @@ func (f *File) BeginIndexBuild(transaction BeginIndexBuildTransaction) (IndexBui
 }
 
 // ApplyIndexBuildScanBatch adds one Primary-key-ordered, bounded batch to the
-// private Secondary tree and advances its durable scan cursor. Source records
+// private Secondary tree and advances its durable scan cursor.
+//
+// Source records
 // are resolved through the build's protected CatalogRoot, never current state.
 func (f *File) ApplyIndexBuildScanBatch(batch IndexBuildScanBatch) (IndexBuildMeta, error) {
 	if f == nil || allZero(batch.BuildID[:]) || len(batch.Entries) > MaxIndexBuildBatchEntries {
@@ -380,8 +401,9 @@ func (f *File) ApplyIndexBuildScanBatch(batch IndexBuildScanBatch) (IndexBuildMe
 	return result, err
 }
 
-// ApplyIndexBuildCatchUpBatch applies caller-derived keys for every relevant
-// Commit Log change in one contiguous sequence interval. The storage layer
+// ApplyIndexBuildCatchUpBatch updates an unfinished index from a contiguous range of committed changes.
+//
+// The caller supplies the derived keys for every relevant change. The storage layer
 // validates sequence continuity, operation/document identity and immutable
 // Before/After document positions before mutating the private tree.
 func (f *File) ApplyIndexBuildCatchUpBatch(batch IndexBuildCatchUpBatch) (IndexBuildMeta, error) {
@@ -546,6 +568,7 @@ func (f *File) ApplyIndexBuildCatchUpBatch(batch IndexBuildCatchUpBatch) (IndexB
 	return result, err
 }
 
+// indexBuildVersionPosition reads a document version's insertion position using cached primary trees.
 func (tx *WriteTxn) indexBuildVersionPosition(trees map[uint64]*MutableTree, reference DocumentVersionRef, documentID [16]byte) (uint64, error) {
 	if tx == nil || reference.PrimaryRoot < 2 || reference.DocumentID != documentID {
 		return 0, ErrCorrupt
@@ -569,7 +592,9 @@ func (tx *WriteTxn) indexBuildVersionPosition(trees map[uint64]*MutableTree, ref
 
 // FinalizeIndexBuild atomically moves an already-current shadow root into the
 // ordinary IndexCatalog, removes its build record and appends one catalog
-// Commit Log event. The Secondary tree is neither copied nor rebuilt.
+// Commit Log event.
+//
+// The Secondary tree is neither copied nor rebuilt.
 func (f *File) FinalizeIndexBuild(transaction FinalizeIndexBuildTransaction) (uint64, error) {
 	if f == nil || allZero(transaction.BuildID[:]) || allZero(transaction.TransactionID[:]) {
 		return 0, ErrCorrupt
@@ -704,6 +729,7 @@ func (f *File) FinalizeIndexBuild(transaction FinalizeIndexBuildTransaction) (ui
 	return sequence, err
 }
 
+// validateUniqueShadowUnlocked checks shadow index uniqueness and entry count under the file lock.
 func (f *File) validateUniqueShadowUnlocked(root uint64, expectedCount uint64) error {
 	iterator, err := newTreeIterator(f, root, TreeSecondary, nil, nil, 0)
 	if err != nil {
@@ -752,6 +778,7 @@ func (f *File) IndexBuild(buildID [16]byte) (IndexBuildMeta, bool, error) {
 	return meta, err == nil, err
 }
 
+// IndexBuilds lists the current persistent index build records.
 func (f *File) IndexBuilds() ([]IndexBuildMeta, error) {
 	if f == nil {
 		return nil, ErrCorrupt
@@ -789,6 +816,7 @@ func (f *File) IndexBuilds() ([]IndexBuildMeta, error) {
 }
 
 // OpenIndexBuildScanIterator streams the next protected source-Primary batch.
+//
 // Its reader pin protects the current DatabaseRoot, which in turn protects the
 // build record, source CatalogRoot and shadow tree for the iterator lifetime.
 func (f *File) OpenIndexBuildScanIterator(buildID [16]byte, limit int) (IndexBuildMeta, *DocumentIterator, error) {
@@ -846,7 +874,9 @@ func (f *File) OpenIndexBuildScanIterator(buildID [16]byte, limit int) (IndexBui
 }
 
 // OpenIndexBuildCatchUpSnapshot atomically reads the current build record and
-// pins the current DatabaseRoot. Its Commit Log and every document-version root
+// pins the current DatabaseRoot.
+//
+// Its Commit Log and every document-version root
 // referenced by retained commits cannot be reclaimed until the snapshot closes.
 func (f *File) OpenIndexBuildCatchUpSnapshot(buildID [16]byte) (IndexBuildMeta, *ReadSnapshot, error) {
 	if f == nil || allZero(buildID[:]) {
@@ -889,6 +919,7 @@ func (f *File) OpenIndexBuildCatchUpSnapshot(buildID [16]byte) (IndexBuildMeta, 
 	return build, &ReadSnapshot{file: f, pinID: pinID, root: root}, nil
 }
 
+// nextIndexBuildDocumentID returns the next document ID in byte order if one exists.
 func nextIndexBuildDocumentID(current [16]byte) ([16]byte, bool) {
 	next := current
 	for index := len(next) - 1; index >= 0; index-- {
@@ -900,7 +931,9 @@ func nextIndexBuildDocumentID(current [16]byte) ([16]byte, bool) {
 	return [16]byte{}, false
 }
 
-// AbortIndexBuild removes only the protected build record. Its private pages
+// AbortIndexBuild removes only the protected build record.
+//
+// Its private pages
 // become reclaimable under the normal dual-Meta epoch rules.
 func (f *File) AbortIndexBuild(buildID [16]byte) error {
 	if f == nil || allZero(buildID[:]) {

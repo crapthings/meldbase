@@ -6,15 +6,18 @@ import (
 	"sort"
 )
 
+// maxTreeIteratorDepth limits the branch stack while descending a tree.
 const maxTreeIteratorDepth = 64
 
+// treeIteratorFrame tracks the child visited in one ancestor branch.
 type treeIteratorFrame struct {
 	view       treeNodeView
 	childIndex int
 }
 
-// TreeIterator walks one immutable B+Tree root without materializing the
-// result set. Key and Value point into validated immutable cached pages and
+// TreeIterator reads an immutable tree in key order without collecting all results.
+//
+// Key and Value point into validated immutable cached pages and
 // remain valid until the iterator is closed or garbage collected. TreeIterator
 // is not safe for concurrent use.
 //
@@ -40,6 +43,7 @@ type TreeIterator struct {
 	value       []byte
 }
 
+// newTreeIterator creates a lazy tree scan with copied bounds and an optional result limit.
 func newTreeIterator(file *File, rootPage uint64, kind TreeKind, start, end []byte, limit int) (*TreeIterator, error) {
 	if file == nil || !validTreeKind(kind) || (len(start) > 0 && len(end) > 0 && bytes.Compare(start, end) > 0) {
 		return nil, ErrCorrupt
@@ -67,6 +71,7 @@ func (iterator *TreeIterator) Next() bool {
 	return iterator.nextUnlocked()
 }
 
+// nextUnlocked reads the next in-range entry while the caller holds the file lock.
 func (iterator *TreeIterator) nextUnlocked() bool {
 	if !iterator.initialized {
 		iterator.initialized = true
@@ -102,6 +107,7 @@ func (iterator *TreeIterator) nextUnlocked() bool {
 	}
 }
 
+// descendUnlocked follows branches to a leaf while the caller holds the file lock.
 func (iterator *TreeIterator) descendUnlocked(pageID uint64, seek []byte, useSeek bool) error {
 	leafType, branchType := treePageTypes(iterator.kind)
 	for {
@@ -160,6 +166,7 @@ func (iterator *TreeIterator) descendUnlocked(pageID uint64, seek []byte, useSee
 	}
 }
 
+// advanceLeafUnlocked finds the next leaf while the caller holds the file lock.
 func (iterator *TreeIterator) advanceLeafUnlocked() bool {
 	for len(iterator.branches) > 0 {
 		last := len(iterator.branches) - 1
@@ -183,6 +190,7 @@ func (iterator *TreeIterator) advanceLeafUnlocked() bool {
 	return false
 }
 
+// Key returns the current key as a borrowed view of immutable page data.
 func (iterator *TreeIterator) Key() []byte {
 	if iterator == nil {
 		return nil
@@ -190,6 +198,7 @@ func (iterator *TreeIterator) Key() []byte {
 	return iterator.key
 }
 
+// Value returns the current value as a borrowed view of immutable page data.
 func (iterator *TreeIterator) Value() []byte {
 	if iterator == nil {
 		return nil
@@ -197,6 +206,7 @@ func (iterator *TreeIterator) Value() []byte {
 	return iterator.value
 }
 
+// Err returns the error that stopped iteration.
 func (iterator *TreeIterator) Err() error {
 	if iterator == nil {
 		return ErrCorrupt
@@ -204,6 +214,7 @@ func (iterator *TreeIterator) Err() error {
 	return iterator.err
 }
 
+// Close stops iteration and releases references to cached pages.
 func (iterator *TreeIterator) Close() error {
 	if iterator == nil || iterator.closed {
 		return nil

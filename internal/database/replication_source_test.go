@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestReplicationSourceSessionBindsHelloInFlightAndDurableAck checks that replication sessions validate resume identity, allow one pending batch, and advance checkpoints only on matching acknowledgments.
 func TestReplicationSourceSessionBindsHelloInFlightAndDurableAck(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "source.meld2"))
 	if err != nil {

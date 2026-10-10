@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestSharedQueryConformanceCorpus checks decoded queries against the shared expected-result examples.
 func TestSharedQueryConformanceCorpus(t *testing.T) {
 	data, err := os.ReadFile("../../testdata/query-conformance.json")
 	if err != nil {
@@ -64,6 +65,7 @@ func TestSharedQueryConformanceCorpus(t *testing.T) {
 	}
 }
 
+// TestDecodeQuerySpecRejectsAmbiguousOrUnsafeInput checks that query decoding rejects ambiguous fields, unsafe paths, invalid operators, and noncanonical values.
 func TestDecodeQuerySpecRejectsAmbiguousOrUnsafeInput(t *testing.T) {
 	tests := []struct{ name, query string }{
 		{"duplicate key", `{"version":1,"version":1,"where":{"op":"true"}}`},
@@ -92,6 +94,7 @@ func TestDecodeQuerySpecRejectsAmbiguousOrUnsafeInput(t *testing.T) {
 	}
 }
 
+// TestDecodeQuerySpecEnforcesResourceLimits checks that query decoding enforces expression-node and input-byte limits.
 func TestDecodeQuerySpecEnforcesResourceLimits(t *testing.T) {
 	query := []byte(`{"version":1,"where":{"op":"and","args":[{"op":"true"},{"op":"true"}]}}`)
 	limits := DefaultQueryLimits
@@ -106,6 +109,7 @@ func TestDecodeQuerySpecEnforcesResourceLimits(t *testing.T) {
 	}
 }
 
+// TestMarshalQuerySpecIsCanonicalAndRoundTrips checks that query JSON is repeatable and stays unchanged after decoding and encoding.
 func TestMarshalQuerySpecIsCanonicalAndRoundTrips(t *testing.T) {
 	limit := 7
 	query, err := CompileQuery(Filter{"$and": []Filter{{"rank": map[string]any{"$gte": int64(2)}}, {"state": map[string]any{"$in": []any{"open", "held"}}}}}, QueryOptions{Sort: []SortField{{Path: "rank", Direction: -1}}, Skip: 1, Limit: &limit})
@@ -130,6 +134,7 @@ func TestMarshalQuerySpecIsCanonicalAndRoundTrips(t *testing.T) {
 	}
 }
 
+// TestCompileSizeAndTypeCanonicalizesAndRejectsInvalidOperands checks that size and type filters normalize their encoding and reject invalid operands.
 func TestCompileSizeAndTypeCanonicalizesAndRejectsInvalidOperands(t *testing.T) {
 	query, err := CompileQuery(Filter{
 		"items": map[string]any{"$size": uint8(2)},
@@ -179,6 +184,7 @@ func TestCompileSizeAndTypeCanonicalizesAndRejectsInvalidOperands(t *testing.T) 
 	}
 }
 
+// TestCompileAllCanonicalizesAndRejectsInvalidOperands checks that all-value array filters remove duplicate operands and reject empty or scalar inputs.
 func TestCompileAllCanonicalizesAndRejectsInvalidOperands(t *testing.T) {
 	query, err := CompileQuery(Filter{"tags": map[string]any{"$all": []any{"one", "two", "one"}}}, QueryOptions{})
 	if err != nil {
@@ -216,6 +222,7 @@ func TestCompileAllCanonicalizesAndRejectsInvalidOperands(t *testing.T) {
 	}
 }
 
+// TestElemMatchWireRoundTripAndInvalidOperands checks that array-element filters survive JSON encoding and decoding and reject invalid conditions.
 func TestElemMatchWireRoundTripAndInvalidOperands(t *testing.T) {
 	query, err := CompileQuery(Filter{
 		"scores": map[string]any{"$elemMatch": map[string]any{"$gte": int64(90), "$lt": int64(100)}},
@@ -252,6 +259,7 @@ func TestElemMatchWireRoundTripAndInvalidOperands(t *testing.T) {
 	}
 }
 
+// TestWireDocumentRoundTrip checks that document JSON preserves identifiers, exact integers, binary data, and nested values.
 func TestWireDocumentRoundTrip(t *testing.T) {
 	id, err := NewDocumentID()
 	if err != nil {
@@ -274,6 +282,7 @@ func TestWireDocumentRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDocumentValidationRejectsUnsafeNestedFields checks that document validation rejects unsafe nested field names.
 func TestDocumentValidationRejectsUnsafeNestedFields(t *testing.T) {
 	document := Document{"safe": Object(Document{"__proto__": Bool(true)})}
 	if !errors.Is(document.Validate(), ErrInvalidDocument) {

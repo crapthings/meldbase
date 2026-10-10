@@ -9,10 +9,7 @@ import (
 	"testing"
 )
 
-// TestRandomIndexedCRUDQueriesMatchReferenceModel deliberately evaluates its
-// small query language in plain Go instead of reusing CompileQuery or the
-// storage planner. It catches stale secondary entries after mixed inserts,
-// deletes, and writes that move documents across every indexed field.
+// TestRandomIndexedCRUDQueriesMatchReferenceModel checks indexed queries after randomized document edits against an independent model in memory and durable databases.
 func TestRandomIndexedCRUDQueriesMatchReferenceModel(t *testing.T) {
 	type model struct {
 		id       DocumentID

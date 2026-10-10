@@ -1,13 +1,15 @@
 package database
 
-// OperationalState is a minimal, allocation-free serving-state snapshot. A
-// fail-stop durability error preserves reads from the last committed state but
-// disables writes; a closed database is neither readable nor writable.
+// OperationalState records whether the database accepts reads and writes.
+//
+// A durability failure disables writes but preserves reads of committed data;
+// closing the database disables both reads and writes.
 type OperationalState struct {
 	Readable bool `json:"readable"`
 	Writable bool `json:"writable"`
 }
 
+// OperationalState reports whether the database currently accepts reads and writes.
 func (db *DB) OperationalState() OperationalState {
 	if db == nil {
 		return OperationalState{}

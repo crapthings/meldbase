@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// TestDestructiveProcessCheckKillsWorkerAndProducesVerifiableTrial checks that killed workers produce verified recovery evidence without leaving test files or overwriting receipts.
 func TestDestructiveProcessCheckKillsWorkerAndProducesVerifiableTrial(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGKILL and advisory-lock qualification is Unix-only")
@@ -88,6 +89,7 @@ func TestDestructiveProcessCheckKillsWorkerAndProducesVerifiableTrial(t *testing
 	}
 }
 
+// TestDestructiveProcessCheckRejectsInsufficientTrialCount checks that process crash testing rejects fewer than twenty trials.
 func TestDestructiveProcessCheckRejectsInsufficientTrialCount(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{"destructive-process-check", "--dir", t.TempDir(), "--out", filepath.Join(t.TempDir(), "receipt.json"), "--trials", "19"}, &output, &output)
@@ -96,6 +98,7 @@ func TestDestructiveProcessCheckRejectsInsufficientTrialCount(t *testing.T) {
 	}
 }
 
+// TestReadDestructiveLedgerIgnoresOnlyIncompleteTrailingRecord checks that the crash ledger tolerates an unfinished final record but rejects a complete invalid record.
 func TestReadDestructiveLedgerIgnoresOnlyIncompleteTrailingRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "oracle.jsonl")
 	raw := []byte("{\"phase\":\"prepared\",\"counter\":1}\n{\"phase\":\"committed\",\"counter\":1}\n{\"phase\":")

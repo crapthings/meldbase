@@ -3,32 +3,46 @@ package database
 import (
 	"fmt"
 	"math"
-	"unicode/utf8"
 )
 
 const (
-	DefaultMaxDocumentBytes      uint64 = 16 << 20
-	DefaultMaxTransactionBytes   uint64 = 64 << 20
+	// DefaultMaxDocumentBytes sets the default canonical document byte limit.
+	DefaultMaxDocumentBytes uint64 = 16 << 20
+	// DefaultMaxTransactionBytes sets the default canonical transaction byte limit.
+	DefaultMaxTransactionBytes uint64 = 64 << 20
+	// DefaultMaxTransactionChanges sets the default transaction change count limit.
 	DefaultMaxTransactionChanges uint64 = 10_000
-	DefaultMaxIndexBuildEntries  uint64 = 1_000_000
-	DefaultMaxIndexBuildBytes    uint64 = 256 << 20
-	// Reactive views retain matching document versions for incremental ordering
-	// and updates, not merely the page currently emitted to a subscriber.
-	DefaultMaxReactiveViewDocuments  uint64 = 10_000
-	DefaultMaxReactiveViewBytes      uint64 = 64 << 20
+	// DefaultMaxIndexBuildEntries sets the default index-build entry count limit.
+	DefaultMaxIndexBuildEntries uint64 = 1_000_000
+	// DefaultMaxIndexBuildBytes sets the default index-build byte limit.
+	DefaultMaxIndexBuildBytes uint64 = 256 << 20
+	// DefaultMaxReactiveViewDocuments sets the default number of document versions retained by a live query.
+	//
+	// Views retain matching versions for incremental ordering and updates,
+	// not merely the page currently emitted to a subscriber.
+	DefaultMaxReactiveViewDocuments uint64 = 10_000
+	// DefaultMaxReactiveViewBytes sets the default retained live query byte limit.
+	DefaultMaxReactiveViewBytes uint64 = 64 << 20
+	// DefaultMaxQueryDocumentsExamined sets the default examined document limit per query.
 	DefaultMaxQueryDocumentsExamined uint64 = 100_000
-	DefaultMaxQueryKeysExamined      uint64 = 100_000
-	DefaultMaxQueryCandidates        uint64 = 100_000
-	DefaultMaxQuerySortBytes         uint64 = 64 << 20
-	DefaultMaxQuerySkip              uint64 = 100_000
-	// Predicate steps account for residual expression visits and data-dependent
-	// comparisons such as scalar membership within stored arrays. It bounds
-	// CPU work that document/key scan limits alone cannot see.
+	// DefaultMaxQueryKeysExamined sets the default examined index key limit per query.
+	DefaultMaxQueryKeysExamined uint64 = 100_000
+	// DefaultMaxQueryCandidates sets the default retained query candidate limit.
+	DefaultMaxQueryCandidates uint64 = 100_000
+	// DefaultMaxQuerySortBytes sets the default retained sort data byte limit.
+	DefaultMaxQuerySortBytes uint64 = 64 << 20
+	// DefaultMaxQuerySkip sets the default query offset limit.
+	DefaultMaxQuerySkip uint64 = 100_000
+	// DefaultMaxQueryPredicateSteps sets the default number of filter evaluation steps per query.
+	//
+	// Steps include expression visits and data-dependent comparisons such as
+	// scalar membership within stored arrays, bounding work beyond scan counts.
 	DefaultMaxQueryPredicateSteps uint64 = 10_000_000
 )
 
-// ResourceLimits bounds work admitted by writes, index maintenance, and query execution. Zero values
-// select production defaults; limits cannot be disabled accidentally. Byte
+// ResourceLimits bounds work admitted by writes, index maintenance, and query execution.
+//
+// Zero values select production defaults; limits cannot be disabled accidentally. Byte
 // limits use the canonical typed binary representation, independent of Go heap
 // layout, JSON spelling, storage generation, or transport compression.
 type ResourceLimits struct {
@@ -50,6 +64,7 @@ type ResourceLimits struct {
 // DatabaseOptions configures an in-memory database.
 type DatabaseOptions struct{ ResourceLimits ResourceLimits }
 
+// normalizeResourceLimits supplies defaults and rejects unsupported resource limit combinations.
 func normalizeResourceLimits(limits ResourceLimits) (ResourceLimits, error) {
 	if limits.MaxDocumentBytes == 0 {
 		limits.MaxDocumentBytes = DefaultMaxDocumentBytes
@@ -105,8 +120,9 @@ func normalizeResourceLimits(limits ResourceLimits) (ResourceLimits, error) {
 	return limits, nil
 }
 
-// admitReactiveViewMember accounts the immutable matching version retained by
-// one shared reactive view. It uses canonical document bytes rather than Go
+// admitReactiveViewMember checks whether a live query can retain one more document and returns updated totals.
+//
+// It uses canonical document bytes rather than Go
 // heap estimates, making the contract stable across storage engines.
 func admitReactiveViewMember(limits ResourceLimits, count, bytes, documentBytes uint64) (uint64, uint64, error) {
 	if count >= limits.MaxReactiveViewDocuments {
@@ -118,8 +134,10 @@ func admitReactiveViewMember(limits ResourceLimits, count, bytes, documentBytes 
 	return count + 1, bytes + documentBytes, nil
 }
 
-// indexBuildBudget accounts the exact eventual Secondary key bytes: encoded
-// scalar key, insertion position, and document ID. It is intentionally a
+// indexBuildBudget tracks index entry counts and encoded key bytes against build limits.
+//
+// Each key includes its encoded value, insertion position, and document ID.
+// This is a
 // storage-independent logical contract rather than an estimate of Go heap use.
 type indexBuildBudget struct {
 	limits   ResourceLimits
@@ -129,6 +147,7 @@ type indexBuildBudget struct {
 	rejected bool
 }
 
+// reset clears retained index entry counts, bytes, and rejection state.
 func (budget *indexBuildBudget) reset() {
 	if budget == nil {
 		return
@@ -136,6 +155,7 @@ func (budget *indexBuildBudget) reset() {
 	budget.entries, budget.bytes, budget.rejected = 0, 0, false
 }
 
+// newIndexBuildBudget creates index accounting that records the first resource rejection.
 func (db *DB) newIndexBuildBudget(limits ResourceLimits) *indexBuildBudget {
 	budget := &indexBuildBudget{limits: limits}
 	if db != nil {
@@ -144,6 +164,7 @@ func (db *DB) newIndexBuildBudget(limits ResourceLimits) *indexBuildBudget {
 	return budget
 }
 
+// add admits one index key and its position and document ID suffix within build limits.
 func (budget *indexBuildBudget) add(key []byte) error {
 	if budget == nil {
 		return nil
@@ -161,6 +182,7 @@ func (budget *indexBuildBudget) add(key []byte) error {
 	return nil
 }
 
+// remove releases the entry and byte accounting for one index key.
 func (budget *indexBuildBudget) remove(key []byte) error {
 	if budget == nil {
 		return nil
@@ -174,6 +196,7 @@ func (budget *indexBuildBudget) remove(key []byte) error {
 	return nil
 }
 
+// reject reports a resource limit error and records the first rejection.
 func (budget *indexBuildBudget) reject(reason string) error {
 	if !budget.rejected && budget.onReject != nil {
 		budget.rejected = true
@@ -190,6 +213,7 @@ func (db *DB) ResourceLimits() ResourceLimits {
 	return db.resourceLimits
 }
 
+// validateDocumentResource validates a document and checks its canonical encoded size limit.
 func (db *DB) validateDocumentResource(document Document) (uint64, error) {
 	size, err := canonicalDocumentSize(document)
 	if err != nil {
@@ -202,10 +226,12 @@ func (db *DB) validateDocumentResource(document Document) (uint64, error) {
 	return size, nil
 }
 
+// validateTransactionResource checks transaction limits and records change delivery sizes.
 func (db *DB) validateTransactionResource(changes []Change) error {
 	return db.validateTransactionResourceExtra(changes, 0)
 }
 
+// validateTransactionResourceExtra checks transaction limits including extra bytes and records change delivery sizes.
 func (db *DB) validateTransactionResourceExtra(changes []Change, extraBytes uint64) error {
 	if uint64(len(changes)) > db.resourceLimits.MaxTransactionChanges {
 		db.metrics.resourceLimitRejections.Add(1)
@@ -248,6 +274,7 @@ func (db *DB) validateTransactionResourceExtra(changes []Change, extraBytes uint
 	return nil
 }
 
+// boundedMutationSelection caps document selection by the caller's limit or the transaction change limit.
 func (db *DB) boundedMutationSelection(maxAffected int, one bool) (limit int, resourceBounded bool) {
 	if one {
 		return maxAffected, false
@@ -263,87 +290,4 @@ func (db *DB) boundedMutationSelection(maxAffected int, one bool) (limit int, re
 		return maxAffected, false
 	}
 	return limit, true
-}
-
-// canonicalDocumentSize returns the exact size produced by
-// encodeDocumentBinary without allocating the encoded byte slice.
-func canonicalDocumentSize(document Document) (uint64, error) {
-	return canonicalObjectSize(document, 0)
-}
-
-func canonicalObjectSize(document Document, depth int) (uint64, error) {
-	if depth > 64 || uint64(len(document)) > math.MaxUint32 {
-		return 0, ErrInvalidDocument
-	}
-	total := uint64(4)
-	for key, value := range document {
-		if err := validField(key); err != nil {
-			return 0, err
-		}
-		if len(key) > math.MaxUint16 {
-			return 0, ErrInvalidDocument
-		}
-		size, err := canonicalValueSize(value, depth+1)
-		if err != nil {
-			return 0, err
-		}
-		add := uint64(2 + len(key))
-		if add > math.MaxUint64-total || size > math.MaxUint64-total-add {
-			return 0, ErrInvalidDocument
-		}
-		total += add + size
-	}
-	return total, nil
-}
-
-func canonicalValueSize(value Value, depth int) (uint64, error) {
-	if depth > 64 {
-		return 0, ErrInvalidDocument
-	}
-	switch value.kind {
-	case NullKind:
-		return 1, nil
-	case BoolKind:
-		return 2, nil
-	case Int64Kind, TimeKind:
-		return 9, nil
-	case Float64Kind:
-		if math.IsNaN(value.f) || math.IsInf(value.f, 0) {
-			return 0, ErrInvalidDocument
-		}
-		return 9, nil
-	case IDKind:
-		return 17, nil
-	case StringKind:
-		if !utf8.ValidString(value.s) || uint64(len(value.s)) > math.MaxUint32 {
-			return 0, ErrInvalidDocument
-		}
-		return 5 + uint64(len(value.s)), nil
-	case BinaryKind:
-		if uint64(len(value.bin)) > math.MaxUint32 {
-			return 0, ErrInvalidDocument
-		}
-		return 5 + uint64(len(value.bin)), nil
-	case ObjectKind:
-		size, err := canonicalObjectSize(value.obj, depth+1)
-		return size + 1, err
-	case ArrayKind:
-		if uint64(len(value.arr)) > math.MaxUint32 {
-			return 0, ErrInvalidDocument
-		}
-		total := uint64(5)
-		for _, item := range value.arr {
-			size, err := canonicalValueSize(item, depth+1)
-			if err != nil {
-				return 0, err
-			}
-			if size > math.MaxUint64-total {
-				return 0, ErrInvalidDocument
-			}
-			total += size
-		}
-		return total, nil
-	default:
-		return 0, ErrInvalidDocument
-	}
 }

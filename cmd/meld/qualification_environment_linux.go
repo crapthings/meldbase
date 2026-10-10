@@ -15,6 +15,7 @@ import (
 	"syscall"
 )
 
+// captureQualificationEnvironment collects mount, kernel, block device, and host evidence for a qualification run.
 func captureQualificationEnvironment(facts destructiveVolumeFacts, revision, method, operatorPath string, operatorBytes uint64, operatorSHA string) (qualificationEnvironmentEvidence, error) {
 	evidence := qualificationEnvironmentBase(facts, revision, method, operatorPath, operatorBytes, operatorSHA)
 	mount, err := captureQualificationMount(facts.directory)
@@ -48,6 +49,7 @@ func captureQualificationEnvironment(facts destructiveVolumeFacts, revision, met
 	return evidence, nil
 }
 
+// captureQualificationMount reads the exact target mount from Linux mount information.
 func captureQualificationMount(target string) (qualificationMountEvidence, error) {
 	file, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
@@ -103,6 +105,7 @@ func captureQualificationMount(target string) (qualificationMountEvidence, error
 	return qualificationMountEvidence{}, errors.New("target mount is absent from /proc/self/mountinfo")
 }
 
+// captureQualificationBlockDevices collects storage settings for a device and its underlying devices.
 func captureQualificationBlockDevices(initial string) ([]qualificationBlockDeviceEvidence, error) {
 	pending := []string{initial}
 	seen := make(map[string]struct{})
@@ -171,12 +174,14 @@ func captureQualificationBlockDevices(initial string) ([]qualificationBlockDevic
 	return result, nil
 }
 
+// qualificationSortedCSV returns comma-separated values in sorted order.
 func qualificationSortedCSV(value string) []string {
 	values := strings.Split(value, ",")
 	sort.Strings(values)
 	return values
 }
 
+// qualificationSysfsValue reads a trimmed device setting or returns an unavailable marker.
 func qualificationSysfsValue(directory, name string) string {
 	value := strings.TrimSpace(string(readQualificationHostFile(filepath.Join(directory, name), 4096)))
 	if value == "" {
@@ -185,11 +190,13 @@ func qualificationSysfsValue(directory, name string) string {
 	return value
 }
 
+// qualificationSysfsUint reads an unsigned device setting or returns zero when parsing fails.
 func qualificationSysfsUint(directory, name string) uint64 {
 	value, _ := strconv.ParseUint(strings.TrimSpace(string(readQualificationHostFile(filepath.Join(directory, name), 128))), 10, 64)
 	return value
 }
 
+// readQualificationHostFile reads a bounded regular file or returns nil when it cannot be read safely.
 func readQualificationHostFile(path string, maximum int64) []byte {
 	file, err := os.Open(path)
 	if err != nil {
@@ -207,6 +214,7 @@ func readQualificationHostFile(path string, maximum int64) []byte {
 	return raw
 }
 
+// utsnameString converts a null-terminated kernel information field to a string.
 func utsnameString(value []int8) string {
 	bytes := make([]byte, 0, len(value))
 	for _, character := range value {

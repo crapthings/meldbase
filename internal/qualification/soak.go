@@ -1,6 +1,7 @@
-// Package qualification contains operational release-evidence runners. It is
-// separate from storage tests so receipts are produced by the same VCS-stamped
-// executable that performs the work.
+// Package qualification runs operational checks and records evidence for releases.
+//
+// It is separate from storage tests so reports come from the same executable
+// that performs the checks and records its source revision.
 package qualification
 
 import (
@@ -19,29 +20,44 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// SoakReceiptSchemaVersion identifies the storage soak report format.
 const SoakReceiptSchemaVersion uint32 = 4
 
+// soakWriteInterval sets the delay between writes after the required reclamation conflict is observed.
+//
 // The operational soak is a duration and recovery qualification, not a storage
 // throughput benchmark. A fixed write cadence keeps its physical churn
 // portable across machines and below the engine's normal 8 GiB safety quota.
 // Release runs begin unthrottled only until the optimistic auditor observes one
 // real concurrent-publication conflict; the remaining work uses this cadence.
 const soakWriteInterval = 10 * time.Second
+
+// soakIndexCatchUpInterval sets the wait between shadow index catch-up attempts.
 const soakIndexCatchUpInterval = 30 * time.Second
 
+// SoakProgressStage identifies the current step of a storage soak run.
 type SoakProgressStage string
 
 const (
-	SoakProgressStarted         SoakProgressStage = "started"
-	SoakProgressPhaseRunning    SoakProgressStage = "phase_running"
-	SoakProgressPhaseVerifying  SoakProgressStage = "phase_verifying"
-	SoakProgressPhaseVerified   SoakProgressStage = "phase_verified"
+	// SoakProgressStarted marks the start of the soak run.
+	SoakProgressStarted SoakProgressStage = "started"
+	// SoakProgressPhaseRunning marks an active concurrent workload phase.
+	SoakProgressPhaseRunning SoakProgressStage = "phase_running"
+	// SoakProgressPhaseVerifying marks verification after a workload phase.
+	SoakProgressPhaseVerifying SoakProgressStage = "phase_verifying"
+	// SoakProgressPhaseVerified marks successful phase verification.
+	SoakProgressPhaseVerified SoakProgressStage = "phase_verified"
+	// SoakProgressShadowVerifying marks shadow index verification.
 	SoakProgressShadowVerifying SoakProgressStage = "shadow_verifying"
-	SoakProgressShadowVerified  SoakProgressStage = "shadow_verified"
-	SoakProgressFinalVerifying  SoakProgressStage = "final_verifying"
-	SoakProgressComplete        SoakProgressStage = "complete"
+	// SoakProgressShadowVerified marks successful shadow index verification.
+	SoakProgressShadowVerified SoakProgressStage = "shadow_verified"
+	// SoakProgressFinalVerifying marks verification of the final database file.
+	SoakProgressFinalVerifying SoakProgressStage = "final_verifying"
+	// SoakProgressComplete marks completion of the soak run.
+	SoakProgressComplete SoakProgressStage = "complete"
 )
 
+// SoakProgress reports the current stage, elapsed time, and workload counters.
 type SoakProgress struct {
 	Stage                SoakProgressStage
 	Phase                int
@@ -55,6 +71,7 @@ type SoakProgress struct {
 	ReclamationConflicts uint64
 }
 
+// VolumeIdentity describes the device and filesystem used for qualification.
 type VolumeIdentity struct {
 	Device         uint64
 	FilesystemType string
@@ -62,6 +79,7 @@ type VolumeIdentity struct {
 	BlockSize      uint64
 }
 
+// SoakOptions configures the target volume, workload, build evidence, and progress reporting.
 type SoakOptions struct {
 	TargetDirectory  string
 	Profile          string
@@ -76,6 +94,7 @@ type SoakOptions struct {
 	Progress         func(SoakProgress)
 }
 
+// SoakPhaseReceipt records workload activity and storage state for one completed phase.
 type SoakPhaseReceipt struct {
 	Ordinal              int           `json:"ordinal"`
 	Duration             time.Duration `json:"durationNanos"`
@@ -91,6 +110,7 @@ type SoakPhaseReceipt struct {
 	IndexBuildPhase      uint8         `json:"indexBuildPhase"`
 }
 
+// SoakReceipt records the environment, workload totals, and final verification evidence for a soak run.
 type SoakReceipt struct {
 	SchemaVersion         uint32             `json:"schemaVersion"`
 	FormatRevision        uint16             `json:"formatRevision"`
@@ -134,6 +154,7 @@ type SoakReceipt struct {
 	Phases                []SoakPhaseReceipt `json:"phases"`
 }
 
+// soakActivity groups the workload counters collected during a soak phase.
 type soakActivity struct {
 	Writes               uint64
 	SnapshotReads        uint64
@@ -142,6 +163,7 @@ type soakActivity struct {
 	ReclamationConflicts uint64
 }
 
+// ValidateSoakOptions checks workload limits and the environment evidence required by the selected profile.
 func ValidateSoakOptions(options SoakOptions) error {
 	if options.Profile != "custom" && options.Profile != "sentinel" && options.Profile != "release" {
 		return fmt.Errorf("unknown storage soak profile %q", options.Profile)
@@ -172,6 +194,7 @@ func ValidateSoakOptions(options SoakOptions) error {
 	return nil
 }
 
+// RunStorageSoak runs and verifies a concurrent storage workload across repeated reopens and returns its evidence report.
 func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, resultErr error) {
 	if ctx == nil {
 		return SoakReceipt{}, errors.New("storage soak context is required")
@@ -418,6 +441,7 @@ func RunStorageSoak(ctx context.Context, options SoakOptions) (_ SoakReceipt, re
 	return receipt, nil
 }
 
+// runWithProgressHeartbeat reports progress at intervals until the operation finishes.
 func runWithProgressHeartbeat(interval time.Duration, heartbeat func(), operation func() error) error {
 	result := make(chan error, 1)
 	go func() {
@@ -435,6 +459,7 @@ func runWithProgressHeartbeat(interval time.Duration, heartbeat func(), operatio
 	}
 }
 
+// createSoakDatabase creates the workload documents and their unique key index.
 func createSoakDatabase(path string, documentCount int) (*storage.File, []string, uint64, error) {
 	file, _, err := storage.Open(path)
 	if err != nil {
@@ -473,6 +498,7 @@ func createSoakDatabase(path string, documentCount int) (*storage.File, []string
 	return file, keys, transactionOrdinal + 1, nil
 }
 
+// runSoakPhase exercises concurrent writes, snapshot reads, index building, and page reclamation for a fixed duration.
 func runSoakPhase(parent context.Context, file *storage.File, keys []string, firstOrdinal uint64, buildID [16]byte, duration, progressInterval time.Duration, requireReclamationConflict bool, progress func(soakActivity, time.Duration)) (uint64, soakActivity, error) {
 	ctx, cancel := context.WithTimeout(parent, duration)
 	defer cancel()
@@ -609,6 +635,7 @@ func runSoakPhase(parent context.Context, file *storage.File, keys []string, fir
 	return ordinal.Load(), loadSoakActivity(&writes, &snapshotReads, &indexBuildBatches, &reclamationAttempts, &reclamationConflicts), nil
 }
 
+// loadSoakActivity reads the atomic workload counters into a progress snapshot.
 func loadSoakActivity(writes, snapshotReads, indexBuildBatches, reclamationAttempts, reclamationConflicts *atomic.Uint64) soakActivity {
 	return soakActivity{
 		Writes: writes.Load(), SnapshotReads: snapshotReads.Load(), IndexBuildBatches: indexBuildBatches.Load(),
@@ -616,6 +643,7 @@ func loadSoakActivity(writes, snapshotReads, indexBuildBatches, reclamationAttem
 	}
 }
 
+// advanceSoakIndexBuild advances one scan or catch-up batch of the shadow index.
 func advanceSoakIndexBuild(ctx context.Context, file *storage.File, buildID [16]byte) (bool, error) {
 	build, exists, err := file.IndexBuild(buildID)
 	if err != nil || !exists {
@@ -657,6 +685,7 @@ func advanceSoakIndexBuild(ctx context.Context, file *storage.File, buildID [16]
 	}
 }
 
+// advanceSoakIndexBuildCatchUp applies a bounded commit batch to the shadow index or waits for new commits.
 func advanceSoakIndexBuildCatchUp(ctx context.Context, file *storage.File, buildID [16]byte) (_ bool, resultErr error) {
 	opened, snapshot, err := file.OpenIndexBuildCatchUpSnapshot(buildID)
 	if err != nil {
@@ -709,6 +738,7 @@ func advanceSoakIndexBuildCatchUp(ctx context.Context, file *storage.File, build
 	return err == nil, err
 }
 
+// verifySoakContents checks that stored documents and index entries match the expected workload state.
 func verifySoakContents(file *storage.File, keys []string) (resultErr error) {
 	snapshot, err := file.OpenSnapshot()
 	if err != nil {
@@ -752,6 +782,7 @@ func verifySoakContents(file *storage.File, keys []string) (resultErr error) {
 	return nil
 }
 
+// soakIndexAudit derives index keys from document bytes for the two workload indexes.
 func soakIndexAudit(meta storage.IndexMeta, _ [16]byte, document []byte) ([]byte, bool, error) {
 	if meta.Name != "by_key" && meta.Name != "by_shadow" {
 		return nil, false, storage.ErrCorrupt
@@ -759,6 +790,7 @@ func soakIndexAudit(meta storage.IndexMeta, _ [16]byte, document []byte) ([]byte
 	return append([]byte(nil), document...), true, nil
 }
 
+// soakDocumentID creates a deterministic document identity from a workload position.
 func soakDocumentID(index int) [16]byte {
 	var id [16]byte
 	binary.BigEndian.PutUint64(id[8:], uint64(index))
@@ -766,6 +798,7 @@ func soakDocumentID(index int) [16]byte {
 	return id
 }
 
+// soakTransactionID creates a deterministic transaction identity from its ordinal.
 func soakTransactionID(ordinal uint64) [16]byte {
 	var id [16]byte
 	binary.BigEndian.PutUint64(id[8:], ordinal)
@@ -773,10 +806,12 @@ func soakTransactionID(ordinal uint64) [16]byte {
 	return id
 }
 
+// soakKey formats a workload key from the document position and revision.
 func soakKey(index, revision int) string {
 	return fmt.Sprintf("key-%012d-r%06d", index, revision)
 }
 
+// syncDirectory syncs a directory and returns any sync or close error.
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {
@@ -785,6 +820,7 @@ func syncDirectory(path string) error {
 	return errors.Join(directory.Sync(), directory.Close())
 }
 
+// validRevision accepts a 40-digit or 64-digit hexadecimal source revision.
 func validRevision(value string) bool {
 	if len(value) != 40 && len(value) != 64 {
 		return false

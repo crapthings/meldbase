@@ -16,10 +16,10 @@ import (
 	"time"
 )
 
+// compoundFixtureDatabaseID fixes the database identity used to reproduce the compound-index fixture.
 var compoundFixtureDatabaseID = [16]byte{0xc3, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 
-// This additive revision-3 fixture pins the independently negotiated V3 tuple
-// key metadata without rewriting the original  and shadow-build fixtures.
+// TestCompoundIndexRevision3GoldenFixtureOpensAuditsAndAdvances checks that the retained compound-index fixture opens and accepts a persistent update.
 func TestCompoundIndexRevision3GoldenFixtureOpensAuditsAndAdvances(t *testing.T) {
 	fixture := loadCompoundGoldenFixture(t)
 	raw := decodeGoldenFixture(t, fixture)
@@ -66,6 +66,7 @@ func TestCompoundIndexRevision3GoldenFixtureOpensAuditsAndAdvances(t *testing.T)
 	}
 }
 
+// TestCompoundIndexRevision3WriterMatchesGoldenFixture checks that deterministic compound-index writes reproduce the retained fixture bytes and metadata.
 func TestCompoundIndexRevision3WriterMatchesGoldenFixture(t *testing.T) {
 	fixture := loadCompoundGoldenFixture(t)
 	raw, meta := buildDeterministicCompoundFixture(t)
@@ -76,6 +77,7 @@ func TestCompoundIndexRevision3WriterMatchesGoldenFixture(t *testing.T) {
 	}
 }
 
+// TestGenerateCompoundIndexRevision3GoldenFixture prints a compressed compound-index fixture when explicitly enabled by the maintainer.
 func TestGenerateCompoundIndexRevision3GoldenFixture(t *testing.T) {
 	if os.Getenv("MELDBASE_GENERATE_COMPOUND_FIXTURE") != "1" {
 		t.Skip("fixture generation is an explicit maintainer action")
@@ -102,6 +104,7 @@ func TestGenerateCompoundIndexRevision3GoldenFixture(t *testing.T) {
 	fmt.Println(string(encoded))
 }
 
+// buildDeterministicCompoundFixture builds and checks a repeatable database with two documents and a unique compound index.
 func buildDeterministicCompoundFixture(t *testing.T) ([]byte, Meta) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "build-compound-index-revision-3.meld2")
@@ -167,6 +170,7 @@ func buildDeterministicCompoundFixture(t *testing.T) ([]byte, Meta) {
 	return raw, meta
 }
 
+// assertCompoundFixture checks the required feature bit, index fields, key codec, and stored index entries.
 func assertCompoundFixture(t *testing.T, file *File) {
 	t.Helper()
 	if file.Meta().RequiredFeatures&RequiredFeatureCompoundIndexes == 0 {
@@ -186,6 +190,7 @@ func assertCompoundFixture(t *testing.T, file *File) {
 	}
 }
 
+// loadCompoundGoldenFixture loads the retained compound-index fixture or fails the test.
 func loadCompoundGoldenFixture(t *testing.T) businessGoldenFixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "compound-index-revision-3.json"))
@@ -199,6 +204,7 @@ func loadCompoundGoldenFixture(t *testing.T) businessGoldenFixture {
 	return fixture
 }
 
+// decodeGoldenFixture decodes and decompresses a fixture while checking its byte counts and hashes.
 func decodeGoldenFixture(t *testing.T, fixture businessGoldenFixture) []byte {
 	t.Helper()
 	compressed, err := base64.StdEncoding.DecodeString(fixture.GzipBase64)

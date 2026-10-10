@@ -11,40 +11,47 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+// fakeSource holds replaceable database statistics behind a mutex for sampler tests.
 type fakeSource struct {
 	mu    sync.Mutex
 	stats meldbase.DBStats
 }
 
+// fakeServerSource holds replaceable server statistics behind a mutex for sampler tests.
 type fakeServerSource struct {
 	mu    sync.Mutex
 	stats meldserver.ServerStats
 }
 
+// Stats returns the current test server statistics under a lock.
 func (source *fakeServerSource) Stats() meldserver.ServerStats {
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	return source.stats
 }
 
+// set replaces the test server statistics under a lock.
 func (source *fakeServerSource) set(stats meldserver.ServerStats) {
 	source.mu.Lock()
 	source.stats = stats
 	source.mu.Unlock()
 }
 
+// Stats returns the current test database statistics under a lock.
 func (source *fakeSource) Stats() meldbase.DBStats {
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	return source.stats
 }
 
+// set replaces the test database statistics under a lock.
 func (source *fakeSource) set(stats meldbase.DBStats) {
 	source.mu.Lock()
 	source.stats = stats
 	source.mu.Unlock()
 }
 
+// newTestSampler creates a sampler with explicit history and subscriber limits and registers cleanup.
 func newTestSampler(t *testing.T, source StatsSource, history, subscribers int) *Sampler {
 	t.Helper()
 	sampler, err := NewSampler(source, SamplerOptions{
@@ -57,6 +64,7 @@ func newTestSampler(t *testing.T, source StatsSource, history, subscribers int) 
 	return sampler
 }
 
+// TestSamplerDerivesRatesAndBoundsHistory checks rate calculations, bounded history, and rate invalidation after a database restart.
 func TestSamplerDerivesRatesAndBoundsHistory(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	source := &fakeSource{stats: meldbase.DBStats{
@@ -115,6 +123,7 @@ func TestSamplerDerivesRatesAndBoundsHistory(t *testing.T) {
 	}
 }
 
+// TestSamplerOptionallyCapturesServerRPCStatsAndRates checks optional RPC sampling and independent rate resets after a server restart.
 func TestSamplerOptionallyCapturesServerRPCStatsAndRates(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	database := &fakeSource{stats: meldbase.DBStats{StartedAt: started, CapturedAt: started.Add(time.Second)}}
@@ -157,6 +166,7 @@ func TestSamplerOptionallyCapturesServerRPCStatsAndRates(t *testing.T) {
 	}
 }
 
+// TestSamplerCoalescesSlowSubscribersWithoutBackpressure checks that slow subscribers receive the latest sample and dropped deliveries degrade telemetry health.
 func TestSamplerCoalescesSlowSubscribersWithoutBackpressure(t *testing.T) {
 	started := time.Now()
 	source := &fakeSource{stats: meldbase.DBStats{StartedAt: started, CapturedAt: started}}
@@ -200,6 +210,7 @@ func TestSamplerCoalescesSlowSubscribersWithoutBackpressure(t *testing.T) {
 	}
 }
 
+// TestLatestValueDeliveryCannotDeadlockWithConcurrentConsumer checks that concurrent delivery completes and the consumer receives the final value.
 func TestLatestValueDeliveryCannotDeadlockWithConcurrentConsumer(t *testing.T) {
 	channel := make(chan Sample, 1)
 	channel <- Sample{Sequence: 1}
@@ -234,6 +245,7 @@ func TestLatestValueDeliveryCannotDeadlockWithConcurrentConsumer(t *testing.T) {
 	}
 }
 
+// TestSamplerContextAndCloseLifecycle checks that cancellation removes subscribers and closure prevents new subscriptions.
 func TestSamplerContextAndCloseLifecycle(t *testing.T) {
 	source := &fakeSource{stats: meldbase.DBStats{StartedAt: time.Now(), CapturedAt: time.Now()}}
 	sampler, err := NewSampler(source, SamplerOptions{Interval: time.Hour, HistorySize: 1, MaxSubscribers: 1})
@@ -268,6 +280,7 @@ func TestSamplerContextAndCloseLifecycle(t *testing.T) {
 	}
 }
 
+// BenchmarkSamplerCapture measures capture time and allocations with a one-sample history.
 func BenchmarkSamplerCapture(b *testing.B) {
 	now := time.Now()
 	source := &fakeSource{stats: meldbase.DBStats{StartedAt: now, CapturedAt: now}}

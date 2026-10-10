@@ -11,6 +11,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestOnlineIndexBuildPersistsResumesAndPublishes checks that a saved index build resumes after reopening and includes newer writes before publication.
 func TestOnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online.meld")
 	db, err := Open(path)
@@ -86,6 +87,7 @@ func TestOnlineIndexBuildPersistsResumesAndPublishes(t *testing.T) {
 	}
 }
 
+// TestOnlineIndexRebuildKeepsPublishedIndexUntilAtomicReplacementAfterReopen checks that reopening a pending rebuild preserves the old index until its replacement is published.
 func TestOnlineIndexRebuildKeepsPublishedIndexUntilAtomicReplacementAfterReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online-rebuild.meld")
 	db, err := Open(path)
@@ -142,6 +144,7 @@ func TestOnlineIndexRebuildKeepsPublishedIndexUntilAtomicReplacementAfterReopen(
 	}
 }
 
+// TestOnlineIndexRebuildFailureLeavesPublishedIndexUntouched checks that a failed unique rebuild leaves the existing index available to queries.
 func TestOnlineIndexRebuildFailureLeavesPublishedIndexUntouched(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "online-rebuild-conflict.meld"))
 	if err != nil {
@@ -172,6 +175,7 @@ func TestOnlineIndexRebuildFailureLeavesPublishedIndexUntouched(t *testing.T) {
 	}
 }
 
+// TestOnlineCompoundIndexBuildResumesCatchUpAndPublishes checks that a resumed compound index includes intervening document changes and enforces tuple uniqueness.
 func TestOnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online-compound.meld")
 	db, err := Open(path)
@@ -233,6 +237,7 @@ func TestOnlineCompoundIndexBuildResumesCatchUpAndPublishes(t *testing.T) {
 	}
 }
 
+// TestIndexBuildStatsAttributeBindingRetentionPressure checks that statistics identify history retained by an index build and clear the pressure after aborting it.
 func TestIndexBuildStatsAttributeBindingRetentionPressure(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "build-retention.meld"), OpenOptions{
 		CommitRetention: CommitRetentionPolicy{MaxCommits: 2},
@@ -271,6 +276,7 @@ func TestIndexBuildStatsAttributeBindingRetentionPressure(t *testing.T) {
 	}
 }
 
+// TestOnlineIndexBuildCatchesWriteRacingFinalization checks that a write made just before index publication appears in the completed index.
 func TestOnlineIndexBuildCatchesWriteRacingFinalization(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "finalize-race.meld"))
 	if err != nil {
@@ -311,6 +317,7 @@ func TestOnlineIndexBuildCatchesWriteRacingFinalization(t *testing.T) {
 	}
 }
 
+// TestOnlineIndexBuildCancellationAndAbort checks that cancellation preserves a pending build until an explicit abort removes it.
 func TestOnlineIndexBuildCancellationAndAbort(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "abort.meld"))
 	if err != nil {
@@ -344,11 +351,17 @@ func TestOnlineIndexBuildCancellationAndAbort(t *testing.T) {
 	}
 }
 
-func TestOnlineIndexBuildRequiresAndIDRoundTrips(t *testing.T) {
+// TestOnlineIndexBuildRejectsMemoryDatabase checks that memory databases reject online index builds.
+func TestOnlineIndexBuildRejectsMemoryDatabase(t *testing.T) {
 	db := New()
+	defer db.Close()
 	if _, err := db.Collection("items").StartIndexBuild(context.Background(), "by_value", []IndexField{{Field: "value", Order: 1}}, IndexOptions{}); !errors.Is(err, ErrIndexBuildUnsupported) {
 		t.Fatalf("memory start=%v", err)
 	}
+}
+
+// TestIndexBuildIDStringConversion checks that build identifiers survive string conversion and malformed strings are rejected.
+func TestIndexBuildIDStringConversion(t *testing.T) {
 	id := IndexBuildID{1, 2, 3}
 	parsed, err := ParseIndexBuildID(id.String())
 	if err != nil || parsed != id {
@@ -359,6 +372,7 @@ func TestOnlineIndexBuildRequiresAndIDRoundTrips(t *testing.T) {
 	}
 }
 
+// TestOnlineUniqueBuildRejectsOnlyAtomicPublication checks that duplicate values prevent a unique index from becoming visible while leaving its build inspectable.
 func TestOnlineUniqueBuildRejectsOnlyAtomicPublication(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "unique.meld"))
 	if err != nil {
@@ -391,6 +405,7 @@ func TestOnlineUniqueBuildRejectsOnlyAtomicPublication(t *testing.T) {
 	}
 }
 
+// TestOnlineIndexBuildResourceRejectionPreservesDurableCursor checks that a resource rejection leaves saved build progress unchanged and the database writable.
 func TestOnlineIndexBuildResourceRejectionPreservesDurableCursor(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded.meld"), OpenOptions{ResourceLimits: ResourceLimits{
 		MaxIndexBuildEntries: 1,

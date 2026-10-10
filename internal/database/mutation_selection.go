@@ -2,9 +2,10 @@ package database
 
 import "context"
 
-// selectMutationDocumentsLocked runs while db.mu is write-locked. Storage-
-// backed engines pin one immutable query snapshot at the same commit token;
-// in-memory/V1 engines retain their insertion-order scan.
+// selectMutationDocumentsLocked finds mutation targets within query and affected-row limits.
+//
+// The caller must hold db.mu for writing; storage queries use a snapshot at the
+// current commit token, while memory and V1 engines scan in insertion order.
 func (c *Collection) selectMutationDocumentsLocked(ctx context.Context, query QuerySpec, one bool, maxAffected int) ([]Document, error) {
 	if c.db.querySource != nil {
 		selection := query

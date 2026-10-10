@@ -13,6 +13,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestCompactToPublishesVerifiedLogicalSnapshotAndReclaimsHistory checks that a smaller compacted database preserves document order, empty collections, and index behavior under a new identity.
 func TestCompactToPublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
@@ -113,6 +114,7 @@ func TestCompactToPublishesVerifiedLogicalSnapshotAndReclaimsHistory(t *testing.
 	}
 }
 
+// TestCompactToDestinationQuotaFailsWithoutPublication checks that exceeding the destination file limit leaves no compacted file and keeps the source writable.
 func TestCompactToDestinationQuotaFailsWithoutPublication(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
@@ -138,6 +140,7 @@ func TestCompactToDestinationQuotaFailsWithoutPublication(t *testing.T) {
 	}
 }
 
+// TestCompactToIndexBuildLimitFailsWithoutPublication checks that exceeding the destination index build limit leaves no compacted file and keeps the source writable.
 func TestCompactToIndexBuildLimitFailsWithoutPublication(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
@@ -165,6 +168,7 @@ func TestCompactToIndexBuildLimitFailsWithoutPublication(t *testing.T) {
 	}
 }
 
+// TestCompactToFailsClosedWithoutOverwriting checks that compaction rejects existing destinations, memory databases, and canceled requests.
 func TestCompactToFailsClosedWithoutOverwriting(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
@@ -205,6 +209,7 @@ func TestCompactToFailsClosedWithoutOverwriting(t *testing.T) {
 	}
 }
 
+// TestCompactToPinsSnapshotWithoutBlockingConcurrentWrites checks that compaction copies its original snapshot while source writes continue.
 func TestCompactToPinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))
@@ -280,6 +285,7 @@ func TestCompactToPinsSnapshotWithoutBlockingConcurrentWrites(t *testing.T) {
 	}
 }
 
+// TestCloseWaitsForPinnedCompactionSnapshot checks that closing the source waits until compaction releases its snapshot and finishes its durable output.
 func TestCloseWaitsForPinnedCompactionSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))

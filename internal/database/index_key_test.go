@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestIndexNumericBytesMatchLogicalOrderExactly checks that numeric index bytes preserve exact comparison order and give equal numbers identical keys.
 func TestIndexNumericBytesMatchLogicalOrderExactly(t *testing.T) {
 	values := []Value{Float(-math.MaxFloat64), Int(math.MinInt64), Float(-1.5), Int(-1), Float(math.Copysign(0, -1)), Int(0), Float(0), Float(math.SmallestNonzeroFloat64), Int(1), Float(1.5), Int(9_007_199_254_740_993), Float(9_007_199_254_740_994), Int(math.MaxInt64), Float(math.MaxFloat64)}
 	for i := range values {
@@ -37,6 +38,7 @@ func TestIndexNumericBytesMatchLogicalOrderExactly(t *testing.T) {
 	}
 }
 
+// TestIndexScalarOrderingAndStringEscaping checks that scalar index bytes preserve value ordering for strings, Unicode, binary data, and other types.
 func TestIndexScalarOrderingAndStringEscaping(t *testing.T) {
 	values := []Value{
 		Null(), Bool(false), Bool(true), Int(-1), Float(1.5), String(""),
@@ -66,6 +68,8 @@ func TestIndexScalarOrderingAndStringEscaping(t *testing.T) {
 		}
 	}
 }
+
+// sign reduces a comparison result to minus one, zero, or one.
 func sign(value int) int {
 	if value < 0 {
 		return -1

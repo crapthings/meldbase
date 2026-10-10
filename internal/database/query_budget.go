@@ -2,9 +2,10 @@ package database
 
 import "fmt"
 
-// queryBudget bounds one logical query across collection scans, index scans,
-// lazy cursors, aggregate reads, and mutation selection. It is deliberately
-// independent of the selected plan so an added index cannot weaken admission.
+// queryBudget tracks work and retained candidates against one query's limits.
+//
+// The limits apply across scans, cursors, aggregates, and mutation selection
+// regardless of the selected plan.
 type queryBudget struct {
 	db             *DB
 	query          QuerySpec
@@ -19,14 +20,14 @@ type queryBudget struct {
 	detailed       bool
 }
 
-// newPredicateBudget is used by reactive rebuild and replay paths which do not
-// execute a public query span. It intentionally accounts only expression work:
-// those paths have their own retained-view admission limits and must still be
-// protected from data-dependent predicate loops.
+// newPredicateBudget creates a predicate-only work budget for reactive rebuilds and replay.
+//
+// Those paths enforce their own retained-view limits separately.
 func newPredicateBudget(query QuerySpec, limits ResourceLimits) *queryBudget {
 	return &queryBudget{query: query, limits: limits}
 }
 
+// newQueryBudget creates a query work budget and checks the requested skip count.
 func (db *DB) newQueryBudget(query QuerySpec) (*queryBudget, error) {
 	if db == nil {
 		return nil, ErrClosed
@@ -38,6 +39,7 @@ func (db *DB) newQueryBudget(query QuerySpec) (*queryBudget, error) {
 	return budget, nil
 }
 
+// document charges one examined document against the query limit.
 func (b *queryBudget) document() error {
 	if b.documents >= b.limits.MaxQueryDocumentsExamined {
 		return b.reject("documents", "documents examined exceed limit %d", b.limits.MaxQueryDocumentsExamined)
@@ -46,6 +48,7 @@ func (b *queryBudget) document() error {
 	return nil
 }
 
+// key charges one examined index key against the query limit.
 func (b *queryBudget) key() error {
 	if b.keys >= b.limits.MaxQueryKeysExamined {
 		return b.reject("keys", "index keys examined exceed limit %d", b.limits.MaxQueryKeysExamined)
@@ -54,6 +57,7 @@ func (b *queryBudget) key() error {
 	return nil
 }
 
+// predicate charges one predicate step against the query limit.
 func (b *queryBudget) predicate() error {
 	if b.predicateSteps >= b.limits.MaxQueryPredicateSteps {
 		return b.reject("predicate_steps", "predicate steps exceed limit %d", b.limits.MaxQueryPredicateSteps)
@@ -62,6 +66,7 @@ func (b *queryBudget) predicate() error {
 	return nil
 }
 
+// candidate charges a retained document against candidate and sorting limits.
 func (b *queryBudget) candidate(document Document) error {
 	if b.candidates >= b.limits.MaxQueryCandidates {
 		return b.reject("candidates", "query candidates exceed limit %d", b.limits.MaxQueryCandidates)
@@ -81,6 +86,7 @@ func (b *queryBudget) candidate(document Document) error {
 	return nil
 }
 
+// releaseCandidate removes a discarded document from candidate and sorting charges.
 func (b *queryBudget) releaseCandidate(document Document) error {
 	if b.candidates == 0 {
 		return ErrCorrupt
@@ -100,6 +106,7 @@ func (b *queryBudget) releaseCandidate(document Document) error {
 	return nil
 }
 
+// retainQueryCandidate updates budget charges when the collector retains or replaces a candidate.
 func retainQueryCandidate(collector *queryCandidateCollector, budget *queryBudget, candidate queryCandidate) error {
 	retained, evicted := collector.Add(candidate)
 	if !retained {
@@ -113,6 +120,7 @@ func retainQueryCandidate(collector *queryCandidateCollector, budget *queryBudge
 	return budget.candidate(candidate.document)
 }
 
+// reject records the first exceeded limit and returns a query budget error.
 func (b *queryBudget) reject(kind, format string, values ...any) error {
 	if b.exceeded == "" {
 		b.exceeded = kind

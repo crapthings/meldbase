@@ -14,10 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-// HS256JWTAuthenticatorConfig configures a locally verified JWT issuer. It is
-// useful when an identity service signs short-lived access tokens with a shared
-// secret. OIDC/JWKS verification can use the same Actor contract later;
-// callers never supply a workspace separately from the signed token.
+// HS256JWTAuthenticatorConfig sets the signing secrets and claim rules for HS256 bearer-token verification.
 type HS256JWTAuthenticatorConfig struct {
 	// Secret is retained for single-key deployments. Secrets permits a bounded
 	// overlap window while a signing key is rotated; it must not be set together
@@ -30,8 +27,9 @@ type HS256JWTAuthenticatorConfig struct {
 	Clock          func() time.Time
 }
 
-// HS256JWTAuthenticator verifies a bounded Bearer JWT and maps its `sub` and
-// active workspace claim to the server Actor.
+// HS256JWTAuthenticator verifies signed tokens and identifies their user or service and active workspace.
+//
+// Tokens must use HS256 and fit within the accepted size limits.
 type HS256JWTAuthenticator struct {
 	secrets        [][]byte
 	issuer         string
@@ -40,6 +38,7 @@ type HS256JWTAuthenticator struct {
 	now            func() time.Time
 }
 
+// NewHS256JWTAuthenticator validates settings and copies the active signing secrets into a new authenticator.
 func NewHS256JWTAuthenticator(config HS256JWTAuthenticatorConfig) (*HS256JWTAuthenticator, error) {
 	if len(config.Secret) > 0 && len(config.Secrets) > 0 {
 		return nil, errors.New("JWT HS256 authentication accepts Secret or Secrets, not both")
@@ -83,6 +82,7 @@ func NewHS256JWTAuthenticator(config HS256JWTAuthenticatorConfig) (*HS256JWTAuth
 	}, nil
 }
 
+// AuthenticateHTTP verifies an HS256 bearer token and returns its subject and workspace as an actor.
 func (a *HS256JWTAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, error) {
 	token, ok := bearerToken(request.Header.Get("Authorization"))
 	if !ok {
@@ -127,6 +127,7 @@ func (a *HS256JWTAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, 
 	return Actor{ID: actorID, WorkspaceID: workspaceID}, nil
 }
 
+// bearerToken extracts a token from a two-part Bearer authorization header.
 func bearerToken(header string) (string, bool) {
 	parts := strings.Fields(header)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || len(parts[1]) == 0 {
@@ -135,6 +136,7 @@ func bearerToken(header string) (string, bool) {
 	return parts[1], true
 }
 
+// decodeJWTPart decodes a nonempty canonical base64url token part within the supplied byte limit.
 func decodeJWTPart(encoded string, max int) ([]byte, bool) {
 	if encoded == "" || len(encoded) > max*2 || strings.Contains(encoded, "=") {
 		return nil, false
@@ -146,6 +148,7 @@ func decodeJWTPart(encoded string, max int) ([]byte, bool) {
 	return decoded, true
 }
 
+// decodeJWTHeader reads the required algorithm and optional bounded key ID from a JSON token header.
 func decodeJWTHeader(raw []byte) (algorithm, keyID string, ok bool) {
 	var header map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &header); err != nil {
@@ -159,6 +162,7 @@ func decodeJWTHeader(raw []byte) (algorithm, keyID string, ok bool) {
 	return algorithm, keyID, len(keyID) <= 256
 }
 
+// decodeJWTClaims reads a non-null JSON claims object.
 func decodeJWTClaims(raw []byte) (map[string]json.RawMessage, bool) {
 	var claims map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &claims); err != nil || claims == nil {
@@ -167,6 +171,7 @@ func decodeJWTClaims(raw []byte) (map[string]json.RawMessage, bool) {
 	return claims, true
 }
 
+// validJWTClaims checks issuer, audience, expiration, and any successfully parsed not-before time.
 func validJWTClaims(claims map[string]json.RawMessage, expectedIssuer, expectedAudience string, now func() time.Time) bool {
 	if expectedIssuer != "" {
 		issuer, ok := claimString(claims, "iss")
@@ -187,6 +192,7 @@ func validJWTClaims(claims map[string]json.RawMessage, expectedIssuer, expectedA
 	return true
 }
 
+// claimString reads a claim when its JSON value is a string.
 func claimString(claims map[string]json.RawMessage, name string) (string, bool) {
 	raw, found := claims[name]
 	if !found {
@@ -196,6 +202,7 @@ func claimString(claims map[string]json.RawMessage, name string) (string, bool) 
 	return value, json.Unmarshal(raw, &value) == nil
 }
 
+// claimUnix reads a claim as an integer Unix timestamp.
 func claimUnix(claims map[string]json.RawMessage, name string) (int64, bool) {
 	raw, found := claims[name]
 	if !found {
@@ -211,6 +218,7 @@ func claimUnix(claims map[string]json.RawMessage, name string) (int64, bool) {
 	return parsed, err == nil
 }
 
+// claimAudienceContains checks whether a string or string-array audience claim includes the expected audience.
 func claimAudienceContains(claims map[string]json.RawMessage, expected string) bool {
 	raw, found := claims["aud"]
 	if !found {
@@ -232,10 +240,12 @@ func claimAudienceContains(claims map[string]json.RawMessage, expected string) b
 	return false
 }
 
+// validActorPart checks that an actor or workspace ID is nonempty valid UTF-8 within the byte limit.
 func validActorPart(value string) bool {
 	return value != "" && len(value) <= 512 && utf8.ValidString(value)
 }
 
+// validWorkspaceClaim checks that the workspace claim name is a simple identifier outside reserved JWT names.
 func validWorkspaceClaim(value string) bool {
 	if !workspaceIdentifier.MatchString(value) {
 		return false

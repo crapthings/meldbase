@@ -12,6 +12,7 @@ import (
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
+// TestRunWriteTransactionCommitsMultiCollectionUniqueSwapAndOneReactiveBatch checks that one durable transaction swaps unique values and publishes changes across collections under one commit.
 func TestRunWriteTransactionCommitsMultiCollectionUniqueSwapAndOneReactiveBatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-write-transaction.meld2")
 	db, err := Open(path)
@@ -106,6 +107,7 @@ func TestRunWriteTransactionCommitsMultiCollectionUniqueSwapAndOneReactiveBatch(
 	}
 }
 
+// TestRunWriteTransactionNoopRollbackLifetimeAndResourceLimit checks that transaction outcomes preserve atomicity, close retained handles, and update terminal statistics.
 func TestRunWriteTransactionNoopRollbackLifetimeAndResourceLimit(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded-write-transaction.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxTransactionChanges: 1},
@@ -174,6 +176,7 @@ func TestRunWriteTransactionNoopRollbackLifetimeAndResourceLimit(t *testing.T) {
 	}
 }
 
+// TestRunWriteTransactionBoundsReadSetEntriesBeforeCommit checks that exceeding the transaction read limit aborts without advancing the commit.
 func TestRunWriteTransactionBoundsReadSetEntriesBeforeCommit(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded-read-set.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxTransactionChanges: 1},
@@ -206,6 +209,7 @@ func TestRunWriteTransactionBoundsReadSetEntriesBeforeCommit(t *testing.T) {
 	}
 }
 
+// TestRunWriteTransactionBoundsRetainedOverlayBytesWithoutCumulativeUpdates checks that retained transaction data obeys the byte limit without counting discarded replacements.
 func TestRunWriteTransactionBoundsRetainedOverlayBytesWithoutCumulativeUpdates(t *testing.T) {
 	limits := ResourceLimits{MaxDocumentBytes: 256, MaxTransactionBytes: 300, MaxTransactionChanges: 4}
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "bounded-overlay-bytes.meld2"), OpenOptions{ResourceLimits: limits})
@@ -260,6 +264,7 @@ func TestRunWriteTransactionBoundsRetainedOverlayBytesWithoutCumulativeUpdates(t
 	}
 }
 
+// TestRunWriteTransactionDoesNotHoldWriterLockAndRejectsPointConflict checks that callbacks allow concurrent writes and reject conflicting document edits without disabling writes.
 func TestRunWriteTransactionDoesNotHoldWriterLockAndRejectsPointConflict(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-write-conflict.meld2"))
 	if err != nil {
@@ -305,6 +310,7 @@ func TestRunWriteTransactionDoesNotHoldWriterLockAndRejectsPointConflict(t *test
 	}
 }
 
+// TestRunWriteTransactionAllowsDisjointConcurrentCommit checks that a transaction can commit alongside an unrelated collection write.
 func TestRunWriteTransactionAllowsDisjointConcurrentCommit(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-write-disjoint.meld2"))
 	if err != nil {
@@ -336,6 +342,7 @@ func TestRunWriteTransactionAllowsDisjointConcurrentCommit(t *testing.T) {
 	}
 }
 
+// TestRunWriteTransactionFindRejectsCollectionPhantomAndSeesOwnWrites checks that transaction queries see staged writes and detect concurrent changes to the queried collection.
 func TestRunWriteTransactionFindRejectsCollectionPhantomAndSeesOwnWrites(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-range-transaction.meld2"))
 	if err != nil {
@@ -428,6 +435,7 @@ func TestRunWriteTransactionFindRejectsCollectionPhantomAndSeesOwnWrites(t *test
 	}
 }
 
+// TestRunWriteTransactionFindFenceSurvivesCommitCoordinator checks that coordinated commits still reject transactions whose queried collection changed.
 func TestRunWriteTransactionFindFenceSurvivesCommitCoordinator(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "coordinated-range-transaction.meld2"), OpenOptions{
 		CommitCoordinator: CommitCoordinatorOptions{Enabled: true, MaxBatch: 2, MaxPending: 8, MaxDelay: time.Millisecond},
@@ -473,6 +481,7 @@ func TestRunWriteTransactionFindFenceSurvivesCommitCoordinator(t *testing.T) {
 	}
 }
 
+// mustCompileTransactionUpdate compiles a transaction update or fails the test.
 func mustCompileTransactionUpdate(t *testing.T, update Update) MutationSpec {
 	t.Helper()
 	compiled, err := CompileUpdate(update)
@@ -482,6 +491,7 @@ func mustCompileTransactionUpdate(t *testing.T, update Update) MutationSpec {
 	return compiled
 }
 
+// TestRunWriteTransactionMaintainsIndexCreatedAfterSnapshot checks that a transaction updates an index created after its snapshot and preserves the result after reopening.
 func TestRunWriteTransactionMaintainsIndexCreatedAfterSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-write-concurrent-index.meld2")
 	db, err := Open(path)
@@ -537,6 +547,7 @@ func TestRunWriteTransactionMaintainsIndexCreatedAfterSnapshot(t *testing.T) {
 	}
 }
 
+// TestRunWriteTransactionReadOnlySnapshotRejectsConcurrentCommit checks that a read-only transaction rejects a document changed by another writer.
 func TestRunWriteTransactionReadOnlySnapshotRejectsConcurrentCommit(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-read-conflict.meld2"))
 	if err != nil {
@@ -573,6 +584,7 @@ func TestRunWriteTransactionReadOnlySnapshotRejectsConcurrentCommit(t *testing.T
 	}
 }
 
+// TestRunWriteTransactionReadOnlyAllowsDisjointConcurrentCommit checks that unrelated writes do not invalidate a read-only transaction.
 func TestRunWriteTransactionReadOnlyAllowsDisjointConcurrentCommit(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-read-disjoint.meld2"))
 	if err != nil {
@@ -608,6 +620,7 @@ func TestRunWriteTransactionReadOnlyAllowsDisjointConcurrentCommit(t *testing.T)
 	}
 }
 
+// TestRunWriteTransactionPanicClosesAndAccountsAbort checks that a callback panic discards writes, closes the transaction, and counts an abort.
 func TestRunWriteTransactionPanicClosesAndAccountsAbort(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-write-panic.meld2"))
 	if err != nil {
@@ -638,6 +651,7 @@ func TestRunWriteTransactionPanicClosesAndAccountsAbort(t *testing.T) {
 	}
 }
 
+// TestRunWriteTransactionRejectsMemoryAndCanceledContext checks that transactions reject memory databases and canceled requests.
 func TestRunWriteTransactionRejectsMemoryAndCanceledContext(t *testing.T) {
 	memory := New()
 	defer memory.Close()
@@ -656,6 +670,7 @@ func TestRunWriteTransactionRejectsMemoryAndCanceledContext(t *testing.T) {
 	}
 }
 
+// receiveWriteTransactionBatch receives a transaction change batch or fails the test after five seconds.
 func receiveWriteTransactionBatch(t *testing.T, events <-chan ChangeBatch) ChangeBatch {
 	t.Helper()
 	select {

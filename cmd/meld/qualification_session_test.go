@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestQualificationSessionOrdersRecordsAndSealsFixedCampaign checks that a twenty-step session can seal a verified artifact index only after all steps are recorded.
 func TestQualificationSessionOrdersRecordsAndSealsFixedCampaign(t *testing.T) {
 	root, planPath := newQualificationSessionTestFixture(t)
 	plan := readQualificationSessionTestPlan(t, planPath)
@@ -76,6 +77,7 @@ func TestQualificationSessionOrdersRecordsAndSealsFixedCampaign(t *testing.T) {
 	}
 }
 
+// TestQualificationSessionRejectsOrderDuplicateAndJournalReceipt checks that session recording rejects the wrong step order, repeated receipts, and journal files used as evidence.
 func TestQualificationSessionRejectsOrderDuplicateAndJournalReceipt(t *testing.T) {
 	root, planPath := newQualificationSessionTestFixture(t)
 	plan := readQualificationSessionTestPlan(t, planPath)
@@ -97,6 +99,7 @@ func TestQualificationSessionRejectsOrderDuplicateAndJournalReceipt(t *testing.T
 	}
 }
 
+// TestQualificationSessionDetectsReceiptEventAndPlanTampering checks that session status rejects changes to the operator, executable, receipt, event, or plan.
 func TestQualificationSessionDetectsReceiptEventAndPlanTampering(t *testing.T) {
 	t.Run("operator uid", func(t *testing.T) {
 		_, planPath := newQualificationSessionTestFixture(t)
@@ -169,6 +172,7 @@ func TestQualificationSessionDetectsReceiptEventAndPlanTampering(t *testing.T) {
 	})
 }
 
+// newQualificationSessionTestFixture creates a test session with fixed runtime identity and simplified receipt validation.
 func newQualificationSessionTestFixture(t *testing.T) (string, string) {
 	t.Helper()
 	durability, _ := qualificationFixtures()
@@ -209,6 +213,7 @@ func newQualificationSessionTestFixture(t *testing.T) (string, string) {
 	return canonicalRoot, filepath.Join(canonicalRoot, qualificationSessionDirectory, "plan.json")
 }
 
+// readQualificationSessionTestPlan loads a session plan for tests and fails if it cannot be read.
 func readQualificationSessionTestPlan(t *testing.T, path string) qualificationSessionPlan {
 	t.Helper()
 	var plan qualificationSessionPlan
@@ -218,6 +223,7 @@ func readQualificationSessionTestPlan(t *testing.T, path string) qualificationSe
 	return plan
 }
 
+// recordQualificationSessionTestFirst writes and records a test receipt for the first durability step.
 func recordQualificationSessionTestFirst(t *testing.T, root, planPath string) string {
 	t.Helper()
 	receipt := filepath.Join(root, "first.json")

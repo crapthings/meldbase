@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 
+# Prints the runtime capacity benchmark options.
 usage() {
   cat <<'EOF'
 Usage:
@@ -14,8 +15,11 @@ machine and workload shape, not an SLA.
 EOF
 }
 
+# Holds the new directory where benchmark evidence will be saved.
 out_dir=""
+# Sets how many times each benchmark runs.
 count=5
+# Sets the duration of each benchmark run.
 benchtime=3s
 while (($#)); do
   case "$1" in

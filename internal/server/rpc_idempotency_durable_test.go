@@ -16,6 +16,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestDurableRPCIdempotencyReplaysAfterDatabaseReopen checks that stored RPC results replay without rerunning the method before and after database reopen.
 func TestDurableRPCIdempotencyReplaysAfterDatabaseReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rpc-idempotency.meld2")
 	db, err := meldbase.Open(path)
@@ -71,6 +72,7 @@ func TestDurableRPCIdempotencyReplaysAfterDatabaseReopen(t *testing.T) {
 	}
 }
 
+// TestDurableRPCIdempotencySequencesBusinessWriteAndTerminalRecord checks that claim, business write, and result use separate commits and replay adds no writes.
 func TestDurableRPCIdempotencySequencesBusinessWriteAndTerminalRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rpc-business-write.meld2")
 	db, err := meldbase.Open(path)
@@ -132,6 +134,7 @@ func TestDurableRPCIdempotencySequencesBusinessWriteAndTerminalRecord(t *testing
 	}
 }
 
+// TestTransactionalRPCPublishesBusinessWriteAndResultInOneCommit checks that transactional RPC requires an idempotency key and commits business changes with a result that survives reopen.
 func TestTransactionalRPCPublishesBusinessWriteAndResultInOneCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transactional-rpc.meld2")
 	db, err := meldbase.Open(path)
@@ -200,6 +203,7 @@ func TestTransactionalRPCPublishesBusinessWriteAndResultInOneCommit(t *testing.T
 	}
 }
 
+// TestTransactionalRPCRollsBackWritesBeforePersistingApplicationError checks that application errors roll back business writes and replay without rerunning the method.
 func TestTransactionalRPCRollsBackWritesBeforePersistingApplicationError(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-error.meld2"))
 	if err != nil {
@@ -233,6 +237,7 @@ func TestTransactionalRPCRollsBackWritesBeforePersistingApplicationError(t *test
 	}
 }
 
+// TestTransactionalRPCNoopUsesTerminalOnlyCompletion checks that a transaction without business writes stores its result and records a no-op completion.
 func TestTransactionalRPCNoopUsesTerminalOnlyCompletion(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-noop.meld2"))
 	if err != nil {
@@ -262,6 +267,7 @@ func TestTransactionalRPCNoopUsesTerminalOnlyCompletion(t *testing.T) {
 	}
 }
 
+// TestTransactionalRPCUsesSameAtomicPathOverWebSocket checks that a WebSocket transaction commits business writes together with its RPC result.
 func TestTransactionalRPCUsesSameAtomicPathOverWebSocket(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-websocket.meld2"))
 	if err != nil {
@@ -299,6 +305,7 @@ func TestTransactionalRPCUsesSameAtomicPathOverWebSocket(t *testing.T) {
 	}
 }
 
+// TestTransactionalRPCPersistsOptimisticConflictWithoutPartialWrites checks that a transaction conflict rolls back staged writes and replays the conflict without rerunning the method.
 func TestTransactionalRPCPersistsOptimisticConflictWithoutPartialWrites(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-conflict.meld2"))
 	if err != nil {
@@ -349,6 +356,7 @@ func TestTransactionalRPCPersistsOptimisticConflictWithoutPartialWrites(t *testi
 	}
 }
 
+// TestDurableRPCIdempotencyPendingFromOldSessionBecomesUnknown checks that a pending claim from an earlier session returns an unknown outcome after reopen.
 func TestDurableRPCIdempotencyPendingFromOldSessionBecomesUnknown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old-session.meld2")
 	database, err := meldbase.Open(path)
@@ -385,6 +393,7 @@ func TestDurableRPCIdempotencyPendingFromOldSessionBecomesUnknown(t *testing.T) 
 	}
 }
 
+// TestDurableRPCIdempotencyClaimIsLinearizableUnderConcurrency checks that concurrent claims allow exactly one execution and publish exactly one commit.
 func TestDurableRPCIdempotencyClaimIsLinearizableUnderConcurrency(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "concurrent.meld2"))
 	if err != nil {
@@ -427,6 +436,7 @@ func TestDurableRPCIdempotencyClaimIsLinearizableUnderConcurrency(t *testing.T) 
 	}
 }
 
+// TestDurableRPCIdempotencyRetentionNeverStealsPendingClaims checks that expired completed claims can be replaced while pending claims retain an unknown outcome.
 func TestDurableRPCIdempotencyRetentionNeverStealsPendingClaims(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "retention.meld2"))
 	if err != nil {
@@ -463,6 +473,7 @@ func TestDurableRPCIdempotencyRetentionNeverStealsPendingClaims(t *testing.T) {
 	}
 }
 
+// TestDurableRPCIdempotencyPrunesOnlyExpiredTerminalRecords checks that bounded pruning removes expired completed records while preserving pending and unexpired records.
 func TestDurableRPCIdempotencyPrunesOnlyExpiredTerminalRecords(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "prune.meld2"))
 	if err != nil {
@@ -539,6 +550,7 @@ func TestDurableRPCIdempotencyPrunesOnlyExpiredTerminalRecords(t *testing.T) {
 	}
 }
 
+// TestDurableRPCIdempotencyPruneCursorPreventsStarvation checks that repeated bounded pruning reaches expired records beyond active claims.
 func TestDurableRPCIdempotencyPruneCursorPreventsStarvation(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "prune-cursor.meld2"))
 	if err != nil {
@@ -575,6 +587,7 @@ func TestDurableRPCIdempotencyPruneCursorPreventsStarvation(t *testing.T) {
 	}
 }
 
+// TestDurableRPCIdempotencySurvivesCompaction checks that database compaction preserves stored RPC results for replay.
 func TestDurableRPCIdempotencySurvivesCompaction(t *testing.T) {
 	directory := t.TempDir()
 	db, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
@@ -611,6 +624,7 @@ func TestDurableRPCIdempotencySurvivesCompaction(t *testing.T) {
 	}
 }
 
+// TestDurableRPCIdempotencyRejectsMemoryDatabase checks that a memory database cannot back a durable RPC idempotency store.
 func TestDurableRPCIdempotencyRejectsMemoryDatabase(t *testing.T) {
 	memory := meldbase.New()
 	defer memory.Close()
@@ -619,6 +633,7 @@ func TestDurableRPCIdempotencyRejectsMemoryDatabase(t *testing.T) {
 	}
 }
 
+// TestTransactionalRPCRegistrationRequiresMatchingBuiltInStore checks that transactional methods reject mismatched stores, custom stores, and duplicate method names.
 func TestTransactionalRPCRegistrationRequiresMatchingBuiltInStore(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "transactional-config.meld2"))
 	if err != nil {
@@ -660,6 +675,7 @@ func TestTransactionalRPCRegistrationRequiresMatchingBuiltInStore(t *testing.T) 
 	}
 }
 
+// newDurableRPCHandler creates a test RPC handler using the supplied database, idempotency store, and methods.
 func newDurableRPCHandler(t *testing.T, db *meldbase.DB, store RPCIdempotencyStore, methods map[string]RPCMethod) *Handler {
 	t.Helper()
 	handler, err := New(Config{
@@ -673,6 +689,7 @@ func newDurableRPCHandler(t *testing.T, db *meldbase.DB, store RPCIdempotencySto
 	return handler
 }
 
+// newDurableTransactionalRPCHandler creates a test handler for transactional methods using the supplied database and idempotency store.
 func newDurableTransactionalRPCHandler(t *testing.T, db *meldbase.DB, store RPCIdempotencyStore, methods map[string]RPCTransactionalMethod) *Handler {
 	t.Helper()
 	handler, err := New(Config{
@@ -686,6 +703,7 @@ func newDurableTransactionalRPCHandler(t *testing.T, db *meldbase.DB, store RPCI
 	return handler
 }
 
+// durableTestClaim creates a test claim with fixed hashes and the supplied session, claim ID, and expiry.
 func durableTestClaim(session, claim byte, expires time.Time) RPCIdempotencyClaim {
 	return RPCIdempotencyClaim{
 		ScopeHash: [32]byte{1}, KeyHash: [32]byte{2}, Fingerprint: [32]byte{3},
@@ -693,6 +711,7 @@ func durableTestClaim(session, claim byte, expires time.Time) RPCIdempotencyClai
 	}
 }
 
+// readRPCStringResult reads a successful RPC string result and closes the response body.
 func readRPCStringResult(t *testing.T, response *http.Response) string {
 	t.Helper()
 	defer response.Body.Close()

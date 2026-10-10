@@ -15,8 +15,10 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// destructiveFlushEIOResultSchema identifies the flush failure recovery result format.
 const destructiveFlushEIOResultSchema uint32 = 1
 
+// destructiveFlushEIOReady records the guest identity and stable database before fault arming.
 type destructiveFlushEIOReady struct {
 	SchemaVersion  uint32    `json:"schemaVersion"`
 	BuildRevision  string    `json:"buildRevision,omitempty"`
@@ -30,6 +32,7 @@ type destructiveFlushEIOReady struct {
 	CommitSequence uint64    `json:"commitSequence"`
 }
 
+// destructiveFlushEIOArmed binds host fault arming to the guest-ready receipt and QMP transcript.
 type destructiveFlushEIOArmed struct {
 	SchemaVersion uint32    `json:"schemaVersion"`
 	ReadySHA256   string    `json:"readySha256"`
@@ -37,6 +40,7 @@ type destructiveFlushEIOArmed struct {
 	ArmedAt       time.Time `json:"armedAt"`
 }
 
+// destructiveFlushEIOFaultResult records the guest's fail-stop behavior after an injected flush error.
 type destructiveFlushEIOFaultResult struct {
 	SchemaVersion      uint32    `json:"schemaVersion"`
 	BuildRevision      string    `json:"buildRevision,omitempty"`
@@ -57,6 +61,7 @@ type destructiveFlushEIOFaultResult struct {
 	Passed             bool      `json:"passed"`
 }
 
+// destructiveFlushEIOWorkerResult records fresh-boot recovery evidence and the retained database after a flush error.
 type destructiveFlushEIOWorkerResult struct {
 	SchemaVersion       uint32    `json:"schemaVersion"`
 	BuildRevision       string    `json:"buildRevision,omitempty"`
@@ -83,6 +88,7 @@ type destructiveFlushEIOWorkerResult struct {
 	Passed              bool      `json:"passed"`
 }
 
+// runDestructiveFlushEIOWorker waits for host fault arming and records fail-stop behavior after an injected flush error.
 func runDestructiveFlushEIOWorker(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-flush-eio-worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -193,6 +199,7 @@ func runDestructiveFlushEIOWorker(args []string, stdout, stderr io.Writer) error
 	return json.NewEncoder(stdout).Encode(fault)
 }
 
+// validateDestructiveFlushEIOReady checks the guest-ready receipt's runtime, boot, and database identities.
 func validateDestructiveFlushEIOReady(ready destructiveFlushEIOReady) error {
 	if ready.SchemaVersion != 1 || (ready.BuildRevision != "" && !validDurabilitySourceRevision(ready.BuildRevision)) || ready.GOOS == "" || ready.GOARCH == "" || ready.GoVersion == "" || ready.ReadyAt.IsZero() || !qualificationSafeName(ready.BootID, 64) || !qualificationHexDigest(ready.DatabaseSHA256) || ready.CommitSequence == 0 {
 		return errors.New("flush EIO ready receipt is incomplete")
@@ -200,6 +207,7 @@ func validateDestructiveFlushEIOReady(ready destructiveFlushEIOReady) error {
 	return nil
 }
 
+// validateDestructiveFlushEIOArmed checks that fault arming follows and binds the expected guest-ready receipt.
 func validateDestructiveFlushEIOArmed(armed destructiveFlushEIOArmed, readySHA string, readyAt time.Time) error {
 	if armed.SchemaVersion != 1 || armed.ReadySHA256 != readySHA || !qualificationHexDigest(armed.QMPArmSHA256) || armed.ArmedAt.IsZero() || armed.ArmedAt.Before(readyAt) {
 		return errors.New("flush EIO armed receipt is incomplete or not bound to ready")
@@ -207,6 +215,7 @@ func validateDestructiveFlushEIOArmed(armed destructiveFlushEIOArmed, readySHA s
 	return nil
 }
 
+// validateDestructiveFlushEIOFaultResult checks the fault result's identity, timing, receipt hashes, and fail-stop observations.
 func validateDestructiveFlushEIOFaultResult(result destructiveFlushEIOFaultResult) error {
 	if result.SchemaVersion != 1 || (result.BuildRevision != "" && !validDurabilitySourceRevision(result.BuildRevision)) || result.GOOS == "" || result.GOARCH == "" || result.GoVersion == "" || result.StartedAt.IsZero() || !result.FinishedAt.After(result.StartedAt) || !qualificationSafeName(result.BootID, 64) || !qualificationHexDigest(result.ReadySHA256) || !qualificationHexDigest(result.ArmedSHA256) || !qualificationHexDigest(result.BeforeSHA256) || result.BeforeSequence == 0 || !result.FirstErrorIsEIO || !result.PoisonedErrorIsEIO || !result.ReadAfterError || !result.Passed {
 		return errors.New("flush EIO fault result is incomplete")
@@ -214,6 +223,7 @@ func validateDestructiveFlushEIOFaultResult(result destructiveFlushEIOFaultResul
 	return nil
 }
 
+// runDestructiveFlushEIORecovery checks fresh-boot recovery against the fault evidence and retains the verified old database state.
 func runDestructiveFlushEIORecovery(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-flush-eio-recovery", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -319,6 +329,7 @@ func runDestructiveFlushEIORecovery(args []string, stdout, stderr io.Writer) err
 	return json.NewEncoder(stdout).Encode(result)
 }
 
+// validateDestructiveFlushEIOWorkerResult checks that recovery evidence records a new boot and the old verified database sequence.
 func validateDestructiveFlushEIOWorkerResult(result destructiveFlushEIOWorkerResult) error {
 	if result.SchemaVersion != destructiveFlushEIOResultSchema || (result.BuildRevision != "" && !validDurabilitySourceRevision(result.BuildRevision)) || result.GOOS == "" || result.GOARCH == "" || result.GoVersion == "" || result.StartedAt.IsZero() || !result.FinishedAt.After(result.StartedAt) || !qualificationSafeName(result.FaultBootID, 64) || !qualificationSafeName(result.RecoveryBootID, 64) || result.FaultBootID == result.RecoveryBootID || !qualificationHexDigest(result.FaultSHA256) || !qualificationHexDigest(result.ProofSHA256) || !qualificationHexDigest(result.RecoveryPlanSHA256) || !qualificationHexDigest(result.RecoveryReadySHA256) || !filepath.IsAbs(result.DatabaseArtifact) || !qualificationHexDigest(result.BeforeSHA256) || !qualificationHexDigest(result.AfterSHA256) || result.BeforeSequence == 0 || result.RecoveredSequence != result.BeforeSequence || !result.OfflineVerified || !result.FreeSpaceValid || !result.PersistentFreeSpace || !result.Passed {
 		return errors.New("flush EIO worker result is incomplete")
@@ -326,6 +337,7 @@ func validateDestructiveFlushEIOWorkerResult(result destructiveFlushEIOWorkerRes
 	return nil
 }
 
+// runDestructiveFlushEIOResultCheck verifies that the retained database matches the recorded flush failure recovery result.
 func runDestructiveFlushEIOResultCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-flush-eio-result-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)

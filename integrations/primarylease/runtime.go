@@ -9,13 +9,16 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
-// ErrPrimaryRuntimeConfiguration reports an unsafe primary runtime assembly.
+// ErrPrimaryRuntimeConfiguration reports settings that cannot safely connect a database, write guard, and renewer.
+//
 // In particular, callers must not inject an unrelated write fence alongside a
 // Guard that a Renewer will update.
 var ErrPrimaryRuntimeConfiguration = errors.New("meldbase primary lease: invalid primary runtime configuration")
 
-// PrimaryOptions assembles one primary with the exact Guard instance that
-// its Renewer will update. OpenOptions remains available for storage settings,
+// PrimaryOptions configures a primary database and its write lease renewal.
+//
+// The database uses the exact Guard instance its Renewer will update.
+// OpenOptions remains available for storage settings,
 // but PrimaryWriteFence and Follower are owned by this constructor and must be
 // left unset/false.
 type PrimaryOptions struct {
@@ -28,7 +31,9 @@ type PrimaryOptions struct {
 	KeepLeaseOnStop bool
 }
 
-// PrimaryRuntime owns the safely wired primary components. The database starts
+// PrimaryRuntime groups a primary database with its write guard and lease renewer.
+//
+// The database starts
 // closed to writes because Guard starts without a certificate; call Renew once
 // explicitly or Run under a long-lived supervisor before serving mutations.
 type PrimaryRuntime struct {
@@ -37,8 +42,9 @@ type PrimaryRuntime struct {
 	Renewer *Renewer
 }
 
-// OpenPrimary creates one primary database with a freshly constructed
-// Guard installed as its only PrimaryWriteFence and a matching Renewer. It does
+// OpenPrimary opens a primary database with a shared write guard and lease renewer.
+//
+// The new Guard is the database's only PrimaryWriteFence. It does
 // not contact the controller or start a goroutine; callers choose the startup
 // ordering and context by calling Renew or Run.
 func OpenPrimary(path string, options PrimaryOptions) (*PrimaryRuntime, error) {
@@ -67,8 +73,7 @@ func OpenPrimary(path string, options PrimaryOptions) (*PrimaryRuntime, error) {
 	return &PrimaryRuntime{DB: db, Guard: guard, Renewer: renewer}, nil
 }
 
-// Renew acquires and installs one certificate before a primary starts serving
-// writes. It is a convenience around the exact matching Renewer instance.
+// Renew acquires and installs a write lease through the primary's matching renewer.
 func (runtime *PrimaryRuntime) Renew(ctx context.Context) error {
 	if runtime == nil || runtime.Renewer == nil {
 		return ErrPrimaryRuntimeConfiguration
@@ -76,8 +81,9 @@ func (runtime *PrimaryRuntime) Renew(ctx context.Context) error {
 	return runtime.Renewer.Renew(ctx)
 }
 
-// Run supervises the matching Renewer until ctx ends. Its default fail-closed
-// behavior revokes Guard locally when it returns.
+// Run renews the primary's write lease until the context ends.
+//
+// By default, returning revokes the local Guard.
 func (runtime *PrimaryRuntime) Run(ctx context.Context) error {
 	if runtime == nil || runtime.Renewer == nil {
 		return ErrPrimaryRuntimeConfiguration

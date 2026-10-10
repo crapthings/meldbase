@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Locates the repository containing the rollback anchor model.
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# Reads the path to the TLA model checking tools.
 jar=${TLA2TOOLS_JAR:-}
+# Sets the number of model checker workers.
 workers=${TLC_WORKERS:-1}
 
 if [[ -z "$jar" || ! -f "$jar" ]]; then

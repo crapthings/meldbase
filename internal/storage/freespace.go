@@ -1,51 +1,17 @@
 package storage
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sort"
 )
 
-var freeSpaceExtentMagic = [8]byte{'M', 'E', 'L', 'D', 'F', 'R', '3', '1'}
-
-func freeSpaceKey(pageID uint64) []byte {
-	key := make([]byte, 8)
-	binary.BigEndian.PutUint64(key, pageID)
-	return key
-}
-
-func encodeFreeSpaceExtent(end, safePhysicalPages, auditGeneration uint64) ([]byte, error) {
-	if end <= 2 || safePhysicalPages < end || auditGeneration == 0 {
-		return nil, ErrCorrupt
-	}
-	value := make([]byte, 32)
-	copy(value[:8], freeSpaceExtentMagic[:])
-	binary.LittleEndian.PutUint64(value[8:16], end)
-	binary.LittleEndian.PutUint64(value[16:24], safePhysicalPages)
-	binary.LittleEndian.PutUint64(value[24:32], auditGeneration)
-	return value, nil
-}
-
-func decodeFreeSpaceExtent(key, value []byte, physicalPages uint64) (uint64, uint64, uint64, error) {
-	if len(key) != 8 || len(value) != 32 || !bytes.Equal(value[:8], freeSpaceExtentMagic[:]) {
-		return 0, 0, 0, ErrCorrupt
-	}
-	start := binary.BigEndian.Uint64(key)
-	end := binary.LittleEndian.Uint64(value[8:16])
-	safePhysicalPages := binary.LittleEndian.Uint64(value[16:24])
-	auditGeneration := binary.LittleEndian.Uint64(value[24:32])
-	if start < 2 || end <= start || safePhysicalPages < end || safePhysicalPages > physicalPages || auditGeneration == 0 {
-		return 0, 0, 0, ErrCorrupt
-	}
-	return start, end, auditGeneration, nil
-}
-
+// restoreFreeSpace restores the reusable page pool from stored free space metadata.
 func (f *File) restoreFreeSpace(root DatabaseRoot, meta Meta) error {
 	return f.restoreFreeSpaceContext(context.Background(), root, meta)
 }
 
+// restoreFreeSpaceContext restores the reusable page pool while checking cancellation and later page reuse.
 func (f *File) restoreFreeSpaceContext(ctx context.Context, root DatabaseRoot, meta Meta) error {
 	if f == nil || meta.OptionalFeatures&OptionalFeaturePersistentFreeSpace == 0 {
 		return nil
@@ -153,6 +119,7 @@ func (f *File) restoreFreeSpaceContext(ctx context.Context, root DatabaseRoot, m
 	return nil
 }
 
+// pageReusedAfterGeneration checks whether a page contains valid data from a later generation.
 func (f *File) pageReusedAfterGeneration(pageID, auditGeneration uint64) (bool, error) {
 	if f == nil || f.file == nil || pageID < 2 || pageID >= f.nextPage || auditGeneration == 0 {
 		return false, ErrCorrupt
@@ -172,6 +139,7 @@ func (f *File) pageReusedAfterGeneration(pageID, auditGeneration uint64) (bool, 
 	return page.Generation > auditGeneration, nil
 }
 
+// finalizeFreeSpace sets the transaction's free space root, rebuilding the stored ranges when needed.
 func (tx *WriteTxn) finalizeFreeSpace(root *DatabaseRoot) error {
 	if tx == nil || root == nil {
 		return ErrCorrupt
@@ -220,6 +188,7 @@ func (f *File) PersistFreeSpace() error {
 	return f.PersistFreeSpaceContext(context.Background())
 }
 
+// PersistFreeSpaceContext persists the audited reusable page pool with cancellation support.
 func (f *File) PersistFreeSpaceContext(ctx context.Context) error {
 	if f == nil {
 		return ErrCorrupt

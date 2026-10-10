@@ -14,6 +14,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestObserveRepresentativeQuerySignals checks query plans, advice, and work counters for representative queries on both backends.
 func TestObserveRepresentativeQuerySignals(t *testing.T) {
 	for _, backend := range []string{"memory", "durable"} {
 		t.Run(backend, func(t *testing.T) {
@@ -116,6 +117,7 @@ func TestObserveRepresentativeQuerySignals(t *testing.T) {
 	}
 }
 
+// TestObserveRetainsBudgetRejectionEvidence checks that reports preserve budget rejection counters and stable error codes without detailed error text.
 func TestObserveRetainsBudgetRejectionEvidence(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -153,6 +155,7 @@ func TestObserveRetainsBudgetRejectionEvidence(t *testing.T) {
 	}
 }
 
+// TestArrayObserverScenariosScalePredicateWorkAcrossBackends checks that larger arrays increase predicate work without increasing the number of examined documents.
 func TestArrayObserverScenariosScalePredicateWorkAcrossBackends(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -191,6 +194,7 @@ func TestArrayObserverScenariosScalePredicateWorkAcrossBackends(t *testing.T) {
 	}
 }
 
+// TestMatrixProfileMeasuresOverlapAndBackendLimitDifferences checks overlap measurements and the different work saved by query limits on each backend.
 func TestMatrixProfileMeasuresOverlapAndBackendLimitDifferences(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -271,6 +275,7 @@ func TestMatrixProfileMeasuresOverlapAndBackendLimitDifferences(t *testing.T) {
 	}
 }
 
+// TestStableJSONIsByteDeterministicAndExcludesTiming checks that identical runs produce identical stable JSON without timing or database paths.
 func TestStableJSONIsByteDeterministicAndExcludesTiming(t *testing.T) {
 	args := []string{
 		"-profile", "matrix", "-backend", "both",
@@ -301,6 +306,7 @@ func TestStableJSONIsByteDeterministicAndExcludesTiming(t *testing.T) {
 	}
 }
 
+// TestObserverRefusesExistingDurableDatabasePath checks that opening an observer database cannot overwrite an existing file.
 func TestObserverRefusesExistingDurableDatabasePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "existing.meld2")
 	const original = "operator-owned"
@@ -317,6 +323,7 @@ func TestObserverRefusesExistingDurableDatabasePath(t *testing.T) {
 	}
 }
 
+// TestObserveReportsRetainsOnlyExplicitDurablePath checks that an explicitly named durable database remains on disk and is identified in the report.
 func TestObserveReportsRetainsOnlyExplicitDurablePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "retained.meld2")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -341,6 +348,7 @@ func TestObserveReportsRetainsOnlyExplicitDurablePath(t *testing.T) {
 	}
 }
 
+// TestObserverOutputFormats checks that table and JSON output include the expected query evidence.
 func TestObserverOutputFormats(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -375,6 +383,7 @@ func TestObserverOutputFormats(t *testing.T) {
 	}
 }
 
+// TestParseObserverConfigRejectsUnsafeOrInvalidInputs checks that invalid workload options and incompatible database path settings are rejected.
 func TestParseObserverConfigRejectsUnsafeOrInvalidInputs(t *testing.T) {
 	var diagnostics bytes.Buffer
 	if _, err := parseObserverConfig([]string{"-backend", "memory", "-database", "observer.meld2"}, &diagnostics); err == nil {
@@ -403,6 +412,7 @@ func TestParseObserverConfigRejectsUnsafeOrInvalidInputs(t *testing.T) {
 	}
 }
 
+// observationsByName indexes scenario observations by name for test assertions.
 func observationsByName(report observationReport) map[string]scenarioObservation {
 	observations := make(map[string]scenarioObservation, len(report.Scenarios))
 	for _, observation := range report.Scenarios {
@@ -411,6 +421,7 @@ func observationsByName(report observationReport) map[string]scenarioObservation
 	return observations
 }
 
+// hasAdvice reports whether query advice contains the requested code.
 func hasAdvice(advice []meldbase.ExplainAdvice, code string) bool {
 	for _, item := range advice {
 		if item.Code == code {

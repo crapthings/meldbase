@@ -2,21 +2,20 @@ package database
 
 import "sync"
 
-// ReplicationSourceLease gives one authenticated source-side replica identity
-// exclusive process-local ownership of its durable consumer. A lease prevents
-// duplicate concurrent transports from racing one checkpoint; it does not
-// establish distributed primary authority or replace follower-promotion
-// fencing.
+// ReplicationSourceLease reserves a replica consumer for one session in this process.
+//
+// It prevents sessions from racing the same checkpoint and does not replace
+// external primary election or follower-promotion fencing.
 type ReplicationSourceLease struct {
 	db   *DB
 	name string
 	once sync.Once
 }
 
-// AcquireReplicationSourceLease reserves name until Release. Callers must
-// authenticate and derive name outside untrusted replication frames. The lease
-// is intentionally DB-local: a database file already has one writer process,
-// while primary election remains an external control-plane responsibility.
+// AcquireReplicationSourceLease reserves a consumer name until the lease is released.
+//
+// Callers must authenticate and derive the name outside untrusted replication
+// frames; primary election remains an external responsibility.
 func (db *DB) AcquireReplicationSourceLease(name string) (*ReplicationSourceLease, error) {
 	if !validPublicDurableConsumerName(name) {
 		return nil, ErrInvalidDocument
@@ -39,9 +38,10 @@ func (db *DB) AcquireReplicationSourceLease(name string) (*ReplicationSourceLeas
 	return &ReplicationSourceLease{db: db, name: name}, nil
 }
 
-// Release is idempotent. It does not alter the durable consumer checkpoint;
-// normal source-session ACK handling remains the only way to advance that
-// recovery position.
+// Release frees the reserved consumer name and is safe to call repeatedly.
+//
+// It leaves the durable checkpoint unchanged; only session acknowledgments
+// advance that recovery position.
 func (lease *ReplicationSourceLease) Release() {
 	if lease == nil || lease.db == nil {
 		return

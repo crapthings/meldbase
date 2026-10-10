@@ -11,8 +11,10 @@ import (
 	"time"
 )
 
+// crashHelperExitCode identifies the deliberate exit used by crash-test subprocesses.
 const crashHelperExitCode = 91
 
+// TestAbruptProcessExitPublicationMatrix checks that abrupt exits at commit boundaries recover a complete old or new database version.
 func TestAbruptProcessExitPublicationMatrix(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "process-crash-base.meld2")
 	file, _, err := Open(basePath)
@@ -97,6 +99,7 @@ func TestAbruptProcessExitPublicationMatrix(t *testing.T) {
 	}
 }
 
+// TestAbruptProcessExitGroupPublicationMatrix checks that abrupt exits never recover only part of a transaction group.
 func TestAbruptProcessExitGroupPublicationMatrix(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "process-crash-group-base.meld2")
 	file, _, err := Open(basePath)
@@ -180,6 +183,7 @@ func TestAbruptProcessExitGroupPublicationMatrix(t *testing.T) {
 	}
 }
 
+// TestCrashProcessHelper exits at the configured commit fault point when launched as a crash-test subprocess.
 func TestCrashProcessHelper(t *testing.T) {
 	if os.Getenv("MELDBASE_CRASH_HELPER") != "1" {
 		return
@@ -206,6 +210,7 @@ func TestCrashProcessHelper(t *testing.T) {
 	t.Fatalf("configured crash point was not reached: %v", err)
 }
 
+// TestCrashGroupProcessHelper exits at the configured group commit fault point when launched as a crash-test subprocess.
 func TestCrashGroupProcessHelper(t *testing.T) {
 	if os.Getenv("MELDBASE_GROUP_CRASH_HELPER") != "1" {
 		return

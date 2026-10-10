@@ -33,8 +33,10 @@ import {
 } from "./shared.js";
 import type { CallOptions, ClientOptions, RealtimeTicket, SubscribeOptions } from "./types.js";
 
+/** Requests realtime tickets that include protocol capability discovery. */
 const REALTIME_TICKET_ACCEPT = "application/vnd.meldbase.realtime-ticket+json; capabilities=1";
 
+/** Provides authenticated remote document operations, RPC calls, and shared realtime subscriptions. */
 export class MeldbaseClient {
   readonly #baseUrl: string;
   readonly #fetch: typeof globalThis.fetch;

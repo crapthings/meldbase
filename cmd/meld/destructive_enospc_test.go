@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestDestructiveCapacityControllerCoversEveryPublicationBoundary checks simulated disk exhaustion at each commit boundary without accepting simulation as real evidence.
 func TestDestructiveCapacityControllerCoversEveryPublicationBoundary(t *testing.T) {
 	directory := t.TempDir()
 	executable := filepath.Join(directory, "meld-test")
@@ -80,6 +81,7 @@ func TestDestructiveCapacityControllerCoversEveryPublicationBoundary(t *testing.
 	}
 }
 
+// TestDestructiveQualificationBoundaryMappingFailsClosed checks that publication boundary lookup accepts known names and rejects unknown names.
 func TestDestructiveQualificationBoundaryMappingFailsClosed(t *testing.T) {
 	if _, ok := destructiveQualificationBoundary("unknown"); ok {
 		t.Fatal("unknown publication boundary accepted")

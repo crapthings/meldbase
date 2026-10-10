@@ -14,20 +14,29 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// RPCIdempotencyDecisionKind identifies whether an RPC may execute or must use a previously recorded outcome.
 type RPCIdempotencyDecisionKind uint8
 
 const (
+	// RPCIdempotencyExecute grants ownership of a new pending request.
 	RPCIdempotencyExecute RPCIdempotencyDecisionKind = iota + 1
+	// RPCIdempotencyReplayResult returns a previously recorded successful result.
 	RPCIdempotencyReplayResult
+	// RPCIdempotencyReplayError returns a previously recorded error.
 	RPCIdempotencyReplayError
+	// RPCIdempotencyInProgress reports that the same request is still pending in the current session.
 	RPCIdempotencyInProgress
+	// RPCIdempotencyOutcomeUnknown reports that the request cannot safely be executed again because its outcome is uncertain.
 	RPCIdempotencyOutcomeUnknown
+	// RPCIdempotencyConflict reports that the key was used for a different request.
 	RPCIdempotencyConflict
 )
 
-// RPCIdempotencyClaim is persisted before application code starts. ScopeHash
-// and KeyHash prevent the durable keyspace from retaining raw identities or
-// caller keys. SessionID and ClaimID are compare-and-set ownership tokens.
+// RPCIdempotencyClaim identifies a pending request and the session that owns it.
+//
+// The claim is persisted before application code starts. ScopeHash and KeyHash
+// keep raw identities and caller keys out of stored record keys. SessionID and
+// ClaimID are compare-and-set ownership tokens.
 type RPCIdempotencyClaim struct {
 	ScopeHash   [32]byte
 	KeyHash     [32]byte
@@ -37,6 +46,7 @@ type RPCIdempotencyClaim struct {
 	ExpiresAt   time.Time
 }
 
+// RPCIdempotencyDecision carries the store's execution decision or recorded result or error.
 type RPCIdempotencyDecision struct {
 	Kind        RPCIdempotencyDecisionKind
 	Result      []byte
@@ -46,6 +56,7 @@ type RPCIdempotencyDecision struct {
 	ErrorStatus int
 }
 
+// RPCIdempotencyCompletion pairs a claim with the result or error to persist.
 type RPCIdempotencyCompletion struct {
 	Claim       RPCIdempotencyClaim
 	Result      []byte
@@ -55,8 +66,10 @@ type RPCIdempotencyCompletion struct {
 	ErrorStatus int
 }
 
-// RPCIdempotencyStore must be linearizable and durable. Claim must publish a
-// new pending record before returning Execute. Complete and MarkUnknown are CAS
+// RPCIdempotencyStore records request ownership and outcomes so repeated calls cannot execute unsafely.
+//
+// Operations must be linearizable and durable. Claim must publish a new pending
+// record before returning Execute. Complete and MarkUnknown are CAS
 // transitions matching SessionID and ClaimID. Implementations must never turn a
 // pending record owned by another session back into Execute.
 type RPCIdempotencyStore interface {
@@ -65,22 +78,27 @@ type RPCIdempotencyStore interface {
 	MarkUnknown(context.Context, RPCIdempotencyClaim) error
 }
 
+// RPCIdempotencyMaintenance removes expired terminal records without discarding pending requests.
 type RPCIdempotencyMaintenance interface {
-	// PruneExpired removes at most limit completed/error/unknown records after
-	// their retention window. Pending records are never removed by time alone.
+	// PruneExpired removes up to the requested number of expired records with known or unknown outcomes.
+	//
+	// Pending records are never removed by time alone.
 	PruneExpired(context.Context, int) (int, error)
 }
 
+// DurableRPCIdempotencyStore combines durable request ownership with expired-record maintenance.
 type DurableRPCIdempotencyStore interface {
 	RPCIdempotencyStore
 	RPCIdempotencyMaintenance
 }
 
+// rpcIdempotencyAction pairs an owned request claim with the store that records its outcome.
 type rpcIdempotencyAction struct {
 	claim RPCIdempotencyClaim
 	store RPCIdempotencyStore
 }
 
+// newRPCIdempotencyClaim hashes the request scope and contents and creates ownership tokens for a pending request.
 func newRPCIdempotencyClaim(actor Actor, envelope rpcCallEnvelope, input meldbase.Value, sessionID [16]byte, retention time.Duration) (RPCIdempotencyClaim, error) {
 	if envelope.IdempotencyKey == nil || !validRPCIdempotencyKey(*envelope.IdempotencyKey) || allZero16(sessionID) || retention <= 0 {
 		return RPCIdempotencyClaim{}, errors.New("invalid RPC idempotency claim")
@@ -114,6 +132,7 @@ func newRPCIdempotencyClaim(actor Actor, envelope rpcCallEnvelope, input meldbas
 	return claim, nil
 }
 
+// validateRPCIdempotencyDecision checks that a decision carries only the outcome fields allowed by its kind.
 func validateRPCIdempotencyDecision(decision RPCIdempotencyDecision, maxResultBytes int) error {
 	switch decision.Kind {
 	case RPCIdempotencyExecute, RPCIdempotencyInProgress, RPCIdempotencyOutcomeUnknown, RPCIdempotencyConflict:
@@ -136,6 +155,7 @@ func validateRPCIdempotencyDecision(decision RPCIdempotencyDecision, maxResultBy
 	return nil
 }
 
+// idempotencyDecisionError maps blocked execution decisions to HTTP conflict responses.
 func idempotencyDecisionError(decision RPCIdempotencyDecision) (int, string, bool) {
 	switch decision.Kind {
 	case RPCIdempotencyInProgress:
@@ -149,12 +169,15 @@ func idempotencyDecisionError(decision RPCIdempotencyDecision) (int, string, boo
 	}
 }
 
+// sameRPCFingerprint compares request hashes in constant time.
 func sameRPCFingerprint(left, right [32]byte) bool {
 	return subtle.ConstantTimeCompare(left[:], right[:]) == 1
 }
 
+// hashWriter accepts bytes used to build framed request hashes.
 type hashWriter interface{ Write([]byte) (int, error) }
 
+// writeHashFrame writes a byte length followed by its value to prevent ambiguous concatenated hashes.
 func writeHashFrame(writer hashWriter, value []byte) {
 	var length [8]byte
 	binary.BigEndian.PutUint64(length[:], uint64(len(value)))
@@ -162,6 +185,7 @@ func writeHashFrame(writer hashWriter, value []byte) {
 	_, _ = writer.Write(value)
 }
 
+// allZero16 reports whether every byte of a token is zero.
 func allZero16(value [16]byte) bool {
 	var found byte
 	for _, item := range value {
@@ -170,6 +194,7 @@ func allZero16(value [16]byte) bool {
 	return found == 0
 }
 
+// randomToken16 generates a cryptographically random sixteen-byte ownership token.
 func randomToken16() ([16]byte, error) {
 	var token [16]byte
 	_, err := rand.Read(token[:])

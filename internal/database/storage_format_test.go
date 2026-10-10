@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestOpenCreatesAndReopensCurrentFormat checks that newly written databases use the current format and preserve documents through reopening.
 func TestOpenCreatesAndReopensCurrentFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "database.meld")
 	db, err := Open(path)
@@ -39,6 +40,7 @@ func TestOpenCreatesAndReopensCurrentFormat(t *testing.T) {
 	}
 }
 
+// TestFormatInspectionIsReadOnlyAndFailsClosed checks that format inspection leaves files unchanged and opening rejects invalid database bytes.
 func TestFormatInspectionIsReadOnlyAndFailsClosed(t *testing.T) {
 	directory := t.TempDir()
 	missing := filepath.Join(directory, "missing.meld")
@@ -73,6 +75,7 @@ func TestFormatInspectionIsReadOnlyAndFailsClosed(t *testing.T) {
 	}
 }
 
+// TestOpenPreservesCorruptCurrentFormatBytes checks that opening rejects a damaged format header without changing the file.
 func TestOpenPreservesCorruptCurrentFormatBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "future.meld")
 	db, err := Open(path)

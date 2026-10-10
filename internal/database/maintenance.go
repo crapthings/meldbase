@@ -9,15 +9,21 @@ import (
 )
 
 const (
+	// defaultMaintenanceInterval sets the default delay between reclamation passes.
 	defaultMaintenanceInterval = 5 * time.Minute
-	defaultMaintenanceTimeout  = time.Minute
-	minMaintenanceDuration     = 10 * time.Millisecond
-	maxMaintenanceInterval     = 24 * time.Hour
-	maxMaintenanceTimeout      = time.Hour
+	// defaultMaintenanceTimeout sets the default time limit for one reclamation pass.
+	defaultMaintenanceTimeout = time.Minute
+	// minMaintenanceDuration sets the shortest accepted maintenance interval or timeout.
+	minMaintenanceDuration = 10 * time.Millisecond
+	// maxMaintenanceInterval sets the longest accepted maintenance interval.
+	maxMaintenanceInterval = 24 * time.Hour
+	// maxMaintenanceTimeout sets the longest accepted reclamation timeout.
+	maxMaintenanceTimeout = time.Hour
 )
 
-// MaintenanceOptions configures an explicit default-off maintenance loop.
-// Every run uses online optimistic reclamation; runs never overlap.
+// MaintenanceOptions sets the schedule and limits for background page reclamation.
+//
+// Each loop uses online optimistic reclamation and never overlaps its own runs.
 type MaintenanceOptions struct {
 	Interval       time.Duration
 	Timeout        time.Duration
@@ -28,6 +34,7 @@ type MaintenanceOptions struct {
 	PersistFreeSpace bool
 }
 
+// MaintenanceStats counts background page reclamation runs and records their outcomes.
 type MaintenanceStats struct {
 	Runs         uint64
 	Completed    uint64
@@ -38,9 +45,10 @@ type MaintenanceStats struct {
 	LastError    string
 }
 
-// Maintenance owns one background reclamation loop. Stop is idempotent and
-// waits for an active scan to observe cancellation. Closing the DB also stops
-// the loop through the DB lifecycle channel.
+// Maintenance runs background tasks that make unused database pages reusable.
+//
+// Stop waits for an active scan to observe cancellation; closing the database
+// also cancels the loop.
 type Maintenance struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
@@ -55,13 +63,8 @@ type Maintenance struct {
 	lastError    string
 }
 
-func (db *DB) StartMaintenance(parent context.Context, options MaintenanceOptions) (*Maintenance, error) {
-	if db == nil {
-		return nil, ErrReclamationUnsupported
-	}
-	if err := contextError(parent); err != nil {
-		return nil, err
-	}
+// normalizeMaintenanceOptions fills scheduling defaults and validates maintenance bounds.
+func normalizeMaintenanceOptions(options MaintenanceOptions) (MaintenanceOptions, error) {
 	interval := options.Interval
 	if interval == 0 {
 		interval = defaultMaintenanceInterval
@@ -73,8 +76,26 @@ func (db *DB) StartMaintenance(parent context.Context, options MaintenanceOption
 	if interval < minMaintenanceDuration || interval > maxMaintenanceInterval ||
 		timeout < minMaintenanceDuration || timeout > maxMaintenanceTimeout ||
 		options.MaxAttempts < 0 || options.MaxAttempts > 32 {
-		return nil, ErrInvalidReclamationOptions
+		return MaintenanceOptions{}, ErrInvalidReclamationOptions
 	}
+	options.Interval, options.Timeout = interval, timeout
+	return options, nil
+}
+
+// StartMaintenance starts a bounded background page-reclamation loop for a durable database.
+func (db *DB) StartMaintenance(parent context.Context, options MaintenanceOptions) (*Maintenance, error) {
+	if db == nil {
+		return nil, ErrReclamationUnsupported
+	}
+	if err := contextError(parent); err != nil {
+		return nil, err
+	}
+	options, err := normalizeMaintenanceOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	interval, timeout := options.Interval, options.Timeout
+
 	db.mu.RLock()
 	_, store := db.durability.(*durableStore)
 	closed := db.closed
@@ -99,6 +120,7 @@ func (db *DB) StartMaintenance(parent context.Context, options MaintenanceOption
 	return handle, nil
 }
 
+// run schedules reclamation passes until the maintenance context is canceled.
 func (maintenance *Maintenance) run(ctx context.Context, db *DB, interval, timeout time.Duration, maxAttempts int, immediately, persistFreeSpace bool) {
 	defer close(maintenance.done)
 	delay := interval
@@ -118,6 +140,7 @@ func (maintenance *Maintenance) run(ctx context.Context, db *DB, interval, timeo
 	}
 }
 
+// runOnce performs one timed reclamation pass and records its outcome.
 func (maintenance *Maintenance) runOnce(parent context.Context, db *DB, timeout time.Duration, maxAttempts int, persistFreeSpace bool) {
 	maintenance.runs.Add(1)
 	maintenance.active.Store(true)
@@ -146,6 +169,7 @@ func (maintenance *Maintenance) runOnce(parent context.Context, db *DB, timeout 
 	}
 }
 
+// Stop cancels maintenance and waits for its loop to finish.
 func (maintenance *Maintenance) Stop() {
 	if maintenance == nil {
 		return
@@ -154,6 +178,7 @@ func (maintenance *Maintenance) Stop() {
 	<-maintenance.done
 }
 
+// Done returns a channel that closes when the maintenance loop finishes.
 func (maintenance *Maintenance) Done() <-chan struct{} {
 	if maintenance == nil {
 		closed := make(chan struct{})
@@ -163,6 +188,7 @@ func (maintenance *Maintenance) Done() <-chan struct{} {
 	return maintenance.done
 }
 
+// Stats samples maintenance counters and the most recent outcome.
 func (maintenance *Maintenance) Stats() MaintenanceStats {
 	if maintenance == nil {
 		return MaintenanceStats{}

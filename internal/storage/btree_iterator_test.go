@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestTreeIteratorRangeLimitAndOldRoot checks range bounds, result limits, and isolation between old and updated tree roots.
 func TestTreeIteratorRangeLimitAndOldRoot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "iterator.meld2")
 	file, _, err := Open(path)
@@ -80,6 +81,7 @@ func TestTreeIteratorRangeLimitAndOldRoot(t *testing.T) {
 	}
 }
 
+// TestDocumentIteratorOwnsPinAndPreservesSnapshot checks that a document iterator keeps its own snapshot protection and reads old data until exhaustion.
 func TestDocumentIteratorOwnsPinAndPreservesSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "document-iterator.meld2")
 	file, _, err := Open(path)
@@ -156,6 +158,7 @@ func TestDocumentIteratorOwnsPinAndPreservesSnapshot(t *testing.T) {
 	}
 }
 
+// TestInsertionOrderIteratorOwnsPinAndPreservesDeleteReinsertOrder checks snapshot isolation, reader release, and insertion order after deletion and reinsertion.
 func TestInsertionOrderIteratorOwnsPinAndPreservesDeleteReinsertOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "order-iterator.meld2")
 	file, _, err := Open(path)
@@ -261,6 +264,7 @@ func TestInsertionOrderIteratorOwnsPinAndPreservesDeleteReinsertOrder(t *testing
 	}
 }
 
+// iteratorDocumentID creates a nonzero test document identifier ordered by its input index.
 func iteratorDocumentID(index int) [16]byte {
 	index++
 	return [16]byte{12: byte(index >> 24), 13: byte(index >> 16), 14: byte(index >> 8), 15: byte(index)}

@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestReplicationSourceLeaseIsSingleActiveAndReleasable checks that each replica has at most one source lease and can acquire another after release.
 func TestReplicationSourceLeaseIsSingleActiveAndReleasable(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -33,6 +34,7 @@ func TestReplicationSourceLeaseIsSingleActiveAndReleasable(t *testing.T) {
 	}
 }
 
+// TestReplicationSourceLeaseConcurrentAcquireAdmitsExactlyOne checks that concurrent lease requests for one replica admit exactly one holder.
 func TestReplicationSourceLeaseConcurrentAcquireAdmitsExactlyOne(t *testing.T) {
 	db := New()
 	defer db.Close()

@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestDurableCommitConsumerPersistsCheckpointAndCapsRetention checks that consumer checkpoints survive reopening and protect unacknowledged history from pruning.
 func TestDurableCommitConsumerPersistsCheckpointAndCapsRetention(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "durable-consumer.meld2")
 	file, _, _, err := OpenWithOptions(path, OpenOptions{CommitRetentionMaxCommits: 2})
@@ -100,6 +101,7 @@ func TestDurableCommitConsumerPersistsCheckpointAndCapsRetention(t *testing.T) {
 	}
 }
 
+// TestDurableCommitConsumerRejectsUnsafePositionsAndAckSkips checks rejection of lost history, acknowledgments before delivery, and acknowledgments after consumer deletion.
 func TestDurableCommitConsumerRejectsUnsafePositionsAndAckSkips(t *testing.T) {
 	file, _, _, err := OpenWithOptions(filepath.Join(t.TempDir(), "durable-consumer-errors.meld2"), OpenOptions{CommitRetentionMaxCommits: 2})
 	if err != nil {
@@ -135,6 +137,7 @@ func TestDurableCommitConsumerRejectsUnsafePositionsAndAckSkips(t *testing.T) {
 	}
 }
 
+// TestDurableCommitConsumerAckDoesNotWaitForNextBlockingRead checks that an acknowledgment can finish while the consumer waits for another commit.
 func TestDurableCommitConsumerAckDoesNotWaitForNextBlockingRead(t *testing.T) {
 	file, _, _, err := OpenWithOptions(filepath.Join(t.TempDir(), "durable-consumer-ack-concurrency.meld2"), OpenOptions{})
 	if err != nil {
@@ -178,6 +181,7 @@ func TestDurableCommitConsumerAckDoesNotWaitForNextBlockingRead(t *testing.T) {
 	}
 }
 
+// TestDurableCommitConsumerAckFaultRecoversOldOrNewCheckpoint checks that acknowledgment faults recover an old or new checkpoint without changing the logical commit sequence.
 func TestDurableCommitConsumerAckFaultRecoversOldOrNewCheckpoint(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "durable-consumer-ack-base.meld2")
 	base, _, err := Open(basePath)
@@ -270,6 +274,7 @@ func TestDurableCommitConsumerAckFaultRecoversOldOrNewCheckpoint(t *testing.T) {
 	}
 }
 
+// applyDurableConsumerDocument inserts a test document and checks that its commit has the expected sequence.
 func applyDurableConsumerDocument(t *testing.T, file *File, sequence int) {
 	t.Helper()
 	id := [16]byte{byte(sequence), 1}

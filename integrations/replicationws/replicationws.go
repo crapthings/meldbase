@@ -1,5 +1,6 @@
-// Package replicationws adapts Meldbase's trusted-server replication protocol
-// to WebSocket. It intentionally has no browser/session authentication: callers
+// Package replicationws transfers database changes between trusted servers over WebSocket.
+//
+// It has no browser or session authentication: callers
 // must supply an authorization callback backed by mTLS, a private network
 // identity, or another server-to-server credential.
 package replicationws
@@ -18,15 +19,19 @@ import (
 )
 
 const (
+	// defaultMaxFrameBytes limits replication messages when no explicit limit is set.
 	defaultMaxFrameBytes = 16 << 20
-	defaultBuffer        = 16
+	// defaultBuffer sets the default number of buffered change batches.
+	defaultBuffer = 16
 )
 
-// Authorize must authenticate a server-to-server peer and return its stable
-// durable-consumer name. The name scopes retention and must not be derived from
+// Authorize verifies a replication peer and returns its server-assigned durable consumer name.
+//
+// The name scopes retention and must not be derived from
 // an untrusted frame field. Returning an error rejects the WebSocket upgrade.
 type Authorize = replicationauth.Authorize
 
+// Config supplies the source database, peer authorizer, and replication resource limits.
 type Config struct {
 	DB            *meldbase.DB
 	Authorize     Authorize
@@ -34,12 +39,14 @@ type Config struct {
 	Buffer        int
 }
 
-// Handler serves one authenticated primary/source replication connection.
+// Handler sends database changes to authenticated replication peers.
+//
 // Each connection is pull/acknowledge serialized: it reads hello, writes one
 // batch, waits for its matching ACK, then repeats. This bounds server memory
 // and guarantees that a peer cannot acknowledge an unseen token.
 type Handler struct{ config Config }
 
+// New creates a replication handler after checking its dependencies and resource limits.
 func New(config Config) (*Handler, error) {
 	if config.DB == nil || config.Authorize == nil {
 		return nil, errors.New("replication websocket requires database and authorizer")
@@ -59,6 +66,7 @@ func New(config Config) (*Handler, error) {
 	return &Handler{config: config}, nil
 }
 
+// ServeHTTP authenticates a TLS peer and serves its exclusive replication connection.
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if handler == nil || request == nil || request.Method != http.MethodGet {
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
@@ -104,6 +112,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 }
 
+// serve exchanges ordered change batches and acknowledgments after the initial handshake.
 func (handler *Handler) serve(ctx context.Context, connection *websocket.Conn, consumerName string) error {
 	frame, err := handler.readFrame(ctx, connection)
 	if err != nil {
@@ -154,6 +163,7 @@ func (handler *Handler) serve(ctx context.Context, connection *websocket.Conn, c
 	}
 }
 
+// readFrame reads a text message and decodes it within the handler's size limit.
 func (handler *Handler) readFrame(ctx context.Context, connection *websocket.Conn) (meldbase.ReplicationFrame, error) {
 	messageType, raw, err := connection.Read(ctx)
 	if err != nil {
@@ -165,6 +175,7 @@ func (handler *Handler) readFrame(ctx context.Context, connection *websocket.Con
 	return meldbase.UnmarshalReplicationFrame(raw, meldbase.ReplicationFrameLimits{MaxFrameBytes: handler.config.MaxFrameBytes})
 }
 
+// writeFrame encodes and sends a replication message within the handler's size limit.
 func (handler *Handler) writeFrame(ctx context.Context, connection *websocket.Conn, frame meldbase.ReplicationFrame) error {
 	raw, err := meldbase.MarshalReplicationFrame(frame, meldbase.ReplicationFrameLimits{MaxFrameBytes: handler.config.MaxFrameBytes})
 	if err != nil {
@@ -173,8 +184,9 @@ func (handler *Handler) writeFrame(ctx context.Context, connection *websocket.Co
 	return connection.Write(ctx, websocket.MessageText, raw)
 }
 
-// ReceiverConfig configures a follower-side WebSocket client. DialOptions is
-// where callers install an mTLS HTTP client, private-network proxy or other
+// ReceiverConfig sets the follower, source connection, and starting replication positions.
+//
+// DialOptions is where callers install an mTLS HTTP client, private-network proxy or other
 // server-to-server transport identity. It must not be used for browser tokens.
 type ReceiverConfig struct {
 	Follower              *meldbase.Follower
@@ -185,8 +197,9 @@ type ReceiverConfig struct {
 	BootstrapToken        uint64
 }
 
-// Receive connects one follower to a primary replication endpoint. It returns
-// only after context cancellation, a terminal resync, authentication/transport
+// Receive applies ordered source changes to a follower and acknowledges locally durable batches.
+//
+// It returns only after context cancellation, a terminal resync, authentication/transport
 // failure, or a failed follower apply. A batch is ACKed only after it is either
 // covered by the verified bootstrap snapshot or durably applied locally.
 func Receive(ctx context.Context, config ReceiverConfig) error {
@@ -267,6 +280,7 @@ func Receive(ctx context.Context, config ReceiverConfig) error {
 	}
 }
 
+// cloneNoRedirectDialOptions copies the connection options and disables HTTP redirects.
 func cloneNoRedirectDialOptions(options *websocket.DialOptions) *websocket.DialOptions {
 	var copied websocket.DialOptions
 	if options != nil {
@@ -282,6 +296,7 @@ func cloneNoRedirectDialOptions(options *websocket.DialOptions) *websocket.DialO
 	return &copied
 }
 
+// receiverReadFrame reads and decodes a text replication message within the supplied size limit.
 func receiverReadFrame(ctx context.Context, connection *websocket.Conn, maxFrameBytes int) (meldbase.ReplicationFrame, error) {
 	messageType, raw, err := connection.Read(ctx)
 	if err != nil {
@@ -293,6 +308,7 @@ func receiverReadFrame(ctx context.Context, connection *websocket.Conn, maxFrame
 	return meldbase.UnmarshalReplicationFrame(raw, meldbase.ReplicationFrameLimits{MaxFrameBytes: maxFrameBytes})
 }
 
+// receiverWriteFrame encodes and sends a replication message within the supplied size limit.
 func receiverWriteFrame(ctx context.Context, connection *websocket.Conn, frame meldbase.ReplicationFrame, maxFrameBytes int) error {
 	raw, err := meldbase.MarshalReplicationFrame(frame, meldbase.ReplicationFrameLimits{MaxFrameBytes: maxFrameBytes})
 	if err != nil {
@@ -301,6 +317,7 @@ func receiverWriteFrame(ctx context.Context, connection *websocket.Conn, frame m
 	return connection.Write(ctx, websocket.MessageText, raw)
 }
 
+// receiverResyncError converts a source resync reason into a local replication error.
 func receiverResyncError(reason string) error {
 	switch reason {
 	case "history_lost":

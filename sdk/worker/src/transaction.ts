@@ -13,6 +13,7 @@ import { MeldbaseInternalError } from "./errors.js";
 import { COLLECTION_PATTERN, deferred, type Deferred, ERROR_PATTERN, isCanonicalDocumentID, record } from "./shared.js";
 import type { WriteTransaction } from "./types.js";
 
+/** Sends sequential document operations for one remote transaction and matches their responses. */
 export class RemoteWriteTransaction implements WriteTransaction {
   readonly #callId: string;
   readonly #send: (value: unknown) => void;

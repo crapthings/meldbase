@@ -6,10 +6,13 @@ import (
 )
 
 const (
+	// defaultCachedPages sets the default page-cache capacity.
 	defaultCachedPages = 1024
-	pageCacheShards    = 16
+	// pageCacheShards sets the number of independently locked cache partitions.
+	pageCacheShards = 16
 )
 
+// PageCacheStats reports cache occupancy, hits, misses, and evictions.
 type PageCacheStats struct {
 	CapacityPages uint64
 	ResidentPages uint64
@@ -18,8 +21,7 @@ type PageCacheStats struct {
 	Evictions     uint64
 }
 
-// StorageStats is a bounded point-in-time view of physical storage health. It
-// contains no keys, document identifiers, paths, or user values.
+// StorageStats reports physical storage health without exposing application data.
 type StorageStats struct {
 	PageSize                   uint64
 	Generation                 uint64
@@ -55,11 +57,13 @@ type StorageStats struct {
 	PageCache                  PageCacheStats
 }
 
+// cachedPage holds a decoded page and the raw bytes backing its values.
 type cachedPage struct {
 	raw  []byte
 	page Page
 }
 
+// pageCacheShard owns a locked cache partition with round-robin eviction.
 type pageCacheShard struct {
 	mu      sync.RWMutex
 	entries map[uint64]*cachedPage
@@ -68,6 +72,7 @@ type pageCacheShard struct {
 	limit   int
 }
 
+// pageCache distributes cached pages across independently locked partitions.
 type pageCache struct {
 	shards    [pageCacheShards]pageCacheShard
 	hits      atomic.Uint64
@@ -75,6 +80,7 @@ type pageCache struct {
 	evictions atomic.Uint64
 }
 
+// newPageCache creates a bounded cache with capacity shared across its partitions.
 func newPageCache(capacity int) *pageCache {
 	if capacity < pageCacheShards {
 		capacity = pageCacheShards
@@ -91,6 +97,7 @@ func newPageCache(capacity int) *pageCache {
 	return cache
 }
 
+// get looks up a cached page and counts the hit or miss.
 func (cache *pageCache) get(pageID uint64) (*cachedPage, bool) {
 	if cache == nil {
 		return nil, false
@@ -107,6 +114,7 @@ func (cache *pageCache) get(pageID uint64) (*cachedPage, bool) {
 	return page, true
 }
 
+// put retains a page in its partition and evicts an older entry when full.
 func (cache *pageCache) put(pageID uint64, raw []byte, decoded Page) *cachedPage {
 	entry := &cachedPage{raw: raw, page: decoded}
 	shard := &cache.shards[pageID%pageCacheShards]
@@ -128,6 +136,7 @@ func (cache *pageCache) put(pageID uint64, raw []byte, decoded Page) *cachedPage
 	return entry
 }
 
+// invalidate removes cached pages whose IDs may be reused.
 func (cache *pageCache) invalidate(pageIDs []uint64) {
 	if cache == nil {
 		return
@@ -155,6 +164,7 @@ func (cache *pageCache) invalidate(pageIDs []uint64) {
 	}
 }
 
+// stats samples cache occupancy and cumulative access counters.
 func (cache *pageCache) stats() PageCacheStats {
 	if cache == nil {
 		return PageCacheStats{}

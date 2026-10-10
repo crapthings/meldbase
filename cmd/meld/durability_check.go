@@ -18,6 +18,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// durabilityCheckResult records the target environment and storage capability probe outcomes.
 type durabilityCheckResult struct {
 	SchemaVersion  int                      `json:"schemaVersion"`
 	SourceRevision string                   `json:"sourceRevision,omitempty"`
@@ -41,6 +42,7 @@ type durabilityCheckResult struct {
 	Database       *durabilityDatabaseProof `json:"database,omitempty"`
 }
 
+// durabilityDatabaseProof records verification evidence for the probe database.
 type durabilityDatabaseProof struct {
 	VerificationSchema int    `json:"verificationSchemaVersion"`
 	FormatRevision     uint16 `json:"formatRevision"`
@@ -53,6 +55,7 @@ type durabilityDatabaseProof struct {
 	SHA256             string `json:"sha256"`
 }
 
+// durabilityCheckRecord reports one probe's outcome, duration, and optional failure.
 type durabilityCheckRecord struct {
 	Name     string        `json:"name"`
 	Passed   bool          `json:"passed"`
@@ -60,6 +63,7 @@ type durabilityCheckRecord struct {
 	Error    string        `json:"error,omitempty"`
 }
 
+// runDurabilityCheck probes storage capabilities in the target directory and reports the results.
 func runDurabilityCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("durability-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -226,6 +230,7 @@ func runDurabilityCheck(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// validDurabilitySourceRevision accepts a 40-digit or 64-digit hexadecimal source revision.
 func validDurabilitySourceRevision(value string) bool {
 	if len(value) != 40 && len(value) != 64 {
 		return false
@@ -234,6 +239,7 @@ func validDurabilitySourceRevision(value string) bool {
 	return err == nil
 }
 
+// durabilityBuildIdentity reads the validated source revision and modified flag from Go build metadata.
 func durabilityBuildIdentity() (string, bool) {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -255,6 +261,7 @@ func durabilityBuildIdentity() (string, bool) {
 	return revision, modified
 }
 
+// checkedFilesystemBytes converts a block count to bytes while rejecting invalid sizes and overflow.
 func checkedFilesystemBytes(blocks, blockSize uint64) (uint64, error) {
 	if blockSize == 0 || (blocks != 0 && blockSize > ^uint64(0)/blocks) {
 		return 0, errors.New("durability-check filesystem capacity overflow")
@@ -262,6 +269,7 @@ func checkedFilesystemBytes(blocks, blockSize uint64) (uint64, error) {
 	return blocks * blockSize, nil
 }
 
+// syncProbeDirectory syncs a probe directory and returns any sync or close error.
 func syncProbeDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {
@@ -270,6 +278,7 @@ func syncProbeDirectory(path string) error {
 	return errors.Join(directory.Sync(), directory.Close())
 }
 
+// checkProbeLock checks exclusive file locking and lock release when the owning handle closes.
 func checkProbeLock(directory string) error {
 	path := filepath.Join(directory, "lock")
 	first, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
@@ -306,6 +315,7 @@ func checkProbeLock(directory string) error {
 	return syscall.Flock(int(second.Fd()), syscall.LOCK_UN)
 }
 
+// checkProbeNoOverwriteLink checks that hard-link publication preserves contents and rejects an existing destination.
 func checkProbeNoOverwriteLink(directory string) error {
 	source := filepath.Join(directory, "link-source")
 	destination := filepath.Join(directory, "link-destination")
@@ -335,6 +345,7 @@ func checkProbeNoOverwriteLink(directory string) error {
 	return nil
 }
 
+// checkProbeRename checks that a synced rename preserves contents and removes the old path.
 func checkProbeRename(directory string) error {
 	source := filepath.Join(directory, "rename-source")
 	destination := filepath.Join(directory, "rename-destination")
@@ -364,6 +375,7 @@ func checkProbeRename(directory string) error {
 	return nil
 }
 
+// checkProbeDatabase checks that document updates and indexed lookup survive a database reopen.
 func checkProbeDatabase(directory string) error {
 	path := filepath.Join(directory, "probe.meld")
 	db, err := meldbase.Open(path)

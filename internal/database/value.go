@@ -9,29 +9,43 @@ import (
 	"time"
 )
 
+// Kind identifies the type stored in a Value.
 type Kind uint8
 
 const (
+	// NullKind identifies a null value.
 	NullKind Kind = iota
+	// BoolKind identifies a boolean value.
 	BoolKind
+	// Int64Kind identifies a signed 64-bit integer.
 	Int64Kind
+	// Float64Kind identifies a 64-bit float.
 	Float64Kind
+	// StringKind identifies a string.
 	StringKind
+	// BinaryKind identifies binary data.
 	BinaryKind
+	// TimeKind identifies a timestamp.
 	TimeKind
+	// ArrayKind identifies an array of values.
 	ArrayKind
+	// ObjectKind identifies a document object.
 	ObjectKind
+	// IDKind identifies a document identifier.
 	IDKind
 )
 
+// DocumentID is a 16-byte document identifier.
 type DocumentID [16]byte
 
+// NewDocumentID creates an identifier from cryptographically random bytes.
 func NewDocumentID() (DocumentID, error) {
 	var id DocumentID
 	_, err := rand.Read(id[:])
 	return id, err
 }
 
+// ParseDocumentID reads a 16-byte identifier from a hexadecimal string.
 func ParseDocumentID(s string) (DocumentID, error) {
 	var id DocumentID
 	b, err := hex.DecodeString(s)
@@ -42,11 +56,13 @@ func ParseDocumentID(s string) (DocumentID, error) {
 	return id, nil
 }
 
+// String returns the identifier as lowercase hexadecimal text.
 func (id DocumentID) String() string { return hex.EncodeToString(id[:]) }
-func (id DocumentID) IsZero() bool   { return id == DocumentID{} }
 
-// Value is a closed tagged value. Its representation is private so callers
-// cannot construct a tag/payload mismatch.
+// IsZero reports whether every byte of the identifier is zero.
+func (id DocumentID) IsZero() bool { return id == DocumentID{} }
+
+// Value stores typed database data behind a private representation.
 type Value struct {
 	kind Kind
 	b    bool
@@ -60,35 +76,71 @@ type Value struct {
 	id   DocumentID
 }
 
-func Null() Value           { return Value{kind: NullKind} }
-func Bool(v bool) Value     { return Value{kind: BoolKind, b: v} }
-func Int(v int64) Value     { return Value{kind: Int64Kind, i: v} }
+// Null creates a null value.
+func Null() Value { return Value{kind: NullKind} }
+
+// Bool creates a boolean value.
+func Bool(v bool) Value { return Value{kind: BoolKind, b: v} }
+
+// Int creates a signed 64-bit integer value.
+func Int(v int64) Value { return Value{kind: Int64Kind, i: v} }
+
+// Float creates a 64-bit floating-point value.
 func Float(v float64) Value { return Value{kind: Float64Kind, f: v} }
+
+// String creates a string value.
 func String(v string) Value { return Value{kind: StringKind, s: v} }
+
+// Binary creates a binary value from a copy of the bytes.
 func Binary(v []byte) Value { return Value{kind: BinaryKind, bin: append([]byte(nil), v...)} }
 
-// Time stores millisecond precision, matching JavaScript Date and the wire
-// contract. Precision is normalized at construction rather than silently lost
-// during transport.
+// Time creates a UTC timestamp value rounded down to millisecond precision.
 func Time(v time.Time) Value {
 	return Value{kind: TimeKind, t: v.Round(0).UTC().Truncate(time.Millisecond)}
 }
-func ID(v DocumentID) Value                  { return Value{kind: IDKind, id: v} }
-func Array(v ...Value) Value                 { return Value{kind: ArrayKind, arr: cloneValues(v)} }
-func Object(v Document) Value                { return Value{kind: ObjectKind, obj: v.Clone()} }
-func (v Value) Kind() Kind                   { return v.kind }
-func (v Value) Bool() (bool, bool)           { return v.b, v.kind == BoolKind }
-func (v Value) Int64() (int64, bool)         { return v.i, v.kind == Int64Kind }
-func (v Value) Float64() (float64, bool)     { return v.f, v.kind == Float64Kind }
-func (v Value) StringValue() (string, bool)  { return v.s, v.kind == StringKind }
+
+// ID creates a document identifier value.
+func ID(v DocumentID) Value { return Value{kind: IDKind, id: v} }
+
+// Array creates an array value from copies of its elements.
+func Array(v ...Value) Value { return Value{kind: ArrayKind, arr: cloneValues(v)} }
+
+// Object creates an object value from a copy of the document.
+func Object(v Document) Value { return Value{kind: ObjectKind, obj: v.Clone()} }
+
+// Kind returns the type of the value.
+func (v Value) Kind() Kind { return v.kind }
+
+// Bool returns the stored boolean and whether the value is a boolean.
+func (v Value) Bool() (bool, bool) { return v.b, v.kind == BoolKind }
+
+// Int64 returns the stored integer and whether the value is an integer.
+func (v Value) Int64() (int64, bool) { return v.i, v.kind == Int64Kind }
+
+// Float64 returns the stored float and whether the value is a float.
+func (v Value) Float64() (float64, bool) { return v.f, v.kind == Float64Kind }
+
+// StringValue returns the stored string and whether the value is a string.
+func (v Value) StringValue() (string, bool) { return v.s, v.kind == StringKind }
+
+// TimeValue returns the stored time and whether the value is a time.
 func (v Value) TimeValue() (time.Time, bool) { return v.t, v.kind == TimeKind }
-func (v Value) IDValue() (DocumentID, bool)  { return v.id, v.kind == IDKind }
+
+// IDValue returns the stored identifier and whether the value is an identifier.
+func (v Value) IDValue() (DocumentID, bool) { return v.id, v.kind == IDKind }
+
+// BinaryValue returns a copy of the stored bytes and whether the value is binary.
 func (v Value) BinaryValue() ([]byte, bool) {
 	return append([]byte(nil), v.bin...), v.kind == BinaryKind
 }
-func (v Value) ArrayValue() ([]Value, bool)   { return cloneValues(v.arr), v.kind == ArrayKind }
+
+// ArrayValue returns copies of the stored elements and whether the value is an array.
+func (v Value) ArrayValue() ([]Value, bool) { return cloneValues(v.arr), v.kind == ArrayKind }
+
+// ObjectValue returns a copy of the stored document and whether the value is an object.
 func (v Value) ObjectValue() (Document, bool) { return v.obj.Clone(), v.kind == ObjectKind }
 
+// Clone copies the value and all nested data.
 func (v Value) Clone() Value {
 	v.bin = append([]byte(nil), v.bin...)
 	v.arr = cloneValues(v.arr)
@@ -96,6 +148,7 @@ func (v Value) Clone() Value {
 	return v
 }
 
+// Equal compares values recursively and allows exact equality between integers and floats.
 func (v Value) Equal(other Value) bool {
 	if v.kind != other.kind {
 		if comparison, ok := compareNumeric(v, other); ok {
@@ -137,6 +190,7 @@ func (v Value) Equal(other Value) bool {
 	}
 }
 
+// ValueOf converts a supported Go value into a database value with copied nested data.
 func ValueOf(x any) (Value, error) {
 	switch x := x.(type) {
 	case nil:
@@ -205,6 +259,7 @@ func ValueOf(x any) (Value, error) {
 	return Value{}, fmt.Errorf("%w: unsupported value type %T", ErrInvalidDocument, x)
 }
 
+// compareNumeric compares an integer with a float without losing integer precision.
 func compareNumeric(a, b Value) (int, bool) {
 	if a.kind == Int64Kind && b.kind == Float64Kind {
 		return compareIntFloat(a.i, b.f)
@@ -216,6 +271,7 @@ func compareNumeric(a, b Value) (int, bool) {
 	return 0, false
 }
 
+// compareIntFloat orders an integer against a float and rejects NaN.
 func compareIntFloat(i int64, f float64) (int, bool) {
 	if math.IsNaN(f) {
 		return 0, false
@@ -240,6 +296,7 @@ func compareIntFloat(i int64, f float64) (int, bool) {
 	return 1, true
 }
 
+// cloneValues copies a slice and all nested data in its values.
 func cloneValues(in []Value) []Value {
 	if in == nil {
 		return nil

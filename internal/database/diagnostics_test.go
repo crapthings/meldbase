@@ -14,6 +14,7 @@ import (
 	"time"
 )
 
+// TestDiagnosticsAreOptInBoundedAndContainNoUserData checks that explicitly enabled diagnostics retain a limited event history without exposing document data.
 func TestDiagnosticsAreOptInBoundedAndContainNoUserData(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "diagnostics.meld"))
 	if err != nil {
@@ -77,6 +78,7 @@ func TestDiagnosticsAreOptInBoundedAndContainNoUserData(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsSamplingThresholdsAndFailureClasses checks that sampling and error classification record safe diagnostic fields.
 func TestDiagnosticsSamplingThresholdsAndFailureClasses(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -112,10 +114,12 @@ func TestDiagnosticsSamplingThresholdsAndFailureClasses(t *testing.T) {
 	}
 }
 
+// fmtWrap joins an error with private detail to test diagnostic error classification.
 func fmtWrap(err error) error {
 	return errors.Join(errors.New("opaque detail that must not be retained"), err)
 }
 
+// TestDiagnosticsExcludeFailuresAndRecordSlowOperations checks that diagnostics can omit failures while recording slow successful queries.
 func TestDiagnosticsExcludeFailuresAndRecordSlowOperations(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -141,6 +145,7 @@ func TestDiagnosticsExcludeFailuresAndRecordSlowOperations(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsConcurrentSnapshotAndClose checks that concurrent recording and snapshot reads respect capacity when diagnostics are closed.
 func TestDiagnosticsConcurrentSnapshotAndClose(t *testing.T) {
 	db := New()
 	diagnostics, err := db.EnableDiagnostics(DiagnosticsOptions{Capacity: 64, RecordAll: true})
@@ -173,6 +178,7 @@ func TestDiagnosticsConcurrentSnapshotAndClose(t *testing.T) {
 	}
 }
 
+// TestStreamingCursorRecordsExecutionLifecycle checks that closing a streaming cursor records the query work completed so far.
 func TestStreamingCursorRecordsExecutionLifecycle(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "diagnostics.meld2"))
 	if err != nil {
@@ -208,6 +214,7 @@ func TestStreamingCursorRecordsExecutionLifecycle(t *testing.T) {
 	}
 }
 
+// TestQueryBudgetFailureRetainsExplainWorkAndDiagnosticReason checks that budget failures preserve completed query work and rejection reasons in Explain and diagnostics.
 func TestQueryBudgetFailureRetainsExplainWorkAndDiagnosticReason(t *testing.T) {
 	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{
 		MaxQueryKeysExamined: 1, MaxQuerySkip: 1,
@@ -286,6 +293,7 @@ func TestQueryBudgetFailureRetainsExplainWorkAndDiagnosticReason(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsConfigurationValidation checks that diagnostics reject invalid capacities and negative time thresholds.
 func TestDiagnosticsConfigurationValidation(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -298,6 +306,7 @@ func TestDiagnosticsConfigurationValidation(t *testing.T) {
 	}
 }
 
+// TestDiagnosticSnapshotAfterReportsLossAndPagination checks that diagnostic pages report overwritten events and remaining pages.
 func TestDiagnosticSnapshotAfterReportsLossAndPagination(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -324,6 +333,7 @@ func TestDiagnosticSnapshotAfterReportsLossAndPagination(t *testing.T) {
 	}
 }
 
+// TestDiagnosticHooksDoNotAllocate checks that diagnostic hooks allocate no memory when disabled, filtered, or recording every event.
 func TestDiagnosticHooksDoNotAllocate(t *testing.T) {
 	for _, mode := range []string{"disabled", "enabled_filtered", "enabled_record_all"} {
 		t.Run(mode, func(t *testing.T) {
@@ -357,8 +367,7 @@ func TestDiagnosticHooksDoNotAllocate(t *testing.T) {
 	}
 }
 
-// This gate is opt-in because scheduler noise makes nanosecond p99 assertions
-// unsuitable for arbitrary shared CI hosts. Release runners enable it explicitly.
+// TestDiagnosticsPerformanceBudget checks on an opt-in runner that filtered diagnostics add no more than 35 percent to query p99 latency.
 func TestDiagnosticsPerformanceBudget(t *testing.T) {
 	if os.Getenv("MELDBASE_PERF_GATE") == "" {
 		t.Skip("set MELDBASE_PERF_GATE=1 on a dedicated performance runner")
@@ -416,6 +425,7 @@ func TestDiagnosticsPerformanceBudget(t *testing.T) {
 	t.Logf("filtered diagnostics p99=%s disabled=%s overhead=%.1f%%", enabledP99, disabledP99, (float64(enabledP99)/float64(disabledP99)-1)*100)
 }
 
+// warmDiagnosticBudgetQueries runs successful queries to warm the diagnostic performance measurement.
 func warmDiagnosticBudgetQueries(t *testing.T, collection *Collection, query QuerySpec, count int) {
 	t.Helper()
 	for iteration := 0; iteration < count; iteration++ {
@@ -425,6 +435,7 @@ func warmDiagnosticBudgetQueries(t *testing.T, collection *Collection, query Que
 	}
 }
 
+// diagnosticQueryP99 measures repeated query latencies and returns their 99th percentile.
 func diagnosticQueryP99(t *testing.T, collection *Collection, query QuerySpec, count int) time.Duration {
 	t.Helper()
 	latencies := make([]time.Duration, count)
@@ -439,6 +450,7 @@ func diagnosticQueryP99(t *testing.T, collection *Collection, query QuerySpec, c
 	return latencies[(len(latencies)-1)*99/100]
 }
 
+// runDiagnosticBudgetQuery reports whether a query successfully returns exactly one document.
 func runDiagnosticBudgetQuery(collection *Collection, query QuerySpec) bool {
 	cursor, err := collection.FindQuery(context.Background(), query)
 	if err != nil {
@@ -448,6 +460,7 @@ func runDiagnosticBudgetQuery(collection *Collection, query QuerySpec) bool {
 	return err == nil && len(documents) == 1
 }
 
+// TestDatabaseDiagnosticSourceFollowsReplacementSession checks that database diagnostic reads follow a new session with its own event sequence.
 func TestDatabaseDiagnosticSourceFollowsReplacementSession(t *testing.T) {
 	db := New()
 	defer db.Close()

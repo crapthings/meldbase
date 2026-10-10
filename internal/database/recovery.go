@@ -6,12 +6,15 @@ import (
 	"time"
 )
 
-// RecoveryMode controls whether Open may perform only the bounded recovery
-// actions described by RecoveryReport. Zero selects the normal automatic mode.
+// RecoveryMode selects whether startup may perform bounded recovery actions.
+//
+// Zero selects automatic recovery; RecoveryReport describes completed actions.
 type RecoveryMode uint8
 
 const (
+	// RecoveryAutomatic allows bounded automatic recovery when opening a database.
 	RecoveryAutomatic RecoveryMode = iota
+	// RecoveryRequireClean rejects opening a database that needs recovery.
 	RecoveryRequireClean
 )
 
@@ -43,8 +46,9 @@ type OpenOptions struct {
 	Follower bool
 }
 
-// PrimaryWriteFence is the local enforcement hook for an external primary
-// election/fencing system. Its implementation normally checks an atomically
+// PrimaryWriteFence checks whether an external authority still permits a local write.
+//
+// Its implementation normally checks an atomically
 // refreshed lease epoch and expiry, not the network. Returning an error rejects
 // the whole logical commit before storage mutation; it never poisons the
 // database or advances a token.
@@ -56,25 +60,25 @@ type PrimaryWriteFence interface {
 	ValidatePrimaryWrite(PrimaryWriteFenceRequest) error
 }
 
-// PrimaryWriteFenceRequest binds a proposed primary mutation to this database
-// identity and exact next logical commit sequence. A lease implementation must
+// PrimaryWriteFenceRequest identifies the database and next commit requiring write authority.
+//
+// A lease implementation must
 // reject when its external authority/epoch/expiry no longer permits that write.
 type PrimaryWriteFenceRequest struct {
 	DatabaseID         [16]byte
 	NextCommitSequence uint64
 }
 
-// CommitCoordinatorOptions controls optional group commit for ordinary
-// InsertMany, filter Update and filter Delete operations. It is disabled by
-// default, so opening an existing database never changes write scheduling
-// unexpectedly.
+// CommitCoordinatorOptions sets the queue and batch limits for optional grouped writes.
 //
-// A coordinator group has one physical  Meta publication but retains one
-// logical commit token for every admitted write request. Public write
-// transactions, atomic RPC, index builds and other maintenance operations
+// Grouping is disabled by default.
+//
+// A coordinator group publishes one stored database version but retains one
+// logical commit token for every admitted write request, including prepared
+// public write transactions. Index builds and other maintenance operations
 // remain exclusive commits. When rollback protection is configured, the
-// coordinator advances the external anchor only after the group's final Meta
-// publication is durable and before acknowledging any member.
+// coordinator advances the external anchor after the group's stored version
+// is durable and before acknowledging any member.
 type CommitCoordinatorOptions struct {
 	Enabled    bool
 	MaxBatch   int
@@ -83,12 +87,16 @@ type CommitCoordinatorOptions struct {
 }
 
 const (
-	DefaultCommitCoordinatorMaxBatch   = 32
+	// DefaultCommitCoordinatorMaxBatch sets the default maximum number of writes in a commit group.
+	DefaultCommitCoordinatorMaxBatch = 32
+	// DefaultCommitCoordinatorMaxPending sets the default maximum number of queued writes.
 	DefaultCommitCoordinatorMaxPending = 1024
 )
 
+// DefaultCommitCoordinatorMaxDelay sets the default wait for grouping queued writes.
 const DefaultCommitCoordinatorMaxDelay = time.Millisecond
 
+// normalizeCommitCoordinatorOptions fills enabled coordinator defaults and rejects invalid bounds.
 func normalizeCommitCoordinatorOptions(options CommitCoordinatorOptions) (CommitCoordinatorOptions, error) {
 	if !options.Enabled {
 		return CommitCoordinatorOptions{}, nil
@@ -109,8 +117,9 @@ func normalizeCommitCoordinatorOptions(options CommitCoordinatorOptions) (Commit
 	return options, nil
 }
 
-// RollbackAnchor is trusted state retained outside the database device. A
-// server must never accept the same identity below either an acknowledged
+// RollbackAnchor records trusted minimum commit and generation values outside the database.
+//
+// A server must never accept the same identity below either an acknowledged
 // logical commit sequence or physical maintenance generation after restart.
 // The coordinates are independently monotonic: one group may advance several
 // logical sequences while publishing a single physical generation.
@@ -120,8 +129,9 @@ type RollbackAnchor struct {
 	MinimumGeneration     uint64
 }
 
-// RollbackAnchorStore durably loads and atomically advances one database's
-// monotonic anchor. Advance must not return until the anchor is persistent and
+// RollbackAnchorStore loads and durably advances a database's trusted rollback boundary.
+//
+// Advance must not return until the anchor is persistent and
 // must reject identity changes or regression of either monotonic coordinate.
 // Implementations must be safe for concurrent callers and honor cancellation.
 // An Advance error does not prove that state was unchanged: persistence may
@@ -131,8 +141,9 @@ type RollbackAnchorStore interface {
 	Advance(context.Context, RollbackAnchor) error
 }
 
-// RollbackAnchorStoreStatus is a bounded, identity-free process-session view of
-// an anchor backend. Counters are diagnostic and never participate in recovery.
+// RollbackAnchorStoreStatus reports anchor backend counters without exposing database identities.
+//
+// These diagnostic counters never participate in recovery.
 type RollbackAnchorStoreStatus struct {
 	Replicas               uint64 `json:"replicas"`
 	Quorum                 uint64 `json:"quorum"`
@@ -146,14 +157,14 @@ type RollbackAnchorStoreStatus struct {
 	ConfigurationFailures  uint64 `json:"configurationFailures"`
 }
 
-// RollbackAnchorStatusProvider is an optional lock-free observability contract
-// for RollbackAnchorStore implementations.
+// RollbackAnchorStatusProvider exposes anchor store counters without acquiring locks.
 type RollbackAnchorStatusProvider interface {
 	RollbackAnchorStatus() RollbackAnchorStoreStatus
 }
 
-// RollbackProtection configures fail-closed database identity and sequence
-// checks. AnchorStore should live on an independently trusted device or remote
+// RollbackProtection configures identity and progress checks that reject database rollback.
+//
+// AnchorStore should live on an independently trusted device or remote
 // quorum; placing it beside the database cannot detect whole-device rollback.
 // InitializeAnchor explicitly trusts the database currently at Path when the
 // store is empty and should only be used during provisioning or audited restore.
@@ -168,20 +179,23 @@ type RollbackProtection struct {
 	OperationTimeout time.Duration
 }
 
-// DefaultRollbackAnchorOperationTimeout prevents a failed remote trust service
-// from indefinitely holding database publication acknowledgement.
+// DefaultRollbackAnchorOperationTimeout limits how long a rollback anchor operation may delay a commit response.
 const DefaultRollbackAnchorOperationTimeout = 10 * time.Second
 
-// StorageLimits bounds the physical single-file high-water mark. Zero selects
-// DefaultMaxFileBytes. The value must be a 16 KiB page multiple.
+// StorageLimits caps the physical database file size.
+//
+// Zero selects DefaultMaxFileBytes; the limit must be a multiple of the 16 KiB page size.
 type StorageLimits struct{ MaxFileBytes uint64 }
 
 const (
-	PageSize            uint64 = 16 << 10
+	// PageSize sets the byte size of each storage page.
+	PageSize uint64 = 16 << 10
+	// DefaultMaxFileBytes sets the default physical database file size limit.
 	DefaultMaxFileBytes uint64 = 8 << 30
 )
 
-// CompactionOptions configures newly written replacement or compaction files.
+// CompactionOptions sets storage and resource limits for a rewritten database.
+//
 // ResourceLimits govern transient index construction as well as the reopened
 // destination handle; zero fields select production defaults.
 type CompactionOptions struct {
@@ -189,8 +203,9 @@ type CompactionOptions struct {
 	ResourceLimits ResourceLimits
 }
 
-// CommitRetentionPolicy bounds logical Commit Log history by both commit
-// count and canonical encoded bytes. Zero fields select production defaults.
+// CommitRetentionPolicy limits retained history by commit count and encoded byte size.
+//
+// Zero fields select production defaults.
 // Active replay leases may temporarily exceed either budget rather than losing
 // history under a reader.
 type CommitRetentionPolicy struct {
@@ -199,13 +214,17 @@ type CommitRetentionPolicy struct {
 }
 
 const (
+	// DefaultCommitRetentionMaxCommits sets the default retained commit count limit.
 	DefaultCommitRetentionMaxCommits uint64 = 10_000
-	DefaultCommitRetentionMaxBytes   uint64 = 256 << 20
-	// DefaultReplayDeliveryTimeout bounds how long a replay source can wait
-	// for a full caller buffer before it releases the retained-history lease.
+	// DefaultCommitRetentionMaxBytes sets the default retained commit payload limit.
+	DefaultCommitRetentionMaxBytes uint64 = 256 << 20
+	// DefaultReplayDeliveryTimeout limits how long replay waits to deliver into a full buffer.
+	//
+	// A delivery timeout releases the retained-history lease.
 	DefaultReplayDeliveryTimeout = 5 * time.Second
 )
 
+// normalizeReplayDeliveryTimeout selects the default timeout or validates the supplied duration.
 func normalizeReplayDeliveryTimeout(timeout time.Duration) (time.Duration, error) {
 	if timeout == 0 {
 		return DefaultReplayDeliveryTimeout, nil
@@ -216,6 +235,7 @@ func normalizeReplayDeliveryTimeout(timeout time.Duration) (time.Duration, error
 	return timeout, nil
 }
 
+// validateRecoveryMode rejects unknown startup recovery policies.
 func validateRecoveryMode(mode RecoveryMode) error {
 	if mode != RecoveryAutomatic && mode != RecoveryRequireClean {
 		return fmt.Errorf("meldbase: invalid recovery mode %d", mode)
@@ -223,8 +243,9 @@ func validateRecoveryMode(mode RecoveryMode) error {
 	return nil
 }
 
-// RecoveryReport is an immutable, non-sensitive receipt for decisions made
-// while opening a database. It reports only actions that were completed before
+// RecoveryReport records completed startup recovery actions without exposing sensitive data.
+//
+// It reports only actions that were completed before
 // Open returned successfully; corruption and unsupported formats still fail
 // Open instead of being described as recovered.
 type RecoveryReport struct {
@@ -246,6 +267,7 @@ type RecoveryReport struct {
 }
 
 // RecoveryReport returns the receipt captured by the successful constructor.
+//
 // It performs no I/O and never changes after the DB is opened.
 func (db *DB) RecoveryReport() RecoveryReport {
 	if db == nil {
@@ -254,6 +276,7 @@ func (db *DB) RecoveryReport() RecoveryReport {
 	return db.recovery
 }
 
+// finalizeRecoveryReport sets the report version and summarizes completed recovery actions.
 func finalizeRecoveryReport(report RecoveryReport) RecoveryReport {
 	report.SchemaVersion = 1
 	report.Recovered = report.FallbackToOlderRoot || report.MetaRedundancyDegraded || report.MainTailBytesRemoved != 0 ||

@@ -11,6 +11,7 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+// TestMarshalPrometheusProducesCompleteLowCardinalityContract checks that Prometheus output includes expected aggregate metrics without private values or invalid numbers.
 func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 	sample := representativePrometheusSample()
 	payload := MarshalPrometheus(sample)
@@ -140,6 +141,7 @@ func TestMarshalPrometheusProducesCompleteLowCardinalityContract(t *testing.T) {
 	validatePrometheusText(t, text)
 }
 
+// TestMarshalPrometheusDoesNotReportRollbackLagWhenProtectionIsDisabled checks that rollback lag is zero when rollback protection is disabled.
 func TestMarshalPrometheusDoesNotReportRollbackLagWhenProtectionIsDisabled(t *testing.T) {
 	payload := string(MarshalPrometheus(Sample{Stats: meldbase.DBStats{CommitSequence: 9}}))
 	if !strings.Contains(payload, "meldbase_storage_rollback_anchor_lag 0\n") {
@@ -147,6 +149,7 @@ func TestMarshalPrometheusDoesNotReportRollbackLagWhenProtectionIsDisabled(t *te
 	}
 }
 
+// representativePrometheusSample creates fixed database and server measurements for Prometheus tests and benchmarks.
 func representativePrometheusSample() Sample {
 	return Sample{
 		Stats: meldbase.DBStats{
@@ -242,6 +245,7 @@ func representativePrometheusSample() Sample {
 	}
 }
 
+// validatePrometheusText checks metric syntax, unique metadata, counter naming, and metadata placement before samples.
 func validatePrometheusText(t *testing.T, payload string) {
 	t.Helper()
 	commentPattern := regexp.MustCompile(`^# (HELP|TYPE) (meldbase_[a-z0-9_]+) (.+)$`)
@@ -285,6 +289,7 @@ func validatePrometheusText(t *testing.T, payload string) {
 	}
 }
 
+// BenchmarkMarshalPrometheus measures rendering time, allocations, and output size for a representative sample.
 func BenchmarkMarshalPrometheus(b *testing.B) {
 	sample := representativePrometheusSample()
 	outputBytes := len(MarshalPrometheus(sample))
@@ -297,6 +302,7 @@ func BenchmarkMarshalPrometheus(b *testing.B) {
 	b.ReportMetric(float64(outputBytes), "output-B")
 }
 
+// TestMarshalPrometheusAllocationAndCapacityBudget checks that representative rendering fits the initial buffer and uses at most fifty-one allocations.
 func TestMarshalPrometheusAllocationAndCapacityBudget(t *testing.T) {
 	sample := representativePrometheusSample()
 	output := MarshalPrometheus(sample)
@@ -312,6 +318,7 @@ func TestMarshalPrometheusAllocationAndCapacityBudget(t *testing.T) {
 	}
 }
 
+// TestMarshalPrometheusIsDeterministicUnderConcurrency checks that concurrent rendering produces identical output for the same sample.
 func TestMarshalPrometheusIsDeterministicUnderConcurrency(t *testing.T) {
 	sample := representativePrometheusSample()
 	expected := string(MarshalPrometheus(sample))

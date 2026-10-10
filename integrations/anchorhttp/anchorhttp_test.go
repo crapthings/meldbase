@@ -23,24 +23,39 @@ import (
 	"github.com/crapthings/meldbase/internal/qualification"
 )
 
+// testSharedKey authenticates ordinary anchor test requests.
 var testSharedKey = []byte("0123456789abcdef0123456789abcdef")
+
+// testRotatedKey authenticates requests after test key rotation.
 var testRotatedKey = []byte("abcdef0123456789abcdef0123456789")
 
+// testKeyID names the authentication key used by test nodes.
 const testKeyID = "primary"
+
+// testClusterID identifies the cluster used by test nodes.
 const testClusterID = "orders-production"
 
+// testMemberCounter gives each test node group distinct member names.
 var testMemberCounter atomic.Uint64
 
 const (
+	// faultNormal forwards requests without injecting a fault.
 	faultNormal int32 = iota
+	// faultUnavailable rejects requests with a service-unavailable response.
 	faultUnavailable
+	// faultDelay holds requests until their context ends.
 	faultDelay
+	// faultDropAdvance rejects writes while allowing reads.
 	faultDropAdvance
+	// faultFailFirstAdvance rejects only the first write attempt.
 	faultFailFirstAdvance
+	// faultSlow delays requests before forwarding them.
 	faultSlow
+	// faultPersistThenDropAdvance closes write connections after the underlying handler finishes.
 	faultPersistThenDropAdvance
 )
 
+// faultHandler injects request failures and delays around an anchor handler.
 type faultHandler struct {
 	handler                       http.Handler
 	mode                          atomic.Int32
@@ -49,6 +64,7 @@ type faultHandler struct {
 	releaseDroppedAdvanceResponse <-chan struct{}
 }
 
+// ServeHTTP applies the selected fault before forwarding or rejecting an anchor request.
 func (handler *faultHandler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	switch handler.mode.Load() {
 	case faultUnavailable:
@@ -113,6 +129,7 @@ func (handler *faultHandler) ServeHTTP(response http.ResponseWriter, request *ht
 	}
 }
 
+// testNode holds an anchor test server, its stored files, and its fault controls.
 type testNode struct {
 	directory string
 	memberID  string
@@ -120,6 +137,7 @@ type testNode struct {
 	server    *httptest.Server
 }
 
+// newTestNode starts an anchor test server with private storage and selectable faults.
 func newTestNode(t *testing.T, clusterID, memberID string, members []string) testNode {
 	t.Helper()
 	directory := t.TempDir()
@@ -131,6 +149,7 @@ func newTestNode(t *testing.T, clusterID, memberID string, members []string) tes
 	return testNode{directory: directory, memberID: memberID, fault: fault, server: httptest.NewServer(fault)}
 }
 
+// newTestNodes starts a static group of test servers with distinct member names.
 func newTestNodes(t *testing.T, count int) []testNode {
 	t.Helper()
 	group := strconv.FormatUint(testMemberCounter.Add(1), 10)
@@ -145,12 +164,15 @@ func newTestNodes(t *testing.T, count int) []testNode {
 	return nodes
 }
 
+// close shuts down the test node HTTP server.
 func (node testNode) close() { node.server.Close() }
 
+// testAnchor creates an anchor for a fixed database identity and the requested minimum versions.
 func testAnchor(sequence, generation uint64) meldbase.RollbackAnchor {
 	return meldbase.RollbackAnchor{DatabaseID: [16]byte{1, 2, 3}, MinimumCommitSequence: sequence, MinimumGeneration: generation}
 }
 
+// TestSingleHTTPSStoreAuthenticatesAndAdvancesMonotonically checks authenticated HTTPS reads, monotonic writes, key rotation, and rejection of invalid credentials.
 func TestSingleHTTPSStoreAuthenticatesAndAdvancesMonotonically(t *testing.T) {
 	handler, err := NewHandler(HandlerOptions{Directory: t.TempDir(), ClusterID: testClusterID, Members: []string{"member-single"}, MemberID: "member-single", Keys: map[string][]byte{testKeyID: testSharedKey, "next": testRotatedKey}})
 	if err != nil {
@@ -212,6 +234,7 @@ func TestSingleHTTPSStoreAuthenticatesAndAdvancesMonotonically(t *testing.T) {
 	}
 }
 
+// TestHandlerRejectsStaleAndBodyTamperedAuthentication checks rejection of stale signatures, altered request bodies, and oversized member names.
 func TestHandlerRejectsStaleAndBodyTamperedAuthentication(t *testing.T) {
 	handler, err := NewHandler(HandlerOptions{Directory: t.TempDir(), ClusterID: testClusterID, Members: []string{"member-auth"}, MemberID: "member-auth", Keys: map[string][]byte{testKeyID: testSharedKey}, MaxClockSkew: time.Second})
 	if err != nil {
@@ -239,6 +262,7 @@ func TestHandlerRejectsStaleAndBodyTamperedAuthentication(t *testing.T) {
 	assertHTTPStatus(t, server.Client(), oversized, http.StatusUnauthorized)
 }
 
+// TestConfigurationRejectsUnsafeMembershipAndPaths checks rejection of unsafe keys, directories, anchor names, and replica configurations.
 func TestConfigurationRejectsUnsafeMembershipAndPaths(t *testing.T) {
 	if _, err := NewHandler(HandlerOptions{Directory: t.TempDir(), ClusterID: testClusterID, Members: []string{"member-config"}, MemberID: "member-config", Keys: map[string][]byte{testKeyID: []byte("short")}}); err == nil {
 		t.Fatal("short server key accepted")
@@ -269,6 +293,7 @@ func TestConfigurationRejectsUnsafeMembershipAndPaths(t *testing.T) {
 	}
 }
 
+// TestNodeDirectoryPermanentlyBindsStaticConfigurationAndMember checks that stored node identity survives reopening and rejects changed or invalid configuration.
 func TestNodeDirectoryPermanentlyBindsStaticConfigurationAndMember(t *testing.T) {
 	directory := t.TempDir()
 	options := HandlerOptions{Directory: directory, ClusterID: testClusterID, Members: []string{"member-a"}, MemberID: "member-a", Keys: map[string][]byte{testKeyID: testSharedKey}}
@@ -312,6 +337,7 @@ func TestNodeDirectoryPermanentlyBindsStaticConfigurationAndMember(t *testing.T)
 	}
 }
 
+// TestConfigurationDigestIsOrderIndependentAndMembershipSensitive checks that configuration hashes ignore member order and reject invalid membership.
 func TestConfigurationDigestIsOrderIndependentAndMembershipSensitive(t *testing.T) {
 	first, err := configurationDigest(testClusterID, []string{"member-c", "member-a", "member-b"}, "member-a")
 	if err != nil {
@@ -333,6 +359,7 @@ func TestConfigurationDigestIsOrderIndependentAndMembershipSensitive(t *testing.
 	}
 }
 
+// TestStaticMembershipBindingRejectsAliasesAndWrongCluster checks that endpoint aliases cannot manufacture a quorum and that cluster mismatches are rejected.
 func TestStaticMembershipBindingRejectsAliasesAndWrongCluster(t *testing.T) {
 	members := []string{"member-a", "member-b", "member-c"}
 	handler, err := NewHandler(HandlerOptions{Directory: t.TempDir(), ClusterID: testClusterID, Members: members, MemberID: "member-a", Keys: map[string][]byte{testKeyID: testSharedKey}})
@@ -376,6 +403,7 @@ func TestStaticMembershipBindingRejectsAliasesAndWrongCluster(t *testing.T) {
 	}
 }
 
+// TestReadQuorumMergeRequiresOneComparableHistory checks that quorum reads select a dominating anchor and reject versions with no comparable maximum.
 func TestReadQuorumMergeRequiresOneComparableHistory(t *testing.T) {
 	older := testAnchor(1, 2)
 	newer := testAnchor(2, 4)
@@ -395,6 +423,7 @@ func TestReadQuorumMergeRequiresOneComparableHistory(t *testing.T) {
 	}
 }
 
+// TestFailedWriteForkFailsClosedAndLaterConverges checks that a minority write cannot hide a safe quorum and that later advances repair conflicting branches.
 func TestFailedWriteForkFailsClosedAndLaterConverges(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -486,6 +515,7 @@ func TestFailedWriteForkFailsClosedAndLaterConverges(t *testing.T) {
 	}
 }
 
+// TestRejectingMajorityCannotBeOverriddenByOneAcceptingMember checks that one accepting replica cannot turn a majority conflict into a successful write.
 func TestRejectingMajorityCannotBeOverriddenByOneAcceptingMember(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -515,6 +545,7 @@ func TestRejectingMajorityCannotBeOverriddenByOneAcceptingMember(t *testing.T) {
 	}
 }
 
+// TestConcurrentWritersAreLinearizableAtStaticQuorum checks that concurrent anchor writes and the final read fit a valid sequential history.
 func TestConcurrentWritersAreLinearizableAtStaticQuorum(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -558,6 +589,7 @@ func TestConcurrentWritersAreLinearizableAtStaticQuorum(t *testing.T) {
 	}
 }
 
+// concurrentAdvances runs two overlapping anchor writes and records their outcomes and event order.
 func concurrentAdvances(store *QuorumStore, anchors [2]meldbase.RollbackAnchor) ([2]error, []qualification.AnchorHistoryOperation, uint64) {
 	start := make(chan struct{})
 	execute := make(chan struct{})
@@ -604,6 +636,7 @@ func concurrentAdvances(store *QuorumStore, anchors [2]meldbase.RollbackAnchor) 
 	return errorsByWriter, operations, events.Load()
 }
 
+// assertAnchorHistoryLinearizable checks that recorded writes and a final read fit a valid sequential anchor history.
 func assertAnchorHistoryLinearizable(t *testing.T, operations []qualification.AnchorHistoryOperation, nextEvent uint64, retained meldbase.RollbackAnchor) {
 	t.Helper()
 	operations = append(operations, qualification.AnchorHistoryOperation{
@@ -616,6 +649,7 @@ func assertAnchorHistoryLinearizable(t *testing.T, operations []qualification.An
 	}
 }
 
+// qualificationAnchorValue converts an existing rollback anchor into a history-checker value.
 func qualificationAnchorValue(anchor meldbase.RollbackAnchor) qualification.AnchorHistoryValue {
 	return qualification.AnchorHistoryValue{
 		Exists: true, DatabaseID: anchor.DatabaseID,
@@ -623,6 +657,7 @@ func qualificationAnchorValue(anchor meldbase.RollbackAnchor) qualification.Anch
 	}
 }
 
+// TestQuorumAdvanceOutcomeIsAmbiguousWhenDurableResponsesAreLost checks that a reported quorum failure can still leave the target anchor stored on a majority.
 func TestQuorumAdvanceOutcomeIsAmbiguousWhenDurableResponsesAreLost(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -669,6 +704,7 @@ func TestQuorumAdvanceOutcomeIsAmbiguousWhenDurableResponsesAreLost(t *testing.T
 	}
 }
 
+// TestDatabaseRecoversCommitAfterQuorumResponsesAreLost checks that lost anchor responses stop database writes until reopening recovers the durable commit.
 func TestDatabaseRecoversCommitAfterQuorumResponsesAreLost(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -741,6 +777,7 @@ func TestDatabaseRecoversCommitAfterQuorumResponsesAreLost(t *testing.T) {
 	}
 }
 
+// TestCheckReplicasWaitsForAndClassifiesEveryStaticMember checks that replica inspection reports missing, available, and unavailable members individually.
 func TestCheckReplicasWaitsForAndClassifiesEveryStaticMember(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -774,6 +811,7 @@ func TestCheckReplicasWaitsForAndClassifiesEveryStaticMember(t *testing.T) {
 	}
 }
 
+// TestQuorumToleratesStaleNodePartitionAndAllowsLaterRejoin checks that a healthy majority tolerates a stale or partitioned node and accepts it back into the quorum.
 func TestQuorumToleratesStaleNodePartitionAndAllowsLaterRejoin(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -818,6 +856,7 @@ func TestQuorumToleratesStaleNodePartitionAndAllowsLaterRejoin(t *testing.T) {
 	}
 }
 
+// TestQuorumFailsClosedOnNoMajorityConflictAndDeadline checks quorum errors for missing majorities, expired deadlines, and conflicting database identities.
 func TestQuorumFailsClosedOnNoMajorityConflictAndDeadline(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -867,6 +906,7 @@ func TestQuorumFailsClosedOnNoMajorityConflictAndDeadline(t *testing.T) {
 	}
 }
 
+// TestQuorumAnchorRejectsRolledBackDatabase checks that a quorum anchor prevents opening a database restored to an older file image.
 func TestQuorumAnchorRejectsRolledBackDatabase(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -905,10 +945,12 @@ func TestQuorumAnchorRejectsRolledBackDatabase(t *testing.T) {
 	}
 }
 
+// newTestQuorum creates a quorum store for the orders anchor on the supplied test nodes.
 func newTestQuorum(t *testing.T, nodes []testNode) *QuorumStore {
 	return newTestQuorumNamed(t, nodes, "orders")
 }
 
+// newTestQuorumNamed creates an authenticated quorum store for a named anchor on test nodes.
 func newTestQuorumNamed(t *testing.T, nodes []testNode, anchorName string) *QuorumStore {
 	t.Helper()
 	replicas := make([]Replica, len(nodes))
@@ -922,6 +964,7 @@ func newTestQuorumNamed(t *testing.T, nodes []testNode, anchorName string) *Quor
 	return store
 }
 
+// loadNodeAnchor reads an existing anchor directly from a test node file.
 func loadNodeAnchor(t *testing.T, node testNode, name string) meldbase.RollbackAnchor {
 	t.Helper()
 	store, err := meldbase.NewFileRollbackAnchorStore(filepath.Join(node.directory, name+".anchor"))
@@ -935,6 +978,7 @@ func loadNodeAnchor(t *testing.T, node testNode, name string) meldbase.RollbackA
 	return anchor
 }
 
+// advanceNodeAnchor advances a test node anchor directly through its file store.
 func advanceNodeAnchor(t *testing.T, node testNode, name string, anchor meldbase.RollbackAnchor) {
 	t.Helper()
 	store, err := meldbase.NewFileRollbackAnchorStore(filepath.Join(node.directory, name+".anchor"))
@@ -946,6 +990,7 @@ func advanceNodeAnchor(t *testing.T, node testNode, name string, anchor meldbase
 	}
 }
 
+// signedTestRequest creates a write request whose signed bytes may differ from its sent bytes.
 func signedTestRequest(t *testing.T, target, path, timestamp string, signedBody, sentBody []byte) *http.Request {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodPut, target, bytes.NewReader(sentBody))
@@ -964,6 +1009,7 @@ func signedTestRequest(t *testing.T, target, path, timestamp string, signedBody,
 	return request
 }
 
+// assertHTTPStatus sends a request and checks its response status.
 func assertHTTPStatus(t *testing.T, client *http.Client, request *http.Request, status int) {
 	t.Helper()
 	response, err := client.Do(request)

@@ -10,6 +10,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestResumeTokenBindsSecurityContextAndExpires checks that resume tokens require their original database, actor, query, and policy context before expiry.
 func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 	service := newResumeTokenService([]byte("0123456789abcdef0123456789abcdef"), time.Minute)
 	now := time.Unix(1_700_000_000, 0)
@@ -57,6 +58,7 @@ func TestResumeTokenBindsSecurityContextAndExpires(t *testing.T) {
 	}
 }
 
+// TestResumeTokenRejectsNonCanonicalBase64URLAliases checks that equivalent signature bytes encoded with a noncanonical Base64URL spelling are rejected.
 func TestResumeTokenRejectsNonCanonicalBase64URLAliases(t *testing.T) {
 	service := newResumeTokenService([]byte("0123456789abcdef0123456789abcdef"), time.Minute)
 	database := [16]byte{1, 2, 3}

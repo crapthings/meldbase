@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 )
 
+// FuzzQueryWireRoundTrip checks that queries containing varied valid text keep identical JSON after decoding and re-encoding.
 func FuzzQueryWireRoundTrip(f *testing.F) {
 	f.Add("plain")
 	f.Add("上海")
@@ -37,6 +38,7 @@ func FuzzQueryWireRoundTrip(f *testing.F) {
 	})
 }
 
+// FuzzScalarComparisonLaws checks that scalar sorting obeys antisymmetry and transitivity across varied values.
 func FuzzScalarComparisonLaws(f *testing.F) {
 	f.Add([]byte{0, 1, 2, 3})
 	f.Add([]byte("unicode"))

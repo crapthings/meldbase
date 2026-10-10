@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 
+# Prints the backup and restore drill options.
 usage() {
   cat <<'EOF'
 Usage:
@@ -13,10 +14,15 @@ rehearsal evidence. It never replaces an existing file.
 EOF
 }
 
+# Holds the path to the Meldbase command binary.
 meld=""
+# Holds the offline database path used for the drill.
 database=""
+# Holds the new directory where drill evidence will be saved.
 out_dir=""
+# Sets the time limit for each database operation.
 timeout="10m"
+# Holds an optional size limit for the restored database.
 max_bytes=""
 while (($#)); do
   case "$1" in
@@ -48,15 +54,20 @@ if [[ -e "$out_dir" ]]; then
 fi
 
 mkdir -m 700 "$out_dir"
+# Names the physical backup created by the drill.
 artifact="$out_dir/physical-backup.meld"
+# Names the receipt describing the physical backup.
 receipt="$out_dir/backup-receipt.json"
+# Names the restored database used for verification.
 restored="$out_dir/restored.meld"
+# Names the receipt returned by the restore operation.
 restore_receipt="$out_dir/restore-receipt.json"
 
 "$meld" inspect --db "$database" --require-compatible >"$out_dir/source-inspect.json"
 "$meld" verify --db "$database" --timeout "$timeout" >"$out_dir/source-verify.json"
 "$meld" backup --db "$database" --out "$artifact" --timeout "$timeout" >"$receipt"
 
+# Builds the restore command arguments before applying the optional size limit.
 restore_args=(restore --in "$artifact" --receipt "$receipt" --out "$restored" --timeout "$timeout")
 if [[ -n "$max_bytes" ]]; then
  restore_args+=(--max-bytes "$max_bytes")

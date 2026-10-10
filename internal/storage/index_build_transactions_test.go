@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TestIndexBuildMetaCodecRoundTripsAndRejectsCorruption checks index-build metadata against fixed encoded bytes and rejects damaged fields.
 func TestIndexBuildMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 	created := time.UnixMilli(1_700_000_000_000).UTC()
 	meta := IndexBuildMeta{
@@ -55,6 +56,7 @@ func TestIndexBuildMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 	}
 }
 
+// TestCompoundIndexBuildMetaCodecRoundTripsAndRejectsCorruption checks that compound index-build metadata preserves field order and rejects invalid field definitions.
 func TestCompoundIndexBuildMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 	created := time.UnixMilli(1_700_000_000_000).UTC()
 	meta := IndexBuildMeta{
@@ -86,6 +88,7 @@ func TestCompoundIndexBuildMetaCodecRoundTripsAndRejectsCorruption(t *testing.T)
 	}
 }
 
+// TestIndexBuildAppliedRootFeatureCannotBeDetached checks that an index build retaining an applied catalog root requires its storage feature flag.
 func TestIndexBuildAppliedRootFeatureCannotBeDetached(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index-build-applied-root-feature.meld2")
 	file, _, err := Open(path)
@@ -168,6 +171,7 @@ func TestIndexBuildAppliedRootFeatureCannotBeDetached(t *testing.T) {
 	_ = opened.Close()
 }
 
+// TestIndexBuildBeginFaultsNeverSplitFeatureAndCatalogRoot checks that faults when starting an index build never publish its catalog without the required feature flag.
 func TestIndexBuildBeginFaultsNeverSplitFeatureAndCatalogRoot(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "begin-base.meld2")
 	base, _, err := Open(basePath)
@@ -238,6 +242,7 @@ func TestIndexBuildBeginFaultsNeverSplitFeatureAndCatalogRoot(t *testing.T) {
 	}
 }
 
+// TestIndexBuildCatchUpFaultsNeverSplitAppliedRootAndFeature checks that faults during index catch-up leave the applied root and its feature flag in the same version.
 func TestIndexBuildCatchUpFaultsNeverSplitAppliedRootAndFeature(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "catch-up-base.meld2")
 	base, _, err := Open(basePath)
@@ -326,6 +331,7 @@ func TestIndexBuildCatchUpFaultsNeverSplitAppliedRootAndFeature(t *testing.T) {
 	}
 }
 
+// TestIndexBuildFinalizeFaultsNeverExposeMixedPublication checks that faults during finalization publish either the pending build or the finished index as a whole.
 func TestIndexBuildFinalizeFaultsNeverExposeMixedPublication(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "finalize-base.meld2")
 	base, _, err := Open(basePath)
@@ -411,6 +417,7 @@ func TestIndexBuildFinalizeFaultsNeverExposeMixedPublication(t *testing.T) {
 	}
 }
 
+// TestBeginIndexBuildProtectsRootsAcrossCommitsReopenAndAbort checks that an index build survives writes and reopening through scanning, catch-up, and publication.
 func TestBeginIndexBuildProtectsRootsAcrossCommitsReopenAndAbort(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shadow-build.meld2")
 	file, _, err := Open(path)
@@ -555,6 +562,7 @@ func TestBeginIndexBuildProtectsRootsAcrossCommitsReopenAndAbort(t *testing.T) {
 	}
 }
 
+// TestIndexBuildPersistentReplayLeaseBoundsCommitPruning checks that an active index build retains needed commits until the build is aborted.
 func TestIndexBuildPersistentReplayLeaseBoundsCommitPruning(t *testing.T) {
 	file, _, _, err := OpenWithOptions(filepath.Join(t.TempDir(), "build-retention.meld2"), OpenOptions{CommitRetentionMaxCommits: 2})
 	if err != nil {
@@ -595,6 +603,7 @@ func TestIndexBuildPersistentReplayLeaseBoundsCommitPruning(t *testing.T) {
 	}
 }
 
+// TestFinalizeUniqueIndexBuildRejectsConflictWithoutPublication checks that duplicate keys prevent a unique index from being published.
 func TestFinalizeUniqueIndexBuildRejectsConflictWithoutPublication(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "unique-shadow.meld2"))
 	if err != nil {
@@ -642,6 +651,7 @@ func TestFinalizeUniqueIndexBuildRejectsConflictWithoutPublication(t *testing.T)
 	}
 }
 
+// TestFailedIndexBuildPersistsAndReleasesReplayLease checks that a failed index build survives reopening and releases the commits it retained.
 func TestFailedIndexBuildPersistsAndReleasesReplayLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "failed-build.meld2")
 	file, _, _, err := OpenWithOptions(path, OpenOptions{CommitRetentionMaxCommits: 2})
@@ -696,6 +706,7 @@ func TestFailedIndexBuildPersistsAndReleasesReplayLease(t *testing.T) {
 	}
 }
 
+// TestIndexBuildCatchUpSnapshotPinsCommitAndVersionRootsAcrossReuse checks that a catch-up snapshot keeps its commit and document versions readable after later writes and reclamation.
 func TestIndexBuildCatchUpSnapshotPinsCommitAndVersionRootsAcrossReuse(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "catch-up-pin.meld2"))
 	if err != nil {

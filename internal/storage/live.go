@@ -9,18 +9,21 @@ import (
 	"sync"
 )
 
+// DocumentRecord holds stored document bytes with their identity and insertion position.
 type DocumentRecord struct {
 	DocumentID        [16]byte
 	InsertionPosition uint64
 	Document          []byte
 }
 
+// CollectionRecord pairs a collection name with its stored metadata.
 type CollectionRecord struct {
 	Name string
 	Meta CollectionMeta
 }
 
-// IndexIterator streams one Secondary tree from a pinned immutable snapshot.
+// IndexIterator reads index entries from a fixed database snapshot.
+//
 // It owns an independent reader pin and is not safe for concurrent use.
 type IndexIterator struct {
 	file   *File
@@ -31,7 +34,8 @@ type IndexIterator struct {
 	closed bool
 }
 
-// DocumentIterator streams one collection from a pinned immutable snapshot.
+// DocumentIterator reads collection documents from a fixed database snapshot.
+//
 // It owns an independent reader pin, so the ReadSnapshot used to create it may
 // be closed immediately. DocumentIterator is not safe for concurrent use.
 type DocumentIterator struct {
@@ -45,8 +49,9 @@ type DocumentIterator struct {
 	closed      bool
 }
 
-// ReadSnapshot pins one immutable DatabaseRoot. Reclamation must retain every
-// page reachable through the snapshot until Close.
+// ReadSnapshot keeps a fixed database version available for reading.
+//
+// Reclamation must retain every page reachable through the snapshot until Close.
 type ReadSnapshot struct {
 	mu     sync.Mutex
 	file   *File
@@ -55,8 +60,9 @@ type ReadSnapshot struct {
 	closed bool
 }
 
-// LiveCommitStream tails durable commits after a sequence. It does not keep a
-// per-subscriber event queue: waiters wake, read the current root, and replay
+// LiveCommitStream reads committed changes after a sequence as they become available.
+//
+// It does not keep a per-subscriber event queue: waiters wake, read the current root, and replay
 // their own next sequence from the durable Commit Log.
 type LiveCommitStream struct {
 	mu                sync.Mutex
@@ -68,7 +74,9 @@ type LiveCommitStream struct {
 	once              sync.Once
 }
 
-// OpenSnapshot pins only the current DatabaseRoot. It is the query/read path;
+// OpenSnapshot opens a fixed view of the current database version.
+//
+// It is the query/read path;
 // callers that also need an N+1 stream use OpenSnapshotAndStream instead.
 func (f *File) OpenSnapshot() (*ReadSnapshot, error) {
 	if f == nil {
@@ -90,8 +98,9 @@ func (f *File) OpenSnapshot() (*ReadSnapshot, error) {
 	return &ReadSnapshot{file: f, pinID: pinID, root: root}, nil
 }
 
-// OpenSnapshotAndStream atomically pins Snapshot N and creates a stream whose
-// first possible result is N+1, eliminating the query/watch registration gap.
+// OpenSnapshotAndStream opens a snapshot and a stream of all subsequent commits atomically.
+//
+// The stream starts after the snapshot, eliminating the query/watch registration gap.
 func (f *File) OpenSnapshotAndStream() (*ReadSnapshot, *LiveCommitStream, error) {
 	if f == nil {
 		return nil, nil, ErrCorrupt
@@ -119,6 +128,7 @@ func (f *File) OpenSnapshotAndStream() (*ReadSnapshot, *LiveCommitStream, error)
 	return snapshot, stream, nil
 }
 
+// OpenLiveCommitStream opens a durable commit stream after a retained commit sequence.
 func (f *File) OpenLiveCommitStream(after uint64) (*LiveCommitStream, error) {
 	if f == nil {
 		return nil, ErrCorrupt
@@ -145,10 +155,10 @@ func (f *File) OpenLiveCommitStream(after uint64) (*LiveCommitStream, error) {
 	return &LiveCommitStream{file: f, pinID: pinID, after: after, closed: make(chan struct{})}, nil
 }
 
-// OpenSnapshotAndStreamAt atomically reconstructs historical Snapshot N and
-// opens a durable stream whose first result is N+1. The snapshot is available
-// only while N remains in the retained Commit Log window. Sequence zero denotes
-// the known empty state before commit 1.
+// OpenSnapshotAndStreamAt opens a retained database version and its subsequent commit stream atomically.
+//
+// The requested sequence must remain in the retained commit history.
+// Sequence zero denotes the known empty state before commit 1.
 func (f *File) OpenSnapshotAndStreamAt(sequence uint64) (*ReadSnapshot, *LiveCommitStream, error) {
 	if f == nil {
 		return nil, nil, ErrCorrupt
@@ -179,6 +189,7 @@ func (f *File) OpenSnapshotAndStreamAt(sequence uint64) (*ReadSnapshot, *LiveCom
 		&LiveCommitStream{file: f, pinID: streamPin, after: sequence, closed: make(chan struct{})}, nil
 }
 
+// historicalRootUnlocked reconstructs a retained database version while the caller holds the file lock.
 func (f *File) historicalRootUnlocked(current DatabaseRoot, sequence uint64) (DatabaseRoot, error) {
 	if sequence > current.CommitSequence {
 		return DatabaseRoot{}, ErrCorrupt
@@ -205,6 +216,7 @@ func (f *File) historicalRootUnlocked(current DatabaseRoot, sequence uint64) (Da
 	}, nil
 }
 
+// addReaderPinUnlocked registers a version that storage must retain while the caller holds the file lock.
 func (f *File) addReaderPinUnlocked(sequence, rootPage uint64, replay bool) (uint64, error) {
 	f.nextPin++
 	if f.nextPin == 0 {
@@ -217,6 +229,7 @@ func (f *File) addReaderPinUnlocked(sequence, rootPage uint64, replay bool) (uin
 	return pinID, nil
 }
 
+// Next waits for and reads the next durable commit, or returns a cancellation or stream error.
 func (stream *LiveCommitStream) Next(ctx context.Context) (CommitBatch, error) {
 	if stream == nil {
 		return CommitBatch{}, ErrCursorClosed
@@ -277,6 +290,7 @@ func (stream *LiveCommitStream) Next(ctx context.Context) (CommitBatch, error) {
 	}
 }
 
+// Close stops the commit stream and releases its reader pin.
 func (stream *LiveCommitStream) Close() error {
 	if stream == nil {
 		return nil
@@ -293,6 +307,7 @@ func (stream *LiveCommitStream) Close() error {
 	return nil
 }
 
+// Sequence returns the commit number fixed by the snapshot.
 func (snapshot *ReadSnapshot) Sequence() uint64 {
 	if snapshot == nil {
 		return 0
@@ -303,6 +318,7 @@ func (snapshot *ReadSnapshot) Sequence() uint64 {
 }
 
 // ReadCommit resolves one commit from this snapshot's pinned CommitLogRoot.
+//
 // DocumentVersionRef values returned by it remain protected until Close.
 func (snapshot *ReadSnapshot) ReadCommit(sequence uint64) (CommitBatch, error) {
 	if snapshot == nil || sequence == 0 {
@@ -325,7 +341,9 @@ func (snapshot *ReadSnapshot) ReadCommit(sequence uint64) (CommitBatch, error) {
 }
 
 // ReadDocumentVersion reads a version reference obtained from a commit in this
-// same pinned snapshot. The reader pin prevents reclamation/reuse of its Primary
+// same pinned snapshot.
+//
+// The reader pin prevents reclamation/reuse of its Primary
 // root while the version is decoded.
 func (snapshot *ReadSnapshot) ReadDocumentVersion(reference DocumentVersionRef) ([]byte, error) {
 	if snapshot == nil || reference.PrimaryRoot < 2 || allZero(reference.DocumentID[:]) {
@@ -378,6 +396,7 @@ func (snapshot *ReadSnapshot) CollectionMeta(collection string) (CollectionMeta,
 	return meta, true, nil
 }
 
+// Collections lists collection names and metadata from the pinned database version.
 func (snapshot *ReadSnapshot) Collections() ([]CollectionRecord, error) {
 	if snapshot == nil {
 		return nil, ErrCorrupt
@@ -430,6 +449,7 @@ func (snapshot *ReadSnapshot) Collections() ([]CollectionRecord, error) {
 	return result, nil
 }
 
+// GetDocument reads document bytes from the pinned database version.
 func (snapshot *ReadSnapshot) GetDocument(collection string, documentID [16]byte) ([]byte, bool, error) {
 	record, exists, err := snapshot.GetDocumentRecord(collection, documentID)
 	return record.Document, exists, err
@@ -471,6 +491,7 @@ func (snapshot *ReadSnapshot) GetDocumentRecord(collection string, documentID [1
 	return DocumentRecord{DocumentID: documentID, InsertionPosition: position, Document: document}, true, nil
 }
 
+// ScanCollection collects document records within the requested document ID range and limit.
 func (snapshot *ReadSnapshot) ScanCollection(collection string, start, end *[16]byte, limit int) ([]DocumentRecord, error) {
 	iterator, err := snapshot.OpenCollectionIterator(collection, start, end, limit)
 	if err != nil {
@@ -484,7 +505,9 @@ func (snapshot *ReadSnapshot) ScanCollection(collection string, start, end *[16]
 	return result, iterator.Err()
 }
 
-// OpenCollectionIterator creates a bounded-memory scan over [start, end). A
+// OpenCollectionIterator creates a bounded-memory scan over [start, end).
+//
+// A
 // nil bound is open and a non-positive limit is unbounded.
 func (snapshot *ReadSnapshot) OpenCollectionIterator(collection string, start, end *[16]byte, limit int) (*DocumentIterator, error) {
 	if snapshot == nil || !validCollectionName(collection) {
@@ -542,7 +565,9 @@ func (snapshot *ReadSnapshot) OpenCollectionIterator(collection string, start, e
 }
 
 // OpenInsertionOrderIterator streams documents by their durable insertion
-// position over [start, end). It resolves every Order entry through the Primary
+// position over [start, end).
+//
+// It resolves every Order entry through the Primary
 // tree from the same snapshot and owns an independent reader pin.
 func (snapshot *ReadSnapshot) OpenInsertionOrderIterator(collection string, start, end *uint64, limit int) (*DocumentIterator, error) {
 	if snapshot == nil || !validCollectionName(collection) || (start != nil && *start == 0) || (end != nil && *end == 0) {
@@ -599,6 +624,7 @@ func (snapshot *ReadSnapshot) OpenInsertionOrderIterator(collection string, star
 	return iterator, nil
 }
 
+// Next advances to the next document and records any scan or decoding error.
 func (iterator *DocumentIterator) Next() bool {
 	if iterator == nil || iterator.closed || iterator.err != nil || iterator.tree == nil || iterator.tree.done {
 		return false
@@ -659,6 +685,7 @@ func (iterator *DocumentIterator) Next() bool {
 	return true
 }
 
+// Record returns the current document record.
 func (iterator *DocumentIterator) Record() DocumentRecord {
 	if iterator == nil {
 		return DocumentRecord{}
@@ -666,6 +693,7 @@ func (iterator *DocumentIterator) Record() DocumentRecord {
 	return iterator.record
 }
 
+// Err returns the document iterator failure.
 func (iterator *DocumentIterator) Err() error {
 	if iterator == nil {
 		return ErrCorrupt
@@ -673,6 +701,7 @@ func (iterator *DocumentIterator) Err() error {
 	return iterator.err
 }
 
+// Close releases the document iterator and its reader pin.
 func (iterator *DocumentIterator) Close() error {
 	if iterator == nil || iterator.closed {
 		return nil
@@ -686,6 +715,7 @@ func (iterator *DocumentIterator) Close() error {
 	return nil
 }
 
+// releasePin removes the document iterator's reader pin from the file.
 func (iterator *DocumentIterator) releasePin() {
 	if iterator == nil || iterator.file == nil || iterator.pinID == 0 {
 		return
@@ -696,6 +726,7 @@ func (iterator *DocumentIterator) releasePin() {
 	iterator.pinID = 0
 }
 
+// Close releases the snapshot's reader pin so its pages can eventually be reclaimed.
 func (snapshot *ReadSnapshot) Close() error {
 	if snapshot == nil {
 		return nil
@@ -715,6 +746,7 @@ func (snapshot *ReadSnapshot) Close() error {
 	return nil
 }
 
+// collectionMetaFromTree reads collection metadata from a catalog within a write transaction.
 func collectionMetaFromTree(tx *WriteTxn, catalogRoot uint64, collection string) (CollectionMeta, bool, error) {
 	catalog, err := tx.OpenTree(catalogRoot, TreeCatalog)
 	if err != nil {

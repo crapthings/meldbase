@@ -7,18 +7,21 @@ import (
 	"io"
 )
 
-// CollectionAccessManifestVersion is the only supported collection-access
-// manifest grammar. A versioned manifest is intentionally data-only so tools
-// and agents can generate and validate the same server configuration.
+// CollectionAccessManifestVersion identifies the supported collection access manifest format.
+//
+// Manifests contain only data so tools and agents can generate and validate
+// the same server configuration.
 const CollectionAccessManifestVersion = 1
 
-// CollectionAccessManifestSchemaURL is the canonical editor and tooling schema
-// for the current manifest grammar. It is optional metadata, but when present
-// the strict parser accepts only this exact versioned URL.
+// CollectionAccessManifestSchemaURL identifies the schema used to validate collection access manifests.
+//
+// It is optional metadata, but when present the strict parser accepts only
+// this exact versioned URL.
 const CollectionAccessManifestSchemaURL = "https://crapthings.github.io/meldbase/schemas/collection-access-manifest-v1.schema.json"
 
-// CollectionAccessManifest is a strict, portable declaration of the generic
-// client data API. It contains no executable authorization callbacks: complex
+// CollectionAccessManifest declares collection access rules without executable authorization callbacks.
+//
+// Complex
 // membership or role rules still use an application Authorizer or Worker policy
 // resolver, both of which return the same server-enforced policy types.
 type CollectionAccessManifest struct {
@@ -29,8 +32,7 @@ type CollectionAccessManifest struct {
 	RPCMethods     []string           `json:"rpcMethods,omitempty"`
 }
 
-// WorkspaceAuthorizerConfig validates the manifest and returns the equivalent
-// built-in authorizer configuration.
+// WorkspaceAuthorizerConfig validates the manifest and converts it into built-in access settings.
 func (manifest CollectionAccessManifest) WorkspaceAuthorizerConfig() (WorkspaceAuthorizerConfig, error) {
 	if manifest.SchemaURL != "" && manifest.SchemaURL != CollectionAccessManifestSchemaURL {
 		return WorkspaceAuthorizerConfig{}, errors.New("collection access manifest schema URL is unsupported")
@@ -49,9 +51,10 @@ func (manifest CollectionAccessManifest) WorkspaceAuthorizerConfig() (WorkspaceA
 	return config, nil
 }
 
-// ParseCollectionAccessManifestJSON rejects unknown fields, trailing values,
-// unsupported versions, and invalid collection declarations before a server is
-// started.
+// ParseCollectionAccessManifestJSON decodes and validates a collection access manifest.
+//
+// It rejects unknown fields, trailing values, unsupported versions, and
+// invalid collection declarations.
 func ParseCollectionAccessManifestJSON(data []byte) (CollectionAccessManifest, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

@@ -12,14 +12,19 @@ import (
 )
 
 const (
-	defaultClockSkew  = time.Second
-	maximumClockSkew  = time.Minute
+	// defaultClockSkew sets the default clock offset allowed during owner handoff.
+	defaultClockSkew = time.Second
+	// maximumClockSkew limits the configured clock offset allowance.
+	maximumClockSkew = time.Minute
+	// defaultCASRetries limits retries after concurrent lease changes.
 	defaultCASRetries = 16
 )
 
 var (
 	// ErrLeaseActive means another owner may still possess a locally valid
-	// certificate. Callers must wait for RetryAfter rather than attempting to
+	// certificate.
+	//
+	// Callers must wait for RetryAfter rather than attempting to
 	// shorten that previous lease.
 	ErrLeaseActive = errors.New("meldbase primary lease: previous owner may still be active")
 	// ErrLeaseSequence rejects a controller request that would certify a source
@@ -32,8 +37,9 @@ var (
 	ErrLeasePromotionReadiness = errors.New("meldbase primary lease: promotion readiness was not proven")
 )
 
-// LeaseRecord is the controller's durable compare-and-swap state for one
-// database. It is deliberately distinct from a rollback anchor: Owner/Epoch
+// LeaseRecord stores the controller's write owner, lease expiry, and source position for one database.
+//
+// It is deliberately distinct from a rollback anchor: Owner/Epoch
 // move forward and a lease may expire, while a rollback anchor is a permanent
 // lower bound on recoverable history.
 type LeaseRecord struct {
@@ -45,7 +51,9 @@ type LeaseRecord struct {
 	Revoked        bool
 }
 
-// LeaseStore is the minimal durable CAS required by Authority. Implement it
+// LeaseStore reads and conditionally replaces a database's controller lease record.
+//
+// Implement it
 // with a quorum-backed transactional store in production. Load and
 // CompareAndSwap must be linearizable for a database identity; a local file or
 // MemoryStore is useful only for deterministic development/testing.
@@ -57,7 +65,8 @@ type LeaseStore interface {
 	CompareAndSwapPrimaryLease(context.Context, [16]byte, *LeaseRecord, LeaseRecord) (bool, error)
 }
 
-// AuthorityOptions configures a controller-side certificate issuer.
+// AuthorityOptions sets the controller store, signing key, lease duration, and clock limits.
+//
 // MaxClockSkew is the maximum absolute offset allowed between a primary and
 // the controller. A new owner cannot receive a currently valid certificate
 // until the preceding certificate's expiry plus this window.
@@ -70,8 +79,9 @@ type AuthorityOptions struct {
 	CASRetries    int
 }
 
-// Authority issues signed certificates only after an external LeaseStore CAS
-// makes the handoff durable. It has no HTTP listener, peer authentication or
+// Authority issues signed write leases after saving the controller state durably.
+//
+// A LeaseStore CAS makes each handoff durable. It has no HTTP listener, peer authentication or
 // membership logic; those are deployment concerns around the store.
 type Authority struct {
 	store         LeaseStore
@@ -83,6 +93,7 @@ type Authority struct {
 	metrics       authorityMetrics
 }
 
+// authorityMetrics counts lease grants, revocations, and rejected controller requests.
 type authorityMetrics struct {
 	grantAttempts              atomic.Uint64
 	granted                    atomic.Uint64
@@ -96,8 +107,9 @@ type authorityMetrics struct {
 	revoked                    atomic.Uint64
 }
 
-// AuthorityStats is a fixed-cardinality, identity-free process snapshot for a
-// controller issuer. It deliberately excludes database IDs, owners, epochs,
+// AuthorityStats reports aggregate controller grants, revocations, and rejected requests.
+//
+// It deliberately excludes database IDs, owners, epochs,
 // certificates, endpoints and error details. Read it from a sampler rather
 // than from a controller request hot path.
 type AuthorityStats struct {
@@ -113,16 +125,18 @@ type AuthorityStats struct {
 	Revoked                    uint64
 }
 
-// Grant is the controller response for a primary or follower-promotion
-// request. RetryAfter is set only with ErrLeaseActive.
+// Grant returns a signed lease, its saved controller record, and any required handoff delay.
+//
+// RetryAfter is set only with ErrLeaseActive.
 type Grant struct {
 	Certificate string
 	Record      LeaseRecord
 	RetryAfter  time.Time
 }
 
-// GrantRequest identifies the owner and exact source position the controller
-// is asked to certify. Owner must derive from authenticated controller-side
+// GrantRequest identifies the database owner and source position requesting a write lease.
+//
+// Owner must derive from authenticated controller-side
 // identity, never an application request.
 type GrantRequest struct {
 	DatabaseID     [16]byte
@@ -130,8 +144,9 @@ type GrantRequest struct {
 	CommitSequence uint64
 }
 
-// PromotionReadiness proves that a specific follower position is eligible for
-// promotion against the controller state observed by the same Authority CAS
+// PromotionReadiness checks whether a follower can be promoted under the current controller state.
+//
+// The check uses the controller state observed by the same Authority CAS
 // attempt. A production implementation normally verifies durable replication
 // receipt/ack evidence and any required application recovery policy. Owner and
 // epoch fencing alone cannot prove that an asynchronous follower contains all
@@ -143,6 +158,7 @@ type PromotionReadiness interface {
 // PromotionReadinessFunc adapts a function to PromotionReadiness.
 type PromotionReadinessFunc func(context.Context, meldbase.FollowerPromotionRequest, LeaseRecord, bool) error
 
+// VerifyFollowerPromotion runs the supplied readiness check or rejects a missing function.
 func (function PromotionReadinessFunc) VerifyFollowerPromotion(ctx context.Context, request meldbase.FollowerPromotionRequest, record LeaseRecord, exists bool) error {
 	if function == nil {
 		return ErrLeasePromotionReadiness
@@ -150,7 +166,9 @@ func (function PromotionReadinessFunc) VerifyFollowerPromotion(ctx context.Conte
 	return function(ctx, request, record, exists)
 }
 
-// NewAuthority validates controller-local configuration. It is intentionally
+// NewAuthority validates controller-local configuration.
+//
+// It is intentionally
 // impossible to construct an Authority with a default in-memory store: doing
 // so would make an accidental single-process test controller look durable.
 func NewAuthority(options AuthorityOptions) (*Authority, error) {
@@ -192,7 +210,9 @@ func NewAuthority(options AuthorityOptions) (*Authority, error) {
 	}, nil
 }
 
-// Grant issues a new epoch. A renewal for the same owner may be granted before
+// Grant issues a signed write lease with a new controller epoch.
+//
+// A renewal for the same owner may be granted before
 // the old certificate expires; a different owner must wait until the old
 // expiry plus MaxClockSkew. This explicit availability gap is the price of not
 // allowing two clock-skewed processes to write concurrently.
@@ -200,6 +220,7 @@ func (authority *Authority) Grant(ctx context.Context, request GrantRequest) (Gr
 	return authority.grant(ctx, request, nil)
 }
 
+// grant returns a signed lease only after checking eligibility and saving the next lease record.
 func (authority *Authority) grant(ctx context.Context, request GrantRequest, readiness PromotionReadiness) (Grant, error) {
 	if authority == nil || authority.store == nil {
 		return Grant{}, ErrLeaseStore
@@ -284,6 +305,7 @@ func (authority *Authority) grant(ctx context.Context, request GrantRequest, rea
 }
 
 // Revoke advances the durable controller epoch and removes the current owner.
+//
 // It does not shorten an already issued certificate: an unreachable old owner
 // may still be using it. The next owner must respect the same handoff window
 // in Grant. A reachable owner should receive Guard.Revoke through its local
@@ -326,7 +348,9 @@ func (authority *Authority) Revoke(ctx context.Context, databaseID [16]byte, epo
 	return LeaseRecord{}, ErrLeaseStore
 }
 
-// Stats returns an O(1), allocation-free aggregate snapshot. It is separate
+// Stats returns an O(1), allocation-free aggregate snapshot.
+//
+// It is separate
 // from DBStats because a controller can manage many databases and is not part
 // of the database commit path.
 func (authority *Authority) Stats() AuthorityStats {
@@ -342,6 +366,7 @@ func (authority *Authority) Stats() AuthorityStats {
 	}
 }
 
+// contextError rejects a missing context or returns its cancellation error.
 func (authority *Authority) contextError(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("meldbase primary lease: context is required")
@@ -349,6 +374,7 @@ func (authority *Authority) contextError(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// validLeaseRecord checks a lease record's database identity, epoch, expiry, and owner fields.
 func validLeaseRecord(record LeaseRecord, databaseID [16]byte) bool {
 	if record.DatabaseID != databaseID || record.Epoch == 0 || record.Epoch == ^uint64(0) || record.NotAfter.IsZero() {
 		return false
@@ -359,9 +385,10 @@ func validLeaseRecord(record LeaseRecord, databaseID [16]byte) bool {
 	return validOwner(record.Owner)
 }
 
-// ValidateLeaseRecord checks that record is a well-formed controller record
-// for databaseID. Network adapters use it before handing a decoded value to a
-// LeaseStore; it does not judge whether the lease is currently expired.
+// ValidateLeaseRecord checks a lease record's fields and database identity.
+//
+// Network adapters use it before passing a decoded record to a LeaseStore.
+// It does not check whether the lease has expired.
 func ValidateLeaseRecord(record LeaseRecord, databaseID [16]byte) error {
 	if !validLeaseRecord(record, databaseID) {
 		return ErrLeaseStore
@@ -370,7 +397,9 @@ func ValidateLeaseRecord(record LeaseRecord, databaseID [16]byte) error {
 }
 
 // PromotionAuthority adapts a controller Authority to
-// meldbase.FollowerPromotionAuthority. Construct it with the authenticated
+// meldbase.FollowerPromotionAuthority.
+//
+// Construct it with the authenticated
 // target process owner identity; it never accepts that identity from a
 // replication frame.
 type PromotionAuthority struct {
@@ -379,6 +408,7 @@ type PromotionAuthority struct {
 	Readiness PromotionReadiness
 }
 
+// AuthorizeFollowerPromotion obtains a lease certificate after checking the follower's readiness.
 func (authority PromotionAuthority) AuthorizeFollowerPromotion(ctx context.Context, request meldbase.FollowerPromotionRequest) (meldbase.FollowerPromotionFence, error) {
 	if authority.Authority == nil || !validOwner(authority.Owner) {
 		return meldbase.FollowerPromotionFence{}, ErrLeaseStore
@@ -396,14 +426,18 @@ func (authority PromotionAuthority) AuthorizeFollowerPromotion(ctx context.Conte
 }
 
 // MemoryStore is a linearizable in-process LeaseStore for tests and local
-// deterministic demos. It must not be used as a production quorum store.
+// deterministic demos.
+//
+// It must not be used as a production quorum store.
 type MemoryStore struct {
 	mu      sync.Mutex
 	records map[[16]byte]LeaseRecord
 }
 
+// NewMemoryStore creates an empty lease store for tests and local demos.
 func NewMemoryStore() *MemoryStore { return &MemoryStore{records: make(map[[16]byte]LeaseRecord)} }
 
+// LoadPrimaryLease reads a database's lease under the memory store lock.
 func (store *MemoryStore) LoadPrimaryLease(ctx context.Context, databaseID [16]byte) (LeaseRecord, bool, error) {
 	if err := memoryContextError(ctx); err != nil {
 		return LeaseRecord{}, false, err
@@ -417,6 +451,7 @@ func (store *MemoryStore) LoadPrimaryLease(ctx context.Context, databaseID [16]b
 	return record, exists, nil
 }
 
+// CompareAndSwapPrimaryLease replaces an in-memory lease when it matches the expected state.
 func (store *MemoryStore) CompareAndSwapPrimaryLease(ctx context.Context, databaseID [16]byte, previous *LeaseRecord, next LeaseRecord) (bool, error) {
 	if err := memoryContextError(ctx); err != nil {
 		return false, err
@@ -438,10 +473,12 @@ func (store *MemoryStore) CompareAndSwapPrimaryLease(ctx context.Context, databa
 	return true, nil
 }
 
+// leaseRecordEqual compares every lease field while allowing equivalent time representations.
 func leaseRecordEqual(left, right LeaseRecord) bool {
 	return left.DatabaseID == right.DatabaseID && left.Owner == right.Owner && left.Epoch == right.Epoch && left.CommitSequence == right.CommitSequence && left.NotAfter.Equal(right.NotAfter) && left.Revoked == right.Revoked
 }
 
+// memoryContextError rejects a missing context or returns its cancellation error.
 func memoryContextError(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("meldbase primary lease: context is required")

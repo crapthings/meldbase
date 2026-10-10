@@ -21,11 +21,15 @@ import (
 )
 
 const (
+	// anchorHistoryControllerSchema identifies the controller history record format.
 	anchorHistoryControllerSchema uint32 = 3
-	anchorHistoryReceiptSchema    uint32 = 1
-	anchorHistoryFinalLoadID             = "qualification-final-load"
+	// anchorHistoryReceiptSchema identifies the signed history receipt format.
+	anchorHistoryReceiptSchema uint32 = 1
+	// anchorHistoryFinalLoadID names the final quorum observation added to a history.
+	anchorHistoryFinalLoadID = "qualification-final-load"
 )
 
+// anchorHistoryWireValue represents an optional rollback anchor in JSON.
 type anchorHistoryWireValue struct {
 	Exists                bool   `json:"exists"`
 	DatabaseIDHex         string `json:"databaseIdHex,omitempty"`
@@ -33,6 +37,7 @@ type anchorHistoryWireValue struct {
 	MinimumGeneration     uint64 `json:"minimumGeneration"`
 }
 
+// anchorHistoryWireOperation records an anchor operation's result and invocation order in JSON.
 type anchorHistoryWireOperation struct {
 	ID      string                 `json:"id"`
 	Kind    string                 `json:"kind"`
@@ -42,6 +47,7 @@ type anchorHistoryWireOperation struct {
 	Value   anchorHistoryWireValue `json:"value"`
 }
 
+// anchorHistoryControllerRecord records a controller's execution history and signed agent evidence.
 type anchorHistoryControllerRecord struct {
 	SchemaVersion   uint32                       `json:"schemaVersion"`
 	RunID           string                       `json:"runId"`
@@ -58,6 +64,7 @@ type anchorHistoryControllerRecord struct {
 	Fragments       []anchorHistoryAgentFragment `json:"fragments"`
 }
 
+// anchorHistoryQualificationReceipt holds signed evidence and the linearizability check for an anchor history.
 type anchorHistoryQualificationReceipt struct {
 	SchemaVersion          uint32                           `json:"schemaVersion"`
 	ProtocolVersion        uint32                           `json:"protocolVersion"`
@@ -84,6 +91,7 @@ type anchorHistoryQualificationReceipt struct {
 	Signature              string                           `json:"signature"`
 }
 
+// runAnchorHistoryQualificationSign adds a final quorum observation to a verified history and publishes a signed qualification receipt.
 func runAnchorHistoryQualificationSign(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("anchor-qualification history-sign", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -226,6 +234,7 @@ func runAnchorHistoryQualificationSign(args []string, stdout, stderr io.Writer) 
 	return encoder.Encode(receipt)
 }
 
+// runAnchorHistoryQualificationVerify verifies a signed history receipt and its controller record and prints the result.
 func runAnchorHistoryQualificationVerify(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("anchor-qualification history-verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -257,6 +266,7 @@ func runAnchorHistoryQualificationVerify(args []string, stdout, stderr io.Writer
 	return json.NewEncoder(stdout).Encode(result)
 }
 
+// anchorHistoryQualificationVerification holds a verified history receipt, its controller record, and their hashes.
 type anchorHistoryQualificationVerification struct {
 	Receipt          anchorHistoryQualificationReceipt
 	Controller       anchorHistoryControllerRecord
@@ -264,6 +274,7 @@ type anchorHistoryQualificationVerification struct {
 	ControllerSHA256 string
 }
 
+// verifyAnchorHistoryQualificationFiles verifies the signed receipt and checks that it binds the supplied controller history.
 func verifyAnchorHistoryQualificationFiles(receiptPath, historyPath string, publicKey ed25519.PublicKey) (anchorHistoryQualificationVerification, error) {
 	if receiptPath == "" || historyPath == "" || len(publicKey) != ed25519.PublicKeySize {
 		return anchorHistoryQualificationVerification{}, errors.New("anchor history qualification verification inputs are incomplete")
@@ -298,6 +309,7 @@ func verifyAnchorHistoryQualificationFiles(receiptPath, historyPath string, publ
 	}, nil
 }
 
+// validateAnchorHistoryController validates controller identity and signed agent evidence before converting its history for checking.
 func validateAnchorHistoryController(controller anchorHistoryControllerRecord, maximum int) (qualification.AnchorHistory, error) {
 	if controller.SchemaVersion != anchorHistoryControllerSchema || !anchorQualificationHex(controller.RunID, 16) || !qualificationHexDigest(controller.ConfigurationID) ||
 		!validDurabilitySourceRevision(controller.SourceRevision) || (controller.BuildRevision != "" && !validDurabilitySourceRevision(controller.BuildRevision)) ||
@@ -323,6 +335,7 @@ func validateAnchorHistoryController(controller anchorHistoryControllerRecord, m
 	return history, nil
 }
 
+// anchorHistoryFromWire converts JSON history values and operations into the history checker's input.
 func anchorHistoryFromWire(initial anchorHistoryWireValue, operations []anchorHistoryWireOperation) (qualification.AnchorHistory, error) {
 	convertedInitial, err := anchorHistoryValueFromWire(initial)
 	if err != nil {
@@ -342,6 +355,7 @@ func anchorHistoryFromWire(initial anchorHistoryWireValue, operations []anchorHi
 	return qualification.AnchorHistory{Initial: convertedInitial, Operations: converted}, nil
 }
 
+// anchorHistoryValueFromWire validates and converts one JSON anchor value into a history value.
 func anchorHistoryValueFromWire(value anchorHistoryWireValue) (qualification.AnchorHistoryValue, error) {
 	if !value.Exists {
 		if value.DatabaseIDHex != "" || value.MinimumCommitSequence != 0 || value.MinimumGeneration != 0 {
@@ -358,6 +372,7 @@ func anchorHistoryValueFromWire(value anchorHistoryWireValue) (qualification.Anc
 	return converted, nil
 }
 
+// anchorHistoryWireValueFromAnchor converts an optional rollback anchor into its JSON representation.
 func anchorHistoryWireValueFromAnchor(anchor meldbase.RollbackAnchor, exists bool) anchorHistoryWireValue {
 	if !exists {
 		return anchorHistoryWireValue{}
@@ -368,6 +383,7 @@ func anchorHistoryWireValueFromAnchor(anchor meldbase.RollbackAnchor, exists boo
 	}
 }
 
+// anchorHistoryProbeMembers collects member evidence and rejects unreachable or invalid member states.
 func anchorHistoryProbeMembers(store *anchorhttp.QuorumStore, replicas []string, timeout time.Duration) ([]anchorQualificationMember, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	checks, err := store.CheckReplicas(ctx)
@@ -384,6 +400,7 @@ func anchorHistoryProbeMembers(store *anchorhttp.QuorumStore, replicas []string,
 	return members, nil
 }
 
+// validateAnchorHistoryQualificationReceipt checks the receipt's fields, recomputed history result, and final quorum evidence.
 func validateAnchorHistoryQualificationReceipt(receipt anchorHistoryQualificationReceipt) error {
 	if receipt.SchemaVersion != anchorHistoryReceiptSchema || receipt.ProtocolVersion != anchorhttp.ProtocolVersion || !anchorQualificationHex(receipt.RunID, 16) ||
 		!qualificationHexDigest(receipt.ControllerSHA256) || !qualificationHexDigest(receipt.ExternalEvidenceSHA256) || !qualificationHexDigest(receipt.ConfigurationID) ||
@@ -430,6 +447,7 @@ func validateAnchorHistoryQualificationReceipt(receipt anchorHistoryQualificatio
 	return nil
 }
 
+// anchorHistoryFinalValueSupported checks that a final observation matches a member value supported by a quorum or a quorum of missing anchors.
 func anchorHistoryFinalValueSupported(value anchorHistoryWireValue, members []anchorQualificationMember, quorum uint64) bool {
 	if !value.Exists {
 		var missing uint64
@@ -457,6 +475,7 @@ func anchorHistoryFinalValueSupported(value anchorHistoryWireValue, members []an
 	return observed && dominated >= quorum
 }
 
+// signAnchorHistoryQualificationReceipt signs the history receipt's JSON contents with an Ed25519 private key.
 func signAnchorHistoryQualificationReceipt(receipt *anchorHistoryQualificationReceipt, privateKey ed25519.PrivateKey) error {
 	receipt.Signature = ""
 	payload, err := json.Marshal(receipt)
@@ -467,6 +486,7 @@ func signAnchorHistoryQualificationReceipt(receipt *anchorHistoryQualificationRe
 	return nil
 }
 
+// verifyAnchorHistoryQualificationReceipt validates a history receipt and verifies its signature against the trusted public key.
 func verifyAnchorHistoryQualificationReceipt(receipt anchorHistoryQualificationReceipt, publicKey ed25519.PublicKey) error {
 	if err := validateAnchorHistoryQualificationReceipt(receipt); err != nil {
 		return err

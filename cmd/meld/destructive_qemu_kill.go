@@ -17,8 +17,10 @@ import (
 	"time"
 )
 
+// destructiveQMPKillProofSchema identifies the QEMU process termination proof format.
 const destructiveQMPKillProofSchema uint32 = 2
 
+// destructiveQMPKillProof records QEMU termination, restart, and the QMP evidence linking them to a trial marker.
 type destructiveQMPKillProof struct {
 	SchemaVersion          uint32                   `json:"schemaVersion"`
 	MarkerSHA256           string                   `json:"markerSha256"`
@@ -39,6 +41,7 @@ type destructiveQMPKillProof struct {
 	RestartQMPExchanges    []destructiveQMPExchange `json:"restartQmpExchanges"`
 }
 
+// qmpRecordingClient exchanges QMP messages while recording their contents and timestamps.
 type qmpRecordingClient struct {
 	connection net.Conn
 	decoder    *json.Decoder
@@ -46,6 +49,7 @@ type qmpRecordingClient struct {
 	exchanges  []destructiveQMPExchange
 }
 
+// runDestructiveQEMUProcessKill records a QEMU SIGKILL and restart trial through verified guest recovery.
 func runDestructiveQEMUProcessKill(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-process-kill", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -278,6 +282,7 @@ func runDestructiveQEMUProcessKill(args []string, stdout, stderr io.Writer) erro
 	return encoder.Encode(event)
 }
 
+// qemuChildCommand creates a QEMU child command with a deadline and a shared output log.
 func qemuChildCommand(deadline time.Time, executable string, args []string, log io.Writer) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	command := exec.CommandContext(ctx, executable, args...)
@@ -285,6 +290,7 @@ func qemuChildCommand(deadline time.Time, executable string, args []string, log 
 	return command, cancel
 }
 
+// openQMPRecordingClient retries a Unix socket connection until the deadline and enables bounded message reading.
 func openQMPRecordingClient(socket string, deadline time.Time) (*qmpRecordingClient, error) {
 	var connection net.Conn
 	var err error
@@ -311,8 +317,10 @@ func openQMPRecordingClient(socket string, deadline time.Time) (*qmpRecordingCli
 	}, nil
 }
 
+// Close closes the QMP socket connection.
 func (client *qmpRecordingClient) Close() error { return client.connection.Close() }
 
+// receive decodes and records one bounded QMP message.
 func (client *qmpRecordingClient) receive() (json.RawMessage, qmpMessageEnvelope, error) {
 	var raw json.RawMessage
 	if err := client.decoder.Decode(&raw); err != nil {
@@ -329,10 +337,12 @@ func (client *qmpRecordingClient) receive() (json.RawMessage, qmpMessageEnvelope
 	return raw, envelope, nil
 }
 
+// send records and sends a QMP command containing string fields.
 func (client *qmpRecordingClient) send(command map[string]string) error {
 	return client.sendValue(command)
 }
 
+// sendValue records a JSON command and flushes it to the QMP connection.
 func (client *qmpRecordingClient) sendValue(command any) error {
 	raw, err := json.Marshal(command)
 	if err != nil {
@@ -345,6 +355,7 @@ func (client *qmpRecordingClient) sendValue(command any) error {
 	return client.writer.Flush()
 }
 
+// handshake checks the QMP greeting and negotiates command capabilities.
 func (client *qmpRecordingClient) handshake(prefix string) error {
 	_, greeting, err := client.receive()
 	if err != nil || len(greeting.QMP) == 0 {
@@ -357,6 +368,7 @@ func (client *qmpRecordingClient) handshake(prefix string) error {
 	return receiveQMPResponse(client.receive, id, nil)
 }
 
+// handshakeAndQueryBlock negotiates QMP capabilities and verifies the expected block device.
 func (client *qmpRecordingClient) handshakeAndQueryBlock(prefix, targetImage string) error {
 	if err := client.handshake(prefix); err != nil {
 		return err
@@ -370,6 +382,7 @@ func (client *qmpRecordingClient) handshakeAndQueryBlock(prefix, targetImage str
 	})
 }
 
+// queryStoppedStatus checks that the restarted QEMU guest is paused.
 func (client *qmpRecordingClient) queryStoppedStatus() error {
 	if err := client.send(map[string]string{"execute": "query-status", "id": "restart-query-status"}); err != nil {
 		return err
@@ -386,6 +399,7 @@ func (client *qmpRecordingClient) queryStoppedStatus() error {
 	})
 }
 
+// qemuArgumentsBindSocket checks that QEMU arguments specify the expected QMP server socket.
 func qemuArgumentsBindSocket(args []string, socket string) bool {
 	want := "unix:" + socket + ",server=on,wait=off"
 	for index, argument := range args {
@@ -396,6 +410,7 @@ func qemuArgumentsBindSocket(args []string, socket string) bool {
 	return false
 }
 
+// setQualificationArtifactOwner changes artifact ownership when requested and syncs the file and parent directory.
 func setQualificationArtifactOwner(path string, uid, gid int) error {
 	if uid < 0 {
 		return nil
@@ -415,6 +430,7 @@ func setQualificationArtifactOwner(path string, uid, gid int) error {
 	return errors.Join(fileErr, directory.Sync(), directory.Close())
 }
 
+// validateDestructiveQMPKillProof checks that a termination proof matches its marker and controller event.
 func validateDestructiveQMPKillProof(raw []byte, event destructivePowerControllerEvent, markerRaw []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -433,6 +449,7 @@ func validateDestructiveQMPKillProof(raw []byte, event destructivePowerControlle
 	return validateQMPKillProofStructure(proof)
 }
 
+// validateQMPKillProofStructure checks termination and restart identities, chronology, SIGKILL status, and QMP evidence.
 func validateQMPKillProofStructure(proof destructiveQMPKillProof) error {
 	waitStatus := syscall.WaitStatus(proof.WaitStatus)
 	if proof.SchemaVersion != destructiveQMPKillProofSchema || !qualificationHexDigest(proof.MarkerSHA256) ||
@@ -475,6 +492,7 @@ func validateQMPKillProofStructure(proof destructiveQMPKillProof) error {
 	return nil
 }
 
+// validateQMPKillBeforeExchanges checks the pre-termination QMP handshake and target block device observation.
 func validateQMPKillBeforeExchanges(exchanges []destructiveQMPExchange, targetImage string) error {
 	return validateQMPOrderedExchanges(exchanges, []qmpExpectedCommand{
 		{execute: "qmp_capabilities", id: "kill-capabilities"},
@@ -484,6 +502,7 @@ func validateQMPKillBeforeExchanges(exchanges []destructiveQMPExchange, targetIm
 	})
 }
 
+// validateQMPExchangeTimeline checks that QMP timestamps are ordered and lie within the supplied time interval.
 func validateQMPExchangeTimeline(exchanges []destructiveQMPExchange, earliest, latest time.Time) error {
 	previous := earliest
 	for index, exchange := range exchanges {
@@ -495,6 +514,7 @@ func validateQMPExchangeTimeline(exchanges []destructiveQMPExchange, earliest, l
 	return nil
 }
 
+// validateQMPRestartExchanges checks that QMP evidence shows a paused restart followed by a continue command.
 func validateQMPRestartExchanges(exchanges []destructiveQMPExchange) error {
 	return validateQMPOrderedExchanges(exchanges, []qmpExpectedCommand{
 		{execute: "qmp_capabilities", id: "restart-capabilities"},
@@ -512,12 +532,14 @@ func validateQMPRestartExchanges(exchanges []destructiveQMPExchange) error {
 	})
 }
 
+// qmpExpectedCommand describes an expected QMP command and its optional response check.
 type qmpExpectedCommand struct {
 	execute  string
 	id       string
 	validate func(qmpMessageEnvelope) error
 }
 
+// validateQMPOrderedExchanges checks a QMP greeting and ordered command responses while allowing asynchronous events.
 func validateQMPOrderedExchanges(exchanges []destructiveQMPExchange, commands []qmpExpectedCommand) error {
 	if len(exchanges) < 1+2*len(commands) || len(exchanges) > 64 {
 		return errors.New("QMP process-kill exchange count is invalid")

@@ -12,8 +12,10 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// recoveryBenchmarkSink keeps recovery reports used by the benchmark.
 var recoveryBenchmarkSink RecoveryReport
 
+// TestRequirePrivateFileModeRejectsExistingBroadPermissions checks that strict opening requires private permissions without changing existing file modes.
 func TestRequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix mode bits are not a Windows security boundary")
@@ -57,6 +59,7 @@ func TestRequirePrivateFileModeRejectsExistingBroadPermissions(t *testing.T) {
 	defer strict.Close()
 }
 
+// TestRecoveryReportIsImmutableAndAllocationFree checks that reading a recovery report returns an independent value without allocating memory.
 func TestRecoveryReportIsImmutableAndAllocationFree(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -71,6 +74,7 @@ func TestRecoveryReportIsImmutableAndAllocationFree(t *testing.T) {
 	}
 }
 
+// BenchmarkRecoveryReport measures the cost of reading a recovery report.
 func BenchmarkRecoveryReport(b *testing.B) {
 	db := New()
 	defer db.Close()
@@ -80,6 +84,7 @@ func BenchmarkRecoveryReport(b *testing.B) {
 	}
 }
 
+// TestRecoveryReportAccountsForRootFallbackAndTailRemoval checks that recovery reports an older root and removed trailing bytes while strict opening leaves the file untouched.
 func TestRecoveryReportAccountsForRootFallbackAndTailRemoval(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "recovery-store.meld2")
 	db, err := Open(path)
@@ -161,6 +166,7 @@ func TestRecoveryReportAccountsForRootFallbackAndTailRemoval(t *testing.T) {
 	}
 }
 
+// TestPublicGraphAuditRejectsDeepCorruptionBeforeTailRecovery checks that a failed page-graph audit rejects corruption without changing the database file.
 func TestPublicGraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-graph-audit.meld2")
 	db, err := Open(path)
@@ -238,6 +244,7 @@ func TestPublicGraphAuditRejectsDeepCorruptionBeforeTailRecovery(t *testing.T) {
 	}
 }
 
+// appendRecoveryTail appends bytes to a database file or fails the test.
 func appendRecoveryTail(t *testing.T, path string, tail []byte) {
 	t.Helper()
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
@@ -253,6 +260,7 @@ func appendRecoveryTail(t *testing.T, path string, tail []byte) {
 	}
 }
 
+// mustReadRecoveryFile reads a database file or fails the test.
 func mustReadRecoveryFile(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -262,6 +270,7 @@ func mustReadRecoveryFile(t *testing.T, path string) []byte {
 	return data
 }
 
+// TestRecoveryModeRejectsUnknownValues checks that opening rejects an unknown recovery mode.
 func TestRecoveryModeRejectsUnknownValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-mode.meld2")
 	if db, err := OpenWithOptions(path, OpenOptions{Recovery: RecoveryMode(255)}); err == nil || db != nil {
@@ -269,6 +278,7 @@ func TestRecoveryModeRejectsUnknownValues(t *testing.T) {
 	}
 }
 
+// TestRequireCleanAllowsCreationAndCleanReopen checks that strict recovery mode permits creating a database and reopening it without repairs.
 func TestRequireCleanAllowsCreationAndCleanReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "strict-clean.meld2")
 	db, err := OpenWithOptions(path, OpenOptions{Recovery: RecoveryRequireClean})

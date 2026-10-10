@@ -12,22 +12,27 @@ import (
 )
 
 var (
+	// ErrUnauthenticated reports that a request has no accepted application identity.
 	ErrUnauthenticated = errors.New("meldbase server: unauthenticated")
-	ErrForbidden       = errors.New("meldbase server: forbidden")
+	// ErrForbidden reports that the requested operation is not authorized.
+	ErrForbidden = errors.New("meldbase server: forbidden")
 )
 
-// Actor is the authenticated application identity for one request. ID is the
-// stable user or service identifier; WorkspaceID is the active workspace
-// selected by the verified credential.
+// Actor identifies the authenticated user or service and active workspace for a request.
+//
+// ID is the stable user or service identifier; WorkspaceID comes from the
+// verified credential.
 type Actor struct {
 	ID          string
 	WorkspaceID string
 }
 
+// Authenticator verifies an HTTP request's credentials and returns its application identity.
 type Authenticator interface {
 	AuthenticateHTTP(*http.Request) (Actor, error)
 }
 
+// QueryPolicy defines row constraints, field permissions, result limits, and revocation leases for a query.
 type QueryPolicy struct {
 	PolicyVersion string
 	Lease         *QueryPolicyLease
@@ -51,14 +56,14 @@ type QueryPolicy struct {
 	compositeLeases         bool
 }
 
-// QueryPolicyResolver adds a dynamic, data-only visibility policy after the
-// application's Authorizer has allowed a query. When configured, a missing
-// resolution fails closed. Implementations may never return documents; they
-// only narrow row membership, query paths, result fields and result count.
+// QueryPolicyResolver optionally supplies an additional policy that narrows an already-authorized query.
+//
+// A missing resolution preserves the base policy, while a resolver error rejects the query.
 type QueryPolicyResolver interface {
 	ResolveQueryPolicy(context.Context, Actor, string, meldbase.QuerySpec) (QueryPolicy, bool, error)
 }
 
+// Authorizer supplies server-enforced policies for document reads, inserts, updates, and deletions.
 type Authorizer interface {
 	AuthorizeQuery(context.Context, Actor, string, meldbase.QuerySpec) (QueryPolicy, error)
 	AuthorizeInsert(context.Context, Actor, string, meldbase.Document) (InsertPolicy, error)
@@ -66,6 +71,7 @@ type Authorizer interface {
 	AuthorizeDelete(context.Context, Actor, string, meldbase.QuerySpec) (DeletePolicy, error)
 }
 
+// UpdatePolicy combines row-selection permissions with writable paths and an affected-document limit.
 type UpdatePolicy struct {
 	QueryPolicy
 	AllowAllUpdatePaths bool
@@ -74,11 +80,13 @@ type UpdatePolicy struct {
 	MaxAffected         int
 }
 
+// DeletePolicy combines row-selection permissions with an affected-document limit.
 type DeletePolicy struct {
 	QueryPolicy
 	MaxAffected int
 }
 
+// InsertPolicy defines accepted input fields, server-owned field values, and permitted result fields.
 type InsertPolicy struct {
 	AllowAllInputFields  bool
 	AllowedInputFields   map[string]struct{}
@@ -87,6 +95,8 @@ type InsertPolicy struct {
 	AllowedResultFields  map[string]struct{}
 }
 
+// freezeQueryPolicy copies query permissions so later changes cannot affect an active request.
+//
 // Authorizer implementations may reuse their input maps. Freeze every returned
 // policy at the trust boundary so later mutation cannot race with or silently
 // change an in-flight query/subscription. QuerySpec internals are immutable, but
@@ -105,6 +115,7 @@ func freezeQueryPolicy(policy QueryPolicy) QueryPolicy {
 	return policy
 }
 
+// cloneCapabilitySet copies each path's operator set while preserving nil maps.
 func cloneCapabilitySet(source map[string]map[string]struct{}) map[string]map[string]struct{} {
 	if source == nil {
 		return nil
@@ -116,6 +127,7 @@ func cloneCapabilitySet(source map[string]map[string]struct{}) map[string]map[st
 	return result
 }
 
+// freezeInsertPolicy copies mutable insert permissions and server-owned field values.
 func freezeInsertPolicy(policy InsertPolicy) InsertPolicy {
 	policy.AllowedInputFields = cloneStringSet(policy.AllowedInputFields)
 	policy.AllowedResultFields = cloneStringSet(policy.AllowedResultFields)
@@ -123,6 +135,7 @@ func freezeInsertPolicy(policy InsertPolicy) InsertPolicy {
 	return policy
 }
 
+// freezeUpdatePolicy copies mutable query and update permissions.
 func freezeUpdatePolicy(policy UpdatePolicy) UpdatePolicy {
 	policy.QueryPolicy = freezeQueryPolicy(policy.QueryPolicy)
 	policy.AllowedUpdatePaths = cloneStringSet(policy.AllowedUpdatePaths)
@@ -130,11 +143,13 @@ func freezeUpdatePolicy(policy UpdatePolicy) UpdatePolicy {
 	return policy
 }
 
+// freezeDeletePolicy copies the mutable query permissions attached to a deletion policy.
 func freezeDeletePolicy(policy DeletePolicy) DeletePolicy {
 	policy.QueryPolicy = freezeQueryPolicy(policy.QueryPolicy)
 	return policy
 }
 
+// cloneStringSet copies a string lookup set while preserving nil.
 func cloneStringSet(source map[string]struct{}) map[string]struct{} {
 	if source == nil {
 		return nil
@@ -146,6 +161,7 @@ func cloneStringSet(source map[string]struct{}) map[string]struct{} {
 	return result
 }
 
+// applyPolicy validates query permissions and applies the policy's row constraint and result cap.
 func applyPolicy(query meldbase.QuerySpec, policy QueryPolicy) (meldbase.QuerySpec, error) {
 	if !validPolicyVersion(policy.PolicyVersion) ||
 		(policy.Lease != nil && (!validPolicyVersion(policy.Lease.Version()) || (!policy.compositeLeases && policy.Lease.Version() != policy.PolicyVersion))) ||
@@ -178,6 +194,7 @@ func applyPolicy(query meldbase.QuerySpec, policy QueryPolicy) (meldbase.QuerySp
 	return query, nil
 }
 
+// queryAllowed checks the query's filter paths, operators, and sort paths against policy permissions.
 func queryAllowed(query meldbase.QuerySpec, policy QueryPolicy) bool {
 	for _, capability := range query.FilterCapabilities() {
 		if capability.Path == "_id" {
@@ -198,6 +215,7 @@ func queryAllowed(query meldbase.QuerySpec, policy QueryPolicy) bool {
 	return true
 }
 
+// filterPathAllowed checks an exact filter path using filter-specific or shared query permissions.
 func filterPathAllowed(path string, policy QueryPolicy) bool {
 	if policy.AllowAllFilterPaths || policy.AllowAllQueryPaths {
 		return true
@@ -210,6 +228,7 @@ func filterPathAllowed(path string, policy QueryPolicy) bool {
 	return ok
 }
 
+// filterOperatorAllowed checks a filter operator using the path's grant or the wildcard grant.
 func filterOperatorAllowed(path, operator string, policy QueryPolicy) bool {
 	if policy.AllowAllFilterOperators || policy.AllowedFilterOperators == nil {
 		return true
@@ -222,6 +241,7 @@ func filterOperatorAllowed(path, operator string, policy QueryPolicy) bool {
 	return ok
 }
 
+// sortPathAllowed checks an exact sort path using sort-specific or shared query permissions.
 func sortPathAllowed(path string, policy QueryPolicy) bool {
 	if policy.AllowAllSortPaths || policy.AllowAllQueryPaths {
 		return true
@@ -234,6 +254,7 @@ func sortPathAllowed(path string, policy QueryPolicy) bool {
 	return ok
 }
 
+// resultPathAllowed checks whether a result grant covers a path or one of its parent objects.
 func resultPathAllowed(path string, allowed map[string]struct{}) bool {
 	for candidate := range allowed {
 		if candidate == path || strings.HasPrefix(path, candidate+".") {
@@ -243,6 +264,7 @@ func resultPathAllowed(path string, allowed map[string]struct{}) bool {
 	return false
 }
 
+// intersectQueryPolicies combines two policies so the resulting query must satisfy both sets of restrictions.
 func intersectQueryPolicies(base, additional QueryPolicy) (QueryPolicy, error) {
 	if !validPolicyVersion(base.PolicyVersion) || !validPolicyVersion(additional.PolicyVersion) {
 		return QueryPolicy{}, ErrForbidden
@@ -293,6 +315,7 @@ func intersectQueryPolicies(base, additional QueryPolicy) (QueryPolicy, error) {
 	return freezeQueryPolicy(result), nil
 }
 
+// effectiveFilterPaths returns filter-specific permissions or their shared query-path fallback.
 func effectiveFilterPaths(policy QueryPolicy) (bool, map[string]struct{}) {
 	if policy.AllowAllFilterPaths || policy.AllowAllQueryPaths {
 		return true, nil
@@ -303,6 +326,7 @@ func effectiveFilterPaths(policy QueryPolicy) (bool, map[string]struct{}) {
 	return false, policy.AllowedQueryPaths
 }
 
+// effectiveSortPaths returns sort-specific permissions or their shared query-path fallback.
 func effectiveSortPaths(policy QueryPolicy) (bool, map[string]struct{}) {
 	if policy.AllowAllSortPaths || policy.AllowAllQueryPaths {
 		return true, nil
@@ -313,6 +337,7 @@ func effectiveSortPaths(policy QueryPolicy) (bool, map[string]struct{}) {
 	return false, policy.AllowedQueryPaths
 }
 
+// intersectFilterOperators builds the operator grants retained when two policies are combined.
 func intersectFilterOperators(base, additional QueryPolicy) (bool, map[string]map[string]struct{}) {
 	baseAll := base.AllowAllFilterOperators || base.AllowedFilterOperators == nil
 	additionalAll := additional.AllowAllFilterOperators || additional.AllowedFilterOperators == nil
@@ -342,6 +367,7 @@ func intersectFilterOperators(base, additional QueryPolicy) (bool, map[string]ma
 	return false, result
 }
 
+// intersectStringSets returns the permissions common to two sets while honoring allow-all flags.
 func intersectStringSets(firstAll bool, first map[string]struct{}, secondAll bool, second map[string]struct{}) map[string]struct{} {
 	if firstAll {
 		return cloneStringSet(second)
@@ -358,6 +384,7 @@ func intersectStringSets(firstAll bool, first map[string]struct{}, secondAll boo
 	return result
 }
 
+// applyUpdatePolicy checks writable paths and applies the update's row-selection policy.
 func applyUpdatePolicy(query meldbase.QuerySpec, mutation meldbase.MutationSpec, policy UpdatePolicy) (meldbase.QuerySpec, error) {
 	for _, path := range mutation.Paths() {
 		if policyPathDenied(path, policy.DeniedUpdatePaths) {
@@ -374,6 +401,7 @@ func applyUpdatePolicy(query meldbase.QuerySpec, mutation meldbase.MutationSpec,
 	return applyMutationQueryPolicy(query, policy.QueryPolicy, policy.MaxAffected)
 }
 
+// policyPathDenied checks whether a path equals or descends from a denied path.
 func policyPathDenied(path string, denied map[string]struct{}) bool {
 	for prefix := range denied {
 		if path == prefix || strings.HasPrefix(path, prefix+".") {
@@ -383,10 +411,12 @@ func policyPathDenied(path string, denied map[string]struct{}) bool {
 	return false
 }
 
+// applyDeletePolicy applies the deletion's row-selection policy.
 func applyDeletePolicy(query meldbase.QuerySpec, policy DeletePolicy) (meldbase.QuerySpec, error) {
 	return applyMutationQueryPolicy(query, policy.QueryPolicy, policy.MaxAffected)
 }
 
+// applyMutationQueryPolicy validates mutation limits and query permissions and adds the row constraint.
 func applyMutationQueryPolicy(query meldbase.QuerySpec, policy QueryPolicy, maxAffected int) (meldbase.QuerySpec, error) {
 	if maxAffected <= 0 || maxAffected > meldbase.DefaultQueryLimits.MaxLimit {
 		return meldbase.QuerySpec{}, ErrForbidden
@@ -403,14 +433,17 @@ func applyMutationQueryPolicy(query meldbase.QuerySpec, policy QueryPolicy, maxA
 	return query, nil
 }
 
+// project copies the document fields permitted by a query policy.
 func project(document meldbase.Document, policy QueryPolicy) meldbase.Document {
 	return projectFields(document, policy.AllowAllResultFields, policy.AllowedResultFields)
 }
 
+// projectInsert copies the document fields permitted by an insert policy.
 func projectInsert(document meldbase.Document, policy InsertPolicy) meldbase.Document {
 	return projectFields(document, policy.AllowAllResultFields, policy.AllowedResultFields)
 }
 
+// projectFields copies permitted document paths while always preserving an existing document ID.
 func projectFields(document meldbase.Document, allowAll bool, allowedFields map[string]struct{}) meldbase.Document {
 	if allowAll {
 		return document.Clone()
@@ -427,6 +460,7 @@ func projectFields(document meldbase.Document, allowAll bool, allowedFields map[
 	return result
 }
 
+// projectPath copies one existing object path into a destination document.
 func projectPath(destination, source meldbase.Document, path []string) {
 	if len(path) == 0 {
 		return

@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestIndexBuildSchedulerCompletesDurableBuild checks that the scheduler finishes a pending durable index and makes it available to queries.
 func TestIndexBuildSchedulerCompletesDurableBuild(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "scheduler.meld"))
 	if err != nil {
@@ -44,6 +45,7 @@ func TestIndexBuildSchedulerCompletesDurableBuild(t *testing.T) {
 	}
 }
 
+// TestIndexBuildSchedulerMarksTerminalFailureAndSkipsIt checks that a unique-key conflict persists as a failed build and is not scheduled again.
 func TestIndexBuildSchedulerMarksTerminalFailureAndSkipsIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "failed-scheduler.meld")
 	db, err := Open(path)
@@ -100,6 +102,7 @@ func TestIndexBuildSchedulerMarksTerminalFailureAndSkipsIt(t *testing.T) {
 	}
 }
 
+// TestIndexBuildSchedulerStopYieldsWithoutFailingBuild checks that stopping the scheduler leaves interrupted builds resumable and permits another scheduler to start.
 func TestIndexBuildSchedulerStopYieldsWithoutFailingBuild(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "stop-scheduler.meld"))
 	if err != nil {
@@ -147,6 +150,7 @@ func TestIndexBuildSchedulerStopYieldsWithoutFailingBuild(t *testing.T) {
 	second.Stop()
 }
 
+// TestIndexBuildSchedulerRejectsInvalidAndOverlappingStarts checks that scheduler startup rejects invalid concurrency limits and an already running scheduler.
 func TestIndexBuildSchedulerRejectsInvalidAndOverlappingStarts(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "scheduler-options.meld"))
 	if err != nil {
@@ -166,6 +170,7 @@ func TestIndexBuildSchedulerRejectsInvalidAndOverlappingStarts(t *testing.T) {
 	first.Stop()
 }
 
+// TestIndexBuildSchedulerTimeSlicesRoundRobinWithoutStarvation checks that time-limited scheduling gives both pending builds a turn with one worker.
 func TestIndexBuildSchedulerTimeSlicesRoundRobinWithoutStarvation(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "scheduler-fairness.meld"))
 	if err != nil {
@@ -215,6 +220,7 @@ func TestIndexBuildSchedulerTimeSlicesRoundRobinWithoutStarvation(t *testing.T) 
 	}
 }
 
+// waitForIndexBuildCondition waits for a test condition and fails if it remains false until the deadline.
 func waitForIndexBuildCondition(t *testing.T, timeout time.Duration, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

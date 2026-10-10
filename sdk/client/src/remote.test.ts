@@ -11,6 +11,7 @@ import { documentID, isDocumentIDValue } from "./safe-value.js";
 import { encodeDocument, encodeValue } from "./wire.js";
 import type { Document, SyncState, WebSocketLike } from "./index.js";
 
+/** Records outgoing frames and emits controlled WebSocket events for remote client tests. */
 class FakeSocket implements WebSocketLike {
   readyState = 0;
   sent: string[] = [];
@@ -51,9 +52,11 @@ class FakeSocket implements WebSocketLike {
   }
 }
 
+/** Waits one timer turn for pending remote client work in tests. */
 const settle = async () => {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 };
+/** Provides the supported protocol version and capabilities used by remote client fixtures. */
 const currentProtocol = {
   versions: [1],
   capabilities: ["query.delta", "query.resume", "rpc", "rpc.cancel", "rpc.idempotency"],

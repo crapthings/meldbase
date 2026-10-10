@@ -2,6 +2,7 @@ package storage
 
 import "testing"
 
+// TestPageCacheIsBoundedAndReportsHitsMisses checks cache capacity, oldest-page eviction, and hit and miss counters.
 func TestPageCacheIsBoundedAndReportsHitsMisses(t *testing.T) {
 	cache := newPageCache(16)
 	for pageID := uint64(2); pageID < 102; pageID++ {
@@ -27,6 +28,7 @@ func TestPageCacheIsBoundedAndReportsHitsMisses(t *testing.T) {
 	}
 }
 
+// TestFilePageCacheWarmsPointReads checks that repeated document reads increase cache hits within the page capacity.
 func TestFilePageCacheWarmsPointReads(t *testing.T) {
 	file, _, err := Open(t.TempDir() + "/cache.meld2")
 	if err != nil {

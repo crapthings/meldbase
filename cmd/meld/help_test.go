@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestRunTopLevelHelpIsSuccessful checks that each supported help spelling prints output successfully.
 func TestRunTopLevelHelpIsSuccessful(t *testing.T) {
 	for _, argument := range []string{"--help", "-h", "help"} {
 		t.Run(argument, func(t *testing.T) {
@@ -20,6 +21,7 @@ func TestRunTopLevelHelpIsSuccessful(t *testing.T) {
 	}
 }
 
+// TestTopLevelHelpPreservesStableOperationalCommands checks that help lists stable operational commands and omits experimental destructive commands.
 func TestTopLevelHelpPreservesStableOperationalCommands(t *testing.T) {
 	var output bytes.Buffer
 	if err := run([]string{"help"}, &output, &bytes.Buffer{}); err != nil {
@@ -35,6 +37,7 @@ func TestTopLevelHelpPreservesStableOperationalCommands(t *testing.T) {
 	}
 }
 
+// TestVersionCommandReportsBuildIdentity checks that version output includes the build version and commit and rejects extra arguments.
 func TestVersionCommandReportsBuildIdentity(t *testing.T) {
 	for _, argument := range []string{"version", "--version"} {
 		t.Run(argument, func(t *testing.T) {

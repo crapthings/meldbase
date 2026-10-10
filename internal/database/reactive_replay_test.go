@@ -10,6 +10,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestHistoricalReplayUsesSharedReactiveTransitions checks that historical commits produce correct ordered query results and matching deltas while unrelated commits emit none.
 func TestHistoricalReplayUsesSharedReactiveTransitions(t *testing.T) {
 	file, _, err := storage.Open(filepath.Join(t.TempDir(), "reactive-replay.meld2"))
 	if err != nil {
@@ -98,6 +99,7 @@ func TestHistoricalReplayUsesSharedReactiveTransitions(t *testing.T) {
 	}
 }
 
+// TestHistoricalSnapshotRestoresInsertionTieBreaker checks that historical query snapshots preserve insertion order when sort values are equal.
 func TestHistoricalSnapshotRestoresInsertionTieBreaker(t *testing.T) {
 	file, _, err := storage.Open(filepath.Join(t.TempDir(), "historical-order.meld2"))
 	if err != nil {
@@ -135,6 +137,7 @@ func TestHistoricalSnapshotRestoresInsertionTieBreaker(t *testing.T) {
 	assertSnapshotIDs(t, view.Snapshot(), []DocumentID{first, second})
 }
 
+// TestReplayRejectsBatchAtomically checks that a rejected replay batch leaves the view unchanged and permits a valid retry.
 func TestReplayRejectsBatchAtomically(t *testing.T) {
 	file, _, err := storage.Open(filepath.Join(t.TempDir(), "replay-atomic.meld2"))
 	if err != nil {
@@ -182,6 +185,7 @@ func TestReplayRejectsBatchAtomically(t *testing.T) {
 	assertSnapshotIDs(t, next, []DocumentID{id})
 }
 
+// TestQueryReplaySourceSkipsInvisibleSequencesAndReportsRetention checks that replay skips unrelated commits and rejects starting positions whose history was pruned.
 func TestQueryReplaySourceSkipsInvisibleSequencesAndReportsRetention(t *testing.T) {
 	file, _, err := storage.Open(filepath.Join(t.TempDir(), "query-replay-source.meld2"))
 	if err != nil {
@@ -235,6 +239,7 @@ func TestQueryReplaySourceSkipsInvisibleSequencesAndReportsRetention(t *testing.
 	}
 }
 
+// assertSnapshotIDs checks that a query snapshot contains the expected document identifiers in order.
 func assertSnapshotIDs(t *testing.T, snapshot QuerySnapshot, want []DocumentID) {
 	t.Helper()
 	if len(snapshot.Documents) != len(want) {

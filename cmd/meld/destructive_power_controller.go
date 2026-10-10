@@ -21,15 +21,22 @@ import (
 )
 
 const (
-	destructivePhysicalPowerEventSchema   uint32 = 2
+	// destructivePhysicalPowerEventSchema identifies the signed physical power-event format.
+	destructivePhysicalPowerEventSchema uint32 = 2
+	// destructivePowerControllerProofSchema identifies the structured controller-proof format.
 	destructivePowerControllerProofSchema uint32 = 1
+	// destructivePowerAdapterProtocolSchema identifies the adapter request and response format.
 	destructivePowerAdapterProtocolSchema uint32 = 1
-	destructivePowerControllerDomain             = "meldbase/destructive-power-controller-event/v1\x00"
-	destructivePowerAdapterMaxOutput             = 1 << 20
+	// destructivePowerControllerDomain separates controller signatures from signatures for other message types.
+	destructivePowerControllerDomain = "meldbase/destructive-power-controller-event/v1\x00"
+	// destructivePowerAdapterMaxOutput limits each adapter output stream to one MiB.
+	destructivePowerAdapterMaxOutput = 1 << 20
 )
 
+// destructivePowerControllerBuildIdentity supplies the running controller binary's revision and modification status.
 var destructivePowerControllerBuildIdentity = durabilityBuildIdentity
 
+// destructivePowerAdapterRequest binds a power-cycle request to its trial, marker, and target.
 type destructivePowerAdapterRequest struct {
 	SchemaVersion        uint32    `json:"schemaVersion"`
 	ControllerRunID      string    `json:"controllerRunId"`
@@ -41,6 +48,7 @@ type destructivePowerAdapterRequest struct {
 	RequestedAt          time.Time `json:"requestedAt"`
 }
 
+// destructivePowerAdapterResponse records the adapter's power-cycle result and hardware evidence.
 type destructivePowerAdapterResponse struct {
 	SchemaVersion          uint32    `json:"schemaVersion"`
 	ControllerRunID        string    `json:"controllerRunId"`
@@ -56,6 +64,7 @@ type destructivePowerAdapterResponse struct {
 	Success                bool      `json:"success"`
 }
 
+// destructivePowerControllerProof records the controller build and the timed adapter exchange.
 type destructivePowerControllerProof struct {
 	SchemaVersion       uint32                          `json:"schemaVersion"`
 	SourceRevision      string                          `json:"sourceRevision"`
@@ -72,11 +81,13 @@ type destructivePowerControllerProof struct {
 	Response            destructivePowerAdapterResponse `json:"response"`
 }
 
+// destructiveBoundedBuffer stores adapter output up to a fixed byte limit.
 type destructiveBoundedBuffer struct {
 	buffer  bytes.Buffer
 	maximum int
 }
 
+// Write rejects data that would exceed the output limit.
 func (buffer *destructiveBoundedBuffer) Write(value []byte) (int, error) {
 	if len(value) > buffer.maximum-buffer.buffer.Len() {
 		return 0, errors.New("power controller adapter output exceeded 1 MiB")
@@ -84,6 +95,7 @@ func (buffer *destructiveBoundedBuffer) Write(value []byte) (int, error) {
 	return buffer.buffer.Write(value)
 }
 
+// runDestructivePowerControllerKeygen creates signing and verification keys for an independent power controller.
 func runDestructivePowerControllerKeygen(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-power-controller-keygen", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -109,6 +121,7 @@ func runDestructivePowerControllerKeygen(args []string, stdout, stderr io.Writer
 	return err
 }
 
+// runDestructivePowerControllerRun executes the power adapter and publishes its proof and signed event.
 func runDestructivePowerControllerRun(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-power-controller-run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -218,6 +231,7 @@ func runDestructivePowerControllerRun(args []string, stdout, stderr io.Writer) e
 	return encoder.Encode(event)
 }
 
+// openDestructivePowerAdapter opens and hashes a size-bounded executable, leaving it ready for execution.
 func openDestructivePowerAdapter(path string) (*os.File, string, error) {
 	absolute, err := existingRegularAbsolutePath(path)
 	if err != nil {
@@ -245,6 +259,7 @@ func openDestructivePowerAdapter(path string) (*os.File, string, error) {
 	return file, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// validateDestructivePowerControllerPaths requires an existing marker and two new output paths in the same directory.
 func validateDestructivePowerControllerPaths(markerPath, proofPath, outputPath string) (string, string, string, error) {
 	marker, err := existingRegularAbsolutePath(markerPath)
 	if err != nil {
@@ -265,6 +280,7 @@ func validateDestructivePowerControllerPaths(markerPath, proofPath, outputPath s
 	return marker, proof, output, nil
 }
 
+// decodeOneStrictJSON decodes exactly one JSON value while rejecting unknown fields and trailing content.
 func decodeOneStrictJSON(raw []byte, output any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -278,6 +294,7 @@ func decodeOneStrictJSON(raw []byte, output any) error {
 	return nil
 }
 
+// validateDestructivePowerMarkerForController checks that a trial marker matches the qualified build and expected power-test setup.
 func validateDestructivePowerMarkerForController(marker destructivePowerMarker, sourceRevision string) error {
 	if marker.SchemaVersion != destructivePowerMarkerSchema || marker.SourceRevision != sourceRevision || marker.BuildRevision != sourceRevision || marker.BuildModified || marker.GOOS != "linux" || marker.GOARCH == "" || !qualificationSafeName(marker.TrialID, 64) || !qualificationBoundaryAllowed(qualificationTrialPower, marker.Boundary) || !qualificationSafeName(marker.BootIDBefore, 64) || marker.StartedAt.IsZero() || marker.ReachedAt.Before(marker.StartedAt) || marker.OldCommitSequence != 1 || marker.NewCommitSequence != 2 || !qualificationHexDigest(marker.OldStateSHA256) || !qualificationHexDigest(marker.NewStateSHA256) || marker.OldStateSHA256 == marker.NewStateSHA256 || !validPowerDatabaseRelative(marker.DatabaseRelative, marker.TrialID) {
 		return errors.New("physical power controller marker is incomplete or differs from the clean qualified revision")
@@ -285,6 +302,7 @@ func validateDestructivePowerMarkerForController(marker destructivePowerMarker, 
 	return nil
 }
 
+// validateDestructivePowerAdapterExchange checks that a successful power-cycle response matches its request and hardware evidence.
 func validateDestructivePowerAdapterExchange(request destructivePowerAdapterRequest, response destructivePowerAdapterResponse) error {
 	hardwareEvidence, evidenceErr := base64.StdEncoding.Strict().DecodeString(response.HardwareEvidenceBase64)
 	if request.SchemaVersion != destructivePowerAdapterProtocolSchema || !anchorQualificationHex(request.ControllerRunID, 16) || !qualificationSafeName(request.TrialID, 64) || !qualificationPhysicalPowerMethod(request.Method) || !qualificationHexDigest(request.MarkerSHA256) || !qualificationSafeName(request.BootIDBefore, 64) || !qualificationHexDigest(request.TargetIdentitySHA256) || request.RequestedAt.IsZero() || response.SchemaVersion != destructivePowerAdapterProtocolSchema || response.ControllerRunID != request.ControllerRunID || response.TrialID != request.TrialID || response.Method != request.Method || !qualificationSafeName(response.OperationID, 128) || response.TargetIdentitySHA256 != request.TargetIdentitySHA256 || response.AcceptedAt.Before(request.RequestedAt) || response.PowerLostAt.Before(response.AcceptedAt) || !response.PowerRestoredAt.After(response.PowerLostAt) || evidenceErr != nil || len(hardwareEvidence) == 0 || len(hardwareEvidence) > 512<<10 || qualificationSHA256(hardwareEvidence) != response.HardwareEvidenceSHA256 || !response.Success {
@@ -293,6 +311,7 @@ func validateDestructivePowerAdapterExchange(request destructivePowerAdapterRequ
 	return nil
 }
 
+// validateDestructivePowerControllerProof checks the controller build, timing, marker binding, and adapter exchange.
 func validateDestructivePowerControllerProof(proof destructivePowerControllerProof, marker destructivePowerMarker, markerRaw []byte) error {
 	if proof.SchemaVersion != destructivePowerControllerProofSchema || !validDurabilitySourceRevision(proof.SourceRevision) || proof.BuildRevision != proof.SourceRevision || proof.BuildModified || proof.GOOS == "" || proof.GOARCH == "" || proof.GoVersion == "" || !qualificationHexDigest(proof.AdapterSHA256) || !qualificationHexDigest(proof.AdapterStderrSHA256) || proof.StartedAt.IsZero() || !proof.FinishedAt.After(proof.StartedAt) || proof.Request.TrialID != marker.TrialID || proof.Request.MarkerSHA256 != qualificationSHA256(markerRaw) || proof.Request.BootIDBefore != marker.BootIDBefore || proof.StartedAt != proof.Request.RequestedAt || proof.FinishedAt.Before(proof.Response.PowerRestoredAt) {
 		return errors.New("physical power controller proof identity, build, timing or marker binding is invalid")
@@ -300,6 +319,7 @@ func validateDestructivePowerControllerProof(proof destructivePowerControllerPro
 	return validateDestructivePowerAdapterExchange(proof.Request, proof.Response)
 }
 
+// signDestructivePowerControllerEvent signs the event with an Ed25519 key and a controller-specific prefix.
 func signDestructivePowerControllerEvent(event *destructivePowerControllerEvent, privateKey ed25519.PrivateKey) error {
 	event.Signature = ""
 	payload, err := json.Marshal(event)
@@ -311,6 +331,7 @@ func signDestructivePowerControllerEvent(event *destructivePowerControllerEvent,
 	return nil
 }
 
+// verifyDestructivePhysicalPowerEvidence verifies the trusted signature and agreement between the event, proof, and marker.
 func verifyDestructivePhysicalPowerEvidence(proofRaw []byte, event destructivePowerControllerEvent, markerRaw []byte, publicKey ed25519.PublicKey) error {
 	if event.SchemaVersion != destructivePhysicalPowerEventSchema || !qualificationPhysicalPowerMethod(event.Method) || !anchorQualificationHex(event.ControllerRunID, 16) || len(publicKey) != ed25519.PublicKeySize || qualificationSHA256(proofRaw) != event.ControllerProofSHA256 || event.MarkerSHA256 != qualificationSHA256(markerRaw) {
 		return errors.New("physical power controller event is incomplete or not bound to its proof and marker")
@@ -350,6 +371,7 @@ func verifyDestructivePhysicalPowerEvidence(proofRaw []byte, event destructivePo
 	return nil
 }
 
+// qualificationPhysicalPowerMethod reports whether a method is an accepted physical power-cycle mechanism.
 func qualificationPhysicalPowerMethod(value string) bool {
 	switch value {
 	case "hypervisor-hard-reset", "ipmi-chassis-power-cycle", "pdu-power-cycle", "redfish-computer-system-power-cycle":

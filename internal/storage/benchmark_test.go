@@ -7,8 +7,10 @@ import (
 	"testing"
 )
 
+// benchmarkScanBytes retains scan output so benchmark work remains observable.
 var benchmarkScanBytes int
 
+// BenchmarkTreeBuildOneThousand measures building and encoding a tree with one thousand entries.
 func BenchmarkTreeBuildOneThousand(b *testing.B) {
 	for iteration := 0; iteration < b.N; iteration++ {
 		tx := &WriteTxn{file: &File{nextPage: 2}, generation: 2, sequence: 1, nextPage: 2, byID: make(map[uint64][]byte)}
@@ -28,6 +30,7 @@ func BenchmarkTreeBuildOneThousand(b *testing.B) {
 	}
 }
 
+// BenchmarkDocumentPointReadTenThousand measures individual document reads from a collection of ten thousand documents.
 func BenchmarkDocumentPointReadTenThousand(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "point-read.meld2")
 	file, _, err := Open(path)
@@ -56,6 +59,7 @@ func BenchmarkDocumentPointReadTenThousand(b *testing.B) {
 	}
 }
 
+// BenchmarkCommitReplayOneChange measures reading commit batches from a history of one-change commits.
 func BenchmarkCommitReplayOneChange(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "replay.meld2")
 	file, _, err := Open(path)
@@ -90,18 +94,17 @@ func BenchmarkCommitReplayOneChange(b *testing.B) {
 	}
 }
 
-// BenchmarkDocumentTransactionGroupTwo is compared with the sequential form
-// on the same target volume when evaluating the CommitCoordinator. Both retain
-// two logical CommitBatch records; only the group publishes one physical Meta
-// generation and therefore one pair of persistence barriers.
+// BenchmarkDocumentTransactionGroupTwo measures two document transactions published as one group.
 func BenchmarkDocumentTransactionGroupTwo(b *testing.B) {
 	benchmarkDocumentTransactionPair(b, true)
 }
 
+// BenchmarkDocumentTransactionSequentialTwo measures two document transactions published separately.
 func BenchmarkDocumentTransactionSequentialTwo(b *testing.B) {
 	benchmarkDocumentTransactionPair(b, false)
 }
 
+// benchmarkDocumentTransactionPair measures repeated pairs of inserts using grouped or separate commits.
 func benchmarkDocumentTransactionPair(b *testing.B, grouped bool) {
 	b.Helper()
 	path := filepath.Join(b.TempDir(), "transaction-pair.meld2")
@@ -135,6 +138,7 @@ func benchmarkDocumentTransactionPair(b *testing.B, grouped bool) {
 	}
 }
 
+// BenchmarkHistoricalSnapshotOpen measures opening a historical snapshot and reading its collection metadata.
 func BenchmarkHistoricalSnapshotOpen(b *testing.B) {
 	file := benchmarkCommitHistory(b, 100)
 	defer file.Close()
@@ -154,6 +158,7 @@ func BenchmarkHistoricalSnapshotOpen(b *testing.B) {
 	}
 }
 
+// BenchmarkLiveResolveOneChange measures resolving before and after values for a live commit change.
 func BenchmarkLiveResolveOneChange(b *testing.B) {
 	file := benchmarkCommitHistory(b, 100)
 	defer file.Close()
@@ -177,6 +182,7 @@ func BenchmarkLiveResolveOneChange(b *testing.B) {
 	}
 }
 
+// benchmarkCommitHistory creates an open database with a requested number of one-document revisions.
 func benchmarkCommitHistory(b *testing.B, count int) *File {
 	b.Helper()
 	path := filepath.Join(b.TempDir(), "history.meld2")
@@ -201,6 +207,7 @@ func benchmarkCommitHistory(b *testing.B, count int) *File {
 	return file
 }
 
+// BenchmarkTreeScanTenThousand compares materialized and streaming scans of ten thousand cached tree entries.
 func BenchmarkTreeScanTenThousand(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "scan.meld2")
 	file, _, err := Open(path)
@@ -261,6 +268,7 @@ func BenchmarkTreeScanTenThousand(b *testing.B) {
 	})
 }
 
+// benchmarkDocumentID creates a nonzero repeatable identifier from a benchmark index.
 func benchmarkDocumentID(index int) [16]byte {
 	index++
 	return [16]byte{byte(index >> 24), byte(index >> 16), byte(index >> 8), byte(index)}

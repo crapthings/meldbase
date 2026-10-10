@@ -5,8 +5,9 @@ import (
 	"time"
 )
 
-// ServerStats is a fixed-cardinality process-session snapshot. It deliberately
-// contains no method, actor, workspace, argument, result or error text.
+// ServerStats reports aggregate server activity during the current process session.
+//
+// It contains no method, actor, workspace, argument, result, or error text.
 type ServerStats struct {
 	CapturedAt                time.Time      `json:"capturedAt"`
 	StartedAt                 time.Time      `json:"startedAt"`
@@ -39,6 +40,7 @@ type ServerStats struct {
 	Worker                    WorkerHubStats `json:"worker"`
 }
 
+// serverMetrics stores atomic counters for connections, RPC execution, and HTTP security rejections.
 type serverMetrics struct {
 	activeConnections, connectionsAccepted              atomic.Uint64
 	realtimeOutboundOverflows                           atomic.Uint64
@@ -56,8 +58,10 @@ type serverMetrics struct {
 	httpUnauthenticated, httpForbidden, httpRateLimited atomic.Uint64
 }
 
+// rpcMetricSpan records when an admitted RPC began execution.
 type rpcMetricSpan struct{ started time.Time }
 
+// Stats captures server activity counters and statistics from a configured worker hub.
 func (h *Handler) Stats() ServerStats {
 	now := time.Now()
 	if h == nil {
@@ -91,12 +95,14 @@ func (h *Handler) Stats() ServerStats {
 	}
 }
 
+// beginRPC records an active RPC and its request size and starts its duration measurement.
 func (h *Handler) beginRPC(requestBytes int) rpcMetricSpan {
 	h.metrics.rpcActive.Add(1)
 	h.metrics.rpcRequestBytes.Add(uint64(requestBytes))
 	return rpcMetricSpan{started: time.Now()}
 }
 
+// finishRPC records an RPC's duration, outcome, and successful result size.
 func (h *Handler) finishRPC(span rpcMetricSpan, outcome string, resultBytes int) {
 	h.metrics.rpcActive.Add(^uint64(0))
 	elapsed := uint64(time.Since(span.started))
@@ -113,6 +119,7 @@ func (h *Handler) finishRPC(span rpcMetricSpan, outcome string, resultBytes int)
 	}
 }
 
+// updateServerAtomicMax raises an atomic counter only when the supplied value exceeds its current value.
 func updateServerAtomicMax(target *atomic.Uint64, value uint64) {
 	for current := target.Load(); value > current; current = target.Load() {
 		if target.CompareAndSwap(current, value) {

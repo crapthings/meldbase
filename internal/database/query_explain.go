@@ -1,11 +1,15 @@
 package database
 
 const (
-	explainBudgetPressurePercent             = 80
-	explainCompoundAdviceMinDocuments  int64 = 32
-	explainCompoundAdviceAmplification       = 4
+	// explainBudgetPressurePercent sets the budget usage percentage that triggers advice.
+	explainBudgetPressurePercent = 80
+	// explainCompoundAdviceMinDocuments sets the minimum document work for compound index advice.
+	explainCompoundAdviceMinDocuments int64 = 32
+	// explainCompoundAdviceAmplification sets the examined-to-retained ratio that triggers compound index advice.
+	explainCompoundAdviceAmplification = 4
 )
 
+// explainCollectionPlan describes a collection scan and its early stopping conditions.
 func explainCollectionPlan(query QuerySpec, access queryAccessPlan) ExplainResult {
 	explain := ExplainResult{
 		Stage:           "COLLSCAN",
@@ -19,6 +23,7 @@ func explainCollectionPlan(query QuerySpec, access queryAccessPlan) ExplainResul
 	return explain
 }
 
+// configureCollectionEarlyStop records whether a collection scan can stop after its result window is filled.
 func configureCollectionEarlyStop(explain *ExplainResult, query QuerySpec) {
 	if explain == nil {
 		return
@@ -43,6 +48,7 @@ func configureCollectionEarlyStop(explain *ExplainResult, query QuerySpec) {
 	explain.EarlyStopReason = "collection_insertion_order"
 }
 
+// configureMemoryAccessEarlyStop records whether in-memory index access preserves an order that permits early stopping.
 func configureMemoryAccessEarlyStop(explain *ExplainResult, access queryAccessPlan, query QuerySpec) {
 	if configureCommonAccessEarlyStop(explain, query) {
 		return
@@ -63,6 +69,7 @@ func configureMemoryAccessEarlyStop(explain *ExplainResult, access queryAccessPl
 	explain.EarlyStopReason = "candidate_position_order"
 }
 
+// configureStorageAccessEarlyStop records how stored index access can stop early or why it must continue.
 func configureStorageAccessEarlyStop(explain *ExplainResult, access queryAccessPlan, query QuerySpec) {
 	if configureCommonAccessEarlyStop(explain, query) {
 		return
@@ -106,6 +113,7 @@ func configureStorageAccessEarlyStop(explain *ExplainResult, access queryAccessP
 	}
 }
 
+// configureCommonAccessEarlyStop handles shared early stopping rules and reports whether further access checks are unnecessary.
 func configureCommonAccessEarlyStop(explain *ExplainResult, query QuerySpec) bool {
 	if explain == nil {
 		return true
@@ -132,6 +140,7 @@ func configureCommonAccessEarlyStop(explain *ExplainResult, query QuerySpec) boo
 	return false
 }
 
+// observeExplainKey counts an examined key for the whole query and its access source.
 func observeExplainKey(explain *ExplainResult, source int) {
 	if explain == nil {
 		return
@@ -142,11 +151,13 @@ func observeExplainKey(explain *ExplainResult, source int) {
 	}
 }
 
+// observeExplainCandidate counts a candidate document ID and whether it duplicates an earlier candidate.
 func observeExplainCandidate(explain *ExplainResult, source int, duplicate bool) {
 	observeExplainCandidateID(explain, source)
 	observeExplainCandidateDedup(explain, source, duplicate)
 }
 
+// observeExplainCandidateID counts a candidate ID for the whole query and its access source.
 func observeExplainCandidateID(explain *ExplainResult, source int) {
 	if explain == nil {
 		return
@@ -157,6 +168,7 @@ func observeExplainCandidateID(explain *ExplainResult, source int) {
 	}
 }
 
+// observeExplainCandidateDedup counts a candidate as unique or duplicated for the query and its access source.
 func observeExplainCandidateDedup(explain *ExplainResult, source int, duplicate bool) {
 	if explain == nil {
 		return
@@ -174,6 +186,7 @@ func observeExplainCandidateDedup(explain *ExplainResult, source int, duplicate 
 	}
 }
 
+// observeExplainDocument counts an examined document for the query and its access source.
 func observeExplainDocument(explain *ExplainResult, source int) {
 	if explain == nil {
 		return
@@ -184,6 +197,7 @@ func observeExplainDocument(explain *ExplainResult, source int) {
 	}
 }
 
+// explainBudgetSnapshot copies query resource usage and limits into an explanation.
 func explainBudgetSnapshot(budget *queryBudget) ExplainBudget {
 	if budget == nil {
 		return ExplainBudget{}
@@ -201,6 +215,7 @@ func explainBudgetSnapshot(budget *queryBudget) ExplainBudget {
 	return result
 }
 
+// highestBudgetPressure identifies the most heavily used budget that has crossed the warning threshold.
 func highestBudgetPressure(budget ExplainBudget) string {
 	type usage struct {
 		name        string
@@ -229,6 +244,7 @@ func highestBudgetPressure(budget ExplainBudget) string {
 	return bestName
 }
 
+// finalizeExplainAdvice adds query improvement suggestions based on the plan and measured work.
 func finalizeExplainAdvice(query QuerySpec, explain ExplainResult) ExplainResult {
 	if len(explain.UnindexedPaths) > 0 {
 		explain.Advice = append(explain.Advice, ExplainAdvice{
@@ -259,6 +275,7 @@ func finalizeExplainAdvice(query QuerySpec, explain ExplainResult) ExplainResult
 	return explain
 }
 
+// hasResidualAmplification checks whether enough documents were examined with few candidates retained.
 func hasResidualAmplification(explain ExplainResult, factor uint64) bool {
 	if explain.DocumentsExamined < explainCompoundAdviceMinDocuments {
 		return false
@@ -270,6 +287,7 @@ func hasResidualAmplification(explain ExplainResult, factor uint64) bool {
 	return examined/explain.CandidatesRetained >= factor
 }
 
+// quarterRoundedUp divides a nonnegative count by four and rounds upward.
 func quarterRoundedUp(value int64) int64 {
 	result := value / 4
 	if value%4 != 0 {
@@ -278,6 +296,7 @@ func quarterRoundedUp(value int64) int64 {
 	return result
 }
 
+// explainSourceSpanCount totals the index spans across access sources.
 func explainSourceSpanCount(sources []ExplainAccessSource) int {
 	total := 0
 	for _, source := range sources {

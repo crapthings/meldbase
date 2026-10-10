@@ -5,17 +5,16 @@ import (
 	"sort"
 )
 
-// IndexCatalogEntry is an immutable operator-facing description of one
-// published index. It contains no document keys, values, or cardinalities.
-// Index management remains a deployment concern; this is intentionally a
-// read-only catalog for CLIs and protected operator surfaces.
+// IndexCatalogEntry describes a published index without exposing document data.
+//
+// Index management remains a deployment concern; this catalog supports CLIs
+// and protected operator views.
 type IndexCatalogEntry struct {
 	Collection string
 	Definition IndexDefinition
 }
 
-// IndexCatalog returns every published index in canonical collection/name
-// order. The returned definitions and field slices are independent copies.
+// IndexCatalog returns copied index definitions sorted by collection and index name.
 func (db *DB) IndexCatalog(ctx context.Context) ([]IndexCatalogEntry, error) {
 	if err := contextError(ctx); err != nil {
 		return nil, err

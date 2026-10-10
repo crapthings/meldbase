@@ -11,22 +11,30 @@ import (
 )
 
 const (
+	// defaultRenewRequestTimeout limits how long a renewal request can take.
 	defaultRenewRequestTimeout = 2 * time.Second
-	defaultRenewRetryInterval  = 500 * time.Millisecond
-	minimumRenewInterval       = 50 * time.Millisecond
-	maximumRenewInterval       = time.Minute
+	// defaultRenewRetryInterval sets the wait after a failed renewal.
+	defaultRenewRetryInterval = 500 * time.Millisecond
+	// minimumRenewInterval sets the shortest allowed timeout or retry wait.
+	minimumRenewInterval = 50 * time.Millisecond
+	// maximumRenewInterval sets the longest allowed timeout or retry wait.
+	maximumRenewInterval = time.Minute
 )
 
+// ErrRenewalConfiguration reports missing dependencies or invalid renewal settings.
 var ErrRenewalConfiguration = errors.New("meldbase primary lease: invalid renewal agent configuration")
 
-// RenewalClient is the narrow control-plane dependency used by Renewer. The
-// supplied authorityhttp.Client implements it. Owner authentication stays in
+// RenewalClient requests a controller write lease for a database position.
+//
+// authorityhttp.Client implements it. Owner authentication stays in
 // that transport and is never an argument to a renewal request.
 type RenewalClient interface {
 	Grant(context.Context, [16]byte, uint64) (Grant, error)
 }
 
-// RenewerOptions configures a single-primary renewal agent. DB must be the
+// RenewerOptions sets the database, write guard, controller client, and renewal timing.
+//
+// DB must be the
 // same database that was opened with Guard as its PrimaryWriteFence. The
 // API cannot infer that pointer equality across the Meldbase boundary, so this
 // deployment wiring is explicit and checked at least for a configured fence.
@@ -45,7 +53,9 @@ type RenewerOptions struct {
 	Clock           func() time.Time
 }
 
-// Renewer performs controller I/O outside the database writer. It is not a
+// Renewer keeps a primary's write lease current without holding the database writer during controller requests.
+//
+// It is not a
 // leader-election, replication-ack or promotion mechanism: its commit
 // sequence snapshot is a controller checkpoint and cannot establish follower
 // completeness after a source failure.
@@ -61,6 +71,7 @@ type Renewer struct {
 	metrics         renewerMetrics
 }
 
+// renewerMetrics tracks renewal outcomes and whether the renewal loop is running.
 type renewerMetrics struct {
 	attempts            atomic.Uint64
 	succeeded           atomic.Uint64
@@ -70,7 +81,8 @@ type renewerMetrics struct {
 	running             atomic.Bool
 }
 
-// RenewerStats is a fixed-cardinality, identity-free supervisor snapshot.
+// RenewerStats reports renewal outcomes and whether the renewal loop is running.
+//
 // It intentionally contains no certificate, endpoint, owner or database ID.
 type RenewerStats struct {
 	Attempts            uint64
@@ -81,6 +93,7 @@ type RenewerStats struct {
 	Running             bool
 }
 
+// NewRenewer creates a lease renewer after checking its dependencies and timing settings.
 func NewRenewer(options RenewerOptions) (*Renewer, error) {
 	if options.DB == nil || options.Guard == nil || options.Client == nil {
 		return nil, ErrRenewalConfiguration
@@ -109,9 +122,9 @@ func NewRenewer(options RenewerOptions) (*Renewer, error) {
 	return &Renewer{db: options.DB, guard: options.Guard, client: options.Client, requestTimeout: timeout, retryInterval: retry, keepLeaseOnStop: options.KeepLeaseOnStop, now: now}, nil
 }
 
-// Renew takes one current DB token snapshot, obtains a fresh controller
-// certificate and installs it locally. The database writer is never held while
-// client.Grant is in progress. A failed request leaves an existing lease in
+// Renew installs a fresh write lease from the controller for the current database position.
+//
+// The database writer is never held while client.Grant is in progress. A failed request leaves an existing lease in
 // place until its normal local expiry; it does not extend authority and does
 // not silently reopen an initially closed guard.
 func (renewer *Renewer) Renew(ctx context.Context) error {
@@ -142,7 +155,9 @@ func (renewer *Renewer) Renew(ctx context.Context) error {
 	return nil
 }
 
-// Run renews immediately, then schedules the next request at one third of the
+// Run keeps the local write lease renewed until the context ends.
+//
+// It renews immediately, then schedules the next request at one third of the
 // current certificate duration before expiry. It retries failures at the
 // bounded RetryInterval. On context completion it revokes the local guard by
 // default, making deliberate supervisor shutdown fail closed immediately.
@@ -175,6 +190,7 @@ func (renewer *Renewer) Run(ctx context.Context) error {
 	}
 }
 
+// nextDelay schedules renewal before lease expiry or uses the retry wait when necessary.
 func (renewer *Renewer) nextDelay() time.Duration {
 	status := renewer.guard.LeaseStatus()
 	if !status.Installed {
@@ -192,6 +208,7 @@ func (renewer *Renewer) nextDelay() time.Duration {
 	return delay
 }
 
+// waitRenew waits for the next renewal or returns when the context ends.
 func waitRenew(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {
 		delay = minimumRenewInterval
@@ -206,6 +223,7 @@ func waitRenew(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+// recordFailure counts a failed renewal and records whether certificate installation failed.
 func (renewer *Renewer) recordFailure(install bool) {
 	renewer.metrics.failed.Add(1)
 	if install {
@@ -214,7 +232,9 @@ func (renewer *Renewer) recordFailure(install bool) {
 	renewer.metrics.consecutiveFailures.Add(1)
 }
 
-// Stats returns an O(1), identity-free aggregate snapshot. It is designed for
+// Stats returns an O(1), identity-free aggregate snapshot.
+//
+// It is designed for
 // an external sampler rather than calls from the database write path.
 func (renewer *Renewer) Stats() RenewerStats {
 	if renewer == nil {

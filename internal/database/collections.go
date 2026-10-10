@@ -9,9 +9,10 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// CreateCollection creates an empty durable collection. CRUD operations still
-// create collections implicitly; this explicit form exists for schema tools
-// that must preserve an otherwise-empty collection, such as logical import.
+// CreateCollection creates an empty collection in a durable database.
+//
+// CRUD also creates collections implicitly; this method lets tools such as
+// logical import preserve collections that contain no documents.
 func (db *DB) CreateCollection(ctx context.Context, name string) error {
 	if err := contextError(ctx); err != nil {
 		return err

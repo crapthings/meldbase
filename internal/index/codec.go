@@ -9,14 +9,16 @@ import (
 	"math"
 )
 
+// treeMagic identifies the serialized tree format.
 var treeMagic = [8]byte{'M', 'E', 'L', 'D', 'B', 'T', 'R', '1'}
 
+// ErrCorrupt reports malformed or inconsistent tree data.
 var ErrCorrupt = errors.New("meldbase index: corrupt tree")
 
+// noNode marks an absent node link in serialized data.
 const noNode = math.MaxUint32
 
-// MarshalBinary persists the actual node topology. It does not flatten the
-// tree to entries and rebuild it on open.
+// MarshalBinary encodes the tree while preserving its node structure.
 func (t *Tree) MarshalBinary() ([]byte, error) {
 	if t == nil || t.root == nil || t.maxKeys < 3 {
 		return nil, ErrCorrupt
@@ -110,6 +112,7 @@ func (t *Tree) MarshalBinary() ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
+// Decode reconstructs and validates a tree from its binary representation.
 func Decode(data []byte) (*Tree, error) {
 	reader := bytes.NewReader(data)
 	magic := make([]byte, 8)
@@ -203,16 +206,8 @@ func Decode(data []byte) (*Tree, error) {
 	if reader.Len() != 0 {
 		return nil, ErrCorrupt
 	}
-	for index, current := range nodes {
-		for _, childID := range childIDs[index] {
-			current.children = append(current.children, nodes[childID])
-		}
-		if nextIDs[index] != noNode {
-			current.next = nodes[nextIDs[index]]
-			if !current.leaf || !current.next.leaf {
-				return nil, ErrCorrupt
-			}
-		}
+	if err := linkDecodedNodes(nodes, childIDs, nextIDs); err != nil {
+		return nil, err
 	}
 	tree := &Tree{root: nodes[rootID], maxKeys: int(maxKeys), size: int(size)}
 	if err := validateDecodedTree(tree, nodes); err != nil {
@@ -221,6 +216,23 @@ func Decode(data []byte) (*Tree, error) {
 	return tree, nil
 }
 
+// linkDecodedNodes resolves validated node IDs into child and leaf-next links.
+func linkDecodedNodes(nodes []*node, childIDs [][]uint32, nextIDs []uint32) error {
+	for index, current := range nodes {
+		for _, childID := range childIDs[index] {
+			current.children = append(current.children, nodes[childID])
+		}
+		if nextIDs[index] != noNode {
+			current.next = nodes[nextIDs[index]]
+			if !current.leaf || !current.next.leaf {
+				return ErrCorrupt
+			}
+		}
+	}
+	return nil
+}
+
+// validateDecodedTree checks reachability, balance, separators, leaf links, and pair counts.
 func validateDecodedTree(tree *Tree, all []*node) error {
 	visiting, visited := map[*node]bool{}, map[*node]bool{}
 	leaves := []*node{}
@@ -271,6 +283,7 @@ func validateDecodedTree(tree *Tree, all []*node) error {
 	return nil
 }
 
+// decodedMinKey finds a subtree's first key while rejecting cycles and empty branches.
 func decodedMinKey(current *node) ([]byte, bool) {
 	seen := map[*node]struct{}{}
 	for current != nil && !current.leaf {
@@ -286,6 +299,7 @@ func decodedMinKey(current *node) ([]byte, bool) {
 	return current.keys[0], true
 }
 
+// writeBytes writes a bounded byte slice preceded by its 32-bit length.
 func writeBytes(buffer *bytes.Buffer, value []byte) error {
 	if len(value) > 64<<20 {
 		return fmt.Errorf("%w: value too large", ErrCorrupt)
@@ -295,6 +309,7 @@ func writeBytes(buffer *bytes.Buffer, value []byte) error {
 	return nil
 }
 
+// readBytes reads length-prefixed bytes within the size limit and remaining input.
 func readBytes(reader *bytes.Reader) ([]byte, error) {
 	length, err := read32(reader)
 	if err != nil || length > 64<<20 || uint64(length) > uint64(reader.Len()) {
@@ -307,25 +322,36 @@ func readBytes(reader *bytes.Reader) ([]byte, error) {
 	return value, nil
 }
 
+// write16 writes an unsigned 16-bit integer in little-endian order.
 func write16(buffer *bytes.Buffer, value uint16) {
 	_ = binary.Write(buffer, binary.LittleEndian, value)
 }
+
+// write32 writes an unsigned 32-bit integer in little-endian order.
 func write32(buffer *bytes.Buffer, value uint32) {
 	_ = binary.Write(buffer, binary.LittleEndian, value)
 }
+
+// write64 writes an unsigned 64-bit integer in little-endian order.
 func write64(buffer *bytes.Buffer, value uint64) {
 	_ = binary.Write(buffer, binary.LittleEndian, value)
 }
+
+// read16 reads an unsigned 16-bit integer in little-endian order.
 func read16(reader *bytes.Reader) (uint16, error) {
 	var v uint16
 	err := binary.Read(reader, binary.LittleEndian, &v)
 	return v, err
 }
+
+// read32 reads an unsigned 32-bit integer in little-endian order.
 func read32(reader *bytes.Reader) (uint32, error) {
 	var v uint32
 	err := binary.Read(reader, binary.LittleEndian, &v)
 	return v, err
 }
+
+// read64 reads an unsigned 64-bit integer in little-endian order.
 func read64(reader *bytes.Reader) (uint64, error) {
 	var v uint64
 	err := binary.Read(reader, binary.LittleEndian, &v)

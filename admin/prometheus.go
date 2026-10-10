@@ -8,14 +8,18 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// PrometheusContentType identifies the supported Prometheus text response format.
 const PrometheusContentType = "text/plain; version=0.0.4; charset=utf-8"
 
+// prometheusInitialCapacity sets the initial output buffer size for a metrics scrape.
+//
 // The fixed schema currently renders below this size even with the optional
 // transport families. Pre-growing once avoids a late buffer growth and copy
 // on every scrape. Keep BenchmarkMarshalPrometheus's output-B metric and tests
 // visible when adding families so this remains an optimization, never a limit.
 const prometheusInitialCapacity = 48 << 10
 
+// prometheusSample holds fixed labels and a numeric or preformatted metric value.
 type prometheusSample struct {
 	labels  string
 	value   string
@@ -23,8 +27,9 @@ type prometheusSample struct {
 	numeric bool
 }
 
-// MarshalPrometheus renders one sampled database state using the Prometheus
-// text exposition format 0.0.4. It emits only fixed metric names and fixed-enum
+// MarshalPrometheus converts a database sample into Prometheus text metrics.
+//
+// It uses text exposition format 0.0.4 and emits only fixed metric names and fixed-enum
 // labels; no application-controlled string can enter the output.
 func MarshalPrometheus(sample Sample) []byte {
 	stats := sample.Stats
@@ -300,6 +305,7 @@ func MarshalPrometheus(sample Sample) []byte {
 	return output.Bytes()
 }
 
+// healthPrometheusSamples converts available component health levels into labeled numeric values.
 func healthPrometheusSamples(health HealthStatus) []prometheusSample {
 	components := []struct {
 		name  string
@@ -318,6 +324,7 @@ func healthPrometheusSamples(health HealthStatus) []prometheusSample {
 	return result
 }
 
+// writePrometheusCache renders capacity, residency, and activity metrics for one cache kind.
 func writePrometheusCache(output *bytes.Buffer, kind, capacitySuffix, residentSuffix string, capacity, resident, hits, misses, evictions uint64) {
 	prefix := "meldbase_" + kind + "_cache_"
 	writePrometheusFamily(output, prefix+capacitySuffix, "Configured "+kind+" cache capacity.", "gauge", gaugeUint(capacity))
@@ -327,6 +334,7 @@ func writePrometheusCache(output *bytes.Buffer, kind, capacitySuffix, residentSu
 	writePrometheusFamily(output, prefix+"evictions_total", kindTitle(kind)+" cache evictions.", "counter", counterUint(evictions))
 }
 
+// writePrometheusFamily renders metric help, type, and sample lines.
 func writePrometheusFamily(output *bytes.Buffer, name, help, metricType string, samples ...prometheusSample) {
 	output.WriteString("# HELP ")
 	output.WriteString(name)
@@ -352,15 +360,20 @@ func writePrometheusFamily(output *bytes.Buffer, name, help, metricType string, 
 	}
 }
 
+// counterUint creates a sample from an unsigned counter value.
 func counterUint(value uint64) prometheusSample {
 	return prometheusSample{number: value, numeric: true}
 }
+
+// gaugeUint creates a sample from an unsigned gauge value.
 func gaugeUint(value uint64) prometheusSample { return prometheusSample{number: value, numeric: true} }
 
+// labeledUint creates an unsigned sample with the supplied fixed labels.
 func labeledUint(labels string, value uint64) prometheusSample {
 	return prometheusSample{labels: labels, number: value, numeric: true}
 }
 
+// gaugeBool creates a gauge sample with one for true and zero for false.
 func gaugeBool(value bool) prometheusSample {
 	if value {
 		return prometheusSample{number: 1, numeric: true}
@@ -368,18 +381,22 @@ func gaugeBool(value bool) prometheusSample {
 	return prometheusSample{numeric: true}
 }
 
+// counterNanos formats a cumulative nanosecond count as seconds.
 func counterNanos(value uint64) prometheusSample {
 	return prometheusSample{value: strconv.FormatFloat(float64(value)/float64(time.Second), 'g', -1, 64)}
 }
 
+// gaugeDuration creates a gauge sample from a duration expressed in seconds.
 func gaugeDuration(value time.Duration) prometheusSample {
 	return prometheusSample{value: formatSeconds(value)}
 }
 
+// formatSeconds formats a duration as a compact decimal number of seconds.
 func formatSeconds(value time.Duration) string {
 	return strconv.FormatFloat(float64(value)/float64(time.Second), 'g', -1, 64)
 }
 
+// safeEngine reduces the sampled engine identity to a fixed memory or current label.
 func safeEngine(stats meldbase.DBStats) string {
 	switch stats.Storage.Engine {
 	case "current":
@@ -394,6 +411,7 @@ func safeEngine(stats meldbase.DBStats) string {
 	}
 }
 
+// kindTitle returns the display title for a page or document cache.
 func kindTitle(kind string) string {
 	if kind == "page" {
 		return "Page"

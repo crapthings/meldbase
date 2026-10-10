@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestDocumentCacheIsByteAndEntryBoundedAndVersionChecked checks that the document cache respects size limits, replaces changed versions, and records hits and evictions.
 func TestDocumentCacheIsByteAndEntryBoundedAndVersionChecked(t *testing.T) {
 	cache := newDocumentCache(2, 64*1024)
 	firstID, secondID, thirdID := DocumentID{1}, DocumentID{2}, DocumentID{3}
@@ -64,6 +65,7 @@ func TestDocumentCacheIsByteAndEntryBoundedAndVersionChecked(t *testing.T) {
 	}
 }
 
+// TestDocumentCacheConcurrentAccessRemainsBounded checks that concurrent cache reads and removals stay within entry and byte limits.
 func TestDocumentCacheConcurrentAccessRemainsBounded(t *testing.T) {
 	cache := newDocumentCache(8, 64*1024)
 	encoded := make([][]byte, 32)
@@ -100,6 +102,7 @@ func TestDocumentCacheConcurrentAccessRemainsBounded(t *testing.T) {
 	}
 }
 
+// TestOpenDocumentCacheNeverLeaksMutableOrStaleDocuments checks that cached reads return independent documents and reflect updates and deletions.
 func TestOpenDocumentCacheNeverLeaksMutableOrStaleDocuments(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "document-cache.meld2"))
 	if err != nil {

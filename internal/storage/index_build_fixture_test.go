@@ -16,11 +16,10 @@ import (
 	"time"
 )
 
+// indexBuildFixtureID identifies the failed shadow index build in the saved database.
 var indexBuildFixtureID = [16]byte{0xfb, 15: 1}
 
-// This fixture extends, rather than rewrites, the original revision-3 business
-// fixture. It pins the separately negotiated shadow-build graph introduced
-// after the base alpha fixture was checked in.
+// TestIndexBuildRevision3GoldenFixtureOpensAuditsAbortsAndAdvances checks that the saved index-build database can be verified, aborted, updated, and reopened.
 func TestIndexBuildRevision3GoldenFixtureOpensAuditsAbortsAndAdvances(t *testing.T) {
 	fixture := loadIndexBuildGoldenFixture(t)
 	compressed, err := base64.StdEncoding.DecodeString(fixture.GzipBase64)
@@ -98,6 +97,7 @@ func TestIndexBuildRevision3GoldenFixtureOpensAuditsAbortsAndAdvances(t *testing
 	}
 }
 
+// TestIndexBuildRevision3WriterMatchesGoldenFixture checks that current writes reproduce the saved database bytes and metadata.
 func TestIndexBuildRevision3WriterMatchesGoldenFixture(t *testing.T) {
 	fixture := loadIndexBuildGoldenFixture(t)
 	raw, meta := buildDeterministicIndexBuildFixture(t)
@@ -108,6 +108,7 @@ func TestIndexBuildRevision3WriterMatchesGoldenFixture(t *testing.T) {
 	}
 }
 
+// TestGenerateIndexBuildRevision3GoldenFixture prints a compressed database fixture when generation is explicitly enabled.
 func TestGenerateIndexBuildRevision3GoldenFixture(t *testing.T) {
 	if os.Getenv("MELDBASE_GENERATE_INDEX_BUILD_FIXTURE") != "1" {
 		t.Skip("fixture generation is an explicit maintainer action")
@@ -134,6 +135,7 @@ func TestGenerateIndexBuildRevision3GoldenFixture(t *testing.T) {
 	fmt.Println(string(encoded))
 }
 
+// buildDeterministicIndexBuildFixture adds a failed shadow index build to the business fixture using fixed identifiers and times.
 func buildDeterministicIndexBuildFixture(t *testing.T) ([]byte, Meta) {
 	t.Helper()
 	base, _ := buildDeterministicBusinessFixture(t)
@@ -181,6 +183,7 @@ func buildDeterministicIndexBuildFixture(t *testing.T) ([]byte, Meta) {
 	return raw, meta
 }
 
+// assertIndexBuildFixture checks the saved failed build and its two shadow index entries.
 func assertIndexBuildFixture(t *testing.T, file *File) {
 	t.Helper()
 	build, exists, err := file.IndexBuild(indexBuildFixtureID)
@@ -195,6 +198,7 @@ func assertIndexBuildFixture(t *testing.T, file *File) {
 	}
 }
 
+// assertIndexBuildFixturePageFamilies checks that the database covers business page types and an index-build catalog leaf.
 func assertIndexBuildFixturePageFamilies(t *testing.T, raw []byte) {
 	t.Helper()
 	assertBusinessFixturePageFamilies(t, raw)
@@ -211,6 +215,7 @@ func assertIndexBuildFixturePageFamilies(t *testing.T, raw []byte) {
 	}
 }
 
+// loadIndexBuildGoldenFixture reads the saved index-build database fixture from its JSON file.
 func loadIndexBuildGoldenFixture(t *testing.T) businessGoldenFixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "index-build-revision-3.json"))

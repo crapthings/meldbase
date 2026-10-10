@@ -8,6 +8,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestFreezeQueryPolicyOwnsMutableAuthorizerInputs checks that later changes to authorizer inputs cannot change a frozen query policy.
 func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
 	constraint, err := meldbase.CompileQuery(meldbase.Filter{"workspace": "mine"}, meldbase.QueryOptions{})
 	if err != nil {
@@ -50,6 +51,7 @@ func TestFreezeQueryPolicyOwnsMutableAuthorizerInputs(t *testing.T) {
 	}
 }
 
+// TestSeekPaginationRequiresSortFieldsInResultProjection checks that seek pagination requires permission to return its sorting fields.
 func TestSeekPaginationRequiresSortFieldsInResultProjection(t *testing.T) {
 	query, err := meldbase.DecodeQuerySpecJSON([]byte(`{"version":1,"where":{"op":"true"},"sort":[{"path":"rank","direction":1}],"limit":2,"seek":true}`), meldbase.DefaultQueryLimits)
 	if err != nil {
@@ -65,6 +67,7 @@ func TestSeekPaginationRequiresSortFieldsInResultProjection(t *testing.T) {
 	}
 }
 
+// TestQueryPolicySeparatesFilterOperatorsFromSortPaths checks that filter operators and sorting fields follow independent permissions.
 func TestQueryPolicySeparatesFilterOperatorsFromSortPaths(t *testing.T) {
 	policy := QueryPolicy{
 		PolicyVersion: "policy-v1", MaxResults: 10,
@@ -102,6 +105,7 @@ func TestQueryPolicySeparatesFilterOperatorsFromSortPaths(t *testing.T) {
 	}
 }
 
+// TestProjectFieldsSupportsNestedAllowedPaths checks that nested projection returns the allowed field without its private sibling.
 func TestProjectFieldsSupportsNestedAllowedPaths(t *testing.T) {
 	projected := projectFields(meldbase.Document{"_id": meldbase.ID(meldbase.DocumentID{1}), "profile": meldbase.Object(meldbase.Document{"city": meldbase.String("Shanghai"), "secret": meldbase.String("hidden")})}, false, map[string]struct{}{"profile.city": {}})
 	profile, ok := projected["profile"].ObjectValue()
@@ -110,6 +114,7 @@ func TestProjectFieldsSupportsNestedAllowedPaths(t *testing.T) {
 	}
 }
 
+// TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases checks that combined policies narrow permissions and stop authorizing after the additional lease is revoked.
 func TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases(t *testing.T) {
 	baseLease, _ := NewQueryPolicyLease("base-lease")
 	workerLease, _ := NewQueryPolicyLease("worker-lease")
@@ -153,6 +158,7 @@ func TestIntersectQueryPoliciesCanOnlyNarrowAndHonorsBothLeases(t *testing.T) {
 	}
 }
 
+// TestFreezeMutationPoliciesOwnMapsAndDocuments checks that later changes to input maps and documents cannot change frozen insertion and update rules.
 func TestFreezeMutationPoliciesOwnMapsAndDocuments(t *testing.T) {
 	input := map[string]struct{}{"title": {}}
 	result := map[string]struct{}{"title": {}}

@@ -9,13 +9,14 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// QueryReplaySource atomically reconstructs a query at afterToken and tails
-// later ordered revisions. Initial.Token must equal afterToken. Implementations
-// return ErrHistoryLost when retention can no longer satisfy that contract.
+// QueryReplaySource opens a historical query snapshot with an ordered stream of later changes.
+//
+// Initial.Token must equal afterToken; unavailable history returns ErrHistoryLost.
 type QueryReplaySource interface {
 	OpenQueryReplay(ctx context.Context, collection string, query QuerySpec, afterToken uint64, buffer int) (*QueryReplaySubscription, error)
 }
 
+// QueryReplaySubscription provides a historical query snapshot and its later changes.
 type QueryReplaySubscription struct {
 	Initial QuerySnapshot
 	Deltas  <-chan QueryDelta
@@ -25,6 +26,7 @@ type QueryReplaySubscription struct {
 	once    sync.Once
 }
 
+// Close cancels replay and waits for delivery to stop.
 func (subscription *QueryReplaySubscription) Close() {
 	if subscription != nil {
 		subscription.once.Do(func() {
@@ -38,9 +40,7 @@ func (subscription *QueryReplaySubscription) Close() {
 	}
 }
 
-// queryReplaySource backs the explicit alpha Open path. It remains internal
-// so callers depend on the transport-independent QueryReplaySource contract,
-// not Storage  implementation details.
+// queryReplaySource reconstructs and tails queries using retained storage commits.
 type queryReplaySource struct {
 	file            *storage.File
 	deliveryTimeout time.Duration
@@ -49,6 +49,7 @@ type queryReplaySource struct {
 	resourceLimits  ResourceLimits
 }
 
+// OpenQueryReplay starts a query at the requested token and streams its later changes.
 func (source *queryReplaySource) OpenQueryReplay(ctx context.Context, collection string, query QuerySpec, afterToken uint64, buffer int) (*QueryReplaySubscription, error) {
 	if source == nil || source.file == nil || buffer <= 0 || buffer > 1024 {
 		return nil, ErrCorrupt
@@ -129,9 +130,10 @@ func (source *queryReplaySource) OpenQueryReplay(ctx context.Context, collection
 	return subscription, nil
 }
 
-// deliver bounds a stalled replay consumer. The immediate send preserves the
-// normal zero-allocation path; only a full caller buffer allocates a timer.
-// Ending the stream releases its durable replay pin so retention can recover.
+// deliver sends a replay delta until delivery succeeds, times out, or is canceled.
+//
+// Only a full caller buffer allocates a timer; ending replay releases its
+// durable history pin.
 func (source *queryReplaySource) deliver(ctx context.Context, deltas chan<- QueryDelta, delta QueryDelta) bool {
 	select {
 	case <-ctx.Done():

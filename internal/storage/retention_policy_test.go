@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
+// sizedRetentionCommitBytes gives the encoded size of the fixed-size retention test commit.
 const sizedRetentionCommitBytes = uint64(commitHeaderBytes + 52 + len("items") + 100)
 
+// TestRetentionBytePruneAndBusinessCommitShareCrashBoundary checks that crash recovery keeps byte-based history pruning and the new commit in one generation.
 func TestRetentionBytePruneAndBusinessCommitShareCrashBoundary(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "retention-byte-crash-base.meld2")
 	options := OpenOptions{CommitRetentionMaxCommits: 100, CommitRetentionMaxBytes: 400}
@@ -72,6 +74,7 @@ func TestRetentionBytePruneAndBusinessCommitShareCrashBoundary(t *testing.T) {
 	}
 }
 
+// TestCommitRetentionByteBudgetAdvancesAndRebuildsOnOpen checks byte-based history pruning and reconstruction of retention statistics after reopening.
 func TestCommitRetentionByteBudgetAdvancesAndRebuildsOnOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "retention-bytes.meld2")
 	options := OpenOptions{CommitRetentionMaxCommits: 100, CommitRetentionMaxBytes: 400}
@@ -111,6 +114,7 @@ func TestCommitRetentionByteBudgetAdvancesAndRebuildsOnOpen(t *testing.T) {
 	}
 }
 
+// TestReplayPinWinsOverRetentionByteBudget checks that replay protection can exceed the byte budget until its stream and snapshot close.
 func TestReplayPinWinsOverRetentionByteBudget(t *testing.T) {
 	file, _, _, err := OpenWithOptions(filepath.Join(t.TempDir(), "retention-byte-pin.meld2"), OpenOptions{
 		CommitRetentionMaxCommits: 100, CommitRetentionMaxBytes: 400,
@@ -146,6 +150,7 @@ func TestReplayPinWinsOverRetentionByteBudget(t *testing.T) {
 	}
 }
 
+// TestRetentionPruneAndBusinessCommitShareCrashBoundary checks that crash recovery keeps count-based history pruning and the new commit in one generation.
 func TestRetentionPruneAndBusinessCommitShareCrashBoundary(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "retention-crash-base.meld2")
 	base, _, _, err := OpenWithOptions(basePath, OpenOptions{CommitRetentionMaxCommits: 2})
@@ -206,6 +211,7 @@ func TestRetentionPruneAndBusinessCommitShareCrashBoundary(t *testing.T) {
 	}
 }
 
+// TestCommitRetentionWindowAdvancesInsideBusinessPublication checks that normal commits advance the retained history window and preserve it after reopening.
 func TestCommitRetentionWindowAdvancesInsideBusinessPublication(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "retention-window.meld2")
 	file, _, _, err := OpenWithOptions(path, OpenOptions{CommitRetentionMaxCommits: 3})
@@ -244,6 +250,7 @@ func TestCommitRetentionWindowAdvancesInsideBusinessPublication(t *testing.T) {
 	}
 }
 
+// TestReplayPinWinsOverRetentionWindowAndPressureClears checks that replay protection delays pruning and retention pressure clears after release and another commit.
 func TestReplayPinWinsOverRetentionWindowAndPressureClears(t *testing.T) {
 	file, _, _, err := OpenWithOptions(filepath.Join(t.TempDir(), "retention-pin.meld2"), OpenOptions{CommitRetentionMaxCommits: 2})
 	if err != nil {
@@ -277,6 +284,7 @@ func TestReplayPinWinsOverRetentionWindowAndPressureClears(t *testing.T) {
 	}
 }
 
+// applyRetentionRevision applies a numbered document revision or fails the test.
 func applyRetentionRevision(t *testing.T, file *File, revision byte) {
 	t.Helper()
 	if err := applyRetentionRevisionError(file, revision); err != nil {
@@ -284,6 +292,7 @@ func applyRetentionRevision(t *testing.T, file *File, revision byte) {
 	}
 }
 
+// applyRetentionRevisionError inserts the first test revision or updates later revisions and returns the commit error.
 func applyRetentionRevisionError(file *File, revision byte) error {
 	operation := DocumentUpdate
 	if revision == 1 {
@@ -300,6 +309,7 @@ func applyRetentionRevisionError(file *File, revision byte) error {
 	return err
 }
 
+// applySizedRetentionCommit appends a fixed-size test commit or fails the test.
 func applySizedRetentionCommit(t *testing.T, file *File, sequence byte) {
 	t.Helper()
 	if err := applySizedRetentionCommitError(file, sequence); err != nil {
@@ -307,6 +317,7 @@ func applySizedRetentionCommit(t *testing.T, file *File, sequence byte) {
 	}
 }
 
+// applySizedRetentionCommitError appends a fixed-size catalog change using the configured history retention policy.
 func applySizedRetentionCommitError(file *File, sequence byte) error {
 	return file.Update(func(tx *WriteTxn) (DatabaseRoot, error) {
 		base := tx.BaseRoot()

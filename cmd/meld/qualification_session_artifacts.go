@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// qualificationSessionArtifactBinding holds the hashes linking a session plan, executable, journal, and receipts.
 type qualificationSessionArtifactBinding struct {
 	PlanSHA256       string
 	HeadEventSHA256  string
@@ -15,6 +16,7 @@ type qualificationSessionArtifactBinding struct {
 	ReceiptSHA256    []string
 }
 
+// verifyQualificationSessionArtifactJournal verifies that the secured session journal binds the planned campaign to its artifacts and receipts.
 func verifyQualificationSessionArtifactJournal(artifacts verifiedQualificationArtifactIndex, durability durabilityCheckResult,
 	environment qualificationEnvironmentEvidence, record qualificationDestructiveRecord) (qualificationSessionArtifactBinding, error) {
 	var binding qualificationSessionArtifactBinding
@@ -117,6 +119,7 @@ func verifyQualificationSessionArtifactJournal(artifacts verifiedQualificationAr
 	return binding, nil
 }
 
+// qualificationSessionArtifactReceiptTime reads a step receipt's start and finish times and checks power trial identity.
 func qualificationSessionArtifactReceiptTime(step qualificationSessionStep, path string) (time.Time, time.Time, error) {
 	switch step.Kind {
 	case "durability":

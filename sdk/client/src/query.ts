@@ -15,6 +15,7 @@ import {
 import { normalizePageSort, pageFilterAfter } from "./cursor.js";
 import { encodeQuerySpec, wireQueryByteLength } from "./wire.js";
 
+/** Lists the field operators accepted by the query compiler. */
 const fieldOperators = new Set([
   "$eq",
   "$ne",
@@ -32,6 +33,7 @@ const fieldOperators = new Set([
   "$not",
 ]);
 
+/** Configures query ordering, pagination, and validation limits. */
 export interface QueryOptions {
   readonly sort?: readonly SortField[];
   readonly skip?: number;
@@ -41,15 +43,17 @@ export interface QueryOptions {
   readonly limits?: Partial<QueryLimits>;
 }
 
-/** Options for selecting one document. Pagination is intentionally excluded. */
+/** Configures the sort order used to select one document. */
 export interface FindOneOptions {
   readonly sort?: readonly SortField[];
 }
 
+/** Combines default query limits with caller overrides in an immutable object. */
 function limitsWith(overrides?: Partial<QueryLimits>): QueryLimits {
   return Object.freeze({ ...DEFAULT_QUERY_LIMITS, ...overrides });
 }
 
+/** Validates a filter and query options and compiles them into a bounded query specification. */
 export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): QuerySpec {
   const limits = limitsWith(options.limits);
   if (options.limit !== undefined && options.first !== undefined)
@@ -245,6 +249,7 @@ export function compileQuery(filter: Filter = {}, options: QueryOptions = {}): Q
   return spec;
 }
 
+/** Checks whether a document satisfies a compiled query expression. */
 export function matches(document: import("./types.js").Document, expression: QueryExpr): boolean {
   switch (expression.op) {
     case "true":
@@ -306,6 +311,7 @@ export function matches(document: import("./types.js").Document, expression: Que
   }
 }
 
+/** Filters documents, sorts matching results stably, and applies pagination. */
 export function executeQuery<T extends import("./types.js").Document>(documents: Iterable<T>, spec: QuerySpec): T[] {
   let result = [...documents].filter((document) => matches(document, spec.where));
   if (spec.sort?.length) {
@@ -329,17 +335,20 @@ export function executeQuery<T extends import("./types.js").Document>(documents:
   return result.slice(spec.skip ?? 0, spec.limit === undefined ? undefined : (spec.skip ?? 0) + spec.limit);
 }
 
+/** Checks field equality while allowing a scalar candidate to match an array element. */
 function fieldEquals(field: Value, candidate: Value): boolean {
   if (Array.isArray(field) && !Array.isArray(candidate)) return field.some((item) => valueEquals(item, candidate));
   return valueEquals(field, candidate);
 }
 
+/** Removes equal values while preserving the first occurrence of each value. */
 function dedupeValues(values: readonly Value[]): Value[] {
   const result: Value[] = [];
   for (const value of values) if (!result.some((candidate) => valueEquals(candidate, value))) result.push(value);
   return result;
 }
 
+/** Checks an array element against a compiled scalar element expression. */
 function matchesElement(value: Value, expression: import("./types.js").ElementQueryExpr): boolean {
   switch (expression.op) {
     case "and":
@@ -365,6 +374,7 @@ function matchesElement(value: Value, expression: import("./types.js").ElementQu
   }
 }
 
+/** Checks for an ordinary object or an object with no prototype. */
 function plainObject(value: unknown): value is Record<string, unknown> {
   if (
     value === null ||

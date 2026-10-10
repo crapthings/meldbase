@@ -16,6 +16,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/replicationws"
 )
 
+// TestFetchImportsVerifiedHTTPSBootstrap checks that HTTPS snapshot import preserves documents and leaves the source checkpoint available for replication.
 func TestFetchImportsVerifiedHTTPSBootstrap(t *testing.T) {
 	directory := t.TempDir()
 	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
@@ -66,6 +67,7 @@ func TestFetchImportsVerifiedHTTPSBootstrap(t *testing.T) {
 	}
 }
 
+// TestFetchBootstrapHandsOffToSameDurableWSSConsumer checks that a downloaded snapshot receives later changes through the same durable WebSocket consumer.
 func TestFetchBootstrapHandsOffToSameDurableWSSConsumer(t *testing.T) {
 	directory := t.TempDir()
 	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
@@ -148,6 +150,7 @@ func TestFetchBootstrapHandsOffToSameDurableWSSConsumer(t *testing.T) {
 	}
 }
 
+// TestFetchRejectsInsecureOrMalformedBootstrapBeforePublication checks that insecure connections and malformed snapshots are rejected without publishing a destination file.
 func TestFetchRejectsInsecureOrMalformedBootstrapBeforePublication(t *testing.T) {
 	if _, err := Fetch(context.Background(), FetchConfig{URL: "http://example.test/bootstrap", Destination: filepath.Join(t.TempDir(), "never.meld2")}); !errors.Is(err, ErrBootstrapHTTPSRequired) {
 		t.Fatalf("HTTP fetch err=%v", err)
@@ -183,6 +186,7 @@ func TestFetchRejectsInsecureOrMalformedBootstrapBeforePublication(t *testing.T)
 	}
 }
 
+// TestSourceRejectsPlainHTTPAndConcurrentConsumer checks that the snapshot source rejects plain HTTP, outdated TLS, and a consumer already holding a source lease.
 func TestSourceRejectsPlainHTTPAndConcurrentConsumer(t *testing.T) {
 	directory := t.TempDir()
 	db, err := meldbase.Open(filepath.Join(directory, "source.meld2"))

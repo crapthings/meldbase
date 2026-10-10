@@ -17,10 +17,13 @@ import (
 )
 
 const (
-	fileRecordVersion      uint32 = 1
-	fileRecordMaximumBytes int64  = 4096
+	// fileRecordVersion identifies the lease record format stored on disk.
+	fileRecordVersion uint32 = 1
+	// fileRecordMaximumBytes limits the size of a stored lease record.
+	fileRecordMaximumBytes int64 = 4096
 )
 
+// fileRecord stores a lease as JSON with a format version and checksum.
 type fileRecord struct {
 	Version        uint32 `json:"version"`
 	DatabaseID     string `json:"databaseId"`
@@ -32,8 +35,9 @@ type fileRecord struct {
 	Checksum       string `json:"checksum"`
 }
 
-// FileStore is one durable, single-member LeaseStore rooted in a trusted
-// existing directory. It is suitable as the local state of one independently
+// FileStore saves one controller member's lease records in a trusted existing directory.
+//
+// It is suitable as the local state of one independently
 // operated quorum member, not as a quorum or leader-election service by
 // itself. Each database identity has a separate atomically replaced record.
 //
@@ -46,9 +50,10 @@ type FileStore struct {
 	gate      sync.Mutex
 }
 
-// NewFileStore opens an existing controller-state directory. It never creates
-// the directory implicitly, so deployment ownership and permissions remain
-// explicit.
+// NewFileStore creates a lease store using an existing controller-state directory.
+//
+// It does not create the directory, leaving deployment ownership and
+// permissions explicit.
 func NewFileStore(directory string) (*FileStore, error) {
 	if directory == "" {
 		return nil, ErrLeaseStore
@@ -64,6 +69,7 @@ func NewFileStore(directory string) (*FileStore, error) {
 	return &FileStore{directory: abs}, nil
 }
 
+// LoadPrimaryLease reads and validates the stored lease for a database.
 func (store *FileStore) LoadPrimaryLease(ctx context.Context, databaseID [16]byte) (LeaseRecord, bool, error) {
 	if store == nil || store.directory == "" || ctx == nil || databaseID == [16]byte{} {
 		return LeaseRecord{}, false, ErrLeaseStore
@@ -76,6 +82,7 @@ func (store *FileStore) LoadPrimaryLease(ctx context.Context, databaseID [16]byt
 	return store.loadUnlocked(ctx, databaseID)
 }
 
+// CompareAndSwapPrimaryLease saves a lease only when the stored record matches the expected state.
 func (store *FileStore) CompareAndSwapPrimaryLease(ctx context.Context, databaseID [16]byte, previous *LeaseRecord, next LeaseRecord) (bool, error) {
 	if store == nil || store.directory == "" || ctx == nil || databaseID == [16]byte{} || !validLeaseRecord(next, databaseID) || (previous != nil && !validLeaseRecord(*previous, databaseID)) {
 		return false, ErrLeaseStore
@@ -111,6 +118,7 @@ func (store *FileStore) CompareAndSwapPrimaryLease(ctx context.Context, database
 	return true, nil
 }
 
+// loadUnlocked reads and validates a lease record while the caller holds the store lock.
 func (store *FileStore) loadUnlocked(ctx context.Context, databaseID [16]byte) (LeaseRecord, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return LeaseRecord{}, false, err
@@ -148,6 +156,7 @@ func (store *FileStore) loadUnlocked(ctx context.Context, databaseID [16]byte) (
 	return record, true, nil
 }
 
+// persistUnlocked publishes a lease through a synced temporary file and an atomic rename.
 func (store *FileStore) persistUnlocked(ctx context.Context, path string, record LeaseRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -189,6 +198,7 @@ func (store *FileStore) persistUnlocked(ctx context.Context, path string, record
 	return nil
 }
 
+// openAndLock opens a private lock file and waits for exclusive access until cancellation.
 func (store *FileStore) openAndLock(ctx context.Context, path string) (*os.File, error) {
 	lock, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -217,10 +227,12 @@ func (store *FileStore) openAndLock(ctx context.Context, path string) (*os.File,
 	}
 }
 
+// recordPath builds the lease file path for a database identity.
 func (store *FileStore) recordPath(databaseID [16]byte) string {
 	return filepath.Join(store.directory, hex.EncodeToString(databaseID[:])+".lease")
 }
 
+// encodeFileRecord converts a lease into its checksummed JSON representation.
 func encodeFileRecord(record LeaseRecord) fileRecord {
 	return fileRecord{
 		Version: fileRecordVersion, DatabaseID: hex.EncodeToString(record.DatabaseID[:]), Owner: record.Owner,
@@ -229,6 +241,7 @@ func encodeFileRecord(record LeaseRecord) fileRecord {
 	}
 }
 
+// decodeFileRecord validates a stored record and converts it into a lease.
 func decodeFileRecord(wire fileRecord) (LeaseRecord, error) {
 	if wire.Version != fileRecordVersion || len(wire.DatabaseID) != 32 || wire.DatabaseID != strings.ToLower(wire.DatabaseID) || len(wire.Checksum) != sha256.Size*2 {
 		return LeaseRecord{}, ErrLeaseStore
@@ -247,6 +260,7 @@ func decodeFileRecord(wire fileRecord) (LeaseRecord, error) {
 	return record, nil
 }
 
+// fileRecordChecksum hashes the lease fields in a fixed order.
 func fileRecordChecksum(record LeaseRecord) string {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("meldbase-primary-lease-file-v1\x00"))
@@ -268,6 +282,7 @@ func fileRecordChecksum(record LeaseRecord) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+// syncLeaseDirectory syncs the directory containing a newly published lease file.
 func syncLeaseDirectory(directory string) error {
 	file, err := os.Open(directory)
 	if err != nil {
@@ -276,8 +291,10 @@ func syncLeaseDirectory(directory string) error {
 	return errors.Join(file.Sync(), file.Close())
 }
 
+// Verify at compile time that FileStore implements LeaseStore.
 var _ LeaseStore = (*FileStore)(nil)
 
+// String returns the store type without exposing its directory.
 func (store *FileStore) String() string {
 	if store == nil {
 		return "primarylease.FileStore<nil>"

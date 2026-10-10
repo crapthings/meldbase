@@ -8,20 +8,25 @@ import (
 	"time"
 )
 
+// ticketRecord binds a one-use connection ticket to an actor and expiration time.
 type ticketRecord struct {
 	actor   Actor
 	expires time.Time
 }
+
+// ticketStore keeps hashed connection tickets until they are consumed or cleaned up after expiration.
 type ticketStore struct {
 	mu      sync.Mutex
 	ttl     time.Duration
 	tickets map[[32]byte]ticketRecord
 }
 
+// newTicketStore creates an empty connection ticket store with the supplied lifetime.
 func newTicketStore(ttl time.Duration) *ticketStore {
 	return &ticketStore{ttl: ttl, tickets: make(map[[32]byte]ticketRecord)}
 }
 
+// issue generates an actor-bound connection ticket and removes expired tickets from the store.
 func (s *ticketStore) issue(actor Actor) (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
@@ -41,6 +46,7 @@ func (s *ticketStore) issue(actor Actor) (string, error) {
 	return ticket, nil
 }
 
+// consume removes a ticket and returns its actor only if the ticket existed and has not expired.
 func (s *ticketStore) consume(ticket string) (Actor, bool) {
 	key := sha256.Sum256([]byte(ticket))
 	s.mu.Lock()

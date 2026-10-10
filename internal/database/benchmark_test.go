@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// BenchmarkInsert measures inserting individual documents into a memory database.
 func BenchmarkInsert(b *testing.B) {
 	db := New()
 	defer db.Close()
@@ -23,6 +24,7 @@ func BenchmarkInsert(b *testing.B) {
 	}
 }
 
+// BenchmarkFindCollectionScan measures finding individual documents without a secondary index.
 func BenchmarkFindCollectionScan(b *testing.B) {
 	db, collection := benchmarkCollection(b, 10_000, false)
 	defer db.Close()
@@ -35,6 +37,7 @@ func BenchmarkFindCollectionScan(b *testing.B) {
 	}
 }
 
+// BenchmarkIndexedPointQuery measures finding individual documents through a secondary index.
 func BenchmarkIndexedPointQuery(b *testing.B) {
 	db, collection := benchmarkCollection(b, 10_000, true)
 	defer db.Close()
@@ -47,6 +50,7 @@ func BenchmarkIndexedPointQuery(b *testing.B) {
 	}
 }
 
+// BenchmarkIndexedRangeScan measures retrieving one hundred documents through an indexed range.
 func BenchmarkIndexedRangeScan(b *testing.B) {
 	db, collection := benchmarkCollection(b, 10_000, true)
 	defer db.Close()
@@ -64,6 +68,7 @@ func BenchmarkIndexedRangeScan(b *testing.B) {
 	}
 }
 
+// BenchmarkLargeOrUnionPlanning measures explaining a large union of indexed membership filters.
 func BenchmarkLargeOrUnionPlanning(b *testing.B) {
 	db := New()
 	defer db.Close()
@@ -94,6 +99,7 @@ func BenchmarkLargeOrUnionPlanning(b *testing.B) {
 	}
 }
 
+// BenchmarkIndexedOrUnionLimit measures retrieving one result from a union of indexed equality filters.
 func BenchmarkIndexedOrUnionLimit(b *testing.B) {
 	db, collection := benchmarkCollection(b, 10_000, true)
 	defer db.Close()
@@ -120,6 +126,7 @@ func BenchmarkIndexedOrUnionLimit(b *testing.B) {
 	}
 }
 
+// BenchmarkCompoundIndexPointQuery measures finding a document through a unique compound index.
 func BenchmarkCompoundIndexPointQuery(b *testing.B) {
 	db := New()
 	defer db.Close()
@@ -146,6 +153,7 @@ func BenchmarkCompoundIndexPointQuery(b *testing.B) {
 	}
 }
 
+// BenchmarkCompoundIndexKeyEncoding measures encoding a compound key with ascending and descending fields.
 func BenchmarkCompoundIndexKeyEncoding(b *testing.B) {
 	values := []Value{String("workspace-a"), Int(42), Time(time.UnixMilli(1_700_000_000_000))}
 	fields := []IndexField{{Field: "workspace", Order: 1}, {Field: "score", Order: -1}, {Field: "createdAt", Order: -1}}
@@ -158,6 +166,7 @@ func BenchmarkCompoundIndexKeyEncoding(b *testing.B) {
 	}
 }
 
+// BenchmarkUpdate measures repeatedly incrementing one document in a memory database.
 func BenchmarkUpdate(b *testing.B) {
 	db := New()
 	defer db.Close()
@@ -175,6 +184,7 @@ func BenchmarkUpdate(b *testing.B) {
 	}
 }
 
+// BenchmarkReactiveBroadcast measures updating a document and receiving its live query snapshot.
 func BenchmarkReactiveBroadcast(b *testing.B) {
 	db := New()
 	defer db.Close()
@@ -207,6 +217,7 @@ func BenchmarkReactiveBroadcast(b *testing.B) {
 	}
 }
 
+// BenchmarkReactiveFanoutOneHundred measures delivering a changed query result to one hundred subscribers.
 func BenchmarkReactiveFanoutOneHundred(b *testing.B) {
 	db := New()
 	defer db.Close()
@@ -245,6 +256,7 @@ func BenchmarkReactiveFanoutOneHundred(b *testing.B) {
 	}
 }
 
+// BenchmarkReactiveIrrelevantCollectionWrite measures writes to another collection while a live query is subscribed.
 func BenchmarkReactiveIrrelevantCollectionWrite(b *testing.B) {
 	db := New()
 	defer db.Close()
@@ -276,6 +288,7 @@ func BenchmarkReactiveIrrelevantCollectionWrite(b *testing.B) {
 	}
 }
 
+// BenchmarkReactiveSelectiveViewTenThousand compares incremental updates and full recomputation for a selective query over ten thousand documents.
 func BenchmarkReactiveSelectiveViewTenThousand(b *testing.B) {
 	for _, test := range []struct {
 		name          string
@@ -327,6 +340,7 @@ func BenchmarkReactiveSelectiveViewTenThousand(b *testing.B) {
 	}
 }
 
+// BenchmarkReactiveOrderedWindowTenThousand compares incremental updates and full recomputation for a sorted ten-document window.
 func BenchmarkReactiveOrderedWindowTenThousand(b *testing.B) {
 	for _, test := range []struct {
 		name          string
@@ -386,6 +400,7 @@ func BenchmarkReactiveOrderedWindowTenThousand(b *testing.B) {
 	}
 }
 
+// BenchmarkReactiveBroadFanoutTenThousand compares snapshot and delta delivery to ten subscribers viewing ten thousand documents.
 func BenchmarkReactiveBroadFanoutTenThousand(b *testing.B) {
 	const subscribers = 10
 	for _, deltas := range []bool{false, true} {
@@ -452,6 +467,7 @@ func BenchmarkReactiveBroadFanoutTenThousand(b *testing.B) {
 	}
 }
 
+// BenchmarkDurableStatsSnapshot measures reading statistics from an indexed memory database.
 func BenchmarkDurableStatsSnapshot(b *testing.B) {
 	db, _ := benchmarkCollection(b, 10_000, true)
 	defer db.Close()
@@ -462,6 +478,7 @@ func BenchmarkDurableStatsSnapshot(b *testing.B) {
 	}
 }
 
+// BenchmarkStatsSnapshotCollectionCardinality compares statistics reads with one and ten thousand memory collections.
 func BenchmarkStatsSnapshotCollectionCardinality(b *testing.B) {
 	for _, count := range []int{1, 10_000} {
 		b.Run(fmt.Sprintf("collections_%d", count), func(b *testing.B) {
@@ -482,6 +499,7 @@ func BenchmarkStatsSnapshotCollectionCardinality(b *testing.B) {
 	}
 }
 
+// BenchmarkStatsSnapshotDiagnosticsEnabled measures statistics reads while diagnostics are enabled.
 func BenchmarkStatsSnapshotDiagnosticsEnabled(b *testing.B) {
 	db, _ := benchmarkCollection(b, 10_000, true)
 	defer db.Close()
@@ -497,6 +515,7 @@ func BenchmarkStatsSnapshotDiagnosticsEnabled(b *testing.B) {
 	}
 }
 
+// BenchmarkStatsSnapshot measures statistics reads from a durable database.
 func BenchmarkStatsSnapshot(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "stats.meld2"))
 	if err != nil {
@@ -513,6 +532,7 @@ func BenchmarkStatsSnapshot(b *testing.B) {
 	}
 }
 
+// BenchmarkStatsSnapshotWithPersistentIndexBuilds measures statistics reads with eight pending durable index builds.
 func BenchmarkStatsSnapshotWithPersistentIndexBuilds(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "stats-builds.meld2"))
 	if err != nil {
@@ -539,6 +559,7 @@ func BenchmarkStatsSnapshotWithPersistentIndexBuilds(b *testing.B) {
 	}
 }
 
+// BenchmarkPointQueryDiagnosticsModes compares point query cost and p99 latency across diagnostic recording modes.
 func BenchmarkPointQueryDiagnosticsModes(b *testing.B) {
 	for _, mode := range []string{"disabled", "enabled_filtered", "enabled_record_all"} {
 		b.Run(mode, func(b *testing.B) {
@@ -596,6 +617,7 @@ func BenchmarkPointQueryDiagnosticsModes(b *testing.B) {
 	}
 }
 
+// BenchmarkDiagnosticHookModes compares diagnostic hook cost across disabled, filtered, and full recording modes.
 func BenchmarkDiagnosticHookModes(b *testing.B) {
 	for _, mode := range []string{"disabled", "enabled_filtered", "enabled_record_all"} {
 		b.Run(mode, func(b *testing.B) {
@@ -628,6 +650,7 @@ func BenchmarkDiagnosticHookModes(b *testing.B) {
 	}
 }
 
+// BenchmarkStorageBackedPointQuery measures document identifier lookups in a durable collection of one thousand documents.
 func BenchmarkStorageBackedPointQuery(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "point-query.meld2"))
 	if err != nil {
@@ -662,6 +685,7 @@ func BenchmarkStorageBackedPointQuery(b *testing.B) {
 	}
 }
 
+// BenchmarkStorageBackedCompiledPointQuery measures durable identifier lookups using a precompiled query.
 func BenchmarkStorageBackedCompiledPointQuery(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "compiled-point-query.meld2"))
 	if err != nil {
@@ -693,6 +717,7 @@ func BenchmarkStorageBackedCompiledPointQuery(b *testing.B) {
 	}
 }
 
+// BenchmarkStreamingCollectionScanFirstTen measures streaming the first ten matching documents from a durable collection scan.
 func BenchmarkStreamingCollectionScanFirstTen(b *testing.B) {
 	db, err := Open(filepath.Join(b.TempDir(), "streaming-scan.meld2"))
 	if err != nil {
@@ -732,6 +757,7 @@ func BenchmarkStreamingCollectionScanFirstTen(b *testing.B) {
 	}
 }
 
+// benchmarkCollection creates a populated memory collection with an optional unique index for benchmarks.
 func benchmarkCollection(b *testing.B, count int, indexed bool) (*DB, *Collection) {
 	b.Helper()
 	db := New()
@@ -753,6 +779,7 @@ func benchmarkCollection(b *testing.B, count int, indexed bool) (*DB, *Collectio
 	return db, collection
 }
 
+// BenchmarkDurableSyncOneThousandDocuments measures creating, populating, syncing, and closing a database with one thousand documents.
 func BenchmarkDurableSyncOneThousandDocuments(b *testing.B) {
 	for iteration := 0; iteration < b.N; iteration++ {
 		path := filepath.Join(b.TempDir(), fmt.Sprintf("checkpoint-%d.meld", iteration))
@@ -776,6 +803,7 @@ func BenchmarkDurableSyncOneThousandDocuments(b *testing.B) {
 	}
 }
 
+// BenchmarkCreateIndexTenThousandDocuments measures creating a unique index over ten thousand durable documents.
 func BenchmarkCreateIndexTenThousandDocuments(b *testing.B) {
 	b.ReportAllocs()
 	b.StopTimer()

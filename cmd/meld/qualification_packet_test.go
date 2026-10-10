@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// TestQualificationReleasePacketSignsAndOfflineVerifierRecomputesEvidence checks that signed release packets verify offline only with unchanged evidence and the matching verifier build.
 func TestQualificationReleasePacketSignsAndOfflineVerifierRecomputesEvidence(t *testing.T) {
 	fixture := newQualificationPacketFixture(t)
 	withQualificationPacketBuild(t, qualificationTestRevision, false)
@@ -89,6 +90,7 @@ func TestQualificationReleasePacketSignsAndOfflineVerifierRecomputesEvidence(t *
 	}
 }
 
+// TestQualificationReleasePacketRejectsForgeryWrongKeyOldVerifierAndAnchorKeyReuse checks that release packet signing and verification reject forged results, incorrect keys, and unsuitable signer builds.
 func TestQualificationReleasePacketRejectsForgeryWrongKeyOldVerifierAndAnchorKeyReuse(t *testing.T) {
 	fixture := newQualificationPacketFixture(t)
 	withQualificationPacketBuild(t, qualificationTestRevision, false)
@@ -166,6 +168,7 @@ func TestQualificationReleasePacketRejectsForgeryWrongKeyOldVerifierAndAnchorKey
 	}
 }
 
+// TestQualificationReleasePacketCannotSignPartialOrLowerLevelEvidence checks that release signing requires an output path and level-five evidence.
 func TestQualificationReleasePacketCannotSignPartialOrLowerLevelEvidence(t *testing.T) {
 	withQualificationPacketBuild(t, qualificationTestRevision, false)
 	durability, soak := qualificationFixtures()
@@ -194,6 +197,7 @@ func TestQualificationReleasePacketCannotSignPartialOrLowerLevelEvidence(t *test
 	}
 }
 
+// TestQualificationPacketKeygenIsPrivateAndExclusive checks that key generation protects private keys, refuses overwrite, and removes incomplete output.
 func TestQualificationPacketKeygenIsPrivateAndExclusive(t *testing.T) {
 	directory := t.TempDir()
 	privatePath, publicPath := filepath.Join(directory, "release.key"), filepath.Join(directory, "release.pub")
@@ -216,6 +220,7 @@ func TestQualificationPacketKeygenIsPrivateAndExclusive(t *testing.T) {
 	}
 }
 
+// qualificationPacketFixture holds evidence paths and independent release keys for packet tests.
 type qualificationPacketFixture struct {
 	durabilityPath     string
 	soakPath           string
@@ -228,6 +233,7 @@ type qualificationPacketFixture struct {
 	releasePublicKey   ed25519.PublicKey
 }
 
+// newQualificationPacketFixture creates test evidence and release keys with destructive evidence recomputation bypassed.
 func newQualificationPacketFixture(t *testing.T) qualificationPacketFixture {
 	t.Helper()
 	withQualificationDestructiveRecomputeBypass(t)
@@ -254,6 +260,7 @@ func newQualificationPacketFixture(t *testing.T) qualificationPacketFixture {
 	}
 }
 
+// qualificationPacketVerifyArguments builds offline verification arguments for a packet and its test evidence.
 func qualificationPacketVerifyArguments(packetPath string, fixture qualificationPacketFixture) []string {
 	arguments := []string{
 		"qualification-packet-verify", "--packet", packetPath, "--release-public-key", fixture.releasePublicPath,
@@ -269,6 +276,7 @@ func qualificationPacketVerifyArguments(packetPath string, fixture qualification
 	return append(arguments, "--anchor-history-receipt", fixture.anchor.historyReceiptPath, "--anchor-history", fixture.anchor.historyPath)
 }
 
+// withQualificationPacketBuild overrides packet build identity for a test and restores it during cleanup.
 func withQualificationPacketBuild(t *testing.T, revision string, modified bool) {
 	t.Helper()
 	previous := qualificationPacketBuildIdentity

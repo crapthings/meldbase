@@ -4,6 +4,7 @@ package main
 
 import "testing"
 
+// TestDecodeMountInfoPath checks that mount paths decode escaped spaces and backslashes and reject malformed escapes.
 func TestDecodeMountInfoPath(t *testing.T) {
 	decoded, err := decodeMountInfoPath(`/mnt/meld\040base\134volume`)
 	if err != nil || decoded != "/mnt/meld base\\volume" {

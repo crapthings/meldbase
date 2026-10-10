@@ -12,18 +12,24 @@ import (
 	"time"
 )
 
+// rollbackAnchorProcessChild names the environment variable that selects the single-write child process.
 const rollbackAnchorProcessChild = "MELDBASE_ROLLBACK_ANCHOR_PROCESS_CHILD"
+
+// rollbackAnchorGroupProcessChild names the environment variable that selects the grouped-write child process.
 const rollbackAnchorGroupProcessChild = "MELDBASE_ROLLBACK_ANCHOR_GROUP_PROCESS_CHILD"
 
+// blockingRollbackAnchorStore pauses anchor updates after publishing a marker for the parent process.
 type blockingRollbackAnchorStore struct {
 	delegate RollbackAnchorStore
 	marker   string
 }
 
+// Load reads the anchor from the wrapped store.
 func (store *blockingRollbackAnchorStore) Load(ctx context.Context) (RollbackAnchor, bool, error) {
 	return store.delegate.Load(ctx)
 }
 
+// Advance saves the initial anchor but blocks later updates after syncing a marker file.
 func (store *blockingRollbackAnchorStore) Advance(ctx context.Context, anchor RollbackAnchor) error {
 	if anchor.MinimumCommitSequence == 0 {
 		return store.delegate.Advance(ctx, anchor)
@@ -38,6 +44,7 @@ func (store *blockingRollbackAnchorStore) Advance(ctx context.Context, anchor Ro
 	return ctx.Err()
 }
 
+// TestRollbackAnchorProcessKillWindow checks that reopening retains a durable write and advances its anchor after the writer is killed before acknowledgement.
 func TestRollbackAnchorProcessKillWindow(t *testing.T) {
 	if childDirectory := os.Getenv(rollbackAnchorProcessChild); childDirectory != "" {
 		runRollbackAnchorProcessChild(t, childDirectory)
@@ -116,11 +123,7 @@ func TestRollbackAnchorProcessKillWindow(t *testing.T) {
 	}
 }
 
-// TestRollbackAnchorGroupProcessKillWindow proves the external acknowledgement
-// boundary for an opt-in coordinator group. The process dies after the final
-// Meta makes both logical members durable, but before the external anchor is
-// advanced. No caller can have received success at that point; reopen must
-// retain the whole group and reconcile the anchor to the final coordinates.
+// TestRollbackAnchorGroupProcessKillWindow checks that reopening retains an entire durable write group and advances its anchor after the writer is killed before acknowledgement.
 func TestRollbackAnchorGroupProcessKillWindow(t *testing.T) {
 	if childDirectory := os.Getenv(rollbackAnchorGroupProcessChild); childDirectory != "" {
 		runRollbackAnchorGroupProcessChild(t, childDirectory)
@@ -200,6 +203,7 @@ func TestRollbackAnchorGroupProcessKillWindow(t *testing.T) {
 	}
 }
 
+// runRollbackAnchorProcessChild attempts a write that blocks before its rollback anchor is advanced.
 func runRollbackAnchorProcessChild(t *testing.T, directory string) {
 	t.Helper()
 	anchor, err := NewFileRollbackAnchorStore(filepath.Join(directory, "database.anchor"))
@@ -216,6 +220,7 @@ func runRollbackAnchorProcessChild(t *testing.T, directory string) {
 	t.Fatalf("commit unexpectedly returned: %v", err)
 }
 
+// runRollbackAnchorGroupProcessChild combines two writes into a group that blocks before its rollback anchor is advanced.
 func runRollbackAnchorGroupProcessChild(t *testing.T, directory string) {
 	t.Helper()
 	anchor, err := NewFileRollbackAnchorStore(filepath.Join(directory, "database.anchor"))

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 )
 
+// encodeDocumentBinary validates a document and encodes it as binary data.
 func encodeDocumentBinary(document Document) ([]byte, error) {
 	if err := document.Validate(); err != nil {
 		return nil, err
@@ -20,6 +21,8 @@ func encodeDocumentBinary(document Document) ([]byte, error) {
 	}
 	return buffer.Bytes(), nil
 }
+
+// decodeDocumentBinary reads exactly one document and rejects malformed or trailing data.
 func decodeDocumentBinary(data []byte) (Document, error) {
 	reader := bytes.NewReader(data)
 	document, err := decodeObjectBinary(reader, 0)
@@ -28,6 +31,8 @@ func decodeDocumentBinary(data []byte) (Document, error) {
 	}
 	return document, nil
 }
+
+// encodeValueBinary writes a value with its type tag within the nesting limit.
 func encodeValueBinary(buffer *bytes.Buffer, value Value, depth int) error {
 	if depth > 64 {
 		return ErrInvalidDocument
@@ -73,6 +78,8 @@ func encodeValueBinary(buffer *bytes.Buffer, value Value, depth int) error {
 	}
 	return nil
 }
+
+// encodeObjectBinary writes object fields in sorted order within the nesting limit.
 func encodeObjectBinary(buffer *bytes.Buffer, document Document, depth int) error {
 	if depth > 64 || len(document) > math.MaxUint32 {
 		return ErrInvalidDocument
@@ -96,6 +103,8 @@ func encodeObjectBinary(buffer *bytes.Buffer, document Document, depth int) erro
 	}
 	return nil
 }
+
+// decodeValueBinary reads a typed value and rejects invalid or oversized data.
 func decodeValueBinary(reader *bytes.Reader, depth int) (Value, error) {
 	if depth > 64 {
 		return Value{}, ErrCorrupt
@@ -169,6 +178,8 @@ func decodeValueBinary(reader *bytes.Reader, depth int) (Value, error) {
 	}
 	return Value{}, ErrCorrupt
 }
+
+// decodeObjectBinary reads an object with valid field names in strictly sorted order.
 func decodeObjectBinary(reader *bytes.Reader, depth int) (Document, error) {
 	if depth > 64 {
 		return nil, ErrCorrupt
@@ -196,36 +207,50 @@ func decodeObjectBinary(reader *bytes.Reader, depth int) (Document, error) {
 	}
 	return document, nil
 }
+
+// writeU16 writes an unsigned 16-bit integer in little-endian order.
 func writeU16(w io.Writer, value uint16) {
 	var data [2]byte
 	binary.LittleEndian.PutUint16(data[:], value)
 	_, _ = w.Write(data[:])
 }
+
+// writeU32 writes an unsigned 32-bit integer in little-endian order.
 func writeU32(w io.Writer, value uint32) {
 	var data [4]byte
 	binary.LittleEndian.PutUint32(data[:], value)
 	_, _ = w.Write(data[:])
 }
+
+// writeU64 writes an unsigned 64-bit integer in little-endian order.
 func writeU64(w io.Writer, value uint64) {
 	var data [8]byte
 	binary.LittleEndian.PutUint64(data[:], value)
 	_, _ = w.Write(data[:])
 }
+
+// readU16 reads an unsigned 16-bit integer in little-endian order.
 func readU16(r io.Reader) (uint16, error) {
 	var data [2]byte
 	_, err := io.ReadFull(r, data[:])
 	return binary.LittleEndian.Uint16(data[:]), err
 }
+
+// readU32 reads an unsigned 32-bit integer in little-endian order.
 func readU32(r io.Reader) (uint32, error) {
 	var data [4]byte
 	_, err := io.ReadFull(r, data[:])
 	return binary.LittleEndian.Uint32(data[:]), err
 }
+
+// readU64 reads an unsigned 64-bit integer in little-endian order.
 func readU64(r io.Reader) (uint64, error) {
 	var data [8]byte
 	_, err := io.ReadFull(r, data[:])
 	return binary.LittleEndian.Uint64(data[:]), err
 }
+
+// writeString16 writes a string preceded by its 16-bit byte length.
 func writeString16(w io.Writer, value string) error {
 	if len(value) > math.MaxUint16 {
 		return ErrCorrupt
@@ -234,6 +259,8 @@ func writeString16(w io.Writer, value string) error {
 	_, err := io.WriteString(w, value)
 	return err
 }
+
+// readString16 reads a string preceded by its 16-bit byte length.
 func readString16(r io.Reader) (string, error) {
 	length, err := readU16(r)
 	if err != nil {
@@ -245,6 +272,8 @@ func readString16(r io.Reader) (string, error) {
 	}
 	return string(data), nil
 }
+
+// writeBytes32 writes bytes preceded by their 32-bit length.
 func writeBytes32(w io.Writer, value []byte) error {
 	if len(value) > math.MaxUint32 {
 		return ErrInvalidDocument
@@ -253,6 +282,8 @@ func writeBytes32(w io.Writer, value []byte) error {
 	_, err := w.Write(value)
 	return err
 }
+
+// readBytes32 reads length-prefixed bytes without exceeding the size limit or remaining input.
 func readBytes32(r *bytes.Reader, max uint32) ([]byte, error) {
 	length, err := readU32(r)
 	if err != nil || length > max || uint64(length) > uint64(r.Len()) {
@@ -264,6 +295,8 @@ func readBytes32(r *bytes.Reader, max uint32) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// corruptIf maps a read error to the database corruption error.
 func corruptIf(err error) error {
 	if err != nil {
 		return ErrCorrupt

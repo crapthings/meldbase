@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestBTreeSplitGetRangeDuplicateAndDelete checks lookups, ordered range scans, duplicate values, and deletion after many inserts.
 func TestBTreeSplitGetRangeDuplicateAndDelete(t *testing.T) {
 	tree := NewWithOrder(5)
 	permutation := rand.Perm(5_000)
@@ -49,6 +50,7 @@ func TestBTreeSplitGetRangeDuplicateAndDelete(t *testing.T) {
 	}
 }
 
+// TestBTreeCopiesCallerBuffers checks that changing input and result buffers cannot change stored entries.
 func TestBTreeCopiesCallerBuffers(t *testing.T) {
 	tree := New()
 	key, value := integer(1), integer(2)
@@ -64,6 +66,7 @@ func TestBTreeCopiesCallerBuffers(t *testing.T) {
 	}
 }
 
+// TestBTreeDeleteMutatesOnlySearchPath checks that deletion preserves an unrelated leaf and the tree structure.
 func TestBTreeDeleteMutatesOnlySearchPath(t *testing.T) {
 	tree := NewWithOrder(5)
 	for number := 0; number < 5_000; number++ {
@@ -81,6 +84,7 @@ func TestBTreeDeleteMutatesOnlySearchPath(t *testing.T) {
 	assertBTreeStructure(t, tree)
 }
 
+// TestBTreeRandomOperationsMatchOrderedSetModel compares randomized insertions and deletions with an independent ordered-set model.
 func TestBTreeRandomOperationsMatchOrderedSetModel(t *testing.T) {
 	for seed := uint64(1); seed <= 8; seed++ {
 		t.Run(string(rune('a'+seed-1)), func(t *testing.T) {
@@ -111,6 +115,7 @@ func TestBTreeRandomOperationsMatchOrderedSetModel(t *testing.T) {
 	}
 }
 
+// FuzzBTreeMatchesOrderedSetModel compares fuzzed insertion and deletion sequences with an independent ordered-set model.
 func FuzzBTreeMatchesOrderedSetModel(f *testing.F) {
 	f.Add([]byte{1, 2, 3, 4, 5, 6})
 	f.Add([]byte{255, 0, 1, 0, 255, 1, 2, 1})
@@ -140,6 +145,7 @@ func FuzzBTreeMatchesOrderedSetModel(f *testing.F) {
 	})
 }
 
+// BenchmarkBTreeLocalDeleteReinsert measures repeated deletion and reinsertion in a populated tree.
 func BenchmarkBTreeLocalDeleteReinsert(b *testing.B) {
 	tree := New()
 	const documents = 100_000
@@ -157,6 +163,7 @@ func BenchmarkBTreeLocalDeleteReinsert(b *testing.B) {
 	}
 }
 
+// assertTreeMatchesModel checks tree structure and sorted entries against the reference set.
 func assertTreeMatchesModel(t *testing.T, tree *Tree, model map[[2]uint16]struct{}) {
 	t.Helper()
 	assertBTreeStructure(t, tree)
@@ -181,6 +188,7 @@ func assertTreeMatchesModel(t *testing.T, tree *Tree, model map[[2]uint16]struct
 	}
 }
 
+// assertBTreeStructure checks node occupancy, ordering, leaf depth, links, and the stored entry count.
 func assertBTreeStructure(t *testing.T, tree *Tree) {
 	t.Helper()
 	if tree == nil || tree.root == nil {
@@ -251,6 +259,7 @@ func assertBTreeStructure(t *testing.T, tree *Tree) {
 	}
 }
 
+// integer encodes an integer as eight big-endian bytes for test keys and values.
 func integer(value int) []byte {
 	result := make([]byte, 8)
 	binary.BigEndian.PutUint64(result, uint64(value))

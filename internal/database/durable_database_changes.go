@@ -11,10 +11,10 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// DurableDatabaseChangeBatch is one globally ordered  Commit Log position
-// projected into public document and catalog events. It is the semantic source
-// for archive and single-writer-follower protocols: callers must Ack only
-// after the externally applied effect for Token is durable.
+// DurableDatabaseChangeBatch contains public document and catalog changes from one commit.
+//
+// Archives and single-writer followers must acknowledge Token only after the
+// externally applied effect is durable.
 //
 // Private System records, raw pages, index-build progress and retention
 // control records are deliberately excluded. A batch can therefore be empty
@@ -26,8 +26,9 @@ type DurableDatabaseChangeBatch struct {
 	Changes       []Change
 }
 
-// DurableDatabaseChangeSubscription is a crash-resumable pull/acknowledge
-// feed over the complete public database. It exposes collection creation,
+// DurableDatabaseChangeSubscription delivers public database changes with a saved acknowledgement.
+//
+// It exposes collection creation,
 // index publication and document changes in exact Commit Log order. It does
 // not itself copy a bootstrap snapshot or apply changes to a follower; those
 // transport and ownership contracts are intentionally separate.
@@ -42,8 +43,9 @@ type DurableDatabaseChangeSubscription struct {
 	once       sync.Once
 }
 
-// Checkpoint returns the consumer's last durable acknowledgement. Delivered
-// batches do not move it; callers may use it to bind a replication hello to
+// Checkpoint returns the last commit token whose acknowledgement was saved.
+//
+// Delivered batches do not move it; callers may use it to bind a replication hello to
 // the exact retained position, rather than to a process-local queue position.
 func (subscription *DurableDatabaseChangeSubscription) Checkpoint() (uint64, error) {
 	if subscription == nil || subscription.checkpoint == nil {
@@ -52,6 +54,7 @@ func (subscription *DurableDatabaseChangeSubscription) Checkpoint() (uint64, err
 	return subscription.checkpoint()
 }
 
+// Ack saves the last processed database commit token in the durable checkpoint.
 func (subscription *DurableDatabaseChangeSubscription) Ack(token uint64) error {
 	if subscription == nil || subscription.ack == nil {
 		return ErrClosed
@@ -59,6 +62,7 @@ func (subscription *DurableDatabaseChangeSubscription) Ack(token uint64) error {
 	return subscription.ack(token)
 }
 
+// Close cancels delivery and waits for the database subscription to stop.
 func (subscription *DurableDatabaseChangeSubscription) Close() {
 	if subscription == nil {
 		return
@@ -73,7 +77,8 @@ func (subscription *DurableDatabaseChangeSubscription) Close() {
 	})
 }
 
-// CreateDurableDatabaseChanges creates a named durable feed after afterToken.
+// CreateDurableDatabaseChanges creates a named database change feed starting after a commit token.
+//
 // The requested position must still be retained. Names share no namespace with
 // collection-scoped consumers, so one application can use the same logical
 // name for both an outbox and a database archive without a checkpoint clash.
@@ -120,9 +125,10 @@ func (db *DB) CreateDurableDatabaseChanges(ctx context.Context, name string, aft
 	return newDurableDatabaseChangeSubscription(ctx, store, consumer, buffer)
 }
 
-// OpenDurableDatabaseChanges resumes a named durable feed from its persisted
-// checkpoint. ErrHistoryLost is returned instead of silently starting at a
-// later token when the required Commit Log window is gone.
+// OpenDurableDatabaseChanges resumes a named database change feed from its saved checkpoint.
+//
+// It returns ErrHistoryLost when the required commit history is no longer
+// retained, rather than silently starting at a later token.
 func (db *DB) OpenDurableDatabaseChanges(ctx context.Context, name string, buffer int) (*DurableDatabaseChangeSubscription, error) {
 	if !validPublicDurableConsumerName(name) || buffer <= 0 || buffer > 1024 {
 		return nil, ErrInvalidDocument
@@ -151,8 +157,9 @@ func (db *DB) OpenDurableDatabaseChanges(ctx context.Context, name string, buffe
 	return newDurableDatabaseChangeSubscription(ctx, store, consumer, buffer)
 }
 
-// DeleteDurableDatabaseChanges removes a named database-wide checkpoint. Stop
-// all active owners first; deletion deliberately makes future resume fail.
+// DeleteDurableDatabaseChanges removes a named database change checkpoint.
+//
+// Stop all active owners first; deletion makes future resume fail.
 func (db *DB) DeleteDurableDatabaseChanges(ctx context.Context, name string) error {
 	if !validPublicDurableConsumerName(name) {
 		return ErrInvalidDocument
@@ -175,6 +182,7 @@ func (db *DB) DeleteDurableDatabaseChanges(ctx context.Context, name string) err
 	return mapDurableConsumerError(store.file.DeleteDurableCommitConsumer(durableDatabaseConsumerKey(name)))
 }
 
+// newDurableDatabaseChangeSubscription starts public database change delivery from a durable consumer.
 func newDurableDatabaseChangeSubscription(ctx context.Context, store *durableStore, consumer *storage.DurableCommitConsumer, buffer int) (*DurableDatabaseChangeSubscription, error) {
 	if store == nil || store.file == nil || consumer == nil || buffer <= 0 || buffer > 1024 {
 		if consumer != nil {
@@ -225,6 +233,7 @@ func newDurableDatabaseChangeSubscription(ctx context.Context, store *durableSto
 	return subscription, nil
 }
 
+// durableDatabaseCollectionNames maps stored collection identities to their public names.
 func durableDatabaseCollectionNames(file *storage.File) (map[uint32]string, error) {
 	if file == nil {
 		return nil, ErrCorrupt
@@ -251,6 +260,7 @@ func durableDatabaseCollectionNames(file *storage.File) (map[uint32]string, erro
 	return result, nil
 }
 
+// convertDurableDatabaseBatch resolves public document and catalog changes from a stored commit.
 func convertDurableDatabaseBatch(consumer *storage.DurableCommitConsumer, batch storage.CommitBatch, collections map[uint32]string) (DurableDatabaseChangeBatch, error) {
 	if consumer == nil || batch.Sequence == 0 || collections == nil {
 		return DurableDatabaseChangeBatch{}, ErrCorrupt
@@ -291,6 +301,7 @@ func convertDurableDatabaseBatch(consumer *storage.DurableCommitConsumer, batch 
 	return result, nil
 }
 
+// convertDurableCatalogChange decodes public collection or index changes and omits private records.
 func convertDurableCatalogChange(change storage.CommitChange, collections map[uint32]string) (Change, bool, error) {
 	if change.CollectionID == 0 {
 		return Change{}, false, ErrCorrupt
@@ -341,6 +352,7 @@ func convertDurableCatalogChange(change storage.CommitChange, collections map[ui
 	return Change{Collection: collection, Operation: operation, Index: &definition, ChangedPaths: append([]string(nil), change.ChangedPaths...)}, true, nil
 }
 
+// durableDatabaseConsumerKey derives a database checkpoint identity from a consumer name.
 func durableDatabaseConsumerKey(name string) string {
 	digest := sha256.Sum256([]byte("database\x00" + name))
 	return "d_" + hex.EncodeToString(digest[:20])

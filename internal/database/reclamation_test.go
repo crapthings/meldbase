@@ -9,12 +9,14 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestReclamationConflictMapsToPublicSentinel checks that storage reclamation conflicts map to the public conflict error rather than corruption.
 func TestReclamationConflictMapsToPublicSentinel(t *testing.T) {
 	if err := mapStorageError(storage.ErrReclamationConflict); !errors.Is(err, ErrReclamationConflict) || errors.Is(err, ErrCorrupt) {
 		t.Fatalf("mapped conflict=%v", err)
 	}
 }
 
+// TestReclaimPagesProtectsLazyCursorAndExportsBoundedStats checks that reclamation preserves cursor snapshots, enables page reuse, and reports completed work.
 func TestReclaimPagesProtectsLazyCursorAndExportsBoundedStats(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-reclaim.meld2"))
 	if err != nil {
@@ -75,6 +77,7 @@ func TestReclaimPagesProtectsLazyCursorAndExportsBoundedStats(t *testing.T) {
 	}
 }
 
+// TestReclaimPagesRejectsUnsupportedAndCancelled checks that reclamation rejects memory databases, cancelled requests, and invalid retry limits.
 func TestReclaimPagesRejectsUnsupportedAndCancelled(t *testing.T) {
 	memory := New()
 	defer memory.Close()
@@ -101,6 +104,7 @@ func TestReclaimPagesRejectsUnsupportedAndCancelled(t *testing.T) {
 	}
 }
 
+// TestReclaimPagesOnlinePublishesReusablePool checks that online reclamation persists reusable pages and reports its scan attempts.
 func TestReclaimPagesOnlinePublishesReusablePool(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "online-public-reclaim.meld2"))
 	if err != nil {
@@ -131,6 +135,7 @@ func TestReclaimPagesOnlinePublishesReusablePool(t *testing.T) {
 	}
 }
 
+// TestReclaimPagesOnlineMemoryOnlyAvoidsPhysicalMaintenanceGeneration checks that memory-only reclamation creates reusable pages without persisting free-space metadata.
 func TestReclaimPagesOnlineMemoryOnlyAvoidsPhysicalMaintenanceGeneration(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "memory-only-reclaim.meld2"))
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestCreateCollectionPublishesEmptyTreesCatalogAndCommit checks that an empty collection publishes its trees, catalog entry, and commit together and survives reopening.
 func TestCreateCollectionPublishesEmptyTreesCatalogAndCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "collection.meld2")
 	file, _, err := Open(path)
@@ -75,6 +76,7 @@ func TestCreateCollectionPublishesEmptyTreesCatalogAndCommit(t *testing.T) {
 	}
 }
 
+// TestCreateCollectionCrashPublishesOldOrCompleteNewGeneration checks that injected collection-creation failures recover either the old state or a complete new collection.
 func TestCreateCollectionCrashPublishesOldOrCompleteNewGeneration(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "base.meld2")
 	base, _, err := Open(basePath)

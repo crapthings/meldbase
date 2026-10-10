@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// TestCommitCursorReplayRetentionAndPinnedOldRoot checks that retention limits new cursors while existing cursors can replay their pinned history.
 func TestCommitCursorReplayRetentionAndPinnedOldRoot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cursor.meld2")
 	file, _, err := Open(path)
@@ -67,6 +68,7 @@ func TestCommitCursorReplayRetentionAndPinnedOldRoot(t *testing.T) {
 	}
 }
 
+// fileRoot returns the current database root or fails the test if it cannot be read.
 func fileRoot(t *testing.T, file *File) DatabaseRoot {
 	t.Helper()
 	root, err := file.DatabaseRoot()

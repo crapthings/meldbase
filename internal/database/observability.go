@@ -8,6 +8,7 @@ import (
 )
 
 // DBStats is a point-in-time, allocation-bounded view of database health.
+//
 // Counters are process-lifetime values and reset when the database is reopened.
 // Persistent state such as CommitSequence is read from the database itself.
 //
@@ -44,11 +45,13 @@ type DBStats struct {
 	IndexBuilds       IndexBuildStats        `json:"indexBuilds"`
 }
 
+// ResourceStats reports configured resource limits and rejection counts.
 type ResourceStats struct {
 	Limits     ResourceLimits `json:"limits"`
 	Rejections uint64         `json:"rejections"`
 }
 
+// IndexBuildStats reports index-build progress, resource use, and outcomes.
 type IndexBuildStats struct {
 	Active               uint64        `json:"active"`
 	Persistent           uint64        `json:"persistent"`
@@ -79,13 +82,15 @@ type IndexBuildStats struct {
 	oldestActiveAppliedSequence uint64
 }
 
+// CommitStats counts committed batches and their changes.
 type CommitStats struct {
 	Total   uint64 `json:"total"`
 	Changes uint64 `json:"changes"`
 }
 
-// DurabilityStats is retained in the admin wire contract. Current-format
-// databases do not use a WAL or checkpoints, so every field is zero.
+// DurabilityStats preserves legacy durability counters in the admin response format.
+//
+// Current-format databases do not use a WAL or checkpoints, so every field is zero.
 type DurabilityStats struct {
 	WALAppends           uint64        `json:"walAppends"`
 	WALPayloadBytes      uint64        `json:"walPayloadBytes"`
@@ -102,12 +107,10 @@ type DurabilityStats struct {
 	CheckpointMaxLatency time.Duration `json:"checkpointMaxLatencyNanos"`
 }
 
-// CommitCoordinatorStats is a fixed-cardinality snapshot of the optional
+// CommitCoordinatorStats reports queued writes, admission decisions, and commit groups.
 //
-//	write-admission scheduler. It is included in DBStats and the versioned
-//
-// admin schema, so applications can alert on admission pressure without
-// inspecting a mutable queue or adding application labels.
+// DBStats and the versioned admin schema expose these bounded counters so
+// applications can alert on queue pressure without inspecting the queue.
 type CommitCoordinatorStats struct {
 	Enabled             bool   `json:"enabled"`
 	Pending             uint64 `json:"pending"`
@@ -119,8 +122,9 @@ type CommitCoordinatorStats struct {
 	OutcomeUnknown      uint64 `json:"outcomeUnknown"`
 }
 
-// PrimaryWriteFenceStats is a fixed-cardinality view of the optional
-// external primary-write guard. Configured means a guard was supplied at open;
+// PrimaryWriteFenceStats reports whether write protection is active and counts its checks and rejections.
+//
+// Configured means a guard was supplied at open;
 // Enforced is false while a read-only follower applies validated source
 // history. Checks and Rejected count only actual primary write admissions.
 // No lease, epoch, endpoint, database ID, or controller detail is exposed.
@@ -131,8 +135,9 @@ type PrimaryWriteFenceStats struct {
 	Rejected   uint64 `json:"rejected"`
 }
 
-// WriteTransactionStats describes public optimistic point transactions. Every
-// started callback reaches exactly one terminal counter. These aggregates do
+// WriteTransactionStats counts active transactions and their outcomes.
+//
+// Every started callback reaches exactly one terminal counter. These aggregates do
 // not contain collection, document, actor, or callback identifiers.
 type WriteTransactionStats struct {
 	Active    uint64 `json:"active"`
@@ -143,8 +148,9 @@ type WriteTransactionStats struct {
 	Aborted   uint64 `json:"aborted"`
 }
 
-// QueryStats contains fixed-cardinality process-session counters. Physical key
-// and candidate counters include work completed before a failed query; the
+// QueryStats counts query activity and execution work during the current process session.
+//
+// Physical key and candidate counters include work completed before a failed query; the
 // older document/return counters retain their successful-query contract.
 type QueryStats struct {
 	ActiveCursors         uint64 `json:"activeCursors"`
@@ -167,6 +173,7 @@ type QueryStats struct {
 	BudgetRejections      uint64 `json:"budgetRejections"`
 }
 
+// RealtimeStats reports live query activity, queued work, and overloads.
 type RealtimeStats struct {
 	SharedViews            uint64 `json:"sharedViews"`
 	QuerySubscribers       uint64 `json:"querySubscribers"`
@@ -202,7 +209,9 @@ type RealtimeStats struct {
 	SlowConsumers          uint64 `json:"slowConsumers"`
 }
 
-// StorageStats describes the selected physical backend. Session counters reset
+// StorageStats describes the selected physical backend.
+//
+// Session counters reset
 // on reopen; physical state and cache counters come from the backend itself.
 type StorageStats struct {
 	Engine                     string                    `json:"engine"`
@@ -254,6 +263,7 @@ type StorageStats struct {
 	CommitMaxLatency           time.Duration             `json:"commitMaxLatencyNanos"`
 }
 
+// PageCacheStats reports page-cache occupancy, hits, misses, and evictions.
 type PageCacheStats struct {
 	CapacityPages uint64 `json:"capacityPages"`
 	ResidentPages uint64 `json:"residentPages"`
@@ -262,6 +272,7 @@ type PageCacheStats struct {
 	Evictions     uint64 `json:"evictions"`
 }
 
+// DocumentCacheStats reports document-cache occupancy, hits, misses, and evictions.
 type DocumentCacheStats struct {
 	CapacityEntries uint64 `json:"capacityEntries"`
 	CapacityBytes   uint64 `json:"capacityBytes"`
@@ -272,6 +283,7 @@ type DocumentCacheStats struct {
 	Evictions       uint64 `json:"evictions"`
 }
 
+// CompactionStats reports compaction activity, byte counts, and outcomes.
 type CompactionStats struct {
 	Active       uint64        `json:"active"`
 	Attempts     uint64        `json:"attempts"`
@@ -282,6 +294,7 @@ type CompactionStats struct {
 	LastDuration time.Duration `json:"lastDurationNanos"`
 }
 
+// ReclamationStats reports page-reclamation activity and outcomes.
 type ReclamationStats struct {
 	Active          uint64        `json:"active"`
 	Attempts        uint64        `json:"attempts"`
@@ -296,6 +309,7 @@ type ReclamationStats struct {
 	LastDuration    time.Duration `json:"lastDurationNanos"`
 }
 
+// BackupStats reports backup activity, sizes, and outcomes.
 type BackupStats struct {
 	Active       uint64        `json:"active"`
 	Attempts     uint64        `json:"attempts"`
@@ -305,6 +319,7 @@ type BackupStats struct {
 	LastDuration time.Duration `json:"lastDurationNanos"`
 }
 
+// dbMetrics stores counters and gauges for database activity and resource use.
 type dbMetrics struct {
 	collections, documents, indexes                      atomic.Uint64
 	commits, commitChanges                               atomic.Uint64
@@ -361,6 +376,7 @@ type dbMetrics struct {
 	indexBuildLastNanos                                uint64
 }
 
+// Stats captures database state and activity counters without scanning stored documents.
 func (db *DB) Stats() DBStats {
 	now := time.Now()
 	stats := DBStats{CapturedAt: now}
@@ -544,6 +560,7 @@ func (db *DB) Stats() DBStats {
 	return stats
 }
 
+// recordLiveCommit records a committed batch and updates logical counts at the publication boundary.
 func (db *DB) recordLiveCommit(batch ChangeBatch) {
 	db.recordCommittedBatch(batch)
 	// Every production caller holds db.mu for the successful publication. Keep
@@ -564,10 +581,9 @@ func (db *DB) recordLiveCommit(batch ChangeBatch) {
 	db.metrics.commitChanges.Add(uint64(len(batch.Changes)))
 }
 
-// initializeLogicalStats performs the one allowed catalog walk while a DB is
-// still private to its constructor. Live commits maintain the gauges in O(1),
-// and Stats never repeats this work.  keeps documents outside the compatibility
-// mirror, so its authoritative persistent count is supplied explicitly.
+// initializeLogicalStats sets initial collection, document, and index counts before the database is shared.
+//
+// Durable storage supplies its document count because its documents may be absent from the in-memory mirror.
 func (db *DB) initializeLogicalStats(persistentDocuments *uint64) {
 	if db == nil {
 		return
@@ -585,6 +601,7 @@ func (db *DB) initializeLogicalStats(persistentDocuments *uint64) {
 	db.metrics.indexes.Store(indexes)
 }
 
+// recordQuery records query work and outcome counters and finishes the query diagnostic.
 func (db *DB) recordQuery(explain ExplainResult, returned int, err error, diagnostic diagnosticSpan) {
 	db.metrics.queries.Add(1)
 	if explain.KeysExamined > 0 {
@@ -639,6 +656,7 @@ func (db *DB) recordQuery(explain ExplainResult, returned int, err error, diagno
 	db.finishQueryDiagnostic(diagnostic, explain, returned, err)
 }
 
+// updateAtomicMax raises an atomic counter only when the supplied value exceeds its current value.
 func updateAtomicMax(target *atomic.Uint64, value uint64) {
 	for current := target.Load(); value > current; current = target.Load() {
 		if target.CompareAndSwap(current, value) {

@@ -14,8 +14,10 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// testAdminToken is the bearer token used by admin handler tests.
 const testAdminToken = "0123456789abcdef0123456789abcdef"
 
+// newTestHandler creates a sampled admin handler with a test token and one allowed origin.
 func newTestHandler(t *testing.T) (*Sampler, *Handler) {
 	t.Helper()
 	now := time.Now()
@@ -35,6 +37,7 @@ func newTestHandler(t *testing.T) (*Sampler, *Handler) {
 	return sampler, handler
 }
 
+// TestHandlerRequiresAuthenticationAndExactOrigin checks authentication, origin restrictions, security headers, and the stats response schema.
 func TestHandlerRequiresAuthenticationAndExactOrigin(t *testing.T) {
 	_, handler := newTestHandler(t)
 
@@ -79,6 +82,7 @@ func TestHandlerRequiresAuthenticationAndExactOrigin(t *testing.T) {
 	}
 }
 
+// TestHandlerAuditRecordsSafeAdminOutcomes checks that audit events record request outcomes without tokens or query parameters.
 func TestHandlerAuditRecordsSafeAdminOutcomes(t *testing.T) {
 	now := time.Now()
 	source := &fakeSource{stats: meldbase.DBStats{StartedAt: now, CapturedAt: now}}
@@ -111,6 +115,7 @@ func TestHandlerAuditRecordsSafeAdminOutcomes(t *testing.T) {
 	}
 }
 
+// TestHandlerAllowsDirectSameOriginDashboardRequests checks that authenticated requests from the admin host are accepted.
 func TestHandlerAllowsDirectSameOriginDashboardRequests(t *testing.T) {
 	_, handler := newTestHandler(t)
 	request := httptest.NewRequest(http.MethodGet, "http://admin.local/v1/stats", nil)
@@ -124,6 +129,7 @@ func TestHandlerAllowsDirectSameOriginDashboardRequests(t *testing.T) {
 	}
 }
 
+// TestHandlerPreflightAndHistory checks that allowed preflight requests succeed and history returns the initial sample.
 func TestHandlerPreflightAndHistory(t *testing.T) {
 	_, handler := newTestHandler(t)
 	request := httptest.NewRequest(http.MethodOptions, "/v1/stats/stream", nil)
@@ -151,6 +157,7 @@ func TestHandlerPreflightAndHistory(t *testing.T) {
 	}
 }
 
+// TestIndexCatalogEndpointIsAuthenticatedAndReturnsDefinitionsOnly checks that authenticated catalog responses include compound index definitions.
 func TestIndexCatalogEndpointIsAuthenticatedAndReturnsDefinitionsOnly(t *testing.T) {
 	now := time.Now()
 	sampler := newTestSampler(t, &fakeSource{stats: meldbase.DBStats{StartedAt: now, CapturedAt: now}}, 1, 1)
@@ -196,6 +203,7 @@ func TestIndexCatalogEndpointIsAuthenticatedAndReturnsDefinitionsOnly(t *testing
 	}
 }
 
+// TestHandlerStreamsInitialSample checks that an authenticated event stream delivers the initial stats sample.
 func TestHandlerStreamsInitialSample(t *testing.T) {
 	_, handler := newTestHandler(t)
 	server := httptest.NewServer(handler)
@@ -239,6 +247,7 @@ func TestHandlerStreamsInitialSample(t *testing.T) {
 	}
 }
 
+// TestAdminConfigurationFailsClosed checks that short tokens, missing required settings, and wildcard origins are rejected.
 func TestAdminConfigurationFailsClosed(t *testing.T) {
 	if _, err := NewBearerTokenAuthorizer("short"); err == nil {
 		t.Fatal("accepted short bearer token")
@@ -255,6 +264,7 @@ func TestAdminConfigurationFailsClosed(t *testing.T) {
 	}
 }
 
+// TestEmbeddedDashboardIsOptInAndContainsNoData checks that enabling dashboard assets preserves API authentication and keeps the token out of the page.
 func TestEmbeddedDashboardIsOptInAndContainsNoData(t *testing.T) {
 	_, protected := newTestHandler(t)
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -307,6 +317,7 @@ func TestEmbeddedDashboardIsOptInAndContainsNoData(t *testing.T) {
 	}
 }
 
+// TestDiagnosticEndpointIsAuthenticatedBoundedAndIncremental checks that diagnostics require authentication and validate sequence and result limits.
 func TestDiagnosticEndpointIsAuthenticatedBoundedAndIncremental(t *testing.T) {
 	now := time.Now()
 	source := &fakeSource{stats: meldbase.DBStats{StartedAt: now, CapturedAt: now}}
@@ -368,6 +379,7 @@ func TestDiagnosticEndpointIsAuthenticatedBoundedAndIncremental(t *testing.T) {
 	}
 }
 
+// TestPrometheusEndpointIsOptInAuthenticatedAndVersioned checks that enabled metrics require authentication and return valid text with current sample values.
 func TestPrometheusEndpointIsOptInAuthenticatedAndVersioned(t *testing.T) {
 	now := time.Now()
 	source := &fakeSource{stats: meldbase.DBStats{

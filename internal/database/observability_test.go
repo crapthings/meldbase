@@ -11,10 +11,7 @@ import (
 	"time"
 )
 
-// This relative gate runs only on the dedicated performance runner. It samples
-// 1,000 times more frequently than the normal one-second admin interval while a
-// synthetic writer repeatedly crosses the exact db.mu publication boundary.
-// Absolute operations/second vary by host; only paired throughput matters.
+// TestStatsSamplingPerformanceBudget checks that one-millisecond statistics sampling reduces median synthetic write throughput by at most five percent on an opt-in runner.
 func TestStatsSamplingPerformanceBudget(t *testing.T) {
 	if os.Getenv("MELDBASE_PERF_GATE") == "" {
 		t.Skip("set MELDBASE_PERF_GATE=1 on a dedicated performance runner")
@@ -87,6 +84,7 @@ func TestStatsSamplingPerformanceBudget(t *testing.T) {
 		(1-float64(sampledMedian)/float64(baselineMedian))*100)
 }
 
+// TestStatsTrackCoreWorkWithoutUserData checks that statistics report database state, query work, commit counts, and index-build activity.
 func TestStatsTrackCoreWorkWithoutUserData(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -145,6 +143,7 @@ func TestStatsTrackCoreWorkWithoutUserData(t *testing.T) {
 	}
 }
 
+// TestStatsReportsFailStopWithoutExposingErrorText checks that a durability failure marks writes disabled while the database remains open.
 func TestStatsReportsFailStopWithoutExposingErrorText(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -156,6 +155,7 @@ func TestStatsReportsFailStopWithoutExposingErrorText(t *testing.T) {
 	}
 }
 
+// TestStatsTrackReactiveLifecycle checks that statistics count subscription creation, result updates, and watcher cleanup.
 func TestStatsTrackReactiveLifecycle(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -213,6 +213,7 @@ func TestStatsTrackReactiveLifecycle(t *testing.T) {
 	}
 }
 
+// TestStatsSnapshotIsAllocationFreeForMemoryAnd checks that statistics snapshots allocate no memory in either database mode.
 func TestStatsSnapshotIsAllocationFreeForMemoryAnd(t *testing.T) {
 	memory := New()
 	defer memory.Close()
@@ -230,6 +231,7 @@ func TestStatsSnapshotIsAllocationFreeForMemoryAnd(t *testing.T) {
 	}
 }
 
+// TestStatsLogicalGaugesStayCommitConsistentDuringWrites checks that sampled document and catalog counts match their commit sequence during concurrent writes.
 func TestStatsLogicalGaugesStayCommitConsistentDuringWrites(t *testing.T) {
 	db := New()
 	defer db.Close()

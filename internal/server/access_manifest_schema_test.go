@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+// TestCollectionAccessManifestSchemaMatchesRuntimeContract checks that schema URLs match the runtime contract.
+//
 // The public schema is an editor/tooling contract, while the Go parser remains
 // the runtime authority. Keep their versioned URL in lockstep so an initialized
 // manifest never advertises a schema the server would reject.

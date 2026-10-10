@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// TestBackupPublishesExactVerifiedIdentityAndHistoryPreservingCopy checks that physical backup copies exact database bytes, identity, and commit sequence while remaining unchanged after source writes.
 func TestBackupPublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
@@ -111,6 +112,7 @@ func TestBackupPublishesExactVerifiedIdentityAndHistoryPreservingCopy(t *testing
 	}
 }
 
+// TestBackupFailsClosedWithoutOverwrite checks that backup rejects existing destinations, cancelled requests, and memory databases without overwriting files.
 func TestBackupFailsClosedWithoutOverwrite(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
@@ -150,6 +152,7 @@ func TestBackupFailsClosedWithoutOverwrite(t *testing.T) {
 	}
 }
 
+// TestBackupPreservesResumableShadowIndexBuild checks that a backup preserves a pending index build that can finish independently of the source.
 func TestBackupPreservesResumableShadowIndexBuild(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source-build.meld2")

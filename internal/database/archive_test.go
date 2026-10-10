@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestBeginArchivePinsTailBeforeVerifiedPhysicalSnapshot checks that archive bootstrap creates a matching physical snapshot and retains the following changes for delivery.
 func TestBeginArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
@@ -64,6 +65,7 @@ func TestBeginArchivePinsTailBeforeVerifiedPhysicalSnapshot(t *testing.T) {
 	}
 }
 
+// TestBeginArchiveRejectsExistingDestinationBeforeCreatingCheckpoint checks that an existing archive destination is rejected without creating a checkpoint or advancing the source.
 func TestBeginArchiveRejectsExistingDestinationBeforeCreatingCheckpoint(t *testing.T) {
 	directory := t.TempDir()
 	db, err := Open(filepath.Join(directory, "source.meld2"))

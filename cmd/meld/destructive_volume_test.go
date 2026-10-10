@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestValidateDestructiveVolumeFactsAcceptsOnlyIndependentDisposableMount checks that destructive tests require an empty independent volume with suitable capacity and a separate evidence device.
 func TestValidateDestructiveVolumeFactsAcceptsOnlyIndependentDisposableMount(t *testing.T) {
 	valid := destructiveVolumeFacts{
 		directory: "/mnt/meldbase-destructive", controlDirectory: "/var/lib/meldbase-evidence", device: 42, parentDevice: 1, workDevice: 1, controlDevice: 1,
@@ -46,6 +47,7 @@ func TestValidateDestructiveVolumeFactsAcceptsOnlyIndependentDisposableMount(t *
 	}
 }
 
+// TestDestructiveVolumeTokenBindsGeometryAndPath checks that a destructive confirmation token changes with the target path or capacity.
 func TestDestructiveVolumeTokenBindsGeometryAndPath(t *testing.T) {
 	facts := destructiveVolumeFacts{
 		directory: "/mnt/one", device: 42, filesystemType: "0xef53", filesystemName: "ext-family",
@@ -65,6 +67,7 @@ func TestDestructiveVolumeTokenBindsGeometryAndPath(t *testing.T) {
 	}
 }
 
+// TestDestructiveVolumeCheckFailsClosedOffLinux checks that the destructive volume command rejects platforms other than Linux.
 func TestDestructiveVolumeCheckFailsClosedOffLinux(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		t.Skip("off-Linux behavior")

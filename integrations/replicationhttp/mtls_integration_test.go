@@ -21,6 +21,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestFetchRequiresActualVerifiedMTLSClientCertificate checks that snapshot fetching requires a verified client certificate before publishing a database.
 func TestFetchRequiresActualVerifiedMTLSClientCertificate(t *testing.T) {
 	directory := t.TempDir()
 	db, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
@@ -73,6 +74,7 @@ func TestFetchRequiresActualVerifiedMTLSClientCertificate(t *testing.T) {
 	}
 }
 
+// replicationTestPKI holds trusted roots and server and client certificates for replication tests.
 type replicationTestPKI struct {
 	roots      *x509.CertPool
 	server     tls.Certificate
@@ -80,6 +82,7 @@ type replicationTestPKI struct {
 	clientLeaf *x509.Certificate
 }
 
+// newReplicationTestPKI creates a test certificate authority and matching server and client certificates.
 func newReplicationTestPKI(t *testing.T) replicationTestPKI {
 	t.Helper()
 	now := time.Now().Add(-time.Minute)
@@ -104,6 +107,7 @@ func newReplicationTestPKI(t *testing.T) replicationTestPKI {
 	return replicationTestPKI{roots: roots, server: server, client: client, clientLeaf: clientLeaf}
 }
 
+// newReplicationTestServerLeaf creates a signed server certificate for the loopback address.
 func newReplicationTestServerLeaf(t *testing.T, ca *x509.Certificate, caKey ed25519.PrivateKey) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
 	key := newReplicationTestKey(t)
@@ -115,6 +119,7 @@ func newReplicationTestServerLeaf(t *testing.T, ca *x509.Certificate, caKey ed25
 	return signReplicationTestLeaf(t, template, ca, caKey, key)
 }
 
+// newReplicationTestLeaf creates a signed test certificate with the supplied identity and usages.
 func newReplicationTestLeaf(t *testing.T, ca *x509.Certificate, caKey ed25519.PrivateKey, serial int64, name string, usages []x509.ExtKeyUsage) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
 	key := newReplicationTestKey(t)
@@ -126,6 +131,7 @@ func newReplicationTestLeaf(t *testing.T, ca *x509.Certificate, caKey ed25519.Pr
 	return signReplicationTestLeaf(t, template, ca, caKey, key)
 }
 
+// signReplicationTestLeaf signs and parses a test certificate and pairs it with its private key.
 func signReplicationTestLeaf(t *testing.T, template, ca *x509.Certificate, caKey, key ed25519.PrivateKey) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
 	der, err := x509.CreateCertificate(rand.Reader, template, ca, key.Public(), caKey)
@@ -139,6 +145,7 @@ func signReplicationTestLeaf(t *testing.T, template, ca *x509.Certificate, caKey
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, leaf
 }
 
+// newReplicationTestKey generates an Ed25519 private key for tests.
 func newReplicationTestKey(t *testing.T) ed25519.PrivateKey {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
@@ -148,6 +155,7 @@ func newReplicationTestKey(t *testing.T) ed25519.PrivateKey {
 	return key
 }
 
+// httpClient creates an HTTP client using the test roots and an optional client certificate.
 func (pki replicationTestPKI) httpClient(client *tls.Certificate) *http.Client {
 	config := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pki.roots}
 	if client != nil {

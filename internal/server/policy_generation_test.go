@@ -10,6 +10,7 @@ import (
 	"github.com/crapthings/meldbase/internal/policyrecord"
 )
 
+// TestDurablePolicyGenerationStoreSurvivesReopen checks that reopening preserves policy generations used by registered worker read policies.
 func TestDurablePolicyGenerationStoreSurvivesReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "policy-generation.meld2")
 	db, err := meldbase.Open(path)

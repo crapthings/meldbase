@@ -13,9 +13,13 @@ import (
 	"github.com/crapthings/meldbase/integrations/anchorhttp"
 )
 
+// anchorReplicaFlags collects repeated member endpoint specifications.
 type anchorReplicaFlags []string
 
+// String joins the configured member specifications for flag display.
 func (values *anchorReplicaFlags) String() string { return strings.Join(*values, ",") }
+
+// Set appends a nonempty member specification.
 func (values *anchorReplicaFlags) Set(value string) error {
 	if value == "" {
 		return errors.New("rollback-anchor replica specification is empty")
@@ -24,6 +28,7 @@ func (values *anchorReplicaFlags) Set(value string) error {
 	return nil
 }
 
+// remoteAnchorConfig holds remote member, signing key, TLS, and timeout settings.
 type remoteAnchorConfig struct {
 	clusterID        string
 	replicaSpecs     []string
@@ -36,10 +41,12 @@ type remoteAnchorConfig struct {
 	operationTimeout time.Duration
 }
 
+// enabled reports whether any remote anchor identity or credential setting was supplied.
 func (config remoteAnchorConfig) enabled() bool {
 	return config.clusterID != "" || len(config.replicaSpecs) != 0 || config.anchorName != "" || config.keyID != "" || config.keyFile != "" || config.serverCAFile != "" || config.clientCertFile != "" || config.clientKeyFile != ""
 }
 
+// newRemoteAnchorStore creates an authenticated anchor quorum store and its TLS transport.
 func newRemoteAnchorStore(config remoteAnchorConfig) (*anchorhttp.QuorumStore, *http.Transport, error) {
 	if config.clusterID == "" || len(config.replicaSpecs) == 0 || config.anchorName == "" || config.keyID == "" || config.keyFile == "" || config.serverCAFile == "" || config.clientCertFile == "" || config.clientKeyFile == "" {
 		return nil, nil, errors.New("remote rollback anchor requires cluster, replica, name, key ID/file, server CA and client certificate/key")
@@ -93,10 +100,12 @@ func newRemoteAnchorStore(config remoteAnchorConfig) (*anchorhttp.QuorumStore, *
 	return store, transport, nil
 }
 
+// loadAnchorClientCertificate loads a key pair with explicit client authentication usage.
 func loadAnchorClientCertificate(certificatePath, privateKeyPath string) (tls.Certificate, error) {
 	return loadAnchorCertificateForUsage(certificatePath, privateKeyPath, x509.ExtKeyUsageClientAuth, "client")
 }
 
+// loadAnchorCertificateForUsage loads a currently valid key pair with the required authentication and signature permissions.
 func loadAnchorCertificateForUsage(certificatePath, privateKeyPath string, requiredUsage x509.ExtKeyUsage, label string) (tls.Certificate, error) {
 	certificatePEM, err := readAnchorFile(certificatePath, anchorTLSFileMaximum, false)
 	if err != nil {

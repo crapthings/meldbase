@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// TestVolatileLossResultRequiresMonotonicFloorRejection checks that lost-commit evidence requires rejection by the minimum accepted commit sequence.
 func TestVolatileLossResultRequiresMonotonicFloorRejection(t *testing.T) {
 	result := destructiveVolatileLossResult{
 		SchemaVersion: 1, GOOS: "linux", GOARCH: "amd64", GoVersion: "go-test",
@@ -26,6 +27,7 @@ func TestVolatileLossResultRequiresMonotonicFloorRejection(t *testing.T) {
 	}
 }
 
+// TestQMPVolatileSnapshotInventoryBindsExactBacking checks that a temporary writable overlay uses the exact expected backing image.
 func TestQMPVolatileSnapshotInventoryBindsExactBacking(t *testing.T) {
 	raw := json.RawMessage(`[{"inserted":{"ro":false,"drv":"qcow2","backing_file":"/control/base.img","image":{"backing-image":{"filename":"/control/base.img"}}}}]`)
 	if err := validateQMPVolatileSnapshotInventory(raw, "/control/base.img"); err != nil {

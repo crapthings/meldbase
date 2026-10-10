@@ -16,10 +16,13 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// indexBuildCommandSchemaVersion identifies the index build command output format.
 const indexBuildCommandSchemaVersion = 1
 
+// indexFieldFlags collects ordered index fields from repeated command-line flags.
 type indexFieldFlags []meldbase.IndexField
 
+// String formats the collected index paths and sort orders as a comma-separated list.
 func (fields *indexFieldFlags) String() string {
 	if fields == nil {
 		return ""
@@ -31,6 +34,7 @@ func (fields *indexFieldFlags) String() string {
 	return strings.Join(parts, ",")
 }
 
+// Set appends an index path with its optional ascending or descending order suffix.
 func (fields *indexFieldFlags) Set(value string) error {
 	path, order := value, 1
 	switch {
@@ -46,6 +50,7 @@ func (fields *indexFieldFlags) Set(value string) error {
 	return nil
 }
 
+// indexBuildCommandResult reports the action and its index build status or outcome.
 type indexBuildCommandResult struct {
 	SchemaVersion int                          `json:"schemaVersion"`
 	Action        string                       `json:"action"`
@@ -56,6 +61,7 @@ type indexBuildCommandResult struct {
 	Aborted       bool                         `json:"aborted,omitempty"`
 }
 
+// runIndexBuild dispatches index build lifecycle commands.
 func runIndexBuild(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("usage: meld index-build <start|rebuild|list|resume|abort>")
@@ -76,6 +82,7 @@ func runIndexBuild(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// runIndexBuildStart starts a new index build or rebuild and prints its initial status.
 func runIndexBuildStart(args []string, stdout, stderr io.Writer, replaceExisting bool) error {
 	action := "start"
 	if replaceExisting {
@@ -124,6 +131,7 @@ func runIndexBuildStart(args []string, stdout, stderr io.Writer, replaceExisting
 	})
 }
 
+// runIndexBuildList prints the stored index build statuses.
 func runIndexBuildList(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("index-build list", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -150,6 +158,7 @@ func runIndexBuildList(args []string, stdout, stderr io.Writer) error {
 	})
 }
 
+// runIndexBuildResume resumes a stored build through publication and prints its outcome.
 func runIndexBuildResume(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("index-build resume", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -184,6 +193,7 @@ func runIndexBuildResume(args []string, stdout, stderr io.Writer) error {
 	})
 }
 
+// runIndexBuildAbort removes a stored build and prints its outcome.
 func runIndexBuildAbort(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("index-build abort", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -218,6 +228,7 @@ func runIndexBuildAbort(args []string, stdout, stderr io.Writer) error {
 	})
 }
 
+// openIndexBuildDatabase opens an existing database after checking its format compatibility.
 func openIndexBuildDatabase(path string) (*meldbase.DB, error) {
 	info, err := meldbase.InspectStorageFormat(path)
 	if err != nil {
@@ -232,6 +243,7 @@ func openIndexBuildDatabase(path string) (*meldbase.DB, error) {
 	return meldbase.Open(path)
 }
 
+// indexBuildCommandContext creates a signal-aware context with an optional deadline.
 func indexBuildCommandContext(timeout time.Duration) (context.Context, context.CancelFunc, error) {
 	if timeout < 0 {
 		return nil, nil, errors.New("index-build --timeout must not be negative")
@@ -247,6 +259,7 @@ func indexBuildCommandContext(timeout time.Duration) (context.Context, context.C
 	}, nil
 }
 
+// writeIndexBuildResult writes an indented JSON command result.
 func writeIndexBuildResult(output io.Writer, result indexBuildCommandResult) error {
 	encoder := json.NewEncoder(output)
 	encoder.SetIndent("", "  ")

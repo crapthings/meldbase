@@ -2,6 +2,7 @@ package database
 
 import "testing"
 
+// TestResumeWindowExpiresOnlyPositionsOlderThanRetainedHistory checks that resume accepts retained positions while rejecting expired and future positions.
 func TestResumeWindowExpiresOnlyPositionsOlderThanRetainedHistory(t *testing.T) {
 	db := New()
 	defer db.Close()

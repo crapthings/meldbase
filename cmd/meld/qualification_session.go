@@ -18,12 +18,17 @@ import (
 )
 
 const (
-	qualificationSessionPlanSchema  uint32 = 2
+	// qualificationSessionPlanSchema identifies the session plan format.
+	qualificationSessionPlanSchema uint32 = 2
+	// qualificationSessionEventSchema identifies the session journal event format.
 	qualificationSessionEventSchema uint32 = 1
-	qualificationSessionDirectory          = ".qualification-session"
-	qualificationSessionExecutable         = qualificationSessionDirectory + "/qualification-executable"
+	// qualificationSessionDirectory names the private journal directory inside the artifact root.
+	qualificationSessionDirectory = ".qualification-session"
+	// qualificationSessionExecutable names the executable copy retained in the session journal.
+	qualificationSessionExecutable = qualificationSessionDirectory + "/qualification-executable"
 )
 
+// qualificationSessionPlan defines a campaign's fixed steps and binds its executable, environment, and target volume.
 type qualificationSessionPlan struct {
 	SchemaVersion                  uint32                     `json:"schemaVersion"`
 	SessionID                      string                     `json:"sessionId"`
@@ -48,6 +53,7 @@ type qualificationSessionPlan struct {
 	Steps                          []qualificationSessionStep `json:"steps"`
 }
 
+// qualificationSessionStep describes one ordered campaign step and its optional power trial boundary.
 type qualificationSessionStep struct {
 	Ordinal             int    `json:"ordinal"`
 	ID                  string `json:"id"`
@@ -57,6 +63,7 @@ type qualificationSessionStep struct {
 	Repetition          int    `json:"repetition,omitempty"`
 }
 
+// qualificationSessionEvent links a recorded step receipt to its plan and the previous journal event.
 type qualificationSessionEvent struct {
 	SchemaVersion       uint32    `json:"schemaVersion"`
 	SessionID           string    `json:"sessionId"`
@@ -70,6 +77,7 @@ type qualificationSessionEvent struct {
 	RecordedAt          time.Time `json:"recordedAt"`
 }
 
+// qualificationSessionState tracks recorded events, receipt identities, and timing while loading or extending a session.
 type qualificationSessionState struct {
 	Events          []qualificationSessionEvent
 	EventRaw        [][]byte
@@ -80,13 +88,19 @@ type qualificationSessionState struct {
 }
 
 var (
-	qualificationSessionBuildIdentity    = durabilityBuildIdentity
-	qualificationSessionValidateReceipt  = validateQualificationSessionReceipt
+	// qualificationSessionBuildIdentity reads build metadata and can be replaced by tests.
+	qualificationSessionBuildIdentity = durabilityBuildIdentity
+	// qualificationSessionValidateReceipt validates step receipts and can be replaced by tests.
+	qualificationSessionValidateReceipt = validateQualificationSessionReceipt
+	// qualificationSessionLoadReceiptState restores receipt state and can be replaced by tests.
 	qualificationSessionLoadReceiptState = loadQualificationSessionReceiptState
-	qualificationSessionRuntimeIdentity  = func() (string, string, string) { return runtime.GOOS, runtime.GOARCH, runtime.Version() }
-	qualificationSessionEffectiveUID     = os.Geteuid
+	// qualificationSessionRuntimeIdentity reads runtime platform details and can be replaced by tests.
+	qualificationSessionRuntimeIdentity = func() (string, string, string) { return runtime.GOOS, runtime.GOARCH, runtime.Version() }
+	// qualificationSessionEffectiveUID reads the current effective user ID and can be replaced by tests.
+	qualificationSessionEffectiveUID = os.Geteuid
 )
 
+// runQualificationSessionInit creates a fixed campaign plan and durable journal bound to the environment and retained executable.
 func runQualificationSessionInit(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-session-init", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -188,6 +202,7 @@ func runQualificationSessionInit(args []string, stdout, stderr io.Writer) error 
 	return encoder.Encode(plan)
 }
 
+// runQualificationSessionRecord validates the next planned receipt and appends its event to the durable journal.
 func runQualificationSessionRecord(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-session-record", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -248,6 +263,7 @@ func runQualificationSessionRecord(args []string, stdout, stderr io.Writer) erro
 	return json.NewEncoder(stdout).Encode(event)
 }
 
+// runQualificationSessionStatus loads the session journal and prints its progress and next planned step.
 func runQualificationSessionStatus(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-session-status", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -266,6 +282,7 @@ func runQualificationSessionStatus(args []string, stdout, stderr io.Writer) erro
 	return json.NewEncoder(stdout).Encode(result)
 }
 
+// runQualificationSessionSeal verifies a complete session and publishes an index of its unchanged artifact tree.
 func runQualificationSessionSeal(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-session-seal", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -318,6 +335,7 @@ func runQualificationSessionSeal(args []string, stdout, stderr io.Writer) error 
 	return json.NewEncoder(stdout).Encode(result)
 }
 
+// qualificationSessionStatus reports session progress, its next step, and whether it can be sealed.
 type qualificationSessionStatus struct {
 	SchemaVersion uint32                    `json:"schemaVersion"`
 	SessionID     string                    `json:"sessionId"`
@@ -327,6 +345,7 @@ type qualificationSessionStatus struct {
 	ReadyToSeal   bool                      `json:"readyToSeal"`
 }
 
+// qualificationSessionStatusResult builds a progress report from the plan and recorded events.
 func qualificationSessionStatusResult(plan qualificationSessionPlan, state qualificationSessionState) qualificationSessionStatus {
 	result := qualificationSessionStatus{SchemaVersion: 1, SessionID: plan.SessionID, Completed: len(state.Events), Total: len(plan.Steps), ReadyToSeal: len(state.Events) == len(plan.Steps)}
 	if !result.ReadyToSeal {
@@ -336,6 +355,7 @@ func qualificationSessionStatusResult(plan qualificationSessionPlan, state quali
 	return result
 }
 
+// qualificationSessionSteps builds the fixed campaign sequence including repeated power trials at each publication boundary.
 func qualificationSessionSteps() []qualificationSessionStep {
 	steps := []qualificationSessionStep{
 		{ID: "durability", Kind: "durability"}, {ID: "soak", Kind: "soak"}, {ID: "process", Kind: "process"},
@@ -353,6 +373,7 @@ func qualificationSessionSteps() []qualificationSessionStep {
 	return steps
 }
 
+// validateQualificationSessionPlan checks the plan's identity bindings and required fixed campaign steps.
 func validateQualificationSessionPlan(plan qualificationSessionPlan) error {
 	if plan.SchemaVersion != qualificationSessionPlanSchema || !anchorQualificationHex(plan.SessionID, 16) ||
 		!validDurabilitySourceRevision(plan.SourceRevision) || plan.BuildRevision != plan.SourceRevision || plan.BuildModified || plan.CreatedAt.IsZero() ||
@@ -372,6 +393,7 @@ func validateQualificationSessionPlan(plan qualificationSessionPlan) error {
 	return nil
 }
 
+// loadQualificationSession checks session identity and journal bindings while optionally validating receipt semantics.
 func loadQualificationSession(planPath string, semantic bool) (qualificationSessionPlan, []byte, qualificationSessionState, error) {
 	var plan qualificationSessionPlan
 	planRaw, err := readQualificationReceipt(planPath, &plan)
@@ -477,10 +499,12 @@ func loadQualificationSession(planPath string, semantic bool) (qualificationSess
 	return plan, planRaw, state, nil
 }
 
+// qualificationSessionEventFilename derives an event filename from the step's ordinal and ID.
 func qualificationSessionEventFilename(step qualificationSessionStep) string {
 	return fmt.Sprintf("%03d-%s.json", step.Ordinal, step.ID)
 }
 
+// qualificationSessionExternalOutput resolves an output path and requires it to lie outside the artifact root.
 func qualificationSessionExternalOutput(root, path string) (string, error) {
 	output, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -497,6 +521,7 @@ func qualificationSessionExternalOutput(root, path string) (string, error) {
 	return output, nil
 }
 
+// qualificationSessionCurrentExecutable returns the running executable's resolved path, size, and content hash.
 func qualificationSessionCurrentExecutable() (string, uint64, string, error) {
 	path, err := os.Executable()
 	if err != nil {

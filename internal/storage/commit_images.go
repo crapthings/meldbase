@@ -2,7 +2,9 @@ package storage
 
 import "errors"
 
-// ResolvedCommitChange owns materialized before/after images. Empty images
+// ResolvedCommitChange holds independent copies of a change and its before and after document bytes.
+//
+// Empty images
 // retain their operation-specific meaning (insert has no Before, delete has no
 // After). ChangedPaths and image bytes never alias Commit Log or page-cache data.
 type ResolvedCommitChange struct {
@@ -14,8 +16,9 @@ type ResolvedCommitChange struct {
 	After        []byte
 }
 
-// ResolveChange materializes a change returned by this finite cursor. The
-// cursor's immutable root pin keeps referenced document versions valid until
+// ResolveChange loads document bytes for a change returned by this finite cursor.
+//
+// The cursor's immutable root pin keeps referenced document versions valid until
 // Close, even if logical retention advances concurrently.
 func (cursor *CommitCursor) ResolveChange(change CommitChange) (ResolvedCommitChange, error) {
 	if cursor == nil {
@@ -34,8 +37,9 @@ func (cursor *CommitCursor) ResolveChange(change CommitChange) (ResolvedCommitCh
 	return cursor.file.resolveCommitChangeUnlocked(change)
 }
 
-// ResolveChange materializes a change from the most recently delivered live
-// batch. Calling Next again acknowledges that batch and may advance the replay
+// ResolveChange loads document bytes for a change from the latest delivered live batch.
+//
+// Calling Next again acknowledges that batch and may advance the replay
 // retention lease, so callers must resolve all required images before Next.
 func (stream *LiveCommitStream) ResolveChange(change CommitChange) (ResolvedCommitChange, error) {
 	if stream == nil {
@@ -60,6 +64,7 @@ func (stream *LiveCommitStream) ResolveChange(change CommitChange) (ResolvedComm
 	return stream.file.resolveCommitChangeUnlocked(change)
 }
 
+// resolveCommitChangeUnlocked copies a change and loads referenced document versions under the file lock.
 func (f *File) resolveCommitChangeUnlocked(change CommitChange) (ResolvedCommitChange, error) {
 	resolved := ResolvedCommitChange{
 		CollectionID: change.CollectionID, DocumentID: change.DocumentID, Operation: change.Operation,
@@ -82,6 +87,7 @@ func (f *File) resolveCommitChangeUnlocked(change CommitChange) (ResolvedCommitC
 	return resolved, nil
 }
 
+// resolveDocumentVersionUnlocked reads a required document version while the caller holds the file lock.
 func (f *File) resolveDocumentVersionUnlocked(reference DocumentVersionRef) ([]byte, error) {
 	if reference.PrimaryRoot < 2 || allZero(reference.DocumentID[:]) {
 		return nil, ErrCorrupt

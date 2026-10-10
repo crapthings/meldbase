@@ -9,8 +9,10 @@ import type { LiveQuery, Unsubscribe } from "@meldbase/client/local";
 import type { RemoteLiveQuery, SyncState, SyncStatus } from "@meldbase/client";
 import type { Document } from "@meldbase/client/types";
 
+/** Provides a shared immutable empty snapshot before remote results arrive. */
 const EMPTY_DOCUMENTS: readonly never[] = Object.freeze([]);
 
+/** Supplies initial remote documents for rendering before the live subscription updates. */
 export interface UseLiveQueryOptions<T extends Document> {
   // Supply the same snapshot on the server and first client render when the
   // query is remote. This avoids hydration drift without creating a second
@@ -18,6 +20,7 @@ export interface UseLiveQueryOptions<T extends Document> {
   readonly initialData?: readonly T[];
 }
 
+/** Holds query documents together with connection status, errors, and a resume token. */
 export interface LiveQueryResult<T extends Document> {
   readonly documents: readonly T[];
   readonly status: SyncState;
@@ -25,8 +28,10 @@ export interface LiveQueryResult<T extends Document> {
   readonly token?: string;
 }
 
+/** Accepts either a local or remote live query. */
 export type SupportedLiveQuery<T extends Document> = LiveQuery<T> | RemoteLiveQuery<T>;
 
+/** Connects a live query to React’s external store subscription lifecycle. */
 export function useLiveQuery<T extends Document>(
   query: SupportedLiveQuery<T>,
   options: UseLiveQueryOptions<T> = {},
@@ -41,6 +46,7 @@ export function useLiveQuery<T extends Document>(
   return useSyncExternalStore(observer.subscribe, observer.getSnapshot, observer.getServerSnapshot);
 }
 
+/** Shares one query subscription among React listeners and retains their current snapshot. */
 class QueryObserver<T extends Document> {
   readonly #query: SupportedLiveQuery<T>;
   readonly #listeners = new Set<() => void>();
@@ -99,6 +105,7 @@ class QueryObserver<T extends Document> {
   }
 }
 
+/** Checks whether documents, connection status, error, and token are unchanged. */
 function sameSnapshot<T extends Document>(left: LiveQueryResult<T>, right: LiveQueryResult<T>): boolean {
   return (
     left.documents === right.documents &&

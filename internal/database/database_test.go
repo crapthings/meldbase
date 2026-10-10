@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestCollectionCRUDAndQuerySemantics checks collection inserts, nested filters, sorting, updates, and deletion.
 func TestCollectionCRUDAndQuerySemantics(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -87,6 +88,7 @@ func TestCollectionCRUDAndQuerySemantics(t *testing.T) {
 	}
 }
 
+// TestStorageIsolationAndIDRules checks that caller edits cannot change stored documents and invalid or repeated identifiers are rejected.
 func TestStorageIsolationAndIDRules(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -120,6 +122,7 @@ func TestStorageIsolationAndIDRules(t *testing.T) {
 	}
 }
 
+// TestUpdateManyIsAtomicAndRejectsAmbiguousPaths checks that overflow rejects an entire update and overlapping field paths are invalid.
 func TestUpdateManyIsAtomicAndRejectsAmbiguousPaths(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -146,6 +149,7 @@ func TestUpdateManyIsAtomicAndRejectsAmbiguousPaths(t *testing.T) {
 	}
 }
 
+// TestMutationAffectedLimitRejectsAtomically checks that affected-document limits reject updates and deletions without changing any documents.
 func TestMutationAffectedLimitRejectsAtomically(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -189,6 +193,7 @@ func TestMutationAffectedLimitRejectsAtomically(t *testing.T) {
 	}
 }
 
+// TestInsertManyIsAtomicAcrossIDsIndexesAndChangeFeed checks that batch insertion publishes one change batch and rejects duplicate unique keys without partial inserts.
 func TestInsertManyIsAtomicAcrossIDsIndexesAndChangeFeed(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -229,6 +234,7 @@ func TestInsertManyIsAtomicAcrossIDsIndexesAndChangeFeed(t *testing.T) {
 	}
 }
 
+// TestChangeFeedPublishesOrderedAtomicBatches checks that change feeds preserve commit order and group document updates into one batch.
 func TestChangeFeedPublishesOrderedAtomicBatches(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -275,6 +281,7 @@ func TestChangeFeedPublishesOrderedAtomicBatches(t *testing.T) {
 	}
 }
 
+// TestClosedAndCancelledOperationsFail checks that operations reject cancelled contexts, closed databases, and invalid collection names.
 func TestClosedAndCancelledOperationsFail(t *testing.T) {
 	db := New()
 	collection := db.Collection("items")
@@ -294,6 +301,7 @@ func TestClosedAndCancelledOperationsFail(t *testing.T) {
 	}
 }
 
+// TestCompileQueryRejectsNonFiniteAndUnsafeValues checks that query compilation rejects non-finite numbers and unsafe object fields.
 func TestCompileQueryRejectsNonFiniteAndUnsafeValues(t *testing.T) {
 	if _, err := CompileQuery(Filter{"x": math.NaN()}, QueryOptions{}); !errors.Is(err, ErrInvalidFilter) {
 		t.Fatalf("NaN error = %v", err)

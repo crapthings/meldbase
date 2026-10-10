@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 )
 
+// rebaseQualificationProcessReceipt updates process receipt paths to verified artifacts while preserving each trial's directory layout.
 func rebaseQualificationProcessReceipt(receipt destructiveProcessReceipt, artifacts verifiedQualificationArtifactIndex) (destructiveProcessReceipt, []string, error) {
 	rebased := receipt
 	rebased.ArtifactsDirectory = artifacts.Root
@@ -29,6 +30,7 @@ func rebaseQualificationProcessReceipt(receipt destructiveProcessReceipt, artifa
 	return rebased, paths, nil
 }
 
+// rebaseQualificationCapacityReceipt updates disk-full receipt paths to the verified database and marker artifacts.
 func rebaseQualificationCapacityReceipt(receipt destructiveENOSPCReceipt, artifacts verifiedQualificationArtifactIndex) (destructiveENOSPCReceipt, []string, error) {
 	rebased := receipt
 	rebased.ArtifactsDirectory = artifacts.Root
@@ -50,6 +52,7 @@ func rebaseQualificationCapacityReceipt(receipt destructiveENOSPCReceipt, artifa
 	return rebased, paths, nil
 }
 
+// rebaseQualificationCorruptionReceipt updates the corruption receipt's database path to its verified artifact.
 func rebaseQualificationCorruptionReceipt(receipt destructiveCorruptionReceipt, artifacts verifiedQualificationArtifactIndex) (destructiveCorruptionReceipt, []string, error) {
 	rebased := receipt
 	database, err := qualificationArtifactPathForReference(artifacts, receipt.DatabaseArtifact, receipt.DatabaseSHA256)
@@ -60,6 +63,7 @@ func rebaseQualificationCorruptionReceipt(receipt destructiveCorruptionReceipt, 
 	return rebased, []string{database}, nil
 }
 
+// rebaseQualificationPowerReceipt updates power receipt paths to verified artifacts inside the secured root.
 func rebaseQualificationPowerReceipt(receipt destructivePowerReceipt, artifacts verifiedQualificationArtifactIndex) (destructivePowerReceipt, []string, error) {
 	rebased := receipt
 	evidence := &rebased.Evidence

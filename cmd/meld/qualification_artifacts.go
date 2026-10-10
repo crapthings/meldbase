@@ -17,11 +17,15 @@ import (
 )
 
 const (
-	qualificationArtifactIndexSchema      uint32 = 1
-	qualificationArtifactMaximumEntries          = 10_000
-	qualificationArtifactMaximumPathBytes        = 1_024
+	// qualificationArtifactIndexSchema identifies the artifact index format.
+	qualificationArtifactIndexSchema uint32 = 1
+	// qualificationArtifactMaximumEntries limits the number of files in an artifact index.
+	qualificationArtifactMaximumEntries = 10_000
+	// qualificationArtifactMaximumPathBytes limits the byte length of indexed relative paths.
+	qualificationArtifactMaximumPathBytes = 1_024
 )
 
+// qualificationArtifactIndex lists artifact paths, sizes, and hashes for one source revision.
 type qualificationArtifactIndex struct {
 	SchemaVersion  uint32                       `json:"schemaVersion"`
 	SourceRevision string                       `json:"sourceRevision"`
@@ -29,12 +33,14 @@ type qualificationArtifactIndex struct {
 	Entries        []qualificationArtifactEntry `json:"entries"`
 }
 
+// qualificationArtifactEntry records one artifact's relative path, byte count, and SHA-256 hash.
 type qualificationArtifactEntry struct {
 	Path   string `json:"path"`
 	Bytes  uint64 `json:"bytes"`
 	SHA256 string `json:"sha256"`
 }
 
+// verifiedQualificationArtifactIndex holds a checked artifact index and its resolved root directory.
 type verifiedQualificationArtifactIndex struct {
 	Raw     []byte
 	Root    string
@@ -42,6 +48,7 @@ type verifiedQualificationArtifactIndex struct {
 	Entries map[string]qualificationArtifactEntry
 }
 
+// runQualificationArtifactsIndexBuild builds and publishes an artifact index outside the indexed directory.
 func runQualificationArtifactsIndexBuild(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-artifacts-index-build", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -82,6 +89,7 @@ func runQualificationArtifactsIndexBuild(args []string, stdout, stderr io.Writer
 	return encoder.Encode(index)
 }
 
+// runQualificationArtifactsIndexVerify rehashes an artifact directory against its index and prints the verification result.
 func runQualificationArtifactsIndexVerify(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-artifacts-index-verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -109,6 +117,7 @@ func runQualificationArtifactsIndexVerify(args []string, stdout, stderr io.Write
 	return json.NewEncoder(stdout).Encode(result)
 }
 
+// buildQualificationArtifactIndex builds a sorted index of regular artifact files while rejecting symbolic links.
 func buildQualificationArtifactIndex(root, revision string) (qualificationArtifactIndex, error) {
 	index := qualificationArtifactIndex{SchemaVersion: qualificationArtifactIndexSchema, SourceRevision: revision}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -159,6 +168,7 @@ func buildQualificationArtifactIndex(root, revision string) (qualificationArtifa
 	return index, nil
 }
 
+// verifyQualificationArtifactIndex checks that the artifact directory's files, sizes, and hashes match the supplied index.
 func verifyQualificationArtifactIndex(rootPath, indexPath, revision string) (verifiedQualificationArtifactIndex, error) {
 	root, err := qualificationArtifactRoot(rootPath)
 	if err != nil {
@@ -190,6 +200,7 @@ func verifyQualificationArtifactIndex(rootPath, indexPath, revision string) (ver
 	return verifiedQualificationArtifactIndex{Raw: raw, Root: root, Index: expected, Entries: entries}, nil
 }
 
+// validateQualificationArtifactIndex checks the index format, revision, ordered paths, hashes, and byte total.
 func validateQualificationArtifactIndex(index qualificationArtifactIndex, revision string) error {
 	if index.SchemaVersion != qualificationArtifactIndexSchema || index.SourceRevision != revision ||
 		len(index.Entries) == 0 || len(index.Entries) > qualificationArtifactMaximumEntries {
@@ -216,6 +227,7 @@ func validateQualificationArtifactIndex(index qualificationArtifactIndex, revisi
 	return nil
 }
 
+// qualificationArtifactRoot resolves an existing artifact directory while rejecting a symbolic link at its root.
 func qualificationArtifactRoot(path string) (string, error) {
 	root, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -235,6 +247,7 @@ func qualificationArtifactRoot(path string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
+// validateQualificationArtifactPath requires a bounded canonical relative UTF-8 path without control characters.
 func validateQualificationArtifactPath(path string) error {
 	if path == "" || len(path) > qualificationArtifactMaximumPathBytes || !utf8.ValidString(path) ||
 		strings.Contains(path, "\\") || filepath.IsAbs(path) || filepath.ToSlash(filepath.Clean(path)) != path ||
@@ -249,6 +262,7 @@ func validateQualificationArtifactPath(path string) error {
 	return nil
 }
 
+// hashQualificationArtifact hashes a regular artifact file and checks for changes or replacement during reading.
 func hashQualificationArtifact(path string) (uint64, string, error) {
 	pathBefore, err := os.Lstat(path)
 	if err != nil || pathBefore.Mode()&os.ModeSymlink != 0 || !pathBefore.Mode().IsRegular() {
@@ -279,11 +293,13 @@ func hashQualificationArtifact(path string) (uint64, string, error) {
 	return uint64(written), hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// qualificationPathWithin checks whether a candidate path is the root or lies beneath it.
 func qualificationPathWithin(root, candidate string) bool {
 	relative, err := filepath.Rel(root, candidate)
 	return err == nil && relative != ".." && !filepath.IsAbs(relative) && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
+// requireQualificationArtifactPaths checks that required regular files resolve inside the root and appear in the verified index.
 func requireQualificationArtifactPaths(index verifiedQualificationArtifactIndex, paths ...string) error {
 	for _, candidate := range paths {
 		absolute, err := qualificationArtifactCandidate(candidate)
@@ -302,6 +318,7 @@ func requireQualificationArtifactPaths(index verifiedQualificationArtifactIndex,
 	return nil
 }
 
+// qualificationArtifactEntryForPath finds the index entry for a regular file inside the artifact root.
 func qualificationArtifactEntryForPath(index verifiedQualificationArtifactIndex, candidate string) (qualificationArtifactEntry, error) {
 	absolute, err := qualificationArtifactCandidate(candidate)
 	if err != nil || !qualificationPathWithin(index.Root, absolute) || absolute == index.Root {
@@ -318,6 +335,7 @@ func qualificationArtifactEntryForPath(index verifiedQualificationArtifactIndex,
 	return entry, nil
 }
 
+// qualificationArtifactEntryForDigest finds the unique indexed artifact with the requested hash and size.
 func qualificationArtifactEntryForDigest(index verifiedQualificationArtifactIndex, digest string, size uint64) (qualificationArtifactEntry, error) {
 	var matched qualificationArtifactEntry
 	for _, entry := range index.Entries {
@@ -335,6 +353,7 @@ func qualificationArtifactEntryForDigest(index verifiedQualificationArtifactInde
 	return matched, nil
 }
 
+// qualificationArtifactPathForDigest returns the path of the unique indexed artifact with the requested hash.
 func qualificationArtifactPathForDigest(index verifiedQualificationArtifactIndex, digest string) (string, error) {
 	if !qualificationHexDigest(digest) {
 		return "", errors.New("required content digest is malformed")
@@ -355,6 +374,7 @@ func qualificationArtifactPathForDigest(index verifiedQualificationArtifactIndex
 	return filepath.Join(index.Root, filepath.FromSlash(matched.Path)), nil
 }
 
+// qualificationArtifactPathForReference resolves an artifact reference by its hash and longest matching original path suffix.
 func qualificationArtifactPathForReference(index verifiedQualificationArtifactIndex, originalPath, digest string) (string, error) {
 	if !filepath.IsAbs(originalPath) || !qualificationHexDigest(digest) {
 		return "", errors.New("artifact reference path or digest is malformed")
@@ -389,6 +409,7 @@ func qualificationArtifactPathForReference(index verifiedQualificationArtifactIn
 	return filepath.Join(index.Root, filepath.FromSlash(best)), nil
 }
 
+// qualificationArtifactCandidate resolves a regular artifact file while rejecting a symbolic link at the file path.
 func qualificationArtifactCandidate(candidate string) (string, error) {
 	absolute, err := filepath.Abs(filepath.Clean(candidate))
 	if err != nil {

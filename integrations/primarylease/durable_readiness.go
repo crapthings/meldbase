@@ -7,10 +7,11 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
-// DurableConsumerPromotionReadiness is a first-party readiness check for a
-// single-writer follower. It verifies that the source's authenticated named
-// durable database consumer has durably acknowledged exactly the candidate
-// follower's local token, and that the source has not advanced beyond it.
+// DurableConsumerPromotionReadiness permits promotion only when source and acknowledged follower positions match.
+//
+// It supports a single-writer follower. The source's authenticated named
+// durable database consumer must have durably acknowledged exactly the
+// candidate follower's local token, and the source must not have advanced beyond it.
 //
 // Authority runs readiness only after the old lease's skew-safe handoff point.
 // The deployment must still ensure that the source used that lease guard and
@@ -23,6 +24,7 @@ type DurableConsumerPromotionReadiness struct {
 	Buffer       int
 }
 
+// VerifyFollowerPromotion checks that the source and its durable consumer match the follower token.
 func (readiness DurableConsumerPromotionReadiness) VerifyFollowerPromotion(ctx context.Context, request meldbase.FollowerPromotionRequest, record LeaseRecord, exists bool) error {
 	if readiness.Source == nil || readiness.ConsumerName == "" || !exists || record.DatabaseID != request.DatabaseID || record.CommitSequence != request.CommitSequence {
 		return ErrLeasePromotionReadiness
@@ -49,4 +51,5 @@ func (readiness DurableConsumerPromotionReadiness) VerifyFollowerPromotion(ctx c
 	return nil
 }
 
+// Verify at compile time that this check implements PromotionReadiness.
 var _ PromotionReadiness = DurableConsumerPromotionReadiness{}

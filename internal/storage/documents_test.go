@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestDocumentCatalogAndCommitLogPublishAtomically checks that document edits, collection metadata, and commit history remain consistent through reopening.
 func TestDocumentCatalogAndCommitLogPublishAtomically(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "documents.meld2")
 	file, _, err := Open(path)
@@ -103,6 +104,7 @@ func TestDocumentCatalogAndCommitLogPublishAtomically(t *testing.T) {
 	}
 }
 
+// TestDocumentTransactionRejectsDuplicateAndFailedPreconditionsWithoutCommit checks that repeated document mutations and deletion of a missing document leave the commit sequence unchanged.
 func TestDocumentTransactionRejectsDuplicateAndFailedPreconditionsWithoutCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preconditions.meld2")
 	file, _, err := Open(path)
@@ -130,6 +132,7 @@ func TestDocumentTransactionRejectsDuplicateAndFailedPreconditionsWithoutCommit(
 	}
 }
 
+// TestDocumentReadSetPreconditionsAreAtomicAndRejectOnlyPointConflicts checks that document preconditions allow unrelated writes and reject stale reads without publishing changes.
 func TestDocumentReadSetPreconditionsAreAtomicAndRejectOnlyPointConflicts(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "document-read-set.meld2"))
 	if err != nil {
@@ -189,6 +192,7 @@ func TestDocumentReadSetPreconditionsAreAtomicAndRejectOnlyPointConflicts(t *tes
 	}
 }
 
+// TestCollectionPreconditionsRejectPhantomsAndRemainAtomic checks that collection preconditions reject intervening collection changes without publishing mutations.
 func TestCollectionPreconditionsRejectPhantomsAndRemainAtomic(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "collection-preconditions.meld2"))
 	if err != nil {
@@ -266,6 +270,7 @@ func TestCollectionPreconditionsRejectPhantomsAndRemainAtomic(t *testing.T) {
 	}
 }
 
+// TestDocumentInsertionPositionsSurviveUpdateSnapshotAndReinsert checks that updates keep insertion positions while reinsertion assigns a new position.
 func TestDocumentInsertionPositionsSurviveUpdateSnapshotAndReinsert(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "document-order.meld2")
 	file, _, err := Open(path)
@@ -365,6 +370,7 @@ func TestDocumentInsertionPositionsSurviveUpdateSnapshotAndReinsert(t *testing.T
 	}
 }
 
+// TestDocumentRecordDescriptorRejectsNonCanonicalHeaders checks that document record decoding rejects damaged headers and zero insertion positions.
 func TestDocumentRecordDescriptorRejectsNonCanonicalHeaders(t *testing.T) {
 	tx := &WriteTxn{}
 	if _, _, err := tx.loadDocumentRecord(nil); !errors.Is(err, ErrCorrupt) {

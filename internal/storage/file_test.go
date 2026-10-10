@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestFilePublishesRootAndFallsBackFromMetaCorruption checks exclusive file ownership and recovery from a damaged newest metadata page.
 func TestFilePublishesRootAndFallsBackFromMetaCorruption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "data.meld2")
 	file, initial, err := Open(path)
@@ -62,6 +63,7 @@ func TestFilePublishesRootAndFallsBackFromMetaCorruption(t *testing.T) {
 	}
 }
 
+// flipByte inverts one byte at the given file offset to simulate corruption.
 func flipByte(file *os.File, offset int64) error {
 	value := []byte{0}
 	if _, err := file.ReadAt(value, offset); err != nil {
@@ -72,6 +74,7 @@ func flipByte(file *os.File, offset int64) error {
 	return err
 }
 
+// TestFileFallsBackFromCorruptNewestRootAndTruncatesPartialTail checks that opening recovers the older valid root and removes an incomplete trailing page.
 func TestFileFallsBackFromCorruptNewestRootAndTruncatesPartialTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "root-fallback.meld2")
 	file, _, err := Open(path)
@@ -129,6 +132,7 @@ func TestFileFallsBackFromCorruptNewestRootAndTruncatesPartialTail(t *testing.T)
 	}
 }
 
+// TestOpenRequireGraphAuditRejectsDeepCorruptionWithoutMutation checks that a required tree audit rejects damaged catalog data without modifying the file.
 func TestOpenRequireGraphAuditRejectsDeepCorruptionWithoutMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "graph-audit.meld2")
 	file, _, err := Open(path)
@@ -195,6 +199,7 @@ func TestOpenRequireGraphAuditRejectsDeepCorruptionWithoutMutation(t *testing.T)
 	}
 }
 
+// TestCommitFaultsReopenAtExactlyOldOrNewGeneration checks that commit faults stop further writes and recover a complete old or new version.
 func TestCommitFaultsReopenAtExactlyOldOrNewGeneration(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "base.meld2")
 	file, _, err := Open(base)
@@ -255,6 +260,7 @@ func TestCommitFaultsReopenAtExactlyOldOrNewGeneration(t *testing.T) {
 	}
 }
 
+// TestOpenOptionsRejectStaleSnapshotBeforeMutation checks that identity and minimum-version guards reject invalid database candidates before changing or creating files.
 func TestOpenOptionsRejectStaleSnapshotBeforeMutation(t *testing.T) {
 	directory := t.TempDir()
 	currentPath := filepath.Join(directory, "current.meld2")
@@ -335,6 +341,7 @@ func TestOpenOptionsRejectStaleSnapshotBeforeMutation(t *testing.T) {
 	}
 }
 
+// TestOpenForQualificationReportsPublicationBoundariesInOrder checks that qualification callbacks report page writes and commit sync boundaries in order.
 func TestOpenForQualificationReportsPublicationBoundariesInOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "qualification.meld2")
 	seed, _, err := Open(path)

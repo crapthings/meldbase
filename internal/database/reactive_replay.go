@@ -8,10 +8,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// reactiveReplayView bridges one pinned Storage snapshot and its ordered
-// Commit Log tail into the same immutable state transitions used by live
-// process-local reactive views. It remains internal until Storage  becomes a
-// supported public open path.
+// reactiveReplayView maintains a query result from a pinned storage snapshot and subsequent commits.
 type reactiveReplayView struct {
 	collection     string
 	collectionID   uint32
@@ -22,17 +19,20 @@ type reactiveReplayView struct {
 	resourceLimits ResourceLimits
 }
 
+// replayOrderCheckpoint saves the order state needed to undo a failed commit transition.
 type replayOrderCheckpoint struct {
 	token uint64
 	next  uint64
 	items map[DocumentID]replayOrderItem
 }
 
+// replayOrderItem records a document's previous insertion position and whether it existed.
 type replayOrderItem struct {
 	position uint64
 	exists   bool
 }
 
+// newReactiveReplayView builds a query view from a pinned storage snapshot within the configured resource limits.
 func newReactiveReplayView(snapshot *storage.ReadSnapshot, collection string, query QuerySpec, suppliedLimits ...ResourceLimits) (*reactiveReplayView, error) {
 	if snapshot == nil || !collectionNamePattern.MatchString(collection) {
 		return nil, ErrInvalidCollection
@@ -119,6 +119,7 @@ func newReactiveReplayView(snapshot *storage.ReadSnapshot, collection string, qu
 	return view, nil
 }
 
+// Snapshot returns a copy of the current query result and its commit token.
 func (view *reactiveReplayView) Snapshot() QuerySnapshot {
 	if view == nil || view.state == nil {
 		return QuerySnapshot{}
@@ -127,7 +128,9 @@ func (view *reactiveReplayView) Snapshot() QuerySnapshot {
 }
 
 // ApplyCommit resolves only this collection's images before acknowledging the
-// stream batch. Unrelated commits still advance the internal sequence, while a
+// stream batch.
+//
+// Unrelated commits still advance the internal sequence, while a
 // delta is produced only when the materialized query result changes.
 func (view *reactiveReplayView) ApplyCommit(stream *storage.LiveCommitStream, batch storage.CommitBatch) (QuerySnapshot, *sharedQueryDelta, error) {
 	if view == nil || view.state == nil || stream == nil || batch.Sequence == 0 || batch.Sequence != view.state.token+1 {
@@ -195,6 +198,7 @@ func (view *reactiveReplayView) ApplyCommit(stream *storage.LiveCommitStream, ba
 	return cloneSnapshot(next.snapshot), delta, nil
 }
 
+// checkpointOrder saves the order counters and positions touched by a set of changes.
 func (view *reactiveReplayView) checkpointOrder(changes []Change) replayOrderCheckpoint {
 	checkpoint := replayOrderCheckpoint{items: make(map[DocumentID]replayOrderItem, len(changes))}
 	view.order.mu.RLock()
@@ -207,6 +211,7 @@ func (view *reactiveReplayView) checkpointOrder(changes []Change) replayOrderChe
 	return checkpoint
 }
 
+// restoreOrder restores saved order counters and document positions after a failed transition.
 func (view *reactiveReplayView) restoreOrder(checkpoint replayOrderCheckpoint) {
 	view.order.mu.Lock()
 	view.order.token, view.order.next = checkpoint.token, checkpoint.next
@@ -220,6 +225,7 @@ func (view *reactiveReplayView) restoreOrder(checkpoint replayOrderCheckpoint) {
 	view.order.mu.Unlock()
 }
 
+// convertReplayChange validates a stored document event and converts its images into a database change.
 func convertReplayChange(change storage.ResolvedCommitChange) (Change, error) {
 	converted := Change{DocumentID: DocumentID(change.DocumentID), ChangedPaths: append([]string(nil), change.ChangedPaths...)}
 	decodeBefore := func() error {
@@ -278,6 +284,7 @@ func convertReplayChange(change storage.ResolvedCommitChange) (Change, error) {
 	return converted, nil
 }
 
+// decodeReplayDocument decodes a stored document and verifies that its ID matches the expected ID.
 func decodeReplayDocument(encoded []byte, expected [16]byte) (Document, error) {
 	document, err := decodeStoredDocument(encoded)
 	if err != nil {
@@ -290,6 +297,7 @@ func decodeReplayDocument(encoded []byte, expected [16]byte) (Document, error) {
 	return document, nil
 }
 
+// replayCorrupt wraps storage replay errors as database corruption while preserving nil and existing corruption errors.
 func replayCorrupt(err error) error {
 	if err == nil || errors.Is(err, ErrCorrupt) {
 		return err

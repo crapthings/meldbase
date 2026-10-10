@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestDestructiveEIOSeedCreatesVerifiedReusableFixture checks that the disk-error fixture contains verified reusable pages and a database checksum.
 func TestDestructiveEIOSeedCreatesVerifiedReusableFixture(t *testing.T) {
 	database := filepath.Join(t.TempDir(), "eio.meld")
 	var output strings.Builder
@@ -25,6 +26,7 @@ func TestDestructiveEIOSeedCreatesVerifiedReusableFixture(t *testing.T) {
 	}
 }
 
+// TestValidateBlkdebugEIOConfigRequiresWriteOnlyUniqueSectors checks that injected disk errors target writes once per distinct sector.
 func TestValidateBlkdebugEIOConfigRequiresWriteOnlyUniqueSectors(t *testing.T) {
 	valid := []byte("[inject-error]\nevent = \"write_aio\"\niotype = \"write\"\nerrno = \"5\"\nsector = \"10\"\nonce = \"on\"\n\n" +
 		"[inject-error]\nevent = \"write_aio\"\niotype = \"write\"\nerrno = \"5\"\nsector = \"11\"\nonce = \"on\"\n")
@@ -43,6 +45,7 @@ func TestValidateBlkdebugEIOConfigRequiresWriteOnlyUniqueSectors(t *testing.T) {
 	}
 }
 
+// TestValidateQMPEIOProofAcceptsAsyncBlockErrorBetweenCommands checks that disk-error evidence accepts an asynchronous write error and rejects a read error.
 func TestValidateQMPEIOProofAcceptsAsyncBlockErrorBetweenCommands(t *testing.T) {
 	now := time.Now().UTC()
 	target, config := "/control/target.img", "/control/eio.conf"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prints the required matrix inputs and exits with an argument error.
 usage() {
 	printf 'usage: %s CONTROL_DIR MELD_LINUX_AMD64 VMLINUZ_VIRT INITRAMFS_VIRT MODLOOP_VIRT [SOURCE_REVISION]\n' "$0" >&2
 	exit 2
@@ -8,21 +9,37 @@ usage() {
 
 [[ $# -eq 5 || $# -eq 6 ]] || usage
 
+# Holds the directory shared by the host and test guest.
 control_dir=$1
+# Holds the Linux Meldbase binary used by the matrix.
 meld_binary=$2
+# Holds the kernel image used to boot the test guest.
 kernel=$3
+# Holds the initial guest filesystem to customize for the matrix.
 base_initramfs=$4
+# Holds the guest kernel module image.
 modloop=$5
+# Holds the optional source revision required by the matrix.
 source_revision=${6:-}
+# Selects whether trials reset the guest or kill the QEMU process.
 qemu_cut_mode=${MELDBASE_QEMU_CUT_MODE:-system-reset}
+# Holds the optional qualification plan used to resume and record trials.
 session_plan=${MELDBASE_QUALIFICATION_PLAN:-}
+# Selects the non-root user that reads and updates the qualification plan.
 session_uid=${MELDBASE_QUALIFICATION_UID:-65534}
+# Controls whether the runner prints trials without executing them.
 dry_run=${MELDBASE_QEMU_DRY_RUN:-0}
+# Limits how many trials run from the complete fifteen-trial matrix.
 trial_limit=${MELDBASE_QEMU_TRIAL_LIMIT:-15}
+# Locates the guest initialization script beside this runner.
 script_dir=$(cd "$(dirname "$0")" && pwd -P)
+# Pins the container image providing QEMU and disk tools.
 qemu_image='ghcr.io/cross-rs/x86_64-unknown-linux-gnu@sha256:65edeb793308323d185cbfb903778debfff6258c74934ef6a4993ffcdb9763cb'
+# Pins the container image used to build the guest filesystem.
 initramfs_image='alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce'
+# Names the container running each test guest.
 container="meld-qemu-matrix-$$"
+# Tracks whether cleanup may remove the session target disk.
 session_matrix_complete=0
 
 [[ -d "$control_dir" && -f "$meld_binary" && -f "$kernel" && -f "$base_initramfs" && -f "$modloop" ]] || usage
@@ -47,6 +64,7 @@ if [[ ! "$trial_limit" =~ ^([1-9]|1[0-5])$ ]]; then
 	exit 2
 fi
 
+# Holds the qualification plan path as seen inside containers.
 session_plan_container=
 if [[ -n "$session_plan" ]]; then
 	[[ "$trial_limit" -eq 15 ]] || { printf 'session mode requires the complete 15-trial power matrix\n' >&2; exit 2; }
@@ -78,6 +96,7 @@ if [[ "$dry_run" == 1 ]]; then
 	exit 0
 fi
 
+# Removes temporary guest resources while preserving an unfinished session disk.
 cleanup() {
 	docker rm -f "$container" >/dev/null 2>&1 || true
 	rm -f "$control_dir/qmp.sock"
@@ -107,13 +126,19 @@ docker run --rm -v "$control_dir:/control" "$initramfs_image" sh -lc '
 '
 
 find "$control_dir" -maxdepth 1 -name 'matrix-*' -delete
+# Names the report collecting individual receipt verification results.
 verification="$control_dir/matrix-verification.jsonl"
 : >"$verification"
+# Collects receipt arguments for the complete matrix check.
 receipt_args=()
+# Collects host receipt paths for final verification.
 receipt_paths=()
+# Lists the commit stages tested by the matrix.
 boundaries=(after-page-write before-data-sync after-data-sync after-meta-write after-meta-sync)
+# Tracks the trial position across commit stages and repetitions.
 ordinal=0
 
+# Reads qualification progress using the configured non-root container user.
 session_status() {
 	docker run --rm --user "$session_uid:$session_uid" -v "$control_dir:/control" "$qemu_image" \
 		/control/meld qualification-session-status --plan "$session_plan_container"
@@ -262,5 +287,6 @@ if [[ "$trial_limit" -eq 15 ]]; then
 else
 	rm -f "$control_dir/matrix-summary.json"
 fi
+# Computes the digest of the final receipt verification report.
 sha256=$(shasum -a 256 "$verification" | awk '{print $1}')
 printf 'verified=%s verificationSha256=%s releaseMatrix=%s\n' "$trial_limit" "$sha256" "$([[ "$trial_limit" -eq 15 ]] && printf true || printf false)"

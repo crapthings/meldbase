@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestRuntimeProfilerHeapCaptureIsBoundedAndObservable checks that heap capture reports its output size and completion statistics.
 func TestRuntimeProfilerHeapCaptureIsBoundedAndObservable(t *testing.T) {
 	profiler, err := NewRuntimeProfiler(RuntimeProfilerOptions{MaxDuration: time.Second, MaxBytes: 8 << 20})
 	if err != nil {
@@ -26,6 +27,7 @@ func TestRuntimeProfilerHeapCaptureIsBoundedAndObservable(t *testing.T) {
 	}
 }
 
+// TestRuntimeProfilerEnforcesGlobalExclusionAndDuration checks that an active timed trace excludes another capture until it finishes.
 func TestRuntimeProfilerEnforcesGlobalExclusionAndDuration(t *testing.T) {
 	profiler, err := NewRuntimeProfiler(RuntimeProfilerOptions{MaxDuration: time.Second, MaxBytes: 8 << 20})
 	if err != nil {
@@ -55,6 +57,7 @@ func TestRuntimeProfilerEnforcesGlobalExclusionAndDuration(t *testing.T) {
 	}
 }
 
+// TestRuntimeProfilerCancellationStopsCPUProfile checks that cancellation stops CPU profiling early and counts a failed capture.
 func TestRuntimeProfilerCancellationStopsCPUProfile(t *testing.T) {
 	profiler, err := NewRuntimeProfiler(RuntimeProfilerOptions{MaxDuration: time.Second, MaxBytes: 8 << 20})
 	if err != nil {
@@ -72,6 +75,7 @@ func TestRuntimeProfilerCancellationStopsCPUProfile(t *testing.T) {
 	}
 }
 
+// TestRuntimeProfilerValidatesPolicyAndCapture checks that capture settings reject invalid inputs and heap output stops at its byte limit.
 func TestRuntimeProfilerValidatesPolicyAndCapture(t *testing.T) {
 	for _, options := range []RuntimeProfilerOptions{
 		{MaxDuration: time.Millisecond}, {MaxDuration: 6 * time.Minute}, {MaxBytes: 1}, {MaxBytes: (1 << 30) + 1},

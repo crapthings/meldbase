@@ -1,26 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prints the required test inputs and exits with an argument error.
 usage() {
 	printf 'usage: %s CONTROL_DIR MELD_LINUX_AMD64 VMLINUZ_VIRT INITRAMFS_VIRT MODLOOP_VIRT\n' "$0" >&2
 	exit 2
 }
 
 [[ $# -eq 5 ]] || usage
+# Holds the directory shared by the host and test guests.
 control_dir=$1
+# Holds the Linux Meldbase binary used by the test.
 meld_binary=$2
+# Holds the kernel image used to boot the test guests.
 kernel=$3
+# Holds the initial guest filesystem to customize for the test.
 base_initramfs=$4
+# Holds the guest kernel module image.
 modloop=$5
+# Locates the guest initialization script beside this runner.
 script_dir=$(cd "$(dirname "$0")" && pwd -P)
+# Pins the container image providing QEMU and disk tools.
 qemu_image='ghcr.io/cross-rs/x86_64-unknown-linux-gnu@sha256:65edeb793308323d185cbfb903778debfff6258c74934ef6a4993ffcdb9763cb'
+# Pins the container image used to build the guest filesystem.
 initramfs_image='alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce'
+# Names the container running the fault injection guest.
 container="meld-qemu-flush-eio-$$"
+# Names the container running the recovery guest.
 recovery_container="meld-qemu-flush-eio-recovery-$$"
+# Names the disk flush error trial and its evidence files.
 trial=flush-eio-1
 
 [[ -d "$control_dir" && -f "$meld_binary" && -f "$kernel" && -f "$base_initramfs" && -f "$modloop" ]] || usage
 control_dir=$(cd "$control_dir" && pwd -P)
+# Removes both test containers and the control socket when the runner exits.
 cleanup() {
 	docker rm -f "$container" >/dev/null 2>&1 || true
 	docker rm -f "$recovery_container" >/dev/null 2>&1 || true

@@ -7,9 +7,11 @@ import (
 	"unicode/utf8"
 )
 
+// ErrInvalidPolicyLease reports an invalid policy version or missing lease where a lease is required.
 var ErrInvalidPolicyLease = errors.New("meldbase server: invalid query policy lease")
 
-// QueryPolicyLease linearizes policy revocation against authorized output.
+// QueryPolicyLease coordinates policy revocation with authorized response delivery.
+//
 // Revoke first prevents new acquisitions and closes Done, then waits for every
 // acquisition already encoding or enqueueing a response to finish. Frames
 // already placed in the transport queue are considered authorized in flight.
@@ -23,6 +25,7 @@ type QueryPolicyLease struct {
 	drained chan struct{}
 }
 
+// NewQueryPolicyLease creates an active lease for a nonempty policy version.
 func NewQueryPolicyLease(version string) (*QueryPolicyLease, error) {
 	if !validPolicyVersion(version) {
 		return nil, ErrInvalidPolicyLease
@@ -30,6 +33,7 @@ func NewQueryPolicyLease(version string) (*QueryPolicyLease, error) {
 	return &QueryPolicyLease{version: version, done: make(chan struct{}), drained: make(chan struct{})}, nil
 }
 
+// Version returns the policy version or an empty string for a nil lease.
 func (lease *QueryPolicyLease) Version() string {
 	if lease == nil {
 		return ""
@@ -37,6 +41,7 @@ func (lease *QueryPolicyLease) Version() string {
 	return lease.version
 }
 
+// Done returns the channel closed on revocation or nil for a nil lease.
 func (lease *QueryPolicyLease) Done() <-chan struct{} {
 	if lease == nil {
 		return nil
@@ -44,6 +49,7 @@ func (lease *QueryPolicyLease) Done() <-chan struct{} {
 	return lease.done
 }
 
+// Valid reports whether a non-nil lease has not been revoked.
 func (lease *QueryPolicyLease) Valid() bool {
 	if lease == nil {
 		return false
@@ -53,7 +59,9 @@ func (lease *QueryPolicyLease) Valid() bool {
 	return !lease.revoked
 }
 
-// Revoke is idempotent. A canceled context stops waiting but does not undo the
+// Revoke blocks new authorized actions and waits for existing actions to finish.
+//
+// Repeated calls are safe. A canceled context stops waiting but does not undo
 // revocation; a later call may wait for the same lease to drain.
 func (lease *QueryPolicyLease) Revoke(ctx context.Context) error {
 	if lease == nil {
@@ -80,6 +88,7 @@ func (lease *QueryPolicyLease) Revoke(ctx context.Context) error {
 	}
 }
 
+// acquire reserves an authorized action unless the lease is revoked, with a nil lease allowing the action.
 func (lease *QueryPolicyLease) acquire() bool {
 	if lease == nil {
 		return true
@@ -96,6 +105,7 @@ func (lease *QueryPolicyLease) acquire() bool {
 	return true
 }
 
+// release finishes an acquired action and signals when a revoked lease has no active actions.
 func (lease *QueryPolicyLease) release() {
 	if lease == nil {
 		return
@@ -111,10 +121,12 @@ func (lease *QueryPolicyLease) release() {
 	}
 }
 
+// validPolicyVersion checks that a policy version is nonempty valid UTF-8 within the byte limit.
 func validPolicyVersion(version string) bool {
 	return version != "" && len(version) <= 128 && utf8.ValidString(version)
 }
 
+// underQueryPolicyLease runs an action while holding a lease acquisition and reports whether it was authorized.
 func underQueryPolicyLease(lease *QueryPolicyLease, action func() error) (bool, error) {
 	if action == nil || !lease.acquire() {
 		return false, nil
@@ -123,6 +135,7 @@ func underQueryPolicyLease(lease *QueryPolicyLease, action func() error) (bool, 
 	return true, action()
 }
 
+// underQueryPolicy runs an action while holding acquisitions on both leases attached to the query policy.
 func underQueryPolicy(policy QueryPolicy, action func() error) (bool, error) {
 	if action == nil || !policy.Lease.acquire() {
 		return false, nil

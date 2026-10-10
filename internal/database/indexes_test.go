@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// TestIndexedRangeQueriesMatchCollectionScanAcrossRandomData checks that indexed ranges return the same sorted and paginated results as scans over randomized data.
 func TestIndexedRangeQueriesMatchCollectionScanAcrossRandomData(t *testing.T) {
 	for seed := uint64(1); seed <= 8; seed++ {
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
@@ -55,6 +56,7 @@ func TestIndexedRangeQueriesMatchCollectionScanAcrossRandomData(t *testing.T) {
 	}
 }
 
+// TestIndexedQueriesRemainCorrectAfterRepeatedIndexedFieldUpdates checks that indexed queries match expected documents after repeated field updates and durable reopening.
 func TestIndexedQueriesRemainCorrectAfterRepeatedIndexedFieldUpdates(t *testing.T) {
 	type model struct {
 		id       DocumentID
@@ -178,6 +180,7 @@ func TestIndexedQueriesRemainCorrectAfterRepeatedIndexedFieldUpdates(t *testing.
 	}
 }
 
+// TestIndexedInAndEligibleOrMatchCollectionScanWithResiduals checks that indexed membership and union queries match scans when additional filters must be evaluated.
 func TestIndexedInAndEligibleOrMatchCollectionScanWithResiduals(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB {
@@ -233,6 +236,7 @@ func TestIndexedInAndEligibleOrMatchCollectionScanWithResiduals(t *testing.T) {
 	}
 }
 
+// TestExplainQueryReportsCompiledOptionsBoundsAndSortCompatibleIndex checks that Explain prefers a sort-compatible index and reports query bounds, scan work, and retained candidates.
 func TestExplainQueryReportsCompiledOptionsBoundsAndSortCompatibleIndex(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -288,6 +292,7 @@ func TestExplainQueryReportsCompiledOptionsBoundsAndSortCompatibleIndex(t *testi
 	}
 }
 
+// queryIDs runs a query and returns its document identifiers or fails the test.
 func queryIDs(t *testing.T, collection *Collection, filter Filter, options QueryOptions) []DocumentID {
 	t.Helper()
 	cursor, err := collection.Find(context.Background(), filter, options)
@@ -305,6 +310,7 @@ func queryIDs(t *testing.T, collection *Collection, filter Filter, options Query
 	return ids
 }
 
+// TestUniqueIndexMaintainedAcrossCRUDAndPlanner checks that a unique index supports lookups, rejects duplicate values, and releases keys after updates and deletes.
 func TestUniqueIndexMaintainedAcrossCRUDAndPlanner(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -343,6 +349,7 @@ func TestUniqueIndexMaintainedAcrossCRUDAndPlanner(t *testing.T) {
 	}
 }
 
+// TestCompoundIndexPlannerMixedDirectionsAndStableOrder checks that a mixed-direction compound index supports prefix and range queries while preserving requested result order.
 func TestCompoundIndexPlannerMixedDirectionsAndStableOrder(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -412,6 +419,7 @@ func TestCompoundIndexPlannerMixedDirectionsAndStableOrder(t *testing.T) {
 	}
 }
 
+// TestCompoundIndexPlannerMatchesCollectionScanAcrossDirections checks that compound index results match scans for every ascending and descending field combination.
 func TestCompoundIndexPlannerMatchesCollectionScanAcrossDirections(t *testing.T) {
 	for _, directions := range [][2]int{{1, 1}, {1, -1}, {-1, 1}, {-1, -1}} {
 		name := fmt.Sprintf("%d_%d", directions[0], directions[1])
@@ -467,6 +475,7 @@ func TestCompoundIndexPlannerMatchesCollectionScanAcrossDirections(t *testing.T)
 	}
 }
 
+// TestUniqueCompoundIndexMaintainedAcrossCRUD checks that compound uniqueness applies to complete tuples and updates or deletes release their old keys.
 func TestUniqueCompoundIndexMaintainedAcrossCRUD(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -515,6 +524,7 @@ func TestUniqueCompoundIndexMaintainedAcrossCRUD(t *testing.T) {
 	}
 }
 
+// TestCompoundIndexPreservesMissingSuffixMatchesAndRejectsNonScalars checks that prefix queries include missing suffixes and invalid array values leave indexed documents unchanged.
 func TestCompoundIndexPreservesMissingSuffixMatchesAndRejectsNonScalars(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -544,6 +554,7 @@ func TestCompoundIndexPreservesMissingSuffixMatchesAndRejectsNonScalars(t *testi
 	}
 }
 
+// TestCompoundIndexDefinitionValidationAndOwnership checks that compound definitions reject invalid fields and retain an independent copy of caller settings.
 func TestCompoundIndexDefinitionValidationAndOwnership(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -575,6 +586,7 @@ func TestCompoundIndexDefinitionValidationAndOwnership(t *testing.T) {
 	}
 }
 
+// TestCompoundIndexRejectsOversizedCanonicalTupleAcrossBuildAndInsert checks that oversized encoded tuples are rejected during index creation and later inserts.
 func TestCompoundIndexRejectsOversizedCanonicalTupleAcrossBuildAndInsert(t *testing.T) {
 	oversized := String(strings.Repeat("x", maxCanonicalSecondaryKeyLen))
 	for _, existing := range []bool{true, false} {
@@ -604,6 +616,7 @@ func TestCompoundIndexRejectsOversizedCanonicalTupleAcrossBuildAndInsert(t *test
 	}
 }
 
+// TestIndexRangeScanAndExactMixedNumericUniqueness checks that numeric indexes respect range bounds and treat equal integer and float values as duplicates.
 func TestIndexRangeScanAndExactMixedNumericUniqueness(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -650,6 +663,7 @@ func TestIndexRangeScanAndExactMixedNumericUniqueness(t *testing.T) {
 	}
 }
 
+// TestOrUnionPlansPrimaryRangeCompoundAndDifferentIndexes checks that union queries merge indexed branches without duplicate documents and fall back when a branch has no index.
 func TestOrUnionPlansPrimaryRangeCompoundAndDifferentIndexes(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB { return New() },
@@ -812,6 +826,7 @@ func TestOrUnionPlansPrimaryRangeCompoundAndDifferentIndexes(t *testing.T) {
 	}
 }
 
+// TestIndexedOrUnionMatchesCollectionScanAcrossBackends checks that indexed unions preserve scan results across memory and durable backends with sorting and pagination.
 func TestIndexedOrUnionMatchesCollectionScanAcrossBackends(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB { return New() },
@@ -921,6 +936,7 @@ func TestIndexedOrUnionMatchesCollectionScanAcrossBackends(t *testing.T) {
 	}
 }
 
+// TestDurableOrUnionMergesExactSpansForInsertionOrderLimit checks that durable unions merge exact index spans in insertion order and stop document reads at the requested window.
 func TestDurableOrUnionMergesExactSpansForInsertionOrderLimit(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "or-limit.meld2"))
 	if err != nil {
@@ -997,6 +1013,7 @@ func TestDurableOrUnionMergesExactSpansForInsertionOrderLimit(t *testing.T) {
 	}
 }
 
+// TestMemoryOrUnionLimitStopsAfterInsertionOrderWindow checks that a limited memory union reads only the documents needed for its insertion-order result.
 func TestMemoryOrUnionLimitStopsAfterInsertionOrderWindow(t *testing.T) {
 	db, err := NewWithOptions(DatabaseOptions{
 		ResourceLimits: ResourceLimits{MaxQueryDocumentsExamined: 1},
@@ -1031,6 +1048,7 @@ func TestMemoryOrUnionLimitStopsAfterInsertionOrderWindow(t *testing.T) {
 	}
 }
 
+// TestDurableSelectiveOrUnionRespectsDocumentBudget checks that indexed union reads and mutations fit a document budget that rejects a full scan.
 func TestDurableSelectiveOrUnionRespectsDocumentBudget(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "or-budget.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxQueryDocumentsExamined: 25},
@@ -1079,6 +1097,7 @@ func TestDurableSelectiveOrUnionRespectsDocumentBudget(t *testing.T) {
 	}
 }
 
+// TestExplainReportsOrSourcesDedupFallbackAndEarlyStop checks that Explain reports union sources, duplicate candidates, scan fallback, and early-stop decisions.
 func TestExplainReportsOrSourcesDedupFallbackAndEarlyStop(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB { return New() },
@@ -1207,6 +1226,7 @@ func TestExplainReportsOrSourcesDedupFallbackAndEarlyStop(t *testing.T) {
 	}
 }
 
+// TestNestedAndUsesSiblingIndexWhenOrBranchIsUnindexed checks that a conjunction uses its indexed condition when a nested union contains an unindexed branch.
 func TestNestedAndUsesSiblingIndexWhenOrBranchIsUnindexed(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB { return New() },
@@ -1265,6 +1285,7 @@ func TestNestedAndUsesSiblingIndexWhenOrBranchIsUnindexed(t *testing.T) {
 	}
 }
 
+// TestExplainReportsAndSingleSourceAmplificationAndCompoundControl checks that Explain identifies excess scanning for a conjunction and clears compound-index advice after adding the matching index.
 func TestExplainReportsAndSingleSourceAmplificationAndCompoundControl(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB { return New() },
@@ -1357,6 +1378,7 @@ func TestExplainReportsAndSingleSourceAmplificationAndCompoundControl(t *testing
 	}
 }
 
+// hasExplainAdvice reports whether Explain contains advice with the requested code.
 func hasExplainAdvice(explain ExplainResult, code string) bool {
 	for _, advice := range explain.Advice {
 		if advice.Code == code {
@@ -1366,6 +1388,7 @@ func hasExplainAdvice(explain ExplainResult, code string) bool {
 	return false
 }
 
+// TestExplainCollectionFallbackReasonsAreStructured checks that Explain distinguishes missing indexes, unfiltered queries, and unusable predicates.
 func TestExplainCollectionFallbackReasonsAreStructured(t *testing.T) {
 	db := New()
 	defer db.Close()

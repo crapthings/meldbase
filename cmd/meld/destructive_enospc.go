@@ -19,13 +19,17 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// destructiveENOSPCReceiptSchema identifies the disk-full campaign receipt format.
 const destructiveENOSPCReceiptSchema uint32 = 1
 
 var (
-	fillDestructiveVolumeFn     = fillDestructiveVolume
+	// fillDestructiveVolumeFn fills the target volume and can be replaced by tests.
+	fillDestructiveVolumeFn = fillDestructiveVolume
+	// destructiveAvailableBytesFn reads available volume space and can be replaced by tests.
 	destructiveAvailableBytesFn = destructiveAvailableBytes
 )
 
+// destructiveENOSPCReceipt records disk-full trials, storage identity, and retained capacity evidence.
 type destructiveENOSPCReceipt struct {
 	SchemaVersion      uint32                             `json:"schemaVersion"`
 	SourceRevision     string                             `json:"sourceRevision,omitempty"`
@@ -46,6 +50,7 @@ type destructiveENOSPCReceipt struct {
 	ArtifactsDirectory string                             `json:"artifactsDirectory"`
 }
 
+// destructiveCapacityMarker records the worker process and storage boundary reached before disk exhaustion.
 type destructiveCapacityMarker struct {
 	SchemaVersion uint32    `json:"schemaVersion"`
 	Boundary      string    `json:"boundary"`
@@ -53,6 +58,7 @@ type destructiveCapacityMarker struct {
 	ReachedAt     time.Time `json:"reachedAt"`
 }
 
+// destructiveCapacityTrialEvidence records disk exhaustion measurements and verification of a retained trial database.
 type destructiveCapacityTrialEvidence struct {
 	TrialID                string `json:"trialId"`
 	Boundary               string `json:"boundary"`
@@ -72,6 +78,7 @@ type destructiveCapacityTrialEvidence struct {
 	FreeSpaceValid         bool   `json:"freeSpaceValid"`
 }
 
+// runDestructiveENOSPCCheck runs disk-full recovery trials at every required storage boundary and publishes their receipt.
 func runDestructiveENOSPCCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-enospc-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -159,10 +166,12 @@ func runDestructiveENOSPCCheck(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(receipt)
 }
 
+// validateDestructiveENOSPCReceipt checks a disk-full receipt using its recorded capacity evidence as the canonical hash input.
 func validateDestructiveENOSPCReceipt(receipt destructiveENOSPCReceipt) error {
 	return validateDestructiveENOSPCReceiptWithCanonicalEvidence(receipt, receipt.CapacityEvidence)
 }
 
+// validateDestructiveENOSPCReceiptWithCanonicalEvidence checks disk-full trial artifacts and coverage against the original capacity evidence used for hashing.
 func validateDestructiveENOSPCReceiptWithCanonicalEvidence(receipt destructiveENOSPCReceipt, canonicalEvidence []destructiveCapacityTrialEvidence) error {
 	wantTrials := receipt.TrialsPerBoundary * len(qualificationPublicationBoundaries)
 	if receipt.SchemaVersion != destructiveENOSPCReceiptSchema || receipt.GOOS != "linux" || receipt.Device == 0 ||
@@ -237,12 +246,14 @@ func validateDestructiveENOSPCReceiptWithCanonicalEvidence(receipt destructiveEN
 	return nil
 }
 
+// verifyRawDestructiveArtifact verifies a raw storage fixture while rejecting unexpected secondary index entries.
 func verifyRawDestructiveArtifact(path string) (storage.VerificationResult, error) {
 	return storage.VerifyPathContextWithIndexAudit(context.Background(), path, func(storage.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
 		return nil, false, errors.New("destructive fixture unexpectedly contains an index")
 	})
 }
 
+// runDestructiveENOSPCWorker publishes a marker at the selected storage boundary and waits for external termination.
 func runDestructiveENOSPCWorker(args []string, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-enospc-worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -286,6 +297,7 @@ func runDestructiveENOSPCWorker(args []string, stderr io.Writer) error {
 	return errors.New("destructive ENOSPC worker unexpectedly resumed after boundary")
 }
 
+// runDestructiveCapacityTrial records recovery of a boundary-paused worker killed after its target volume runs out of space.
 func runDestructiveCapacityTrial(facts destructiveVolumeFacts, executable, artifactsDirectory, boundary string, ordinal int, stderr io.Writer) (trial qualificationDestructiveTrial, evidence destructiveCapacityTrialEvidence, resultErr error) {
 	targetTrial, err := os.MkdirTemp(facts.directory, fmt.Sprintf(".meldbase-enospc-%04d-", ordinal))
 	if err != nil {
@@ -411,6 +423,7 @@ func runDestructiveCapacityTrial(facts destructiveVolumeFacts, executable, artif
 	return trial, evidence, nil
 }
 
+// seedDestructiveCapacityDatabase creates the initial document used to distinguish disk-full recovery outcomes.
 func seedDestructiveCapacityDatabase(path string, value []byte) error {
 	file, _, err := storage.Open(path)
 	if err != nil {
@@ -423,6 +436,7 @@ func seedDestructiveCapacityDatabase(path string, value []byte) error {
 	return errors.Join(commitErr, file.Close())
 }
 
+// recoverDestructiveCapacityDatabase reopens a trial database and returns its recovered document and metadata.
 func recoverDestructiveCapacityDatabase(path string) ([]byte, storage.Meta, error) {
 	file, meta, err := storage.Open(path)
 	if err != nil {
@@ -437,6 +451,7 @@ func recoverDestructiveCapacityDatabase(path string) ([]byte, storage.Meta, erro
 	return value, meta, nil
 }
 
+// destructiveQualificationBoundary looks up a supported storage publication boundary by name.
 func destructiveQualificationBoundary(value string) (storage.QualificationBoundary, bool) {
 	for _, boundary := range []storage.QualificationBoundary{
 		storage.QualificationAfterPageWrite, storage.QualificationBeforeDataSync, storage.QualificationAfterDataSync,
@@ -449,6 +464,7 @@ func destructiveQualificationBoundary(value string) (storage.QualificationBounda
 	return "", false
 }
 
+// waitForCapacityMarker waits for a valid worker marker at the requested publication boundary within the timeout.
 func waitForCapacityMarker(path, boundary string, timeout time.Duration) ([]byte, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -473,6 +489,7 @@ func waitForCapacityMarker(path, boundary string, timeout time.Duration) ([]byte
 	return nil, errors.New("timed out waiting for capacity publication boundary")
 }
 
+// writeJSONExclusiveDurable creates a private JSON file without overwriting and syncs the file and parent directory.
 func writeJSONExclusiveDurable(path string, value any) error {
 	raw, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -494,6 +511,7 @@ func writeJSONExclusiveDurable(path string, value any) error {
 	return syncProbeDirectory(filepath.Dir(path))
 }
 
+// copyFileExclusiveDurable copies a file to a new private destination and syncs the destination and parent directory.
 func copyFileExclusiveDurable(destination, source string) error {
 	input, err := os.Open(source)
 	if err != nil {
@@ -508,11 +526,13 @@ func copyFileExclusiveDurable(destination, source string) error {
 	return errors.Join(copyErr, output.Sync(), output.Close(), syncProbeDirectory(filepath.Dir(destination)))
 }
 
+// bytesSHA256 returns the hexadecimal SHA-256 hash of a byte slice.
 func bytesSHA256(value []byte) string {
 	digest := sha256.Sum256(value)
 	return hex.EncodeToString(digest[:])
 }
 
+// hashRegularFile hashes a bounded nonempty regular file and checks that its read length matches its initial size.
 func hashRegularFile(path string, maximum int64) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -535,6 +555,7 @@ func hashRegularFile(path string, maximum int64) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// writeDestructiveENOSPCReceipt publishes a disk-full test receipt as a new durable JSON file.
 func writeDestructiveENOSPCReceipt(path string, receipt destructiveENOSPCReceipt) error {
 	return writeJSONExclusiveDurable(path, receipt)
 }

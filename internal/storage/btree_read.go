@@ -6,6 +6,7 @@ import (
 	"sort"
 )
 
+// treeNodeView reads node entries directly from an immutable page payload.
 type treeNodeView struct {
 	payload   []byte
 	leaf      bool
@@ -13,6 +14,7 @@ type treeNodeView struct {
 	freeStart int
 }
 
+// validateTreeRootUnlocked checks a root page and its node layout while the caller holds the file lock.
 func (f *File) validateTreeRootUnlocked(rootPage uint64, kind TreeKind) error {
 	if rootPage == 0 {
 		return nil
@@ -32,6 +34,7 @@ func (f *File) validateTreeRootUnlocked(rootPage uint64, kind TreeKind) error {
 	return err
 }
 
+// treeGetUnlocked looks up a stored key and copies its value while the caller holds the file lock.
 func (f *File) treeGetUnlocked(rootPage uint64, kind TreeKind, key []byte) ([]byte, bool, error) {
 	if rootPage == 0 {
 		return nil, false, nil
@@ -87,6 +90,7 @@ func (f *File) treeGetUnlocked(rootPage uint64, kind TreeKind, key []byte) ([]by
 	}
 }
 
+// decodeTreeNodeView validates node layout, key order, and subtree counts without copying entries.
 func decodeTreeNodeView(page Page) (treeNodeView, error) {
 	payload := page.Payload
 	if len(payload) < 32 || page.ItemCount > 65535 {
@@ -142,6 +146,7 @@ func decodeTreeNodeView(page Page) (treeNodeView, error) {
 	return view, nil
 }
 
+// entry reads a key and its value or child reference from a node slot.
 func (view treeNodeView) entry(index int) (key, value []byte, child, childCount uint64, err error) {
 	if index < 0 || index >= view.count {
 		return nil, nil, 0, 0, ErrCorrupt
@@ -175,6 +180,7 @@ func (view treeNodeView) entry(index int) (key, value []byte, child, childCount 
 		binary.LittleEndian.Uint64(entry[2+keyLength+8:]), nil
 }
 
+// child reads a branch child page and its subtree entry count.
 func (view treeNodeView) child(index int) (uint64, uint64, error) {
 	if view.leaf || index < 0 || index > view.count {
 		return 0, 0, ErrCorrupt

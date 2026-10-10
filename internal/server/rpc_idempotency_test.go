@@ -15,11 +15,13 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// memoryIdempotencyRecord pairs a test request claim with its execution or replay decision.
 type memoryIdempotencyRecord struct {
 	claim    RPCIdempotencyClaim
 	decision RPCIdempotencyDecision
 }
 
+// memoryIdempotencyStore holds test claims and configurable storage failures under a mutex.
 type memoryIdempotencyStore struct {
 	mu           sync.Mutex
 	records      map[[64]byte]memoryIdempotencyRecord
@@ -28,10 +30,12 @@ type memoryIdempotencyStore struct {
 	failUnknown  bool
 }
 
+// newMemoryIdempotencyStore creates an empty in-memory store for RPC idempotency tests.
 func newMemoryIdempotencyStore() *memoryIdempotencyStore {
 	return &memoryIdempotencyStore{records: make(map[[64]byte]memoryIdempotencyRecord)}
 }
 
+// idempotencyRecordKey combines request scope and key hashes into one test record key.
 func idempotencyRecordKey(claim RPCIdempotencyClaim) [64]byte {
 	var key [64]byte
 	copy(key[:32], claim.ScopeHash[:])
@@ -39,6 +43,7 @@ func idempotencyRecordKey(claim RPCIdempotencyClaim) [64]byte {
 	return key
 }
 
+// Claim reserves a new test request or returns its conflict, pending, unknown, or replay decision.
 func (store *memoryIdempotencyStore) Claim(_ context.Context, claim RPCIdempotencyClaim) (RPCIdempotencyDecision, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -68,6 +73,7 @@ func (store *memoryIdempotencyStore) Claim(_ context.Context, claim RPCIdempoten
 	return decision, nil
 }
 
+// Complete saves a replayable test result or error only for the current claim owner.
 func (store *memoryIdempotencyStore) Complete(_ context.Context, completion RPCIdempotencyCompletion) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -88,6 +94,7 @@ func (store *memoryIdempotencyStore) Complete(_ context.Context, completion RPCI
 	return nil
 }
 
+// MarkUnknown records an uncertain test outcome only for the current claim owner.
 func (store *memoryIdempotencyStore) MarkUnknown(_ context.Context, claim RPCIdempotencyClaim) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -104,6 +111,7 @@ func (store *memoryIdempotencyStore) MarkUnknown(_ context.Context, claim RPCIde
 	return nil
 }
 
+// TestRPCIdempotencyReplaysCanonicalResultAndRejectsKeyReuse checks that repeated requests reuse a result while changed input with the same key is rejected.
 func TestRPCIdempotencyReplaysCanonicalResultAndRejectsKeyReuse(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
@@ -129,6 +137,7 @@ func TestRPCIdempotencyReplaysCanonicalResultAndRejectsKeyReuse(t *testing.T) {
 	}
 }
 
+// TestRPCIdempotencyReplaysApplicationErrorsAndFailsClosedWithoutStore checks that application errors replay and a missing idempotency store prevents execution.
 func TestRPCIdempotencyReplaysApplicationErrorsAndFailsClosedWithoutStore(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
@@ -151,6 +160,7 @@ func TestRPCIdempotencyReplaysApplicationErrorsAndFailsClosedWithoutStore(t *tes
 	}
 }
 
+// TestRPCIdempotencyConcurrentDuplicateIsInProgress checks that a concurrent duplicate reports pending execution without running the method again.
 func TestRPCIdempotencyConcurrentDuplicateIsInProgress(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	started, release := make(chan struct{}), make(chan struct{})
@@ -179,6 +189,7 @@ func TestRPCIdempotencyConcurrentDuplicateIsInProgress(t *testing.T) {
 	}
 }
 
+// TestRPCIdempotencyCompletionFailureBecomesOutcomeUnknown checks that failed completion storage reports an unknown outcome without repeating execution.
 func TestRPCIdempotencyCompletionFailureBecomesOutcomeUnknown(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	store.failComplete = true
@@ -198,6 +209,7 @@ func TestRPCIdempotencyCompletionFailureBecomesOutcomeUnknown(t *testing.T) {
 	}
 }
 
+// TestRPCIdempotencyReplaysAcrossHTTPAndWebSocketTransports checks that a WebSocket retry reuses an HTTP result and preserves its binary value.
 func TestRPCIdempotencyReplaysAcrossHTTPAndWebSocketTransports(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	var calls atomic.Uint64
@@ -236,6 +248,7 @@ func TestRPCIdempotencyReplaysAcrossHTTPAndWebSocketTransports(t *testing.T) {
 	}
 }
 
+// TestRPCIdempotencyCancellationIsPersistedAsOutcomeUnknown checks that cancellation records an unknown outcome and prevents later retries from repeating execution.
 func TestRPCIdempotencyCancellationIsPersistedAsOutcomeUnknown(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	started := make(chan struct{})
@@ -273,6 +286,7 @@ func TestRPCIdempotencyCancellationIsPersistedAsOutcomeUnknown(t *testing.T) {
 	}
 }
 
+// TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed checks that equivalent objects produce identical request hashes and distinct actor boundaries produce distinct scope hashes.
 func TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed(t *testing.T) {
 	key := "abcdefghijklmnopqrstuv"
 	session := [16]byte{1}
@@ -297,6 +311,7 @@ func TestRPCIdempotencyFingerprintIsCanonicalAndIdentityFramed(t *testing.T) {
 	}
 }
 
+// TestRPCIdempotencyEnvelopeRejectsWeakOrMalformedKeys checks that RPC decoding rejects empty, short, oversized, or space-containing idempotency keys.
 func TestRPCIdempotencyEnvelopeRejectsWeakOrMalformedKeys(t *testing.T) {
 	input := `"input":{"t":"null"}`
 	for _, key := range []string{"", "too-short", "contains spaces and is long", strings.Repeat("a", 129)} {
@@ -307,8 +322,10 @@ func TestRPCIdempotencyEnvelopeRejectsWeakOrMalformedKeys(t *testing.T) {
 	}
 }
 
+// rpcNullInput returns a null value in the RPC wire format.
 func rpcNullInput() map[string]any { return map[string]any{"t": "null"} }
 
+// postIdempotentRPC sends an authenticated test RPC request with an idempotency key.
 func postIdempotentRPC(t *testing.T, serverURL, method, key string, input any) *http.Response {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
@@ -327,6 +344,7 @@ func postIdempotentRPC(t *testing.T, serverURL, method, key string, input any) *
 	return response
 }
 
+// assertRPCResultInt checks that a successful RPC response contains the expected typed integer and closes its body.
 func assertRPCResultInt(t *testing.T, response *http.Response, expected int64) {
 	t.Helper()
 	defer response.Body.Close()
@@ -347,6 +365,7 @@ func assertRPCResultInt(t *testing.T, response *http.Response, expected int64) {
 	}
 }
 
+// assertRPCError checks an RPC response status and error code and closes its body.
 func assertRPCError(t *testing.T, response *http.Response, status int, code string) {
 	t.Helper()
 	defer response.Body.Close()
@@ -356,6 +375,7 @@ func assertRPCError(t *testing.T, response *http.Response, status int, code stri
 	}
 }
 
+// assertRPCBusinessErrorData checks an RPC business error code and typed document data and closes its body.
 func assertRPCBusinessErrorData(t *testing.T, response *http.Response, code string, expected meldbase.Document) {
 	t.Helper()
 	defer response.Body.Close()

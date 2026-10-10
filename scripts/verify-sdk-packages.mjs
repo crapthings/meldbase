@@ -15,9 +15,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Locates the repository used for SDK packaging checks.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Creates temporary storage for source copies, archives, and package consumers.
 const temporary = mkdtempSync(join(tmpdir(), "meldbase-sdk-pack-"));
 
+// Lists SDK packages and the exact files expected in their archives.
 const packages = [
   {
     directory: "sdk/client",
@@ -140,6 +143,7 @@ try {
   rmSync(temporary, { recursive: true, force: true });
 }
 
+// Copies tracked and unignored source files into a temporary workspace with installed dependencies.
 function prepareCleanWorkspace() {
   const clean = join(temporary, "clean-checkout");
   mkdirSync(clean, { recursive: true });
@@ -162,6 +166,7 @@ function prepareCleanWorkspace() {
   return clean;
 }
 
+// Makes existing workspace dependencies available to the temporary packaging workspace.
 function linkInstalledDependencies(clean) {
   const rootModules = join(root, "node_modules");
   assert(existsSync(rootModules), "run pnpm install before SDK package verification");
@@ -174,6 +179,7 @@ function linkInstalledDependencies(clean) {
   }
 }
 
+// Checks that packaging emitted every expected nonempty build artifact.
 function assertEmittedArtifacts(definition, sourceDirectory) {
   const artifacts = definition.expected.filter((path) => path.startsWith("dist/"));
   assert(artifacts.length > 0, `${definition.name}: package must publish build artifacts`);
@@ -184,6 +190,7 @@ function assertEmittedArtifacts(definition, sourceDirectory) {
   }
 }
 
+// Checks that each package export points to existing type and runtime files inside dist.
 function verifyExports(definition) {
   assert(
     definition.manifest.exports && typeof definition.manifest.exports === "object",
@@ -200,6 +207,7 @@ function verifyExports(definition) {
   }
 }
 
+// Checks that packaged imports resolve to included files or declared dependencies.
 function verifyImports(definition) {
   const declared = new Set([
     ...Object.keys(definition.manifest.dependencies ?? {}),
@@ -226,6 +234,7 @@ function verifyImports(definition) {
   }
 }
 
+// Runs a Node smoke test against installed SDK archives.
 function verifyRuntimeConsumer() {
   const consumer = installTarballConsumer("runtime-consumer");
   writeFileSync(
@@ -248,6 +257,7 @@ function verifyRuntimeConsumer() {
   execFileSync(process.execPath, [join(consumer, "smoke.mjs")], { cwd: consumer, stdio: "pipe" });
 }
 
+// Checks an archive consumer with the requested TypeScript module resolution mode.
 function verifyTypeScriptConsumer(resolution) {
   const consumer = installTarballConsumer(`typescript-${resolution.toLowerCase()}-consumer`);
   const modules = join(consumer, "node_modules");
@@ -294,6 +304,7 @@ function verifyTypeScriptConsumer(resolution) {
   execFileSync(process.execPath, [tsc, "-p", join(consumer, "tsconfig.json")], { cwd: consumer, stdio: "pipe" });
 }
 
+// Installs SDK archives and local React into a temporary consumer without lifecycle scripts.
 function installTarballConsumer(name) {
   const consumer = join(temporary, name);
   mkdirSync(consumer, { recursive: true });
@@ -318,10 +329,12 @@ function installTarballConsumer(name) {
   return consumer;
 }
 
+// Resolves a dependency path against the source repository.
 function realPackage(path) {
   return resolve(root, path);
 }
 
+// Lists regular files recursively beneath a directory.
 function walk(directory) {
   const paths = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {

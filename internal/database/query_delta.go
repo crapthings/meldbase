@@ -2,17 +2,23 @@ package database
 
 import "fmt"
 
+// QueryDeltaOperationKind identifies a change to an ordered query result.
 type QueryDeltaOperationKind string
 
 const (
+	// QueryDeltaRemove removes a document from the result.
 	QueryDeltaRemove QueryDeltaOperationKind = "remove"
-	QueryDeltaAdd    QueryDeltaOperationKind = "add_before"
-	QueryDeltaMove   QueryDeltaOperationKind = "move_before"
+	// QueryDeltaAdd inserts a document before an anchor.
+	QueryDeltaAdd QueryDeltaOperationKind = "add_before"
+	// QueryDeltaMove moves a document before an anchor.
+	QueryDeltaMove QueryDeltaOperationKind = "move_before"
+	// QueryDeltaChange replaces a document without changing its position.
 	QueryDeltaChange QueryDeltaOperationKind = "change"
 )
 
-// QueryDeltaOperation mutates an ordered query result. A zero BeforeID means
-// the end of the result; database document IDs are never zero.
+// QueryDeltaOperation describes one edit to an ordered query result.
+//
+// A zero BeforeID means the end of the result; document IDs are never zero.
 type QueryDeltaOperation struct {
 	Kind       QueryDeltaOperationKind
 	DocumentID DocumentID
@@ -20,20 +26,23 @@ type QueryDeltaOperation struct {
 	Document   Document
 }
 
-// QueryDelta transforms exactly FromToken into Token. Operations are ordered:
-// removals first, followed by reverse-order add/move anchors and document
-// changes. Applying them in slice order is deterministic.
+// QueryDelta transforms a query result from FromToken to Token through ordered edits.
+//
+// Apply operations in slice order: removals come first, followed by
+// reverse-order add or move anchors and document changes.
 type QueryDelta struct {
 	FromToken  uint64
 	Token      uint64
 	Operations []QueryDeltaOperation
 }
 
+// sharedQueryDelta shares immutable result changes across subscribers.
 type sharedQueryDelta struct {
 	token      uint64
 	operations []QueryDeltaOperation // immutable internal documents
 }
 
+// queryDeltaNode holds one document in a linked query result.
 type queryDeltaNode struct {
 	id       DocumentID
 	document Document
@@ -41,11 +50,13 @@ type queryDeltaNode struct {
 	next     *queryDeltaNode
 }
 
+// queryDeltaList keeps result order and supports direct lookup by document ID.
 type queryDeltaList struct {
 	head, tail *queryDeltaNode
 	byID       map[DocumentID]*queryDeltaNode
 }
 
+// buildSharedQueryDelta derives ordered changes that transform the previous result into the next result.
 func buildSharedQueryDelta(previous, next []Document, token uint64) (*sharedQueryDelta, error) {
 	if len(previous) == len(next) {
 		operations := make([]QueryDeltaOperation, 0)
@@ -115,6 +126,7 @@ func buildSharedQueryDelta(previous, next []Document, token uint64) (*sharedQuer
 	return &sharedQueryDelta{token: token, operations: operations}, nil
 }
 
+// newQueryDeltaList builds an ordered document list and rejects missing or duplicate IDs.
 func newQueryDeltaList(documents []Document, clone bool) (*queryDeltaList, map[DocumentID]Document, error) {
 	list := &queryDeltaList{byID: make(map[DocumentID]*queryDeltaNode, len(documents))}
 	byID := make(map[DocumentID]Document, len(documents))
@@ -138,6 +150,7 @@ func newQueryDeltaList(documents []Document, clone bool) (*queryDeltaList, map[D
 	return list, byID, nil
 }
 
+// remove detaches a node from the result order and ID lookup.
 func (list *queryDeltaList) remove(node *queryDeltaNode) {
 	if node.previous == nil {
 		list.head = node.next
@@ -153,6 +166,7 @@ func (list *queryDeltaList) remove(node *queryDeltaNode) {
 	node.previous, node.next = nil, nil
 }
 
+// insertBefore places a node before the anchor or at the end when no anchor is given.
 func (list *queryDeltaList) insertBefore(node, anchor *queryDeltaNode) {
 	if anchor == nil {
 		node.previous, node.next = list.tail, nil
@@ -174,8 +188,7 @@ func (list *queryDeltaList) insertBefore(node, anchor *queryDeltaNode) {
 	list.byID[node.id] = node
 }
 
-// ApplyQueryDelta strictly validates and applies an ordered delta without
-// mutating the input snapshot.
+// ApplyQueryDelta validates and applies ordered changes to a copy of the snapshot.
 func ApplyQueryDelta(snapshot QuerySnapshot, delta QueryDelta) (QuerySnapshot, error) {
 	if delta.FromToken != snapshot.Token || delta.Token <= delta.FromToken || len(delta.Operations) == 0 {
 		return QuerySnapshot{}, fmt.Errorf("%w: token contract", ErrInvalidDelta)
@@ -230,11 +243,13 @@ func ApplyQueryDelta(snapshot QuerySnapshot, delta QueryDelta) (QuerySnapshot, e
 	return result, nil
 }
 
+// documentHasID checks that a valid document has the expected nonzero ID.
 func documentHasID(document Document, expected DocumentID) bool {
 	id, valid := document.ID()
 	return valid && !id.IsZero() && id == expected && document.Validate() == nil
 }
 
+// cloneSharedQueryDelta copies shared changes into a subscriber delta with its starting token.
 func cloneSharedQueryDelta(delta *sharedQueryDelta, from uint64) QueryDelta {
 	result := QueryDelta{FromToken: from, Token: delta.token, Operations: make([]QueryDeltaOperation, len(delta.operations))}
 	for index, operation := range delta.operations {

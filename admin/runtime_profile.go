@@ -13,36 +13,49 @@ import (
 )
 
 var (
-	ErrRuntimeCaptureBusy  = errors.New("meldbase admin: another runtime capture is active")
+	// ErrRuntimeCaptureBusy reports that another admin runtime capture is active.
+	ErrRuntimeCaptureBusy = errors.New("meldbase admin: another runtime capture is active")
+	// ErrRuntimeCaptureLimit reports that capture output exceeded its byte limit.
 	ErrRuntimeCaptureLimit = errors.New("meldbase admin: runtime capture byte limit reached")
 )
 
 const (
+	// defaultRuntimeCaptureDuration sets the requested duration when none is supplied.
 	defaultRuntimeCaptureDuration = 10 * time.Second
-	defaultRuntimeCaptureMaxTime  = 60 * time.Second
+	// defaultRuntimeCaptureMaxTime sets the default maximum capture duration.
+	defaultRuntimeCaptureMaxTime = 60 * time.Second
+	// defaultRuntimeCaptureMaxBytes sets the default capture output limit.
 	defaultRuntimeCaptureMaxBytes = 64 << 20
-	minRuntimeCaptureDuration     = 100 * time.Millisecond
+	// minRuntimeCaptureDuration sets the shortest permitted timed capture.
+	minRuntimeCaptureDuration = 100 * time.Millisecond
 )
 
+// RuntimeCaptureKind selects a CPU profile, heap snapshot, or runtime trace.
 type RuntimeCaptureKind string
 
 const (
-	RuntimeCPUProfile  RuntimeCaptureKind = "cpu"
+	// RuntimeCPUProfile selects a timed CPU profile.
+	RuntimeCPUProfile RuntimeCaptureKind = "cpu"
+	// RuntimeHeapProfile selects an immediate heap snapshot.
 	RuntimeHeapProfile RuntimeCaptureKind = "heap"
-	RuntimeTrace       RuntimeCaptureKind = "trace"
+	// RuntimeTrace selects a timed Go runtime trace.
+	RuntimeTrace RuntimeCaptureKind = "trace"
 )
 
+// RuntimeProfilerOptions sets duration and output limits for runtime captures.
 type RuntimeProfilerOptions struct {
 	MaxDuration time.Duration
 	MaxBytes    int64
 }
 
+// RuntimeCaptureOptions selects the duration of one timed capture.
 type RuntimeCaptureOptions struct {
 	// Duration applies to CPU profiles and runtime traces. Zero selects ten
 	// seconds. Heap snapshots are immediate and require zero.
 	Duration time.Duration
 }
 
+// RuntimeCaptureResult reports capture timing, output size, and whether output was truncated.
 type RuntimeCaptureResult struct {
 	Kind      RuntimeCaptureKind
 	StartedAt time.Time
@@ -51,6 +64,7 @@ type RuntimeCaptureResult struct {
 	Truncated bool
 }
 
+// RuntimeProfilerStats reports capture activity, outcomes, and total output bytes.
 type RuntimeProfilerStats struct {
 	Active    uint64
 	Attempts  uint64
@@ -59,10 +73,11 @@ type RuntimeProfilerStats struct {
 	Bytes     uint64
 }
 
-// RuntimeProfiler owns bounded process-runtime captures. It does not start a
-// listener or retain capture bytes. The caller owns authorization, the output
-// writer and its lifetime. CPU profiles and runtime traces add process-wide
-// overhead and should be enabled only for short diagnostic windows.
+// RuntimeProfiler captures CPU profiles, heap snapshots, and runtime traces within configured limits.
+//
+// It does not start a listener or retain capture bytes. The caller owns
+// authorization, the output writer, and its lifetime. CPU profiles and runtime
+// traces add process-wide overhead; use them for short diagnostic windows.
 type RuntimeProfiler struct {
 	maxDuration time.Duration
 	maxBytes    int64
@@ -73,8 +88,10 @@ type RuntimeProfiler struct {
 	bytes       atomic.Uint64
 }
 
+// runtimeCaptureSlot allows only one admin runtime capture at a time across the process.
 var runtimeCaptureSlot = make(chan struct{}, 1)
 
+// NewRuntimeProfiler creates a profiler after validating duration and output limits.
 func NewRuntimeProfiler(options RuntimeProfilerOptions) (*RuntimeProfiler, error) {
 	if options.MaxDuration == 0 {
 		options.MaxDuration = defaultRuntimeCaptureMaxTime
@@ -91,6 +108,7 @@ func NewRuntimeProfiler(options RuntimeProfilerOptions) (*RuntimeProfiler, error
 	return &RuntimeProfiler{maxDuration: options.MaxDuration, maxBytes: options.MaxBytes}, nil
 }
 
+// Stats returns the profiler's aggregate capture counters.
 func (profiler *RuntimeProfiler) Stats() RuntimeProfilerStats {
 	if profiler == nil {
 		return RuntimeProfilerStats{}
@@ -101,6 +119,7 @@ func (profiler *RuntimeProfiler) Stats() RuntimeProfilerStats {
 	}
 }
 
+// Capture writes a bounded runtime profile or trace and records its outcome.
 func (profiler *RuntimeProfiler) Capture(ctx context.Context, writer io.Writer, kind RuntimeCaptureKind, options RuntimeCaptureOptions) (result RuntimeCaptureResult, resultErr error) {
 	if profiler == nil || ctx == nil || writer == nil {
 		return result, errors.New("meldbase admin: runtime profiler, context and writer are required")
@@ -164,6 +183,7 @@ func (profiler *RuntimeProfiler) Capture(ctx context.Context, writer io.Writer, 
 	return result, resultErr
 }
 
+// captureDuration validates the capture kind and applies its duration defaults and limits.
 func (profiler *RuntimeProfiler) captureDuration(kind RuntimeCaptureKind, requested time.Duration) (time.Duration, error) {
 	switch kind {
 	case RuntimeHeapProfile:
@@ -187,6 +207,7 @@ func (profiler *RuntimeProfiler) captureDuration(kind RuntimeCaptureKind, reques
 	}
 }
 
+// waitRuntimeCapture waits for the capture duration or context cancellation.
 func waitRuntimeCapture(ctx context.Context, duration time.Duration) error {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
@@ -198,6 +219,7 @@ func waitRuntimeCapture(ctx context.Context, duration time.Duration) error {
 	}
 }
 
+// captureWriter serializes output writes while enforcing a shared byte limit.
 type captureWriter struct {
 	mu        sync.Mutex
 	writer    io.Writer
@@ -206,6 +228,7 @@ type captureWriter struct {
 	err       error
 }
 
+// Write forwards bytes within the remaining limit and preserves the first output error.
 func (writer *captureWriter) Write(payload []byte) (int, error) {
 	writer.mu.Lock()
 	defer writer.mu.Unlock()

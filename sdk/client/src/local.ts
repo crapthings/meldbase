@@ -24,6 +24,7 @@ import type { SnapshotListener, Unsubscribe } from "./observer.js";
 
 export type { SnapshotListener, Unsubscribe } from "./observer.js";
 
+/** Runs a local query and delivers copied snapshots when its results change. */
 class LiveQuery<T extends Document> {
   readonly mode = "local" as const;
   readonly spec: QuerySpec;
@@ -64,6 +65,7 @@ class LiveQuery<T extends Document> {
 // without exposing an implementation constructor on the local entry point.
 export type { LiveQuery };
 
+/** Stores documents in memory with querying, mutations, and change notifications. */
 export class LocalCollection<T extends Document = Document> {
   readonly #documents = new Map<string, T>();
   readonly #listeners = new Set<() => void>();
@@ -201,6 +203,7 @@ export class LocalCollection<T extends Document = Document> {
 // it occurs outside OR/not. The remaining predicate still runs below, so an
 // additional condition or contradictory _id comparison preserves exact query
 // semantics while avoiding a collection scan.
+/** Finds an ID equality constraint required by every match of the query. */
 function requiredDocumentID(expression: QuerySpec["where"]): string | undefined {
   if (
     expression.op === "compare" &&
@@ -218,10 +221,12 @@ function requiredDocumentID(expression: QuerySpec["where"]): string | undefined 
   return undefined;
 }
 
+/** Copies every document in a query snapshot. */
 function cloneSnapshot<T extends Document>(documents: readonly T[]): T[] {
   return documents.map(cloneDocument);
 }
 
+/** Checks whether two ordered snapshots contain equal documents. */
 function snapshotEquals<T extends Document>(left: readonly T[], right: readonly T[]): boolean {
   return left.length === right.length && left.every((document, i) => valueEquals(document, right[i] as T));
 }

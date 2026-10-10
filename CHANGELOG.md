@@ -50,3 +50,16 @@ they are assigned to a release.
   [storage-format migration](docs/storage-format-migration.md).
 - Protocol v1 envelope grammar and fixed engine error codes remain immutable;
   incompatible changes require a new version and migration notes.
+
+## 0.1.0-alpha.14
+
+### Changed
+
+- Added plain-English summaries to top-level source declarations.
+- Split query execution, document validation, and storage codecs into focused files and helpers.
+- Updated SDK release checks to use the current guides and archived release metadata after the documentation migration.
+- Aligned the contributor pnpm version with the workspace and CI.
+
+### Compatibility
+
+- This refactor does not change the storage format or protocol version.

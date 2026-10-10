@@ -24,6 +24,7 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+// TestDurabilityCheckExercisesTargetDirectoryAndCleansUp checks that the target directory passes filesystem and database probes and retains no probe files.
 func TestDurabilityCheckExercisesTargetDirectoryAndCleansUp(t *testing.T) {
 	directory := t.TempDir()
 	revision := "0123456789abcdef0123456789abcdef01234567"
@@ -63,6 +64,7 @@ func TestDurabilityCheckExercisesTargetDirectoryAndCleansUp(t *testing.T) {
 	}
 }
 
+// TestDurabilityCheckRejectsInvalidSourceRevision checks that durability checks reject malformed source revisions.
 func TestDurabilityCheckRejectsInvalidSourceRevision(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{"durability-check", "--dir", t.TempDir(), "--source-revision", "not-a-revision"}, &output, &output)
@@ -71,6 +73,7 @@ func TestDurabilityCheckRejectsInvalidSourceRevision(t *testing.T) {
 	}
 }
 
+// TestDurabilityCheckPublishesNoOverwriteDurableReceipt checks that the saved receipt matches command output and cannot overwrite an existing receipt.
 func TestDurabilityCheckPublishesNoOverwriteDurableReceipt(t *testing.T) {
 	directory := t.TempDir()
 	receiptPath := filepath.Join(t.TempDir(), "durability.json")
@@ -97,6 +100,7 @@ func TestDurabilityCheckPublishesNoOverwriteDurableReceipt(t *testing.T) {
 	}
 }
 
+// TestDurabilityCheckCleanSourceRequiresClaimedRevision checks that clean-source verification requires a claimed source revision.
 func TestDurabilityCheckCleanSourceRequiresClaimedRevision(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{"durability-check", "--dir", t.TempDir(), "--require-clean-source"}, &output, &output)
@@ -105,6 +109,7 @@ func TestDurabilityCheckCleanSourceRequiresClaimedRevision(t *testing.T) {
 	}
 }
 
+// TestCheckedFilesystemBytesRejectsInvalidGeometry checks filesystem capacity calculation and rejects zero block sizes or overflow.
 func TestCheckedFilesystemBytesRejectsInvalidGeometry(t *testing.T) {
 	if value, err := checkedFilesystemBytes(8, 4096); err != nil || value != 32768 {
 		t.Fatalf("value=%d err=%v", value, err)
@@ -117,6 +122,7 @@ func TestCheckedFilesystemBytesRejectsInvalidGeometry(t *testing.T) {
 	}
 }
 
+// TestDurabilityCheckRejectsNonDirectory checks that durability probes reject a file in place of a target directory.
 func TestDurabilityCheckRejectsNonDirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
@@ -129,6 +135,7 @@ func TestDurabilityCheckRejectsNonDirectory(t *testing.T) {
 	}
 }
 
+// TestInspectCommandReportsCompatibleFormatAsJSON checks that inspection reports the current compatible format and database identity as JSON.
 func TestInspectCommandReportsCompatibleFormatAsJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.meld")
 	db, err := meldbase.Open(path)
@@ -151,6 +158,7 @@ func TestInspectCommandReportsCompatibleFormatAsJSON(t *testing.T) {
 	}
 }
 
+// TestIndexBuildCommandStartListResumeLifecycle checks that CLI index builds can be started, listed, resumed, and used by queries after publication.
 func TestIndexBuildCommandStartListResumeLifecycle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index-build.meld2")
 	db, err := meldbase.Open(path)
@@ -221,6 +229,7 @@ func TestIndexBuildCommandStartListResumeLifecycle(t *testing.T) {
 	}
 }
 
+// TestIndexBuildCommandLeavesUniqueConflictInspectableThenAborts checks that a conflicting unique index build remains inspectable and can be aborted.
 func TestIndexBuildCommandLeavesUniqueConflictInspectableThenAborts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index-build-conflict.meld2")
 	db, err := meldbase.Open(path)
@@ -268,6 +277,7 @@ func TestIndexBuildCommandLeavesUniqueConflictInspectableThenAborts(t *testing.T
 	}
 }
 
+// TestIndexBuildCommandRebuildAtomicallyReplacesPublishedIndex checks that rebuilding an index replaces its field definition and queries use the replacement after reopen.
 func TestIndexBuildCommandRebuildAtomicallyReplacesPublishedIndex(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index-rebuild.meld2")
 	db, err := meldbase.Open(path)
@@ -310,6 +320,7 @@ func TestIndexBuildCommandRebuildAtomicallyReplacesPublishedIndex(t *testing.T) 
 	}
 }
 
+// TestIndexBuildCommandRejectsUnsafeArguments checks that index-build commands reject missing actions, malformed IDs, and negative timeouts.
 func TestIndexBuildCommandRejectsUnsafeArguments(t *testing.T) {
 	var output bytes.Buffer
 	if err := run([]string{"index-build"}, &output, &output); err == nil {
@@ -323,6 +334,7 @@ func TestIndexBuildCommandRejectsUnsafeArguments(t *testing.T) {
 	}
 }
 
+// TestInspectCommandCompatibilityGateOutputsBeforeFailure checks that incompatible inspection emits format information before returning an error.
 func TestInspectCommandCompatibilityGateOutputsBeforeFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.meld")
 	var output bytes.Buffer
@@ -336,6 +348,7 @@ func TestInspectCommandCompatibilityGateOutputsBeforeFailure(t *testing.T) {
 	}
 }
 
+// TestVerifyCommandProducesFullReadOnlyAuditJSON checks that verification returns a complete JSON report without changing database bytes.
 func TestVerifyCommandProducesFullReadOnlyAuditJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify.meld2")
 	db, err := meldbase.Open(path)
@@ -371,6 +384,7 @@ func TestVerifyCommandProducesFullReadOnlyAuditJSON(t *testing.T) {
 	}
 }
 
+// TestVerifyCommandReportsActiveWriterLock checks that verification rejects a database held by an active writer.
 func TestVerifyCommandReportsActiveWriterLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "locked.meld2")
 	db, err := meldbase.Open(path)
@@ -384,6 +398,7 @@ func TestVerifyCommandReportsActiveWriterLock(t *testing.T) {
 	}
 }
 
+// TestBackupCommandPublishesVerifiedRestoreArtifactJSON checks that backup output identifies a physical artifact preserving database identity and commit position.
 func TestBackupCommandPublishesVerifiedRestoreArtifactJSON(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
@@ -427,6 +442,7 @@ func TestBackupCommandPublishesVerifiedRestoreArtifactJSON(t *testing.T) {
 	}
 }
 
+// TestBackupCommandFailsClosedForExistingDestination checks that backup rejects an existing destination without changing its contents.
 func TestBackupCommandFailsClosedForExistingDestination(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
@@ -451,6 +467,7 @@ func TestBackupCommandFailsClosedForExistingDestination(t *testing.T) {
 
 }
 
+// TestRestoreCommandImportsVerifiedPhysicalBackup checks that restoring a physical backup preserves database identity, commit position, and documents.
 func TestRestoreCommandImportsVerifiedPhysicalBackup(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
@@ -507,6 +524,7 @@ func TestRestoreCommandImportsVerifiedPhysicalBackup(t *testing.T) {
 	}
 }
 
+// TestBackupAndRestoreCommandSupportsVerifiedGzipArtifact checks that gzip backup receipts describe an artifact that restores the original database.
 func TestBackupAndRestoreCommandSupportsVerifiedGzipArtifact(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
@@ -561,6 +579,7 @@ func TestBackupAndRestoreCommandSupportsVerifiedGzipArtifact(t *testing.T) {
 	}
 }
 
+// TestRestoreCommandRejectsGzipArtifactThatDoesNotMatchReceipt checks that a changed gzip artifact is rejected without publishing a restored database.
 func TestRestoreCommandRejectsGzipArtifactThatDoesNotMatchReceipt(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
@@ -592,6 +611,7 @@ func TestRestoreCommandRejectsGzipArtifactThatDoesNotMatchReceipt(t *testing.T) 
 	}
 }
 
+// TestReadServiceResourceLimitsAcceptsStrictPublicConfiguration checks resource-limit parsing and rejects unknown fields, multiple JSON values, and oversized files.
 func TestReadServiceResourceLimitsAcceptsStrictPublicConfiguration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "limits.json")
 	if err := os.WriteFile(path, []byte(`{"maxDocumentBytes":1024,"maxTransactionBytes":2048,"maxQueryKeysExamined":12}`), 0o600); err != nil {
@@ -624,6 +644,7 @@ func TestReadServiceResourceLimitsAcceptsStrictPublicConfiguration(t *testing.T)
 	}
 }
 
+// TestRestoreCommandFailsClosedForExistingDestinationAndInvalidReceipt checks that restore rejects existing destinations, invalid receipts, and identical input and output paths.
 func TestRestoreCommandFailsClosedForExistingDestinationAndInvalidReceipt(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld2")
@@ -667,6 +688,7 @@ func TestRestoreCommandFailsClosedForExistingDestinationAndInvalidReceipt(t *tes
 	}
 }
 
+// TestDemoExercisesDurabilityIndexUpdateAndReactiveQuery checks that the demo reports indexed queries, reactive snapshots, and successful recovery.
 func TestDemoExercisesDurabilityIndexUpdateAndReactiveQuery(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	path := filepath.Join(t.TempDir(), "demo.meld")
@@ -684,6 +706,7 @@ func TestDemoExercisesDurabilityIndexUpdateAndReactiveQuery(t *testing.T) {
 	}
 }
 
+// TestServeRequiresExplicitUnsafeDevelopmentMode checks that unauthenticated serving requires the explicit development flag.
 func TestServeRequiresExplicitUnsafeDevelopmentMode(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{"serve", "--db", filepath.Join(t.TempDir(), "data.meld")}, &output, &output)
@@ -692,6 +715,7 @@ func TestServeRequiresExplicitUnsafeDevelopmentMode(t *testing.T) {
 	}
 }
 
+// TestCollectionAccessConfigurationHasNoLegacyShorthand checks that serve and init reject the removed workspace-collections flag.
 func TestCollectionAccessConfigurationHasNoLegacyShorthand(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{"serve", "--db", filepath.Join(t.TempDir(), "data.meld"), "--workspace-collections", "tasks"}, &output, &output)
@@ -705,6 +729,7 @@ func TestCollectionAccessConfigurationHasNoLegacyShorthand(t *testing.T) {
 	}
 }
 
+// TestServeRejectsInvalidCollectionAccessManifestBeforeOpeningDatabase checks that invalid access policies are rejected before a database file is created.
 func TestServeRejectsInvalidCollectionAccessManifestBeforeOpeningDatabase(t *testing.T) {
 	directory := t.TempDir()
 	secretPath := filepath.Join(directory, "jwt.secret")
@@ -728,6 +753,7 @@ func TestServeRejectsInvalidCollectionAccessManifestBeforeOpeningDatabase(t *tes
 	}
 }
 
+// TestServeRequiresCurrentHS256SecretWhenPreviousSecretIsConfigured checks that configuring a previous JWT secret requires a current secret.
 func TestServeRequiresCurrentHS256SecretWhenPreviousSecretIsConfigured(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{
@@ -739,6 +765,7 @@ func TestServeRequiresCurrentHS256SecretWhenPreviousSecretIsConfigured(t *testin
 	}
 }
 
+// TestServeRejectsIndexBuildSchedulerTuningUnlessEnabled checks that scheduler tuning requires the index-build scheduler to be enabled.
 func TestServeRejectsIndexBuildSchedulerTuningUnlessEnabled(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{
@@ -750,6 +777,7 @@ func TestServeRejectsIndexBuildSchedulerTuningUnlessEnabled(t *testing.T) {
 	}
 }
 
+// TestAccessPolicyExplainUsesTheServerAuthorizer checks that policy explanations report owner restrictions and RPC-only access using current actor flags.
 func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 	manifestPath := filepath.Join(t.TempDir(), "access-policy.json")
 	if err := os.WriteFile(manifestPath, []byte(`{
@@ -827,6 +855,7 @@ func TestAccessPolicyExplainUsesTheServerAuthorizer(t *testing.T) {
 	}
 }
 
+// TestInitCreatesPrivateSingleNodeBundle checks that initialization creates private configuration and secrets with a valid access policy and launcher.
 func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "meldbase-local")
 	var output bytes.Buffer
@@ -892,6 +921,7 @@ func TestInitCreatesPrivateSingleNodeBundle(t *testing.T) {
 	}
 }
 
+// TestInitBundleLauncherUsesGeneratedManifest checks that the generated launcher passes the configured database, authentication, policy, and browser settings.
 func TestInitBundleLauncherUsesGeneratedManifest(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "meldbase-local")
 	var output bytes.Buffer
@@ -933,6 +963,7 @@ func TestInitBundleLauncherUsesGeneratedManifest(t *testing.T) {
 	}
 }
 
+// TestInitRefusesExistingOrUnsafeBundleConfiguration checks that initialization rejects an existing directory or a non-loopback listener.
 func TestInitRefusesExistingOrUnsafeBundleConfiguration(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "meldbase-local")
 	if err := os.Mkdir(root, 0o750); err != nil {
@@ -949,6 +980,7 @@ func TestInitRefusesExistingOrUnsafeBundleConfiguration(t *testing.T) {
 	}
 }
 
+// TestServeProductionWiresJWTPolicyAndBrowserBoundary checks that the serve command enforces JWT workspace isolation and configured browser origins in a child process.
 func TestServeProductionWiresJWTPolicyAndBrowserBoundary(t *testing.T) {
 	const childEnvironment = "MELDBASE_TEST_SERVE_PRODUCTION_CHILD"
 	if os.Getenv(childEnvironment) == "1" {
@@ -1101,6 +1133,7 @@ func TestServeProductionWiresJWTPolicyAndBrowserBoundary(t *testing.T) {
 	stopped = true
 }
 
+// TestServeIndexBuildSchedulerResumesDurableBuildAfterRestart checks that starting the server completes a stored index build and preserves its publication after shutdown.
 func TestServeIndexBuildSchedulerResumesDurableBuildAfterRestart(t *testing.T) {
 	const childEnvironment = "MELDBASE_TEST_SERVE_INDEX_SCHEDULER_CHILD"
 	if os.Getenv(childEnvironment) == "1" {
@@ -1199,6 +1232,7 @@ func TestServeIndexBuildSchedulerResumesDurableBuildAfterRestart(t *testing.T) {
 	}
 }
 
+// signedServeTestJWT signs test JWT claims with the supplied HS256 secret.
 func signedServeTestJWT(t *testing.T, secret []byte, claims map[string]any) string {
 	t.Helper()
 	header, err := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
@@ -1215,6 +1249,7 @@ func signedServeTestJWT(t *testing.T, secret []byte, claims map[string]any) stri
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
+// TestServeWithoutWorkerControlStartsAndStopsCleanly checks that a server without worker control exits successfully on SIGTERM.
 func TestServeWithoutWorkerControlStartsAndStopsCleanly(t *testing.T) {
 	const childEnvironment = "MELDBASE_TEST_SERVE_WITHOUT_WORKER_CHILD"
 	if os.Getenv(childEnvironment) == "1" {
@@ -1244,6 +1279,7 @@ func TestServeWithoutWorkerControlStartsAndStopsCleanly(t *testing.T) {
 	}
 }
 
+// TestServeRollbackAnchorFlagsFailClosed checks that rollback anchor options reject incomplete, conflicting, or invalid settings.
 func TestServeRollbackAnchorFlagsFailClosed(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{
@@ -1276,6 +1312,7 @@ func TestServeRollbackAnchorFlagsFailClosed(t *testing.T) {
 	}
 }
 
+// TestDefaultRealtimeURL checks realtime URLs for wildcard listeners and ephemeral port detection.
 func TestDefaultRealtimeURL(t *testing.T) {
 	if got := defaultRealtimeURL(":8080"); got != "ws://localhost:8080/v1/realtime" {
 		t.Fatalf("url = %q", got)
@@ -1288,6 +1325,7 @@ func TestDefaultRealtimeURL(t *testing.T) {
 	}
 }
 
+// TestDefaultBrowserOriginsIncludeEscapedIPv6RealtimePattern checks default loopback browser origins, escaped IPv6 patterns, and configured origin parsing.
 func TestDefaultBrowserOriginsIncludeEscapedIPv6RealtimePattern(t *testing.T) {
 	if got := defaultHTTPOrigins(); !reflect.DeepEqual(got, []string{"http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"}) {
 		t.Fatalf("HTTP origins=%q", got)
@@ -1300,6 +1338,7 @@ func TestDefaultBrowserOriginsIncludeEscapedIPv6RealtimePattern(t *testing.T) {
 	}
 }
 
+// TestAdminAddressMustBeExplicitlyLoopback checks that admin listeners accept only explicit loopback addresses.
 func TestAdminAddressMustBeExplicitlyLoopback(t *testing.T) {
 	for _, address := range []string{"127.0.0.1:9091", "localhost:9091", "[::1]:9091"} {
 		if !isLoopbackAddress(address) {
@@ -1313,6 +1352,7 @@ func TestAdminAddressMustBeExplicitlyLoopback(t *testing.T) {
 	}
 }
 
+// TestAdminDiagnosticsRequireAdminListener checks that enabling admin diagnostics requires an admin listener.
 func TestAdminDiagnosticsRequireAdminListener(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{
@@ -1323,6 +1363,7 @@ func TestAdminDiagnosticsRequireAdminListener(t *testing.T) {
 	}
 }
 
+// TestAdminMetricsRequireAdminListener checks that enabling admin metrics requires an admin listener.
 func TestAdminMetricsRequireAdminListener(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{
@@ -1333,6 +1374,7 @@ func TestAdminMetricsRequireAdminListener(t *testing.T) {
 	}
 }
 
+// TestWorkerControlRequiresLoopbackAndDedicatedToken checks that worker control requires a loopback listener and a dedicated authentication token.
 func TestWorkerControlRequiresLoopbackAndDedicatedToken(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{
@@ -1350,6 +1392,7 @@ func TestWorkerControlRequiresLoopbackAndDedicatedToken(t *testing.T) {
 	}
 }
 
+// TestWorkerReadPoliciesRequireControlListener checks that worker read policies require a worker control listener.
 func TestWorkerReadPoliciesRequireControlListener(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{

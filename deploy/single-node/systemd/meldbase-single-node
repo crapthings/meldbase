@@ -3,31 +3,57 @@ set -eu
 
 # This launcher runs the current JWT/collection-policy server path. Keep the
 # public listener on loopback until an application-owned TLS proxy is configured.
+# Selects the Meldbase executable.
 : "${MELDBASE_BIN:=/usr/local/bin/meld}"
+# Selects the database file.
 : "${MELDBASE_DB:=/var/lib/meldbase/data/app.meld}"
+# Sets the public server listen address.
 : "${MELDBASE_ADDR:=127.0.0.1:8080}"
+# Sets the administration listen address.
 : "${MELDBASE_ADMIN_ADDR:=127.0.0.1:9091}"
+# Reads the administration bearer token from the environment.
 : "${MELDBASE_ADMIN_TOKEN:=}"
+# Selects the current JWT signing secret file.
 : "${MELDBASE_JWT_HS256_SECRET_FILE:=}"
+# Selects the previous JWT secret accepted during key rotation.
 : "${MELDBASE_JWT_HS256_PREVIOUS_SECRET_FILE:=}"
+# Selects the public key endpoint for RSA JWT verification.
 : "${MELDBASE_JWT_JWKS_URL:=}"
+# Sets the required JWT issuer.
 : "${MELDBASE_JWT_ISSUER:=}"
+# Sets the required JWT audience.
 : "${MELDBASE_JWT_AUDIENCE:=}"
+# Selects the collection access manifest.
 : "${MELDBASE_ACCESS_POLICY_FILE:=}"
+# Sets the realtime URL advertised to clients.
 : "${MELDBASE_PUBLIC_REALTIME_URL:=}"
+# Sets the allowed HTTP browser origins.
 : "${MELDBASE_HTTP_ORIGINS:=http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173}"
+# Sets the allowed realtime browser origin patterns.
 : "${MELDBASE_REALTIME_ORIGIN_PATTERNS:=localhost:*,127.0.0.1:*,[[]::1]:*}"
+# Selects the scheduled backup directory.
 : "${MELDBASE_BACKUP_DIR:=}"
+# Sets the time between scheduled backups.
 : "${MELDBASE_BACKUP_INTERVAL:=}"
+# Sets the number of scheduled backups to retain.
 : "${MELDBASE_BACKUP_KEEP:=}"
+# Sets the deadline for each scheduled backup.
 : "${MELDBASE_BACKUP_TIMEOUT:=}"
+# Selects the directory for scheduled restore drills.
 : "${MELDBASE_BACKUP_DRILL_DIR:=}"
+# Selects the database resource limits file.
 : "${MELDBASE_RESOURCE_LIMITS_FILE:=}"
+# Controls whether unfinished index builds resume automatically.
 : "${MELDBASE_INDEX_BUILD_SCHEDULER:=1}"
+# Sets the minimum service log level.
 : "${MELDBASE_LOG_LEVEL:=info}"
+# Sets the allowed request rate per subject.
 : "${MELDBASE_RATE_LIMIT_PER_MINUTE:=}"
+# Sets the allowed request burst per subject.
 : "${MELDBASE_RATE_LIMIT_BURST:=}"
+# Limits the number of tracked rate-limit subjects.
 : "${MELDBASE_RATE_LIMIT_SUBJECTS:=}"
+# Sets the proxy networks trusted to supply client addresses.
 : "${MELDBASE_TRUSTED_PROXY_CIDRS:=}"
 
 case "$MELDBASE_ADDR" in

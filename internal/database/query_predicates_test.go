@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestSizeAndTypePredicatesAcrossMemoryAndDurableExecution checks array-size and value-type filters across reads, writes, query plans, and subscriptions in both database modes.
 func TestSizeAndTypePredicatesAcrossMemoryAndDurableExecution(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(*testing.T) *DB { return New() },
@@ -110,6 +111,7 @@ func TestSizeAndTypePredicatesAcrossMemoryAndDurableExecution(t *testing.T) {
 	}
 }
 
+// TestAllPredicateAcrossMemoryAndDurableExecution checks that all-value array filters select and update matching documents in both database modes.
 func TestAllPredicateAcrossMemoryAndDurableExecution(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(*testing.T) *DB { return New() },
@@ -160,6 +162,7 @@ func TestAllPredicateAcrossMemoryAndDurableExecution(t *testing.T) {
 	}
 }
 
+// TestElemMatchKeepsScalarAndObjectConditionsOnOneArrayElement checks that array-element matching requires all conditions to hold on the same element in both database modes.
 func TestElemMatchKeepsScalarAndObjectConditionsOnOneArrayElement(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(*testing.T) *DB { return New() },
@@ -215,6 +218,7 @@ func TestElemMatchKeepsScalarAndObjectConditionsOnOneArrayElement(t *testing.T) 
 	}
 }
 
+// mustQuery compiles a test filter with default options and fails if compilation is rejected.
 func mustQuery(t *testing.T, filter Filter) QuerySpec {
 	t.Helper()
 	query, err := CompileQuery(filter, QueryOptions{})

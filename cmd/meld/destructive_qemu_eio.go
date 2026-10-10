@@ -15,8 +15,10 @@ import (
 	"time"
 )
 
+// destructiveQMPEIOProofSchema identifies the QMP write failure proof format.
 const destructiveQMPEIOProofSchema uint32 = 1
 
+// destructiveQMPEIOProof records write failure rules, the guest result hash, and QMP evidence for one target image.
 type destructiveQMPEIOProof struct {
 	SchemaVersion       uint32                   `json:"schemaVersion"`
 	TargetImage         string                   `json:"targetImage"`
@@ -29,6 +31,7 @@ type destructiveQMPEIOProof struct {
 	Exchanges           []destructiveQMPExchange `json:"exchanges"`
 }
 
+// runDestructiveQEMUEIO observes a QEMU write failure trial and publishes its QMP proof and guest shutdown acknowledgement.
 func runDestructiveQEMUEIO(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-eio", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -159,6 +162,7 @@ func runDestructiveQEMUEIO(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(proof)
 }
 
+// qmpEIOQueryBlock queries QEMU block devices and checks the expected target and fault configuration.
 func qmpEIOQueryBlock(client *qmpRecordingClient, id, targetImage, config string) error {
 	if err := client.send(map[string]string{"execute": "query-block", "id": id}); err != nil {
 		return err
@@ -168,6 +172,7 @@ func qmpEIOQueryBlock(client *qmpRecordingClient, id, targetImage, config string
 	})
 }
 
+// validateQMPBlkdebugInventory checks that the expected writable raw device uses direct I/O and the specified fault configuration.
 func validateQMPBlkdebugInventory(raw json.RawMessage, targetImage, config string) error {
 	var blocks []struct {
 		Inserted *struct {
@@ -197,6 +202,7 @@ func validateQMPBlkdebugInventory(raw json.RawMessage, targetImage, config strin
 	return errors.New("QMP block inventory does not bind writable direct-I/O blkdebug config to the exact target with flushes enabled")
 }
 
+// validateBlkdebugEIOConfig parses canonical one-shot write failure rules and returns their unique target sectors.
 func validateBlkdebugEIOConfig(raw []byte) (map[uint64]struct{}, error) {
 	if len(raw) == 0 || len(raw) > qualificationReceiptMaxBytes {
 		return nil, errors.New("blkdebug EIO config is empty or oversized")
@@ -247,6 +253,7 @@ func validateBlkdebugEIOConfig(raw []byte) (map[uint64]struct{}, error) {
 	return sectors, nil
 }
 
+// countQMPBlockIOErrors counts reported write I/O errors that are not disk-full errors.
 func countQMPBlockIOErrors(exchanges []destructiveQMPExchange) int {
 	count := 0
 	for _, exchange := range exchanges {
@@ -270,6 +277,7 @@ func countQMPBlockIOErrors(exchanges []destructiveQMPExchange) int {
 	return count
 }
 
+// validateQMPEIOProofStructure checks a write failure proof’s identity, timing, error events, and ordered QMP exchanges.
 func validateQMPEIOProofStructure(proof destructiveQMPEIOProof) error {
 	if proof.SchemaVersion != destructiveQMPEIOProofSchema || !filepath.IsAbs(proof.TargetImage) || !filepath.IsAbs(proof.BlkdebugConfig) ||
 		!qualificationHexDigest(proof.BlkdebugSHA256) || !qualificationHexDigest(proof.ResultSHA256) || proof.InjectedSectorCount <= 0 ||
@@ -290,6 +298,7 @@ func validateQMPEIOProofStructure(proof destructiveQMPEIOProof) error {
 	})
 }
 
+// runDestructiveQMPEIOProofCheck checks that a QMP write failure proof matches its fault rules and guest result.
 func runDestructiveQMPEIOProofCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-eio-proof-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -333,6 +342,7 @@ func runDestructiveQMPEIOProofCheck(args []string, stdout, stderr io.Writer) err
 	return json.NewEncoder(stdout).Encode(packet)
 }
 
+// runDestructiveEIOBundleCheck checks that the seed, guest result, fault rules, and retained database form one verified trial.
 func runDestructiveEIOBundleCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-eio-bundle-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)

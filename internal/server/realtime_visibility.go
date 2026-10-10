@@ -2,21 +2,24 @@ package server
 
 import "github.com/crapthings/meldbase"
 
+// visibilityNode holds a projected document and its neighbors in the connection's ordered result.
 type visibilityNode struct {
 	id             meldbase.DocumentID
 	document       meldbase.Document
 	previous, next *visibilityNode
 }
 
-// visibilityOverlay owns one connection-local projected ordered result. It is
-// initialized in O(N), then applies a k-operation engine delta in O(k) without
-// rebuilding or cloning the complete query result.
+// visibilityOverlay keeps the ordered query result that one connection is allowed to see.
+//
+// It is initialized in O(N), then applies a k-operation engine delta in O(k)
+// without rebuilding or cloning the complete query result.
 type visibilityOverlay struct {
 	engineToken, visibleToken uint64
 	head, tail                *visibilityNode
 	byID                      map[meldbase.DocumentID]*visibilityNode
 }
 
+// newVisibilityOverlay projects a snapshot through the query policy and builds its ordered document lookup.
 func newVisibilityOverlay(snapshot meldbase.QuerySnapshot, policy QueryPolicy) (*visibilityOverlay, []meldbase.Document, error) {
 	overlay := &visibilityOverlay{
 		engineToken: snapshot.Token, visibleToken: snapshot.Token,
@@ -34,6 +37,7 @@ func newVisibilityOverlay(snapshot meldbase.QuerySnapshot, policy QueryPolicy) (
 	return overlay, projected, nil
 }
 
+// apply updates the projected result and emits only delta operations visible under the query policy.
 func (overlay *visibilityOverlay) apply(delta meldbase.QueryDelta, policy QueryPolicy) (meldbase.QueryDelta, bool, error) {
 	if delta.FromToken != overlay.engineToken || delta.Token <= delta.FromToken || len(delta.Operations) == 0 {
 		return meldbase.QueryDelta{}, false, meldbase.ErrInvalidDelta
@@ -95,6 +99,7 @@ func (overlay *visibilityOverlay) apply(delta meldbase.QueryDelta, policy QueryP
 	return visible, true, nil
 }
 
+// remove unlinks a document node and removes its ID from the overlay lookup.
 func (overlay *visibilityOverlay) remove(node *visibilityNode) {
 	if node.previous == nil {
 		overlay.head = node.next
@@ -110,6 +115,7 @@ func (overlay *visibilityOverlay) remove(node *visibilityNode) {
 	node.previous, node.next = nil, nil
 }
 
+// insertBefore links a document node before an anchor or appends it when the anchor is nil.
 func (overlay *visibilityOverlay) insertBefore(node, anchor *visibilityNode) {
 	if anchor == nil {
 		node.previous, node.next = overlay.tail, nil

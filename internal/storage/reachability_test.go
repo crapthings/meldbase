@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestSemanticAuditTreeViewCacheIsBoundedAndTypeSafe checks that audit tree views are reused within the cache limit and reject mismatched tree types.
 func TestSemanticAuditTreeViewCacheIsBoundedAndTypeSafe(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "semantic-view-cache.meld2")
 	file, _, err := Open(path)
@@ -41,6 +42,7 @@ func TestSemanticAuditTreeViewCacheIsBoundedAndTypeSafe(t *testing.T) {
 	}
 }
 
+// TestReachabilityProtectsTwoMetasAndSnapshotPins checks that closing a snapshot makes its old pages reclaimable without changing the file size.
 func TestReachabilityProtectsTwoMetasAndSnapshotPins(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reachability.meld2")
 	file, _, err := Open(path)

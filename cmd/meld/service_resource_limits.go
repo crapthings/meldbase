@@ -10,14 +10,10 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// serviceResourceLimitsMaxBytes limits the size of a resource limits configuration file.
 const serviceResourceLimitsMaxBytes = 64 << 10
 
-// readServiceResourceLimits deliberately accepts only the public
-// ResourceLimits JSON shape. This lets an operator tune one immutable set of
-// admission budgets at process start without turning individual CLI flags into
-// a partially applied, hard-to-audit configuration surface. Zero fields retain
-// Meldbase's production defaults and the database validates cross-field
-// constraints before it opens the file.
+// readServiceResourceLimits reads one size-bounded resource limits JSON value and rejects unknown fields.
 func readServiceResourceLimits(path string) (meldbase.ResourceLimits, error) {
 	info, err := os.Stat(path)
 	if err != nil {

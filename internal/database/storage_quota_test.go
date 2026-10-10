@@ -10,6 +10,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestPublicStorageQuotaIsSafeAdmissionRejection checks that storage quota rejection preserves documents and allows writes after reopening with a larger quota.
 func TestPublicStorageQuotaIsSafeAdmissionRejection(t *testing.T) {
 	if DefaultMaxFileBytes != storage.DefaultMaxFileBytes {
 		t.Fatalf("public/internal quota defaults drifted: %d/%d", DefaultMaxFileBytes, storage.DefaultMaxFileBytes)
@@ -63,6 +64,7 @@ func TestPublicStorageQuotaIsSafeAdmissionRejection(t *testing.T) {
 	}
 }
 
+// TestPublicInvalidStorageQuotaDoesNotCreateFile checks that an invalid storage quota is rejected before creating a database file.
 func TestPublicInvalidStorageQuotaDoesNotCreateFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-quota.meld2")
 	_, err := OpenWithOptions(path, OpenOptions{StorageLimits: StorageLimits{MaxFileBytes: 2*PageSize + 1}})

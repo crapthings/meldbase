@@ -1,23 +1,34 @@
+/** Defines the accepted shape of a worker method name. */
 export const METHOD_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/;
+/** Defines the accepted shape of a worker name. */
 export const WORKER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+/** Defines the accepted shape of a collection name. */
 export const COLLECTION_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+/** Matches the lowercase hexadecimal shape of a document ID. */
 export const ID_PATTERN = /^[0-9a-f]{32}$/;
+/** Defines the accepted shape of an internal error code. */
 export const ERROR_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 // Keep the SDK's inbound worker frame ceiling aligned with the largest frame
 // the Go worker hub will accept. A worker must never parse an unbounded string
 // supplied by its control-plane peer.
+/** Limits the byte size of incoming worker messages. */
 export const MAX_WORKER_FRAME_BYTES = 16 << 20;
 
+/** Limits nesting in incoming worker JSON. */
 const MAX_WORKER_JSON_DEPTH = 128;
+/** Identifies the all-zero document ID that validation rejects. */
 const ZERO_DOCUMENT_ID = "00000000000000000000000000000000";
+/** Encodes validated strings as UTF-8 for byte limits. */
 const encoder = new TextEncoder();
 
+/** Holds a promise and the functions that settle it. */
 export interface Deferred<T> {
   readonly promise: Promise<T>;
   resolve(value: T): void;
   reject(error: unknown): void;
 }
 
+/** Creates a promise that callers can resolve or reject later. */
 export function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -28,6 +39,7 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+/** Validates a worker URL and expands a Meldbase address to its secure WebSocket endpoint. */
 export function parseWorkerURL(raw: string): string {
   const url = new URL(raw);
   if (!url.host || url.username || url.password || url.search || url.hash) {
@@ -47,6 +59,7 @@ export function parseWorkerURL(raw: string): string {
   return url.toString();
 }
 
+/** Checks for a nonzero lowercase hexadecimal document ID. */
 export function isCanonicalDocumentID(value: unknown): value is string {
   return typeof value === "string" && ID_PATTERN.test(value) && value !== ZERO_DOCUMENT_ID;
 }
@@ -58,10 +71,12 @@ export function utf8ByteLength(value: unknown, label = "value"): number {
   return encoder.encode(value).byteLength;
 }
 
+/** Checks whether a value is a non-null object other than an array. */
 export function record(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Parses a bounded worker JSON object after checking strict JSON syntax. */
 export function parseJSONRecord(raw: string): Record<string, unknown> {
   let byteLength: number;
   try {
@@ -83,6 +98,7 @@ export function parseJSONRecord(raw: string): Record<string, unknown> {
   return value;
 }
 
+/** Rejects objects with missing or unexpected fields. */
 export function exactKeys(record_: Record<string, unknown>, expected: readonly string[]): void {
   const actual = Object.keys(record_).sort();
   const wanted = [...expected].sort();
@@ -90,10 +106,12 @@ export function exactKeys(record_: Record<string, unknown>, expected: readonly s
     throw new Error("Worker frame contains unknown or missing fields");
 }
 
+/** Preserves Error instances and replaces other failures with a generic worker error. */
 export function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error("Unknown Meldbase worker failure");
 }
 
+/** Waits until the timer expires or the abort signal fires. */
 export function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
@@ -107,6 +125,7 @@ export function abortableDelay(milliseconds: number, signal: AbortSignal): Promi
   });
 }
 
+/** Rejects strings containing unpaired UTF-16 surrogates. */
 function assertWellFormedString(value: string, label: string): void {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -125,6 +144,7 @@ function assertWellFormedString(value: string, label: string): void {
 // JSON.parse intentionally accepts duplicate keys and silently keeps the last
 // value. The Go hub rejects those frames, so validate the complete JSON token
 // stream first to keep the worker-side control-plane boundary symmetric.
+/** Rejects malformed JSON, duplicate object keys, invalid strings, and excessive nesting. */
 function validateStrictJSON(raw: string): void {
   let index = 0;
 

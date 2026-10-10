@@ -7,17 +7,19 @@ import (
 	"math"
 )
 
+// nodePageMagic identifies a serialized index node page.
 var nodePageMagic = [8]byte{'M', 'E', 'L', 'D', 'I', 'D', 'X', 'N'}
 
+// TreePageHeader records the root, node capacity, and pair count for encoded node pages.
 type TreePageHeader struct {
 	MaxKeys uint16
 	Size    uint64
 	Root    uint32
 }
 
-// EncodeNodePages returns one independently addressable blob per logical
-// B+Tree node. Child and leaf-next links are stable node ordinals resolved by
-// the checkpoint catalog.
+// EncodeNodePages encodes each tree node as a separate blob with stable node IDs.
+//
+// The checkpoint catalog resolves child and leaf-next links by those IDs.
 func (t *Tree) EncodeNodePages() (TreePageHeader, [][]byte, error) {
 	if t == nil || t.root == nil || t.maxKeys < 3 || t.maxKeys > math.MaxUint16 || t.size < 0 {
 		return TreePageHeader{}, nil, ErrCorrupt
@@ -112,6 +114,7 @@ func (t *Tree) EncodeNodePages() (TreePageHeader, [][]byte, error) {
 	return TreePageHeader{MaxKeys: uint16(t.maxKeys), Size: uint64(t.size), Root: ids[t.root]}, encoded, nil
 }
 
+// DecodeNodePages reconstructs and validates a tree from individually encoded nodes.
 func DecodeNodePages(header TreePageHeader, encoded [][]byte) (*Tree, error) {
 	if header.MaxKeys < 3 || header.Size > math.MaxInt || len(encoded) == 0 || len(encoded) > 10_000_000 || header.Root >= uint32(len(encoded)) {
 		return nil, ErrCorrupt
@@ -192,16 +195,8 @@ func DecodeNodePages(header TreePageHeader, encoded [][]byte) (*Tree, error) {
 		}
 		nodes[expectedID] = current
 	}
-	for index, current := range nodes {
-		for _, childID := range childIDs[index] {
-			current.children = append(current.children, nodes[childID])
-		}
-		if nextIDs[index] != noNode {
-			current.next = nodes[nextIDs[index]]
-			if !current.leaf || !current.next.leaf {
-				return nil, ErrCorrupt
-			}
-		}
+	if err := linkDecodedNodes(nodes, childIDs, nextIDs); err != nil {
+		return nil, err
 	}
 	tree := &Tree{root: nodes[header.Root], maxKeys: int(header.MaxKeys), size: int(header.Size)}
 	if err := validateDecodedTree(tree, nodes); err != nil {
@@ -210,6 +205,7 @@ func DecodeNodePages(header TreePageHeader, encoded [][]byte) (*Tree, error) {
 	return tree, nil
 }
 
+// nodePageID reads a node identifier from a recognized node-page header.
 func nodePageID(data []byte) (uint32, bool) {
 	if len(data) < 14 || !bytes.Equal(data[:8], nodePageMagic[:]) || binary.LittleEndian.Uint16(data[8:10]) != 1 {
 		return 0, false

@@ -9,22 +9,28 @@ import (
 	"time"
 )
 
-// ReplicationProtocolVersion is intentionally separate from the browser
-// realtime protocol. It transports durable database positions between trusted
-// servers, not end-user query subscriptions.
+// ReplicationProtocolVersion identifies the protocol for replicating commits between trusted servers.
+//
+// This version is separate from the browser realtime subscription protocol.
 const ReplicationProtocolVersion = 1
 
 const (
+	// DefaultReplicationMaxFrameBytes sets the default replication frame byte limit.
 	DefaultReplicationMaxFrameBytes = 96 << 20
-	maxReplicationChanges           = 10_000
+	// maxReplicationChanges limits the changes in a batch and the paths in one change.
+	maxReplicationChanges = 10_000
 )
 
-// ReplicationFrameLimits bounds one already-decompressed protocol frame. The
+// ReplicationFrameLimits caps the size of a decompressed replication message.
+//
+// The
 // default accommodates the configured 64 MiB canonical transaction limit plus
 // JSON/base64 overhead, while still rejecting unbounded peer allocation.
 type ReplicationFrameLimits struct{ MaxFrameBytes int }
 
-// ReplicationFrame is a transport-neutral protocol envelope. A transport must
+// ReplicationFrame carries a handshake, change batch, acknowledgement, or resync request.
+//
+// A transport must
 // authenticate both peers (for example with mTLS) before it accepts frames;
 // DatabaseID binds every frame to one durable source identity.
 type ReplicationFrame struct {
@@ -38,12 +44,17 @@ type ReplicationFrame struct {
 }
 
 const (
-	ReplicationHelloFrame  = "hello"
-	ReplicationBatchFrame  = "batch"
-	ReplicationAckFrame    = "ack"
+	// ReplicationHelloFrame identifies a replication handshake frame.
+	ReplicationHelloFrame = "hello"
+	// ReplicationBatchFrame identifies a replication change-batch frame.
+	ReplicationBatchFrame = "batch"
+	// ReplicationAckFrame identifies a durable replication acknowledgment.
+	ReplicationAckFrame = "ack"
+	// ReplicationResyncFrame identifies a request to rebuild a replica from a snapshot.
 	ReplicationResyncFrame = "resync_required"
 )
 
+// replicationWireFrame represents the JSON fields of a replication protocol message.
 type replicationWireFrame struct {
 	Version    int                     `json:"v"`
 	Type       string                  `json:"type"`
@@ -57,6 +68,7 @@ type replicationWireFrame struct {
 	Reason     string                  `json:"reason,omitempty"`
 }
 
+// replicationWireChange represents a change with document images encoded as base64 strings.
 type replicationWireChange struct {
 	Collection string           `json:"collection"`
 	Operation  Operation        `json:"operation"`
@@ -67,8 +79,9 @@ type replicationWireChange struct {
 	Paths      []string         `json:"changedPaths,omitempty"`
 }
 
-// MarshalReplicationFrame returns a strict JSON frame with canonical document
-// images encoded as base64 of the storage-independent typed document codec.
+// MarshalReplicationFrame validates and encodes a replication message as bounded JSON.
+//
+// Document images use base64 of the storage-independent typed document codec.
 // It is suitable for WebSocket binary/text messages, QUIC streams or framed
 // RPC, but it does not provide authentication or encryption itself.
 func MarshalReplicationFrame(frame ReplicationFrame, limits ReplicationFrameLimits) ([]byte, error) {
@@ -87,9 +100,10 @@ func MarshalReplicationFrame(frame ReplicationFrame, limits ReplicationFrameLimi
 	return encoded, nil
 }
 
-// UnmarshalReplicationFrame rejects unknown fields, duplicate JSON keys,
-// malformed base64, invalid typed documents and non-canonical identities before
-// a receiver reaches the follower state machine.
+// UnmarshalReplicationFrame validates and decodes a bounded JSON replication message.
+//
+// It rejects unknown fields, duplicate keys, malformed base64, invalid typed
+// documents, and non-canonical identities before the follower receives a batch.
 func UnmarshalReplicationFrame(data []byte, limits ReplicationFrameLimits) (ReplicationFrame, error) {
 	limits = normalizedReplicationFrameLimits(limits)
 	if len(data) == 0 || len(data) > limits.MaxFrameBytes {
@@ -105,6 +119,7 @@ func UnmarshalReplicationFrame(data []byte, limits ReplicationFrameLimits) (Repl
 	return decodeReplicationFrame(wire)
 }
 
+// normalizedReplicationFrameLimits supplies the default frame size or a conservative size for invalid settings.
 func normalizedReplicationFrameLimits(limits ReplicationFrameLimits) ReplicationFrameLimits {
 	if limits.MaxFrameBytes == 0 {
 		limits.MaxFrameBytes = DefaultReplicationMaxFrameBytes
@@ -117,6 +132,7 @@ func normalizedReplicationFrameLimits(limits ReplicationFrameLimits) Replication
 	return limits
 }
 
+// encodeReplicationFrame validates a replication message and converts it to its JSON field representation.
 func encodeReplicationFrame(frame ReplicationFrame) (replicationWireFrame, error) {
 	if frame.DatabaseID == [16]byte{} {
 		return replicationWireFrame{}, fmt.Errorf("%w: zero database identity", ErrReplicaProtocol)
@@ -164,6 +180,7 @@ func encodeReplicationFrame(frame ReplicationFrame) (replicationWireFrame, error
 	return wire, nil
 }
 
+// decodeReplicationFrame validates JSON message fields and reconstructs a replication message.
 func decodeReplicationFrame(wire replicationWireFrame) (ReplicationFrame, error) {
 	if wire.Version != ReplicationProtocolVersion {
 		return ReplicationFrame{}, fmt.Errorf("%w: unsupported version", ErrReplicaProtocol)
@@ -215,6 +232,7 @@ func decodeReplicationFrame(wire replicationWireFrame) (ReplicationFrame, error)
 	return frame, nil
 }
 
+// encodeReplicationChange validates a change and encodes its document images for transport.
 func encodeReplicationChange(change Change) (replicationWireChange, error) {
 	if !collectionNamePattern.MatchString(change.Collection) {
 		return replicationWireChange{}, fmt.Errorf("%w: invalid collection", ErrReplicaProtocol)
@@ -267,6 +285,7 @@ func encodeReplicationChange(change Change) (replicationWireChange, error) {
 	return result, nil
 }
 
+// decodeReplicationChange validates a transported change and reconstructs its document images.
 func decodeReplicationChange(wire replicationWireChange) (Change, error) {
 	if !collectionNamePattern.MatchString(wire.Collection) {
 		return Change{}, fmt.Errorf("%w: invalid collection", ErrReplicaProtocol)
@@ -326,6 +345,7 @@ func decodeReplicationChange(wire replicationWireChange) (Change, error) {
 	return result, nil
 }
 
+// validReplicationDocumentShape checks which document images an insert, update, or delete must carry.
 func validReplicationDocumentShape(operation Operation, before, after bool) bool {
 	switch operation {
 	case InsertOperation:
@@ -339,6 +359,7 @@ func validReplicationDocumentShape(operation Operation, before, after bool) bool
 	}
 }
 
+// validReplicationPaths checks the count, spelling, and strict ordering of changed paths.
 func validReplicationPaths(paths []string) bool {
 	if len(paths) > maxReplicationChanges {
 		return false
@@ -351,6 +372,7 @@ func validReplicationPaths(paths []string) bool {
 	return true
 }
 
+// parseReplicationHex decodes an identity with the required byte length and canonical lowercase spelling.
 func parseReplicationHex(value string, size int) ([]byte, error) {
 	if len(value) != size*2 || strings.ToLower(value) != value {
 		return nil, fmt.Errorf("%w: non-canonical identity", ErrReplicaProtocol)
@@ -362,6 +384,7 @@ func parseReplicationHex(value string, size int) ([]byte, error) {
 	return decoded, nil
 }
 
+// validReplicationResyncReason checks whether a snapshot request uses a recognized reason code.
 func validReplicationResyncReason(reason string) bool {
 	return reason == "history_lost" || reason == "identity_mismatch" || reason == "snapshot_required" || reason == "protocol_error"
 }

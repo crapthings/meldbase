@@ -9,7 +9,7 @@ Requirements:
 
 - Go 1.23 or newer
 - Node.js 22
-- pnpm 11.10.0 through Corepack or a compatible installation
+- pnpm 10.34.5 through Corepack or a compatible installation
 
 Install JavaScript dependencies with:
 

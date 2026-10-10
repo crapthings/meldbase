@@ -21,6 +21,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// TestClientRequiresActualVerifiedMTLSMember checks that lease access requires a verified client certificate.
 func TestClientRequiresActualVerifiedMTLSMember(t *testing.T) {
 	pki := newLeaseTestPKI(t)
 	fingerprint := sha256.Sum256(pki.clientLeaf.Raw)
@@ -65,6 +66,7 @@ func TestClientRequiresActualVerifiedMTLSMember(t *testing.T) {
 	}
 }
 
+// TestThreeVerifiedHTTPSMembersBackAuthorityQuorum checks that three authenticated HTTPS file stores support a signed lease grant and subsequent load.
 func TestThreeVerifiedHTTPSMembersBackAuthorityQuorum(t *testing.T) {
 	pki := newLeaseTestPKI(t)
 	clientFingerprint := sha256.Sum256(pki.clientLeaf.Raw)
@@ -123,6 +125,7 @@ func TestThreeVerifiedHTTPSMembersBackAuthorityQuorum(t *testing.T) {
 	}
 }
 
+// TestClientAcceptsOnlyConfiguredLeavesDuringRotation checks certificate rotation against configured pins and rejects overlapping identities as separate quorum votes.
 func TestClientAcceptsOnlyConfiguredLeavesDuringRotation(t *testing.T) {
 	pki := newLeaseTestPKI(t)
 	clientFingerprint := sha256.Sum256(pki.clientLeaf.Raw)
@@ -204,6 +207,7 @@ func TestClientAcceptsOnlyConfiguredLeavesDuringRotation(t *testing.T) {
 	}
 }
 
+// leaseTestPKI holds a test certificate authority and its server and client credentials.
 type leaseTestPKI struct {
 	roots      *x509.CertPool
 	ca         *x509.Certificate
@@ -213,6 +217,7 @@ type leaseTestPKI struct {
 	clientLeaf *x509.Certificate
 }
 
+// newLeaseTestPKI creates trusted roots and matching server and client certificates for lease tests.
 func newLeaseTestPKI(t *testing.T) leaseTestPKI {
 	t.Helper()
 	now := time.Now().Add(-time.Minute)
@@ -233,10 +238,12 @@ func newLeaseTestPKI(t *testing.T) leaseTestPKI {
 	return leaseTestPKI{roots: roots, ca: ca, caKey: caKey, server: server, client: client, clientLeaf: clientLeaf}
 }
 
+// newLeaseTestServerLeaf creates a loopback server certificate with the default test serial number.
 func newLeaseTestServerLeaf(t *testing.T, ca *x509.Certificate, caKey ed25519.PrivateKey) (tls.Certificate, *x509.Certificate) {
 	return newLeaseTestServerLeafWithSerial(t, ca, caKey, 2)
 }
 
+// newLeaseTestServerLeafWithSerial creates a loopback server certificate with the supplied serial number.
 func newLeaseTestServerLeafWithSerial(t *testing.T, ca *x509.Certificate, caKey ed25519.PrivateKey, serial int64) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
 	key := newLeaseTestKey(t)
@@ -245,6 +252,7 @@ func newLeaseTestServerLeafWithSerial(t *testing.T, ca *x509.Certificate, caKey 
 	return signLeaseTestLeaf(t, template, ca, caKey, key)
 }
 
+// newLeaseTestClientLeaf creates a signed client authentication certificate for tests.
 func newLeaseTestClientLeaf(t *testing.T, ca *x509.Certificate, caKey ed25519.PrivateKey) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
 	key := newLeaseTestKey(t)
@@ -253,6 +261,7 @@ func newLeaseTestClientLeaf(t *testing.T, ca *x509.Certificate, caKey ed25519.Pr
 	return signLeaseTestLeaf(t, template, ca, caKey, key)
 }
 
+// signLeaseTestLeaf signs and parses a test certificate and pairs it with its private key.
 func signLeaseTestLeaf(t *testing.T, template, ca *x509.Certificate, caKey, key ed25519.PrivateKey) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
 	der, err := x509.CreateCertificate(rand.Reader, template, ca, key.Public(), caKey)
@@ -266,6 +275,7 @@ func signLeaseTestLeaf(t *testing.T, template, ca *x509.Certificate, caKey, key 
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, leaf
 }
 
+// newLeaseTestKey generates an Ed25519 private key for tests.
 func newLeaseTestKey(t *testing.T) ed25519.PrivateKey {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
@@ -275,6 +285,7 @@ func newLeaseTestKey(t *testing.T) ed25519.PrivateKey {
 	return key
 }
 
+// httpClient creates an HTTP client using the test roots and an optional client certificate.
 func (pki leaseTestPKI) httpClient(client *tls.Certificate) *http.Client {
 	config := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pki.roots}
 	if client != nil {

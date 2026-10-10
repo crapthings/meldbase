@@ -15,10 +15,13 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// destructiveEIOResultSchema identifies the I/O failure worker result format.
 const destructiveEIOResultSchema uint32 = 1
 
+// destructiveEIODocumentID identifies the document updated by I/O failure trials.
 var destructiveEIODocumentID = [16]byte{15: 0xe1}
 
+// destructiveEIOSeedResult records the verified database and reusable pages prepared for an I/O failure trial.
 type destructiveEIOSeedResult struct {
 	SchemaVersion  uint32 `json:"schemaVersion"`
 	BuildRevision  string `json:"buildRevision,omitempty"`
@@ -35,6 +38,7 @@ type destructiveEIOSeedResult struct {
 	Passed         bool   `json:"passed"`
 }
 
+// destructiveEIOWorkerResult records fail-stop write behavior and the retained database after an I/O failure.
 type destructiveEIOWorkerResult struct {
 	SchemaVersion       uint32    `json:"schemaVersion"`
 	BuildRevision       string    `json:"buildRevision,omitempty"`
@@ -60,6 +64,7 @@ type destructiveEIOWorkerResult struct {
 	Passed              bool      `json:"passed"`
 }
 
+// runDestructiveEIOSeed creates and verifies a database fixture with reusable pages for an I/O failure trial.
 func runDestructiveEIOSeed(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-eio-seed", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -128,6 +133,7 @@ func runDestructiveEIOSeed(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(result)
 }
 
+// validateDestructiveEIOSeedResult checks that the seed result identifies a verified fixture with reusable pages.
 func validateDestructiveEIOSeedResult(result destructiveEIOSeedResult) error {
 	if result.SchemaVersion != 1 || result.GOOS == "" || result.GOARCH == "" || result.GoVersion == "" ||
 		(result.BuildRevision != "" && !validDurabilitySourceRevision(result.BuildRevision)) || !qualificationHexDigest(result.DatabaseSHA256) ||
@@ -138,6 +144,7 @@ func validateDestructiveEIOSeedResult(result destructiveEIOSeedResult) error {
 	return nil
 }
 
+// runDestructiveEIOWorker checks fail-stop behavior under injected I/O errors and retains the verified old database state.
 func runDestructiveEIOWorker(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-eio-worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -214,6 +221,7 @@ func runDestructiveEIOWorker(args []string, stdout, stderr io.Writer) error {
 	return json.NewEncoder(stdout).Encode(result)
 }
 
+// applyDestructiveEIOUpdate updates the trial document using the supplied transaction ID suffix and value.
 func applyDestructiveEIOUpdate(file *storage.File, transactionByte byte, value string) error {
 	_, err := file.ApplyDocumentTransaction(storage.DocumentTransaction{TransactionID: [16]byte{15: transactionByte}, Mutations: []storage.DocumentMutation{{
 		Collection: "items", DocumentID: destructiveEIODocumentID, Operation: storage.DocumentUpdate, Document: []byte(value),
@@ -221,12 +229,14 @@ func applyDestructiveEIOUpdate(file *storage.File, transactionByte byte, value s
 	return err
 }
 
+// verifyDestructiveEIODatabase verifies the storage fixture while rejecting unexpected secondary index entries.
 func verifyDestructiveEIODatabase(path string) (storage.VerificationResult, error) {
 	return storage.VerifyPathContextWithIndexAudit(context.Background(), path, func(storage.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
 		return nil, false, errors.New("destructive EIO fixture unexpectedly contains an index")
 	})
 }
 
+// validateDestructiveEIOWorkerResult checks that the worker result records I/O errors and recovery of the old verified state.
 func validateDestructiveEIOWorkerResult(result destructiveEIOWorkerResult) error {
 	if result.SchemaVersion != destructiveEIOResultSchema || result.GOOS == "" || result.GOARCH == "" || result.GoVersion == "" ||
 		(result.BuildRevision != "" && !validDurabilitySourceRevision(result.BuildRevision)) ||
@@ -240,6 +250,7 @@ func validateDestructiveEIOWorkerResult(result destructiveEIOWorkerResult) error
 	return nil
 }
 
+// runDestructiveEIOResultCheck verifies that the retained database matches the recorded I/O failure result.
 func runDestructiveEIOResultCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-eio-result-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)

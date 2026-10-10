@@ -4,12 +4,14 @@ import test from "node:test";
 
 import { decodeProtocolDescriptor, MELDBASE_PROTOCOL_VERSION, supportsProtocol } from "./protocol.js";
 
+/** Describes required and optional fields for one protocol frame type. */
 interface FrameContract {
   readonly type: string;
   readonly required: readonly string[];
   readonly optional: readonly string[];
 }
 
+/** Describes the shared version-one protocol fixture checked by SDK compatibility tests. */
 interface ProtocolV1Contract {
   readonly formatVersion: number;
   readonly protocolVersion: number;

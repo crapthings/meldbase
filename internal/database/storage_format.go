@@ -9,7 +9,8 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// StorageFormatInfo is a read-only negotiation view, not a full graph audit.
+// StorageFormatInfo reports file format metadata and compatibility with this reader.
+//
 // ReaderCompatible says this binary understands the reported revision and all
 // required feature bits; callers must still Open the database before use.
 type StorageFormatInfo struct {
@@ -25,17 +26,22 @@ type StorageFormatInfo struct {
 	ReaderCompatible  bool          `json:"readerCompatible"`
 }
 
-// StorageFormat identifies the sole supported on-disk engine. Unknown denotes
+// StorageFormat identifies the supported file format or an absent database.
+//
+// Unknown denotes
 // a missing or zero-length path, not an unrecognized non-empty file.
 type StorageFormat string
 
 const (
+	// StorageFormatUnknown identifies a missing or empty database file.
 	StorageFormatUnknown StorageFormat = ""
+	// StorageFormatCurrent identifies the supported database file format.
 	StorageFormatCurrent StorageFormat = "current"
 )
 
-// DetectStorageFormat performs only enough inspection to distinguish a new
-// path from the current database format. Old database files deliberately fail
+// DetectStorageFormat distinguishes an absent database from a recognized database format.
+//
+// Old database files deliberately fail
 // closed: this build contains no legacy reader or automatic migration path.
 func DetectStorageFormat(path string) (StorageFormat, error) {
 	if path == "" {
@@ -94,6 +100,7 @@ func InspectStorageFormat(path string) (StorageFormatInfo, error) {
 	return inspectCurrentFormat(pages)
 }
 
+// inspectCurrentFormat selects a valid metadata envelope and reports reader compatibility.
 func inspectCurrentFormat(pages [2][]byte) (StorageFormatInfo, error) {
 	var envelopes [2]storage.MetaEnvelope
 	valid := [2]bool{}

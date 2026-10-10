@@ -4,6 +4,7 @@ import test from "node:test";
 import { applyMutation, decodeMutationSpec } from "./mutation.js";
 import { decodeDocument } from "./wire.js";
 
+/** Describes a shared mutation fixture with encoded input and expected output documents. */
 interface CorpusCase {
   name: string;
   document: unknown;

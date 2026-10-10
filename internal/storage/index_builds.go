@@ -6,30 +6,45 @@ import (
 	"unicode/utf8"
 )
 
+// indexBuildMetaHeaderBytes is the byte size of a stored index build header.
 const indexBuildMetaHeaderBytes = 160
 
+// indexBuildMetaMagic identifies encoded index build records.
 var indexBuildMetaMagic = [8]byte{'M', 'E', 'L', 'D', 'I', 'B', 'L', 'D'}
 
+// IndexBuildPhase identifies the current stage of a persistent index build.
 type IndexBuildPhase uint8
 
 const (
+	// IndexBuildScan marks a build scanning its source collection.
 	IndexBuildScan IndexBuildPhase = 1 + iota
+	// IndexBuildCatchUp marks a build applying commits after its source snapshot.
 	IndexBuildCatchUp
+	// IndexBuildReady marks a build ready for index publication.
 	IndexBuildReady
+	// IndexBuildFailed marks a build stopped by a recorded failure.
 	IndexBuildFailed
 )
 
+// IndexBuildFailure identifies why a persistent index build stopped.
 type IndexBuildFailure uint8
 
 const (
+	// IndexBuildFailureNone marks a build with no recorded failure.
 	IndexBuildFailureNone IndexBuildFailure = iota
+	// IndexBuildFailureUniqueConflict marks duplicate values encountered in a unique index.
 	IndexBuildFailureUniqueConflict
+	// IndexBuildFailureResourceLimit marks a build stopped by a resource limit.
 	IndexBuildFailureResourceLimit
+	// IndexBuildFailureHistoryLost marks a build whose required replay history is unavailable.
 	IndexBuildFailureHistoryLost
+	// IndexBuildFailureCanceled marks a canceled build.
 	IndexBuildFailureCanceled
+	// IndexBuildFailureInvalidIndex marks a build rejected by index validation.
 	IndexBuildFailureInvalidIndex
 )
 
+// IndexBuildMeta records a persistent index build's definition, progress, and protected snapshots.
 type IndexBuildMeta struct {
 	BuildID           [16]byte
 	CollectionID      uint32
@@ -57,6 +72,7 @@ type IndexBuildMeta struct {
 	UpdatedAt          time.Time
 }
 
+// encodeIndexBuildMeta validates and encodes an index build record.
 func encodeIndexBuildMeta(meta IndexBuildMeta) ([]byte, error) {
 	if !validIndexBuildMeta(meta) {
 		return nil, ErrCorrupt
@@ -115,6 +131,7 @@ func encodeIndexBuildMeta(meta IndexBuildMeta) ([]byte, error) {
 	return encoded, nil
 }
 
+// decodeIndexBuildMeta validates and reads an index build record.
 func decodeIndexBuildMeta(key, encoded []byte) (IndexBuildMeta, error) {
 	var meta IndexBuildMeta
 	if len(key) != len(meta.BuildID) || allZero(key) || len(encoded) < indexBuildMetaHeaderBytes ||
@@ -193,6 +210,7 @@ func decodeIndexBuildMeta(key, encoded []byte) (IndexBuildMeta, error) {
 	return meta, nil
 }
 
+// validIndexBuildMeta checks build identity, snapshot bounds, and phase consistency.
 func validIndexBuildMeta(meta IndexBuildMeta) bool {
 	fields, validFields := normalizeIndexFields(meta.FieldPath, meta.Fields)
 	if allZero(meta.BuildID[:]) || meta.CollectionID == 0 || !validCollectionName(meta.Collection) ||
@@ -212,6 +230,7 @@ func validIndexBuildMeta(meta IndexBuildMeta) bool {
 	return (meta.Phase == IndexBuildFailed) == (meta.Failure != IndexBuildFailureNone)
 }
 
+// validateIndexBuildMetaFeatures checks that stored build roots have their required feature declared.
 func validateIndexBuildMetaFeatures(required uint64, meta IndexBuildMeta) error {
 	if meta.AppliedCatalogRoot != 0 && required&RequiredFeatureIndexBuildAppliedRoot == 0 {
 		return ErrCorrupt
@@ -219,6 +238,7 @@ func validateIndexBuildMetaFeatures(required uint64, meta IndexBuildMeta) error 
 	return nil
 }
 
+// effectiveAppliedCatalogRoot returns the snapshot represented by the build progress if it is known.
 func (meta IndexBuildMeta) effectiveAppliedCatalogRoot() (uint64, bool) {
 	if meta.AppliedSequence == meta.SourceSequence {
 		return meta.SourceCatalogRoot, true
@@ -226,6 +246,7 @@ func (meta IndexBuildMeta) effectiveAppliedCatalogRoot() (uint64, bool) {
 	return meta.AppliedCatalogRoot, meta.AppliedCatalogRoot >= 2
 }
 
+// boolByte encodes a boolean as zero or one.
 func boolByte(value bool) byte {
 	if value {
 		return 1

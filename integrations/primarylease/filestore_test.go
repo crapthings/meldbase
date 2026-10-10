@@ -15,6 +15,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// TestFileStoreDurableCASReopenAndNamespace checks that private lease files survive reopening, isolate database IDs, and enforce conditional writes.
 func TestFileStoreDurableCASReopenAndNamespace(t *testing.T) {
 	directory := t.TempDir()
 	store, err := primarylease.NewFileStore(directory)
@@ -59,6 +60,7 @@ func TestFileStoreDurableCASReopenAndNamespace(t *testing.T) {
 	}
 }
 
+// TestFileStoreSerializesIndependentInstances checks that two independent store instances allow only one concurrent lease creation.
 func TestFileStoreSerializesIndependentInstances(t *testing.T) {
 	directory := t.TempDir()
 	first, err := primarylease.NewFileStore(directory)
@@ -108,6 +110,7 @@ func TestFileStoreSerializesIndependentInstances(t *testing.T) {
 	}
 }
 
+// TestFileStoreRejectsCorruptionPermissionsAndCancelledWrites checks that canceled writes publish nothing and damaged or publicly readable lease files are rejected.
 func TestFileStoreRejectsCorruptionPermissionsAndCancelledWrites(t *testing.T) {
 	directory := t.TempDir()
 	store, err := primarylease.NewFileStore(directory)
@@ -147,6 +150,7 @@ func TestFileStoreRejectsCorruptionPermissionsAndCancelledWrites(t *testing.T) {
 	}
 }
 
+// TestFileStoreIgnoresUnpublishedTemporaryFiles checks that an interrupted temporary file cannot appear as a published lease.
 func TestFileStoreIgnoresUnpublishedTemporaryFiles(t *testing.T) {
 	directory := t.TempDir()
 	store, err := primarylease.NewFileStore(directory)
@@ -162,6 +166,7 @@ func TestFileStoreIgnoresUnpublishedTemporaryFiles(t *testing.T) {
 	}
 }
 
+// TestAuthorityPersistsCertificateStateThroughFileQuorum checks that a lease granted through file replicas remains available after reopening the quorum.
 func TestAuthorityPersistsCertificateStateThroughFileQuorum(t *testing.T) {
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

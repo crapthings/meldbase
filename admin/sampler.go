@@ -1,4 +1,5 @@
-// Package admin provides optional, bounded observability consumers for Meldbase.
+// Package admin provides database monitoring and operator HTTP endpoints.
+//
 // It is deliberately separate from the database package: creating a DB never
 // starts a sampler, a goroutine, or a network listener.
 package admin
@@ -14,19 +15,25 @@ import (
 )
 
 var (
-	ErrClosed          = errors.New("meldbase admin: sampler closed")
+	// ErrClosed reports an attempt to subscribe to a closed sampler.
+	ErrClosed = errors.New("meldbase admin: sampler closed")
+	// ErrSubscriberLimit reports that the sampler has reached its subscriber limit.
 	ErrSubscriberLimit = errors.New("meldbase admin: subscriber limit reached")
 )
 
-// StatsSource is implemented by *meldbase.DB.
+// StatsSource supplies database activity snapshots to the sampler.
+//
+// *meldbase.DB implements this interface.
 type StatsSource interface {
 	Stats() meldbase.DBStats
 }
 
+// ServerStatsSource supplies server activity snapshots to the sampler.
 type ServerStatsSource interface {
 	Stats() meldserver.ServerStats
 }
 
+// SamplerOptions sets the sampling interval, history size, subscriber limit, and optional server source.
 type SamplerOptions struct {
 	Interval       time.Duration
 	HistorySize    int
@@ -34,7 +41,8 @@ type SamplerOptions struct {
 	Server         ServerStatsSource
 }
 
-// Rates contains process-session rates derived from two adjacent snapshots.
+// Rates reports activity rates between adjacent samples and cumulative cache hit ratios.
+//
 // Valid is false for the first sample and after a database reopen or counter
 // reset. Ratios are cumulative for the current process session.
 type Rates struct {
@@ -59,6 +67,7 @@ type Rates struct {
 	RPCRatesValid              bool    `json:"rpcRatesValid"`
 }
 
+// SamplerStatus reports sample counts, retained history, subscribers, and replaced deliveries.
 type SamplerStatus struct {
 	Samples           uint64 `json:"samples"`
 	Subscribers       uint64 `json:"subscribers"`
@@ -66,7 +75,7 @@ type SamplerStatus struct {
 	HistorySamples    uint64 `json:"historySamples"`
 }
 
-// Sample is an immutable point in the admin stream.
+// Sample groups database statistics, activity rates, and health at one sampling point.
 type Sample struct {
 	Sequence uint64                  `json:"sequence"`
 	Stats    meldbase.DBStats        `json:"stats"`
@@ -76,7 +85,9 @@ type Sample struct {
 	Server   *meldserver.ServerStats `json:"server,omitempty"`
 }
 
-// Sampler periodically reads DB.Stats and retains a fixed-size history. Each
+// Sampler periodically collects database statistics and keeps a fixed-size history.
+//
+// Each
 // subscriber has a single replaceable slot, so a slow consumer can never block
 // sampling or database work.
 type Sampler struct {
@@ -99,6 +110,7 @@ type Sampler struct {
 	done   chan struct{}
 }
 
+// NewSampler validates settings, captures an initial sample, and starts periodic sampling.
 func NewSampler(source StatsSource, options SamplerOptions) (*Sampler, error) {
 	if source == nil {
 		return nil, errors.New("meldbase admin: stats source is required")
@@ -134,6 +146,7 @@ func NewSampler(source StatsSource, options SamplerOptions) (*Sampler, error) {
 	return sampler, nil
 }
 
+// run captures samples at the configured interval until cancellation.
 func (s *Sampler) run(ctx context.Context) {
 	defer close(s.done)
 	ticker := time.NewTicker(s.options.Interval)
@@ -148,6 +161,7 @@ func (s *Sampler) run(ctx context.Context) {
 	}
 }
 
+// capture records a statistics snapshot and offers it to subscribers without waiting for them.
 func (s *Sampler) capture() {
 	stats := s.source.Stats()
 	var serverStats *meldserver.ServerStats
@@ -192,8 +206,9 @@ func (s *Sampler) capture() {
 	}
 }
 
-// offerLatest performs a non-blocking latest-value delivery to a single-slot
-// channel. The consumer may receive between the first failed send and the
+// offerLatest delivers the latest sample without blocking and reports whether an older sample was dropped.
+//
+// The channel has one slot. The consumer may receive between the first failed send and the
 // stale-value drain, so both the drain and replacement send must remain
 // non-blocking. The sampler lock guarantees that no other producer can send or
 // close the channel while this function runs.
@@ -221,6 +236,7 @@ func offerLatest(channel chan Sample, sample Sample) (dropped bool) {
 	return dropped
 }
 
+// deriveServerRates adds RPC rates when adjacent server snapshots have compatible counters and sessions.
 func deriveServerRates(rates *Rates, previous, current *meldserver.ServerStats) {
 	if rates == nil || !rates.Valid || previous == nil || current == nil || current.StartedAt != previous.StartedAt || rates.WindowSeconds <= 0 {
 		return
@@ -250,6 +266,7 @@ func deriveServerRates(rates *Rates, previous, current *meldserver.ServerStats) 
 	rates.RPCRatesValid = true
 }
 
+// sumUintCounters adds unsigned counters and rejects overflow.
 func sumUintCounters(values ...uint64) (uint64, bool) {
 	var total uint64
 	for _, value := range values {
@@ -261,6 +278,7 @@ func sumUintCounters(values ...uint64) (uint64, bool) {
 	return total, true
 }
 
+// deriveRates calculates database activity rates and cache hit ratios from adjacent snapshots.
 func deriveRates(previous, current meldbase.DBStats) Rates {
 	window := current.CapturedAt.Sub(previous.CapturedAt).Seconds()
 	if window <= 0 || current.StartedAt != previous.StartedAt {
@@ -292,6 +310,7 @@ func deriveRates(previous, current meldbase.DBStats) Rates {
 	return rates
 }
 
+// hitRatio returns the fraction of cache accesses that hit, or zero for an empty or overflowing total.
 func hitRatio(hits, misses uint64) float64 {
 	total := hits + misses
 	if total < hits || total == 0 {
@@ -300,12 +319,14 @@ func hitRatio(hits, misses uint64) float64 {
 	return float64(hits) / float64(total)
 }
 
+// Latest returns the most recent sample and whether a sample is available.
 func (s *Sampler) Latest() (Sample, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.latest, s.haveLatest
 }
 
+// History returns a copy of the retained samples in oldest-first order.
 func (s *Sampler) History() []Sample {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -316,6 +337,7 @@ func (s *Sampler) History() []Sample {
 	return result
 }
 
+// Status returns the sampler's current counters and retained history size.
 func (s *Sampler) Status() SamplerStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -325,17 +347,20 @@ func (s *Sampler) Status() SamplerStatus {
 	}
 }
 
+// Subscription exposes a sample stream that can be closed independently.
 type Subscription struct {
 	C       <-chan Sample
 	sampler *Sampler
 	id      uint64
 }
 
+// subscriber holds a replaceable sample slot and a close notification.
 type subscriber struct {
 	channel chan Sample
 	done    chan struct{}
 }
 
+// Subscribe creates a bounded latest-sample stream that closes when its context ends.
 func (s *Sampler) Subscribe(ctx context.Context) (*Subscription, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -374,6 +399,7 @@ func (s *Sampler) Subscribe(ctx context.Context) (*Subscription, error) {
 	return subscription, nil
 }
 
+// Close removes this subscription and closes its sample stream.
 func (s *Subscription) Close() {
 	if s == nil || s.sampler == nil {
 		return
@@ -381,6 +407,7 @@ func (s *Subscription) Close() {
 	s.sampler.unsubscribe(s.id)
 }
 
+// unsubscribe removes a subscriber and closes its delivery and notification channels.
 func (s *Sampler) unsubscribe(id uint64) {
 	s.mu.Lock()
 	if subscriber, ok := s.subscribers[id]; ok {
@@ -391,6 +418,7 @@ func (s *Sampler) unsubscribe(id uint64) {
 	s.mu.Unlock()
 }
 
+// Close closes subscriber streams and waits for periodic sampling to stop.
 func (s *Sampler) Close() error {
 	if s == nil {
 		return nil

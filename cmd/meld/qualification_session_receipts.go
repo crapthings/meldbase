@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// validateQualificationSessionReceipt validates a step receipt against the session plan and updates the accumulated session state.
 func validateQualificationSessionReceipt(plan qualificationSessionPlan, step qualificationSessionStep, path string, state *qualificationSessionState) ([]byte, time.Time, error) {
 	switch step.Kind {
 	case "durability":
@@ -168,6 +169,7 @@ func validateQualificationSessionReceipt(plan qualificationSessionPlan, step qua
 	}
 }
 
+// loadQualificationSessionReceiptState restores accumulated session state from a previously recorded step receipt.
 func loadQualificationSessionReceiptState(step qualificationSessionStep, path string, state *qualificationSessionState) error {
 	switch step.Kind {
 	case "durability":
@@ -218,6 +220,7 @@ func loadQualificationSessionReceiptState(step qualificationSessionStep, path st
 	return nil
 }
 
+// qualificationSessionAdvanceTime checks that a step follows the plan and earlier steps in time before recording its finish.
 func qualificationSessionAdvanceTime(plan qualificationSessionPlan, state *qualificationSessionState, started, finished time.Time) error {
 	if started.IsZero() || !finished.After(started) || started.Before(plan.CreatedAt) || (!state.LastFinishedAt.IsZero() && started.Before(state.LastFinishedAt)) {
 		return errors.New("qualification session receipt timing is invalid or overlaps an earlier step")
@@ -226,6 +229,7 @@ func qualificationSessionAdvanceTime(plan qualificationSessionPlan, state *quali
 	return nil
 }
 
+// qualificationSessionRequireArtifactPaths checks that artifact paths exist without links and stay inside the artifact root.
 func qualificationSessionRequireArtifactPaths(root string, paths ...string) error {
 	for _, path := range paths {
 		absolute, err := qualificationArtifactCandidate(path)
@@ -236,6 +240,7 @@ func qualificationSessionRequireArtifactPaths(root string, paths ...string) erro
 	return nil
 }
 
+// qualificationSessionReceiptRelativePath converts a receipt path to a slash-separated path beneath the artifact root.
 func qualificationSessionReceiptRelativePath(root, path string) (string, error) {
 	relative, err := filepath.Rel(root, path)
 	if err != nil || relative == "." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {

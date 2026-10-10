@@ -11,14 +11,18 @@ import (
 )
 
 const (
+	// defaultIndexBuildPollInterval sets the default delay between build-discovery passes.
 	defaultIndexBuildPollInterval = time.Second
-	defaultIndexBuildRunTimeout   = 250 * time.Millisecond
-	maxIndexBuildSchedulers       = 8
+	// defaultIndexBuildRunTimeout sets the default time slice for resuming one build.
+	defaultIndexBuildRunTimeout = 250 * time.Millisecond
+	// maxIndexBuildSchedulers limits concurrently running tasks in one index-build scheduler.
+	maxIndexBuildSchedulers = 8
 )
 
-// IndexBuildSchedulerOptions configures an explicit default-off runner. Each
-// task receives a bounded time quantum, then yields durable progress so CRUD and
-// other builds can proceed between quanta.
+// IndexBuildSchedulerOptions configures polling, time slices, and build concurrency.
+//
+// The scheduler must be started explicitly; each task yields durable progress
+// between bounded time slices so document writes and other builds can proceed.
 type IndexBuildSchedulerOptions struct {
 	PollInterval   time.Duration
 	RunTimeout     time.Duration
@@ -26,6 +30,7 @@ type IndexBuildSchedulerOptions struct {
 	RunImmediately bool
 }
 
+// IndexBuildSchedulerStats reports background index-build activity and outcomes.
 type IndexBuildSchedulerStats struct {
 	Polls        uint64        `json:"polls"`
 	Runs         uint64        `json:"runs"`
@@ -39,6 +44,7 @@ type IndexBuildSchedulerStats struct {
 	LastError    string        `json:"lastError,omitempty"`
 }
 
+// IndexBuildScheduler runs resumable index builds in bounded background tasks.
 type IndexBuildScheduler struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
@@ -61,13 +67,8 @@ type IndexBuildScheduler struct {
 	cursor       int
 }
 
-func (db *DB) StartIndexBuildScheduler(parent context.Context, options IndexBuildSchedulerOptions) (*IndexBuildScheduler, error) {
-	if db == nil {
-		return nil, ErrIndexBuildUnsupported
-	}
-	if err := contextError(parent); err != nil {
-		return nil, err
-	}
+// normalizeIndexBuildSchedulerOptions fills defaults and validates scheduling bounds.
+func normalizeIndexBuildSchedulerOptions(options IndexBuildSchedulerOptions) (IndexBuildSchedulerOptions, error) {
 	interval := options.PollInterval
 	if interval == 0 {
 		interval = defaultIndexBuildPollInterval
@@ -83,8 +84,26 @@ func (db *DB) StartIndexBuildScheduler(parent context.Context, options IndexBuil
 	if interval < minMaintenanceDuration || interval > maxMaintenanceInterval ||
 		timeout < minMaintenanceDuration || timeout > maxMaintenanceTimeout ||
 		concurrency < 1 || concurrency > maxIndexBuildSchedulers {
-		return nil, ErrInvalidIndexBuildSchedulerOptions
+		return IndexBuildSchedulerOptions{}, ErrInvalidIndexBuildSchedulerOptions
 	}
+	options.PollInterval, options.RunTimeout, options.MaxConcurrency = interval, timeout, concurrency
+	return options, nil
+}
+
+// StartIndexBuildScheduler starts the database's single background index-build scheduler.
+func (db *DB) StartIndexBuildScheduler(parent context.Context, options IndexBuildSchedulerOptions) (*IndexBuildScheduler, error) {
+	if db == nil {
+		return nil, ErrIndexBuildUnsupported
+	}
+	if err := contextError(parent); err != nil {
+		return nil, err
+	}
+	options, err := normalizeIndexBuildSchedulerOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	interval, timeout, concurrency := options.PollInterval, options.RunTimeout, options.MaxConcurrency
+
 	db.mu.Lock()
 	if db.closed {
 		db.mu.Unlock()
@@ -119,6 +138,7 @@ func (db *DB) StartIndexBuildScheduler(parent context.Context, options IndexBuil
 	return scheduler, nil
 }
 
+// run polls for builds until canceled and then waits for active tasks to finish.
 func (scheduler *IndexBuildScheduler) run(ctx context.Context, db *DB, interval, timeout time.Duration, immediately bool) {
 	defer close(scheduler.done)
 	defer func() {
@@ -144,6 +164,7 @@ func (scheduler *IndexBuildScheduler) run(ctx context.Context, db *DB, interval,
 	}
 }
 
+// dispatch starts eligible builds in rotating order while respecting the concurrency limit.
 func (scheduler *IndexBuildScheduler) dispatch(ctx context.Context, db *DB, timeout time.Duration) {
 	scheduler.polls.Add(1)
 	builds, err := db.IndexBuilds()
@@ -178,6 +199,7 @@ func (scheduler *IndexBuildScheduler) dispatch(ctx context.Context, db *DB, time
 	}
 }
 
+// runOne resumes a claimed build for one time slice and records its outcome.
 func (scheduler *IndexBuildScheduler) runOne(parent context.Context, db *DB, id IndexBuildID, timeout time.Duration) {
 	defer scheduler.wg.Done()
 	defer func() { <-scheduler.sem }()
@@ -222,6 +244,7 @@ func (scheduler *IndexBuildScheduler) runOne(parent context.Context, db *DB, id 
 	}
 }
 
+// persistentIndexBuildFailure classifies errors that permanently stop an index build.
 func persistentIndexBuildFailure(err error) (storage.IndexBuildFailure, bool) {
 	switch {
 	case errors.Is(err, ErrDuplicateKey):
@@ -237,6 +260,7 @@ func persistentIndexBuildFailure(err error) (storage.IndexBuildFailure, bool) {
 	}
 }
 
+// claim reserves a build ID and reports whether it was not already running.
 func (scheduler *IndexBuildScheduler) claim(id IndexBuildID) bool {
 	scheduler.runningMu.Lock()
 	defer scheduler.runningMu.Unlock()
@@ -247,12 +271,14 @@ func (scheduler *IndexBuildScheduler) claim(id IndexBuildID) bool {
 	return true
 }
 
+// release frees a build ID after its task finishes or admission fails.
 func (scheduler *IndexBuildScheduler) release(id IndexBuildID) {
 	scheduler.runningMu.Lock()
 	delete(scheduler.running, id)
 	scheduler.runningMu.Unlock()
 }
 
+// recordError updates or clears the scheduler's most recent error.
 func (scheduler *IndexBuildScheduler) recordError(err error) {
 	scheduler.lastMu.Lock()
 	if err == nil {
@@ -263,6 +289,7 @@ func (scheduler *IndexBuildScheduler) recordError(err error) {
 	scheduler.lastMu.Unlock()
 }
 
+// Stop cancels scheduling and waits for active tasks to finish.
 func (scheduler *IndexBuildScheduler) Stop() {
 	if scheduler == nil {
 		return
@@ -271,6 +298,7 @@ func (scheduler *IndexBuildScheduler) Stop() {
 	<-scheduler.done
 }
 
+// Done returns a channel that closes after the scheduler and its tasks finish.
 func (scheduler *IndexBuildScheduler) Done() <-chan struct{} {
 	if scheduler == nil {
 		closed := make(chan struct{})
@@ -280,6 +308,7 @@ func (scheduler *IndexBuildScheduler) Done() <-chan struct{} {
 	return scheduler.done
 }
 
+// Stats samples scheduling counters and the most recent outcome.
 func (scheduler *IndexBuildScheduler) Stats() IndexBuildSchedulerStats {
 	if scheduler == nil {
 		return IndexBuildSchedulerStats{}

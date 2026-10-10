@@ -18,12 +18,16 @@ import (
 )
 
 const (
+	// destructiveCorruptionReceiptSchema identifies the corruption campaign receipt format.
 	destructiveCorruptionReceiptSchema uint32 = 1
-	maxCorruptionPageSamples                  = 128
+	// maxCorruptionPageSamples limits the number of pages sampled by a corruption campaign.
+	maxCorruptionPageSamples = 128
 )
 
+// destructiveCorruptionOffsets lists the byte offsets mutated within each sampled page.
 var destructiveCorruptionOffsets = []uint64{0, 7, 8, 31, 63, 127, 223, 224, 255, 511, 1023, 2047, 3071, storage.PageSize - 1}
 
+// destructiveCorruptionReceipt records a corruption campaign’s baseline, samples, and verification outcomes.
 type destructiveCorruptionReceipt struct {
 	SchemaVersion     uint32                      `json:"schemaVersion"`
 	SourceRevision    string                      `json:"sourceRevision,omitempty"`
@@ -46,6 +50,7 @@ type destructiveCorruptionReceipt struct {
 	Passed            bool                        `json:"passed"`
 }
 
+// destructiveCorruptionCampaignResult holds the baseline and outcome counts produced by a corruption campaign.
 type destructiveCorruptionCampaignResult struct {
 	Baseline          meldbase.VerificationReport
 	SampledPages      []uint64
@@ -55,6 +60,7 @@ type destructiveCorruptionCampaignResult struct {
 	ValidOutcomeBySeq map[string]int
 }
 
+// runDestructiveCorruptionCheck tests byte mutations on a temporary database copy and publishes the campaign receipt.
 func runDestructiveCorruptionCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-corruption-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -113,6 +119,7 @@ func runDestructiveCorruptionCheck(args []string, stdout, stderr io.Writer) erro
 	return encoder.Encode(receipt)
 }
 
+// runDestructiveCorruptionReceiptCheck reproduces a corruption campaign from its receipt and prints the verification result.
 func runDestructiveCorruptionReceiptCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-corruption-receipt-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -143,6 +150,7 @@ func runDestructiveCorruptionReceiptCheck(args []string, stdout, stderr io.Write
 	return json.NewEncoder(stdout).Encode(resultPacket)
 }
 
+// recheckDestructiveCorruptionReceipt checks the source artifact and reproduces the recorded corruption outcomes.
 func recheckDestructiveCorruptionReceipt(receipt destructiveCorruptionReceipt) error {
 	actualHash, err := hashRegularFile(receipt.DatabaseArtifact, 1<<30)
 	if err != nil || actualHash != receipt.DatabaseSHA256 {
@@ -160,6 +168,7 @@ func recheckDestructiveCorruptionReceipt(receipt destructiveCorruptionReceipt) e
 	return nil
 }
 
+// executeDestructiveCorruptionCampaign tests sampled single-bit mutations on a temporary copy against valid recovery outcomes.
 func executeDestructiveCorruptionCampaign(ctx context.Context, database string, pageSampleLimit int) (result destructiveCorruptionCampaignResult, resultErr error) {
 	if pageSampleLimit < 2 || pageSampleLimit > maxCorruptionPageSamples {
 		return result, errors.New("corruption campaign page sample limit is invalid")
@@ -241,6 +250,7 @@ func executeDestructiveCorruptionCampaign(ctx context.Context, database string, 
 	return result, nil
 }
 
+// corruptionAllowedMetaOutcomes reads valid metadata slots to identify the database and permitted recovery sequences.
 func corruptionAllowedMetaOutcomes(path string) (map[uint64]struct{}, string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -271,6 +281,7 @@ func corruptionAllowedMetaOutcomes(path string) (map[uint64]struct{}, string, er
 	return allowed, databaseID, nil
 }
 
+// deterministicPageSamples selects evenly spaced physical pages or every page when the limit permits.
 func deterministicPageSamples(physicalPages uint64, limit int) []uint64 {
 	if physicalPages <= uint64(limit) {
 		pages := make([]uint64, physicalPages)
@@ -286,6 +297,7 @@ func deterministicPageSamples(physicalPages uint64, limit int) []uint64 {
 	return pages
 }
 
+// validateDestructiveCorruptionReceipt checks the receipt’s baseline, deterministic samples, and outcome accounting.
 func validateDestructiveCorruptionReceipt(receipt destructiveCorruptionReceipt) error {
 	if receipt.SchemaVersion != destructiveCorruptionReceiptSchema || receipt.GOOS == "" || receipt.GOARCH == "" || receipt.GoVersion == "" {
 		return errors.New("corruption receipt build identity is invalid")
@@ -327,6 +339,7 @@ func validateDestructiveCorruptionReceipt(receipt destructiveCorruptionReceipt) 
 	return nil
 }
 
+// existingRegularAbsolutePath returns an absolute path only when it names an existing regular file.
 func existingRegularAbsolutePath(path string) (string, error) {
 	absolute, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -339,6 +352,7 @@ func existingRegularAbsolutePath(path string) (string, error) {
 	return absolute, nil
 }
 
+// newAbsolutePath returns an absolute path only when no entry currently exists there.
 func newAbsolutePath(path string) (string, error) {
 	absolute, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -352,6 +366,7 @@ func newAbsolutePath(path string) (string, error) {
 	return absolute, nil
 }
 
+// equalUint64s compares unsigned integer slices element by element.
 func equalUint64s(left, right []uint64) bool {
 	if len(left) != len(right) {
 		return false
@@ -364,6 +379,7 @@ func equalUint64s(left, right []uint64) bool {
 	return true
 }
 
+// equalStringIntMaps checks equal map sizes and matching values for each key in the first map.
 func equalStringIntMaps(left, right map[string]int) bool {
 	if len(left) != len(right) {
 		return false

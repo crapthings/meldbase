@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 )
 
+// qualificationSessionPowerPaths holds the artifact paths for one physical power trial.
 type qualificationSessionPowerPaths struct {
 	Marker          string `json:"marker"`
 	ControllerProof string `json:"controllerProof"`
@@ -20,6 +21,7 @@ type qualificationSessionPowerPaths struct {
 	RecoveryReceipt string `json:"recoveryReceipt"`
 }
 
+// qualificationSessionPowerStatus reports the next physical power trial and its current preparation or recovery phase.
 type qualificationSessionPowerStatus struct {
 	SchemaVersion                  uint32                         `json:"schemaVersion"`
 	SessionID                      string                         `json:"sessionId"`
@@ -32,11 +34,15 @@ type qualificationSessionPowerStatus struct {
 }
 
 var (
+	// qualificationSessionPowerPrepareFn runs power trial preparation and can be replaced by tests.
 	qualificationSessionPowerPrepareFn = runDestructivePowerPrepare
+	// qualificationSessionPowerRecoverFn runs power trial recovery and can be replaced by tests.
 	qualificationSessionPowerRecoverFn = runDestructivePowerRecover
-	qualificationSessionPowerRecordFn  = runQualificationSessionRecord
+	// qualificationSessionPowerRecordFn records a power trial receipt and can be replaced by tests.
+	qualificationSessionPowerRecordFn = runQualificationSessionRecord
 )
 
+// runQualificationSessionPowerStatus checks the next physical power trial's artifacts and reports its current phase.
 func runQualificationSessionPowerStatus(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-session-power-status", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -114,6 +120,7 @@ func runQualificationSessionPowerStatus(args []string, stdout, stderr io.Writer)
 	return encoder.Encode(result)
 }
 
+// runQualificationSessionPowerPrepare prepares the exact next physical power trial from the session plan.
 func runQualificationSessionPowerPrepare(args []string, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-session-power-prepare", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -151,6 +158,7 @@ func runQualificationSessionPowerPrepare(args []string, stderr io.Writer) error 
 	}, stderr)
 }
 
+// runQualificationSessionPowerRecover recovers and records the next physical power trial using the planned controller identity.
 func runQualificationSessionPowerRecover(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-session-power-recover", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -200,6 +208,7 @@ func runQualificationSessionPowerRecover(args []string, stdout, stderr io.Writer
 	}, stdout, stderr)
 }
 
+// qualificationSessionPhysicalPowerStep selects the next planned physical power trial and derives its artifact paths.
 func qualificationSessionPhysicalPowerStep(plan qualificationSessionPlan, state qualificationSessionState) (qualificationSessionStep, qualificationSessionPowerPaths, error) {
 	if !qualificationPhysicalPowerMethod(plan.ControllerMethod) {
 		return qualificationSessionStep{}, qualificationSessionPowerPaths{}, errors.New("qualification session physical power command requires a physical controller method")

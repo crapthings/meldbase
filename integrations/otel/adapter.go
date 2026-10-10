@@ -1,5 +1,6 @@
-// Package meldotel exports Meldbase's bounded admin snapshots through the
-// stable OpenTelemetry Metrics API. It never calls DB.Stats directly and does
+// Package meldotel exports sampled Meldbase statistics through OpenTelemetry metrics.
+//
+// It never calls DB.Stats directly and does
 // not create an SDK, exporter, goroutine, network connection, or global state.
 package meldotel
 
@@ -15,19 +16,25 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+// instrumentationName identifies this adapter to the meter provider.
 const instrumentationName = "github.com/crapthings/meldbase/integrations/otel"
 
-// SchemaVersion identifies the fixed aggregate instrument contract. It is
-// independent of the admin JSON schema and OpenTelemetry API version.
+// SchemaVersion identifies the fixed set of exported metrics and their meanings.
+//
+// It is independent of the admin JSON schema and OpenTelemetry API version.
 const SchemaVersion uint32 = 12
 
+// InstrumentKind distinguishes gauges from cumulative counters.
 type InstrumentKind string
 
 const (
-	InstrumentGauge   InstrumentKind = "gauge"
+	// InstrumentGauge identifies a measurement of the current state.
+	InstrumentGauge InstrumentKind = "gauge"
+	// InstrumentCounter identifies a cumulative measurement.
 	InstrumentCounter InstrumentKind = "counter"
 )
 
+// InstrumentDescriptor describes a metric name, meaning, unit, and numeric kind.
 type InstrumentDescriptor struct {
 	Name        string
 	Description string
@@ -36,8 +43,10 @@ type InstrumentDescriptor struct {
 	Number      string
 }
 
-// Instruments returns a fresh, caller-owned copy of the fixed schema. It never
-// contains application, collection, query, document, actor, or workspace data.
+// Instruments returns a fresh copy of the exported metric definitions.
+//
+// Definitions never contain application, collection, query, document, actor,
+// or workspace data.
 func Instruments() []InstrumentDescriptor {
 	result := make([]InstrumentDescriptor, 0, len(intDescriptors)+len(floatDescriptors)+1)
 	result = append(result, InstrumentDescriptor{
@@ -67,18 +76,21 @@ func Instruments() []InstrumentDescriptor {
 	return result
 }
 
-// SampleSource is implemented by *admin.Sampler. The adapter deliberately
-// consumes its latest immutable sample instead of entering a database lock from
-// an OpenTelemetry collection callback.
+// SampleSource supplies the latest stored admin sample for metric collection.
+//
+// *admin.Sampler implements this interface. The adapter reads its latest
+// immutable sample without entering a database lock from a collection callback.
 type SampleSource interface {
 	Latest() (admin.Sample, bool)
 }
 
+// Options selects the meter provider and optional instrumentation version.
 type Options struct {
 	MeterProvider          metric.MeterProvider
 	InstrumentationVersion string
 }
 
+// AdapterStats reports collection attempts, unavailable samples, and clamped measurements.
 type AdapterStats struct {
 	Collections           uint64
 	UnavailableSamples    uint64
@@ -86,42 +98,53 @@ type AdapterStats struct {
 	Closed                bool
 }
 
+// intKind selects the OpenTelemetry instrument used for an integer metric.
 type intKind uint8
 
 const (
+	// intGauge marks an integer measurement of the current state.
 	intGauge intKind = iota
+	// intCounter marks an integer cumulative measurement.
 	intCounter
 )
 
+// floatKind selects the OpenTelemetry instrument used for a floating-point metric.
 type floatKind uint8
 
 const (
+	// floatGauge marks a floating-point measurement of the current state.
 	floatGauge floatKind = iota
+	// floatCounter marks a floating-point cumulative measurement.
 	floatCounter
 )
 
+// intDescriptor defines an integer metric and reads its value from an admin sample.
 type intDescriptor struct {
 	name, description, unit string
 	kind                    intKind
 	read                    func(admin.Sample) (uint64, bool)
 }
 
+// floatDescriptor defines a floating-point metric and reads its value from an admin sample.
 type floatDescriptor struct {
 	name, description, unit string
 	kind                    floatKind
 	read                    func(admin.Sample) (float64, bool)
 }
 
+// intObservation pairs an integer metric definition with its registered instrument.
 type intObservation struct {
 	descriptor intDescriptor
 	instrument metric.Int64Observable
 }
 
+// floatObservation pairs a floating-point metric definition with its registered instrument.
 type floatObservation struct {
 	descriptor floatDescriptor
 	instrument metric.Float64Observable
 }
 
+// Adapter exports the latest admin sample through registered OpenTelemetry instruments.
 type Adapter struct {
 	source       SampleSource
 	registration metric.Registration
@@ -135,6 +158,7 @@ type Adapter struct {
 	saturations  atomic.Uint64
 }
 
+// New registers the fixed metric set and a callback that reads the supplied sample source.
 func New(source SampleSource, options Options) (*Adapter, error) {
 	if source == nil {
 		return nil, errors.New("meldbase otel: sample source is required")
@@ -198,6 +222,7 @@ func New(source SampleSource, options Options) (*Adapter, error) {
 	return adapter, nil
 }
 
+// Close unregisters the collection callback once and returns any unregister error.
 func (adapter *Adapter) Close() error {
 	if adapter == nil {
 		return nil
@@ -211,6 +236,7 @@ func (adapter *Adapter) Close() error {
 	return adapter.closeErr
 }
 
+// Stats returns the adapter counters and closed state.
 func (adapter *Adapter) Stats() AdapterStats {
 	if adapter == nil {
 		return AdapterStats{Closed: true}
@@ -221,20 +247,26 @@ func (adapter *Adapter) Stats() AdapterStats {
 	}
 }
 
+// observationSink accepts integer and floating-point metric observations.
 type observationSink interface {
 	Int64(string, metric.Int64Observable, int64)
 	Float64(string, metric.Float64Observable, float64)
 }
 
+// otelSink forwards metric values to an OpenTelemetry observer.
 type otelSink struct{ observer metric.Observer }
 
+// Int64 sends an integer value to the supplied instrument.
 func (sink otelSink) Int64(_ string, instrument metric.Int64Observable, value int64) {
 	sink.observer.ObserveInt64(instrument, value)
 }
+
+// Float64 sends a floating-point value to the supplied instrument.
 func (sink otelSink) Float64(_ string, instrument metric.Float64Observable, value float64) {
 	sink.observer.ObserveFloat64(instrument, value)
 }
 
+// observe exports available values from the latest sample while counting missing samples.
 func (adapter *Adapter) observe(sink observationSink) {
 	if adapter == nil || sink == nil || adapter.closed.Load() {
 		return
@@ -266,6 +298,7 @@ func (adapter *Adapter) observe(sink observationSink) {
 	}
 }
 
+// toInt64 clamps oversized unsigned values and counts each clamp.
 func (adapter *Adapter) toInt64(value uint64) int64 {
 	if value > math.MaxInt64 {
 		adapter.saturations.Add(1)
@@ -274,13 +307,18 @@ func (adapter *Adapter) toInt64(value uint64) int64 {
 	return int64(value)
 }
 
+// available marks an integer metric value as ready to export.
 func available(value uint64) (uint64, bool) { return value, true }
+
+// boolValue converts true to one and false to zero.
 func boolValue(value bool) uint64 {
 	if value {
 		return 1
 	}
 	return 0
 }
+
+// serverValue skips a metric when the sample has no server statistics.
 func serverValue(read func(admin.Sample) uint64) func(admin.Sample) (uint64, bool) {
 	return func(sample admin.Sample) (uint64, bool) {
 		if sample.Server == nil {
@@ -289,10 +327,16 @@ func serverValue(read func(admin.Sample) uint64) func(admin.Sample) (uint64, boo
 		return read(sample), true
 	}
 }
+
+// healthValue reads a health level as a numeric severity from an admin sample.
 func healthValue(read func(admin.HealthStatus) admin.HealthLevel) func(admin.Sample) (uint64, bool) {
 	return func(sample admin.Sample) (uint64, bool) { return read(sample.Health).Severity() }
 }
+
+// seconds converts an unsigned nanosecond count to seconds.
 func seconds(nanos uint64) float64 { return float64(nanos) / float64(time.Second) }
+
+// durationSeconds converts a positive duration to seconds and returns zero otherwise.
 func durationSeconds(value time.Duration) float64 {
 	if value <= 0 {
 		return 0
@@ -300,6 +344,7 @@ func durationSeconds(value time.Duration) float64 {
 	return float64(value) / float64(time.Second)
 }
 
+// intDescriptors defines the integer metrics exported from admin samples.
 var intDescriptors = []intDescriptor{
 	{name: "meldbase.health.overall", description: "Derived overall health: 0 healthy, 1 degraded, 2 critical.", unit: "1", kind: intGauge, read: healthValue(func(h admin.HealthStatus) admin.HealthLevel { return h.Overall })},
 	{name: "meldbase.health.database", description: "Derived database health: 0 healthy, 1 degraded, 2 critical.", unit: "1", kind: intGauge, read: healthValue(func(h admin.HealthStatus) admin.HealthLevel { return h.Database })},
@@ -483,6 +528,7 @@ var intDescriptors = []intDescriptor{
 	{name: "meldbase.worker.policy.invalidation", description: "Durable worker publication policy invalidations.", unit: "{event}", kind: intCounter, read: serverValue(func(s admin.Sample) uint64 { return s.Server.Worker.PolicyInvalidations })},
 }
 
+// floatDescriptors defines the floating-point metrics exported from admin samples.
 var floatDescriptors = []floatDescriptor{
 	{name: "meldbase.index.build.duration.last", description: "Duration of the last index build.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return durationSeconds(s.Stats.IndexBuilds.LastDuration), true }},
 	{name: "meldbase.index.build.duration.max", description: "Maximum index-build duration in this process session.", unit: "s", kind: floatGauge, read: func(s admin.Sample) (float64, bool) { return durationSeconds(s.Stats.IndexBuilds.MaxDuration), true }},

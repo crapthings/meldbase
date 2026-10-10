@@ -25,13 +25,13 @@ network.
 In a browser, the client uses the platform's `fetch` and `WebSocket`:
 
 ```js
-import { MeldbaseClient } from '@meldbase/client'
+import { MeldbaseClient } from "@meldbase/client";
 
 const client = new MeldbaseClient({
-  baseUrl: 'http://127.0.0.1:8080'
-})
+  baseUrl: "http://127.0.0.1:8080",
+});
 
-const todos = client.collection('todos')
+const todos = client.collection("todos");
 ```
 
 For a server that requires authentication, supply a token from your application
@@ -39,9 +39,9 @@ identity system:
 
 ```js
 const client = new MeldbaseClient({
-  baseUrl: 'https://api.example.com',
-  accessToken: () => session.accessToken
-})
+  baseUrl: "https://api.example.com",
+  accessToken: () => session.accessToken,
+});
 ```
 
 The server, not the client, decides what that token is allowed to read or
@@ -51,18 +51,15 @@ change.
 
 ```js
 const todo = await todos.insertOne({
-  title: 'Write the first document',
-  done: false
-})
+  title: "Write the first document",
+  done: false,
+});
 
-const openTodos = await todos.find({ done: false }).fetch()
+const openTodos = await todos.find({ done: false }).fetch();
 
-await todos.updateOne(
-  { _id: todo._id },
-  { $set: { done: true } }
-)
+await todos.updateOne({ _id: todo._id }, { $set: { done: true } });
 
-await todos.deleteOne({ _id: todo._id })
+await todos.deleteOne({ _id: todo._id });
 ```
 
 `insertOne` adds `_id` when one is not supplied. Queries and updates are data,
@@ -75,21 +72,21 @@ Call `subscribe` on a query to receive the first result and later updates. It
 returns a function that stops the subscription.
 
 ```js
-const stop = todos.find({ done: false }).subscribe(documents => {
-  renderTodos(documents)
-})
+const stop = todos.find({ done: false }).subscribe((documents) => {
+  renderTodos(documents);
+});
 
-window.addEventListener('beforeunload', stop)
+window.addEventListener("beforeunload", stop);
 ```
 
 For long-lived applications, also handle connection state:
 
 ```js
 const stop = todos.find({ done: false }).subscribe(renderTodos, {
-  onStatus (status) {
-    setConnectionState(status.state)
-  }
-})
+  onStatus(status) {
+    setConnectionState(status.state);
+  },
+});
 ```
 
 The client reconnects subscriptions after a temporary connection loss. Treat

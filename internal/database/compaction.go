@@ -14,8 +14,9 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// Compact writes one current logical snapshot into a new, atomically
-// published file. It never overwrites destination or mutates the source.
+// Compact rewrites a database snapshot into a new compacted file.
+//
+// Publication is atomic and never overwrites the destination or changes the source.
 // Writes which commit after the source snapshot is pinned may continue and are
 // intentionally absent from the destination. The compacted database receives a
 // new identity and commit-log history, so callers must treat every old resume
@@ -29,7 +30,7 @@ func (db *DB) Compact(ctx context.Context, destination string) (resultErr error)
 	return db.CompactWithOptions(ctx, destination, options)
 }
 
-// CompactWithOptions is Compact with an explicit destination quota.
+// CompactWithOptions rewrites a database snapshot with explicit storage and resource limits.
 func (db *DB) CompactWithOptions(ctx context.Context, destination string, options CompactionOptions) (resultErr error) {
 	if db == nil {
 		return ErrCompactionUnsupported
@@ -183,6 +184,7 @@ func (db *DB) CompactWithOptions(ctx context.Context, destination string, option
 	return nil
 }
 
+// compactSnapshot copies collections, documents, indexes, and system records into a fresh storage file.
 func compactSnapshot(ctx context.Context, source *storage.ReadSnapshot, destination *storage.File, db *DB, resourceLimits ResourceLimits) error {
 	collections, err := source.Collections()
 	if err != nil {
@@ -314,6 +316,7 @@ func compactSnapshot(ctx context.Context, source *storage.ReadSnapshot, destinat
 	return nil
 }
 
+// verifyCompactedSnapshots checks that compaction preserved collection contents, index entries, and system records.
 func verifyCompactedSnapshots(ctx context.Context, source, destination *storage.ReadSnapshot) error {
 	expectedCollections, err := source.Collections()
 	if err != nil {
@@ -378,6 +381,7 @@ func verifyCompactedSnapshots(ctx context.Context, source, destination *storage.
 	return nil
 }
 
+// compareCompactedIndex checks that two snapshots contain the same ordered index keys and document IDs.
 func compareCompactedIndex(ctx context.Context, source, destination *storage.ReadSnapshot, collection, name string) error {
 	expected, err := source.OpenIndexIterator(collection, name, nil, nil, 0)
 	if err != nil {
@@ -407,6 +411,7 @@ func compareCompactedIndex(ctx context.Context, source, destination *storage.Rea
 	}
 }
 
+// compareCompactedDocuments checks that two snapshots contain identical documents in the same insertion order.
 func compareCompactedDocuments(ctx context.Context, source, destination *storage.ReadSnapshot, collection string) error {
 	expected, err := source.OpenInsertionOrderIterator(collection, nil, nil, 0)
 	if err != nil {

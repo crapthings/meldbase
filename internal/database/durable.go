@@ -52,64 +52,12 @@ type durableStore struct {
 	indexBuildStats                   atomic.Pointer[IndexBuildStats]
 }
 
-type indexBuildStatsBackend interface {
-	indexBuildDBStats() IndexBuildStats
-}
-
-func (store *durableStore) indexBuildDBStats() IndexBuildStats {
-	if store == nil {
-		return IndexBuildStats{}
-	}
-	stats := store.indexBuildStats.Load()
-	if stats == nil {
-		return IndexBuildStats{}
-	}
-	return *stats
-}
-
-func persistentIndexBuildStats(builds []storage.IndexBuildMeta) IndexBuildStats {
-	stats := IndexBuildStats{}
-	stats.Persistent = uint64(len(builds))
-	for _, build := range builds {
-		stats.PersistentEntries += build.EntryCount
-		stats.PersistentBytes += build.CanonicalBytes
-		switch build.Phase {
-		case storage.IndexBuildScan:
-			stats.Scanning++
-		case storage.IndexBuildCatchUp:
-			stats.CatchingUp++
-		case storage.IndexBuildReady:
-			stats.Ready++
-		case storage.IndexBuildFailed:
-			stats.PersistentFailed++
-		}
-		if build.Phase != storage.IndexBuildFailed &&
-			(stats.oldestActiveAppliedSequence == 0 || build.AppliedSequence < stats.oldestActiveAppliedSequence) {
-			stats.oldestActiveAppliedSequence = build.AppliedSequence
-		}
-	}
-	return stats
-}
-
-func (store *durableStore) refreshIndexBuildStats() {
-	if store == nil || store.file == nil {
-		return
-	}
-	store.indexBuildStatsMu.Lock()
-	defer store.indexBuildStatsMu.Unlock()
-	builds, err := store.file.IndexBuilds()
-	if err != nil {
-		return
-	}
-	stats := persistentIndexBuildStats(builds)
-	store.indexBuildStats.Store(&stats)
-}
-
 // Open creates or opens a Meldbase durable database in the current format.
 func Open(path string) (*DB, error) {
 	return OpenWithOptions(path, OpenOptions{})
 }
 
+// OpenWithOptions creates or opens a durable database with explicit storage and resource options.
 func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 	if err := validateRecoveryMode(options.Recovery); err != nil {
 		return nil, err
@@ -274,197 +222,7 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 	return db, nil
 }
 
-func (store *durableStore) openQuerySnapshot() (queryStorageSnapshot, error) {
-	if store == nil || store.file == nil {
-		return nil, ErrClosed
-	}
-	snapshot, err := store.file.OpenSnapshot()
-	if err != nil {
-		return nil, mapStorageError(err)
-	}
-	if store.testQuerySnapshotHook != nil {
-		store.testQuerySnapshotHook()
-	}
-	return &durableQueryStorageSnapshot{snapshot: snapshot, documents: store.documents}, nil
-}
-
-type durableQueryStorageSnapshot struct {
-	snapshot  *storage.ReadSnapshot
-	documents *documentCache
-}
-
-func (snapshot *durableQueryStorageSnapshot) Sequence() uint64 {
-	if snapshot == nil || snapshot.snapshot == nil {
-		return 0
-	}
-	return snapshot.snapshot.Sequence()
-}
-
-func (snapshot *durableQueryStorageSnapshot) CollectionVersion(collection string) (queryStorageCollectionVersion, bool, error) {
-	if snapshot == nil || snapshot.snapshot == nil {
-		return queryStorageCollectionVersion{}, false, ErrClosed
-	}
-	meta, exists, err := snapshot.snapshot.CollectionMeta(collection)
-	if err != nil {
-		return queryStorageCollectionVersion{}, false, mapStorageError(err)
-	}
-	if !exists {
-		return queryStorageCollectionVersion{}, false, nil
-	}
-	if meta.ID == 0 || meta.UpdatedSequence == 0 {
-		return queryStorageCollectionVersion{}, false, ErrCorrupt
-	}
-	return queryStorageCollectionVersion{ID: meta.ID, UpdatedSequence: meta.UpdatedSequence, NextDocumentPosition: meta.NextDocumentPosition}, true, nil
-}
-
-func (snapshot *durableQueryStorageSnapshot) GetDocumentRecord(collection string, id DocumentID) (queryStorageDocument, bool, error) {
-	if snapshot == nil || snapshot.snapshot == nil {
-		return queryStorageDocument{}, false, ErrClosed
-	}
-	record, exists, err := snapshot.snapshot.GetDocumentRecord(collection, [16]byte(id))
-	if err != nil {
-		return queryStorageDocument{}, false, mapStorageError(err)
-	}
-	if !exists {
-		snapshot.documents.remove(collection, id)
-		return queryStorageDocument{}, false, nil
-	}
-	document, err := snapshot.documents.decode(collection, id, record.Document)
-	if err != nil {
-		return queryStorageDocument{}, false, err
-	}
-	return queryStorageDocument{
-		ID: DocumentID(record.DocumentID), Position: record.InsertionPosition,
-		Encoded: record.Document, Decoded: document,
-	}, true, nil
-}
-
-func (snapshot *durableQueryStorageSnapshot) Indexes(collection string) ([]queryStorageIndex, error) {
-	if snapshot == nil || snapshot.snapshot == nil {
-		return nil, ErrClosed
-	}
-	metas, err := snapshot.snapshot.Indexes(collection)
-	if err != nil {
-		return nil, mapStorageError(err)
-	}
-	result := make([]queryStorageIndex, len(metas))
-	for index, meta := range metas {
-		fields, err := publicIndexFields(meta.FieldPath, meta.Fields)
-		if err != nil {
-			return nil, err
-		}
-		result[index] = queryStorageIndex{Name: meta.Name, Field: fields[0].Field, Fields: fields, Unique: meta.Unique}
-	}
-	return result, nil
-}
-
-func (snapshot *durableQueryStorageSnapshot) OpenIndexIterator(collection, index string, start, end []byte, limit int) (queryStorageIndexIterator, error) {
-	if snapshot == nil || snapshot.snapshot == nil {
-		return nil, ErrClosed
-	}
-	iterator, err := snapshot.snapshot.OpenIndexIterator(collection, index, start, end, limit)
-	if err != nil {
-		return nil, mapStorageError(err)
-	}
-	return &durableQueryStorageIndexIterator{iterator: iterator}, nil
-}
-
-func (snapshot *durableQueryStorageSnapshot) OpenCollectionIterator(collection string) (queryStorageDocumentIterator, error) {
-	if snapshot == nil || snapshot.snapshot == nil {
-		return nil, ErrClosed
-	}
-	iterator, err := snapshot.snapshot.OpenInsertionOrderIterator(collection, nil, nil, 0)
-	if err != nil {
-		return nil, mapStorageError(err)
-	}
-	return &durableQueryStorageDocumentIterator{iterator: iterator, collection: collection, documents: snapshot.documents}, nil
-}
-
-func (snapshot *durableQueryStorageSnapshot) Close() error {
-	if snapshot == nil || snapshot.snapshot == nil {
-		return nil
-	}
-	err := snapshot.snapshot.Close()
-	snapshot.snapshot = nil
-	return mapStorageError(err)
-}
-
-type durableQueryStorageIndexIterator struct {
-	iterator *storage.IndexIterator
-}
-
-func (iterator *durableQueryStorageIndexIterator) Next() bool {
-	return iterator != nil && iterator.iterator != nil && iterator.iterator.Next()
-}
-
-func (iterator *durableQueryStorageIndexIterator) Entry() queryStorageIndexEntry {
-	if iterator == nil || iterator.iterator == nil {
-		return queryStorageIndexEntry{}
-	}
-	entry := iterator.iterator.Entry()
-	return queryStorageIndexEntry{Key: entry.Key, Position: entry.InsertionPosition, ID: DocumentID(entry.DocumentID)}
-}
-
-func (iterator *durableQueryStorageIndexIterator) Err() error {
-	if iterator == nil || iterator.iterator == nil {
-		return ErrCorrupt
-	}
-	return mapStorageError(iterator.iterator.Err())
-}
-
-func (iterator *durableQueryStorageIndexIterator) Close() error {
-	if iterator == nil || iterator.iterator == nil {
-		return nil
-	}
-	err := iterator.iterator.Close()
-	iterator.iterator = nil
-	return mapStorageError(err)
-}
-
-type durableQueryStorageDocumentIterator struct {
-	iterator   *storage.DocumentIterator
-	collection string
-	documents  *documentCache
-	err        error
-}
-
-func (iterator *durableQueryStorageDocumentIterator) Next() bool {
-	return iterator != nil && iterator.iterator != nil && iterator.err == nil && iterator.iterator.Next()
-}
-
-func (iterator *durableQueryStorageDocumentIterator) Record() queryStorageDocument {
-	if iterator == nil || iterator.iterator == nil {
-		return queryStorageDocument{}
-	}
-	record := iterator.iterator.Record()
-	id := DocumentID(record.DocumentID)
-	document, err := iterator.documents.decode(iterator.collection, id, record.Document)
-	if err != nil {
-		iterator.err = err
-		return queryStorageDocument{}
-	}
-	return queryStorageDocument{ID: id, Position: record.InsertionPosition, Encoded: record.Document, Decoded: document}
-}
-
-func (iterator *durableQueryStorageDocumentIterator) Err() error {
-	if iterator == nil || iterator.iterator == nil {
-		return ErrCorrupt
-	}
-	if iterator.err != nil {
-		return iterator.err
-	}
-	return mapStorageError(iterator.iterator.Err())
-}
-
-func (iterator *durableQueryStorageDocumentIterator) Close() error {
-	if iterator == nil || iterator.iterator == nil {
-		return nil
-	}
-	err := iterator.iterator.Close()
-	iterator.iterator = nil
-	return mapStorageError(err)
-}
-
+// loadCollections restores collection and index definitions from a storage snapshot.
 func loadCollections(snapshot *storage.ReadSnapshot) (map[string]*collectionData, error) {
 	records, err := snapshot.Collections()
 	if err != nil {
@@ -490,11 +248,13 @@ func loadCollections(snapshot *storage.ReadSnapshot) (map[string]*collectionData
 	return collections, nil
 }
 
+// appendDBCommit persists a document or catalog change batch.
 func (store *durableStore) appendDBCommit(ctx context.Context, db *DB, token uint64, changes []Change) error {
 	_, err := store.appendDBCommitWithSystem(ctx, db, token, changes, nil, nil, nil)
 	return err
 }
 
+// appendDBCommitWithSystem commits database changes and system records together.
 func (store *durableStore) appendDBCommitWithSystem(
 	ctx context.Context,
 	db *DB,
@@ -611,11 +371,10 @@ func (store *durableStore) appendDBCommitWithSystem(
 	return result, nil
 }
 
-// prepareDocumentTransaction converts one already-authorized logical Change
-// batch to the storage-neutral transaction form. It intentionally reads only
-// immutable schema/index definitions from db.collections;  document state is
-// authoritative in the storage snapshot. The group publisher reuses this exact
-// conversion for every member.
+// prepareDocumentTransaction encodes an authorized document change batch for storage.
+//
+// Schema and index definitions come from db.collections; document state comes
+// from the storage snapshot, and grouped commits reuse this conversion.
 func (store *durableStore) prepareDocumentTransaction(
 	ctx context.Context,
 	db *DB,
@@ -684,25 +443,19 @@ func (store *durableStore) prepareDocumentTransaction(
 	return storage.DocumentTransaction{TransactionID: transactionID, Preconditions: preconditions, CollectionPreconditions: collectionPreconditions, Mutations: mutations}, nil
 }
 
-// commitDurableChangeBatchesLocked is the DB-side companion to 's private group
-// publisher. The caller holds db.mu and supplies already-authorized, immutable
-// logical batches in admission order. 's optional CommitCoordinator reaches
-// this boundary only for ordinary InsertMany requests after it owns admission,
-// cancellation and conflict partitioning; special writes stay exclusive.
+// commitDurableChangeBatchesLocked commits ordered document batches without read preconditions.
+//
+// The caller holds db.mu and supplies authorized, immutable batches in admission order.
 func (db *DB) commitDurableChangeBatchesLocked(ctx context.Context, store *durableStore, batches []ChangeBatch) error {
 	return db.commitChangeBatchesWithPreconditionsLocked(ctx, store, batches, nil, nil)
 }
 
-// commitChangeBatchesWithPreconditionsLocked is the coordinator's complete
-// document group boundary. Every logical member owns an independent point read
-// set, validated against the preceding logical CatalogRoot inside the same
-// WriteTxn. That is the required foundation for future grouped Update/Delete:
-// an old query selection can never overwrite a document changed by an earlier
-// admitted member or an exclusive write.
+// commitChangeBatchesWithPreconditionsLocked commits ordered batches after checking each member's read preconditions.
 //
-// The caller holds db.mu. A nil preconditions slice means no member requires a
-// read set (the ordinary InsertMany coordinator path); otherwise its length
-// must exactly match batches.
+// Each member's reads are checked against the preceding logical catalog root
+// within the same storage transaction, preventing stale selections from
+// overwriting changes made by an earlier member.
+// The caller holds db.mu; non-nil precondition lists must match the batch count.
 func (db *DB) commitChangeBatchesWithPreconditionsLocked(
 	ctx context.Context,
 	store *durableStore,
@@ -813,6 +566,7 @@ func (db *DB) commitChangeBatchesWithPreconditionsLocked(
 	return nil
 }
 
+// advanceRollbackAnchor records the current durable version in the external rollback protection store.
 func (store *durableStore) advanceRollbackAnchor(ctx context.Context, minimumSequence uint64) error {
 	if store == nil || store.rollbackAnchor == nil || zeroDatabaseID(store.databaseID) {
 		return ErrRollbackAnchor
@@ -855,6 +609,7 @@ func (store *durableStore) advanceRollbackAnchor(ctx context.Context, minimumSeq
 	return nil
 }
 
+// advanceRollbackAnchorLocked stops the database if rollback protection cannot record a committed version.
 func (db *DB) advanceRollbackAnchorLocked(ctx context.Context, store *durableStore, minimumSequence uint64) error {
 	if store == nil || store.rollbackAnchor == nil {
 		return nil
@@ -867,6 +622,7 @@ func (db *DB) advanceRollbackAnchorLocked(ctx context.Context, store *durableSto
 	return nil
 }
 
+// advanceRollbackAnchor checks database health under its lock before updating rollback protection.
 func (db *DB) advanceRollbackAnchor(ctx context.Context, store *durableStore, minimumSequence uint64) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -879,11 +635,10 @@ func (db *DB) advanceRollbackAnchor(ctx context.Context, store *durableStore, mi
 	return db.advanceRollbackAnchorLocked(ctx, store, minimumSequence)
 }
 
-// collectIndexEntries streams the Primary B+Tree at one exact sequence. It may
-// run outside db.mu; a changed current sequence is an optimistic conflict, not
-// a durability fault. It deliberately does not consult db.collections:  keeps only
-// collection/index metadata in memory and treats the immutable storage roots as
-// the source of truth for document contents.
+// collectIndexEntries builds index entries from a collection snapshot at the requested commit.
+//
+// This can run outside db.mu; a changed sequence is an optimistic conflict.
+// Document contents come from storage rather than the in-memory collection metadata.
 func (store *durableStore) collectIndexEntries(ctx context.Context, sequence uint64, collection string, definition IndexDefinition, budget *indexBuildBudget) (_ []storage.IndexEntry, resultErr error) {
 	if store == nil || store.file == nil {
 		return nil, ErrClosed
@@ -973,6 +728,7 @@ func (store *durableStore) collectIndexEntries(ctx context.Context, sequence uin
 	return entries, nil
 }
 
+// storageIndexFields converts an index definition to stored field descriptions.
 func storageIndexFields(definition IndexDefinition) []storage.IndexField {
 	fields := indexDefinitionFields(definition)
 	result := make([]storage.IndexField, len(fields))
@@ -982,6 +738,7 @@ func storageIndexFields(definition IndexDefinition) []storage.IndexField {
 	return result
 }
 
+// publicIndexFields validates stored index fields and converts them to database field descriptions.
 func publicIndexFields(fieldPath string, fields []storage.IndexField) ([]IndexField, error) {
 	if len(fields) == 0 {
 		fields = []storage.IndexField{{Path: fieldPath, Direction: 1}}
@@ -997,6 +754,7 @@ func publicIndexFields(fieldPath string, fields []storage.IndexField) ([]IndexFi
 	return cloneIndexFields(definition.Fields), nil
 }
 
+// storageDBStats reports storage usage, cache activity, and rollback protection status.
 func (store *durableStore) storageDBStats() StorageStats {
 	stats := StorageStats{Engine: "current"}
 	if store == nil || store.file == nil {
@@ -1057,6 +815,7 @@ func (store *durableStore) storageDBStats() StorageStats {
 	return stats
 }
 
+// syncDB reports database health because each successful commit is already synced.
 func (store *durableStore) syncDB(db *DB) error {
 	if db.fatalErr != nil {
 		return db.fatalErr
@@ -1064,6 +823,7 @@ func (store *durableStore) syncDB(db *DB) error {
 	return nil // every commit is already data+meta fsynced
 }
 
+// closeDB closes the storage file and returns any database or close error.
 func (store *durableStore) closeDB(db *DB) error {
 	if store == nil || store.file == nil {
 		return db.fatalErr
@@ -1073,6 +833,7 @@ func (store *durableStore) closeDB(db *DB) error {
 	return errors.Join(db.fatalErr, err)
 }
 
+// OpenQueryReplay opens a query change stream after the supplied commit token.
 func (db *DB) OpenQueryReplay(ctx context.Context, collection string, query QuerySpec, afterToken uint64, buffer int) (*QueryReplaySubscription, error) {
 	if db == nil {
 		return nil, ErrClosed
@@ -1088,6 +849,7 @@ func (db *DB) OpenQueryReplay(ctx context.Context, collection string, query Quer
 	return db.replaySource.OpenQueryReplay(ctx, collection, query, afterToken, buffer)
 }
 
+// mapStorageError translates storage errors into database errors.
 func mapStorageError(err error) error {
 	switch {
 	case errors.Is(err, storage.ErrLocked):

@@ -10,6 +10,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestQueryPolicyLeaseRevocationLinearizesWithAuthorizedWork checks that revocation prevents new work and waits for already authorized work to finish.
 func TestQueryPolicyLeaseRevocationLinearizesWithAuthorizedWork(t *testing.T) {
 	lease, err := NewQueryPolicyLease("policy-v1")
 	if err != nil {
@@ -42,6 +43,7 @@ func TestQueryPolicyLeaseRevocationLinearizesWithAuthorizedWork(t *testing.T) {
 	}
 }
 
+// TestQueryPolicyLeaseCanceledWaitRemainsRevoked checks that canceling a revocation wait does not restore the lease.
 func TestQueryPolicyLeaseCanceledWaitRemainsRevoked(t *testing.T) {
 	lease, _ := NewQueryPolicyLease("policy-v1")
 	if !lease.acquire() {
@@ -61,6 +63,7 @@ func TestQueryPolicyLeaseCanceledWaitRemainsRevoked(t *testing.T) {
 	}
 }
 
+// TestQueryPolicyLeaseVersionValidation checks that leases reject invalid version strings and policies with a different version.
 func TestQueryPolicyLeaseVersionValidation(t *testing.T) {
 	invalid := []string{"", strings.Repeat("x", 129), string([]byte{0xff})}
 	for _, version := range invalid {
@@ -78,6 +81,7 @@ func TestQueryPolicyLeaseVersionValidation(t *testing.T) {
 	}
 }
 
+// BenchmarkQueryPolicyLeaseGuard compares the cost of authorized work with static and revocable policy guards.
 func BenchmarkQueryPolicyLeaseGuard(b *testing.B) {
 	action := func() error { return nil }
 	b.Run("Static", func(b *testing.B) {

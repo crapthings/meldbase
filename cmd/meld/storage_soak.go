@@ -16,6 +16,7 @@ import (
 	"github.com/crapthings/meldbase/internal/qualification"
 )
 
+// runStorageSoak validates the target and build evidence, runs storage qualification, and publishes its receipt.
 func runStorageSoak(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("storage-soak", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -96,6 +97,7 @@ func runStorageSoak(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(receipt)
 }
 
+// storageSoakVolume reads the device identity and filesystem details for the target directory.
 func storageSoakVolume(path string, info os.FileInfo) (qualification.VolumeIdentity, error) {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
@@ -114,6 +116,7 @@ func storageSoakVolume(path string, info os.FileInfo) (qualification.VolumeIdent
 	}, nil
 }
 
+// writeStorageSoakReceipt creates and syncs a new private receipt and removes it if publication fails.
 func writeStorageSoakReceipt(path string, receipt qualification.SoakReceipt) error {
 	encoded, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {

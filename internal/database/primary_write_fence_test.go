@@ -10,6 +10,7 @@ import (
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
+// recordingPrimaryWriteFence records write checks and follower promotions with configurable errors.
 type recordingPrimaryWriteFence struct {
 	mu       sync.Mutex
 	err      error
@@ -18,6 +19,7 @@ type recordingPrimaryWriteFence struct {
 	bindErr  error
 }
 
+// ValidatePrimaryWrite records a write request and returns the configured error.
 func (fence *recordingPrimaryWriteFence) ValidatePrimaryWrite(request PrimaryWriteFenceRequest) error {
 	fence.mu.Lock()
 	defer fence.mu.Unlock()
@@ -25,18 +27,21 @@ func (fence *recordingPrimaryWriteFence) ValidatePrimaryWrite(request PrimaryWri
 	return fence.err
 }
 
+// setError changes the error returned by later write checks.
 func (fence *recordingPrimaryWriteFence) setError(err error) {
 	fence.mu.Lock()
 	fence.err = err
 	fence.mu.Unlock()
 }
 
+// snapshot returns a copy of the recorded write requests.
 func (fence *recordingPrimaryWriteFence) snapshot() []PrimaryWriteFenceRequest {
 	fence.mu.Lock()
 	defer fence.mu.Unlock()
 	return append([]PrimaryWriteFenceRequest(nil), fence.requests...)
 }
 
+// BindFollowerPromotion records a promotion and returns the configured binding error.
 func (fence *recordingPrimaryWriteFence) BindFollowerPromotion(_ context.Context, promotion FollowerPromotionFence) error {
 	fence.mu.Lock()
 	defer fence.mu.Unlock()
@@ -44,12 +49,14 @@ func (fence *recordingPrimaryWriteFence) BindFollowerPromotion(_ context.Context
 	return fence.bindErr
 }
 
+// boundPromotions returns a copy of the recorded follower promotions.
 func (fence *recordingPrimaryWriteFence) boundPromotions() []FollowerPromotionFence {
 	fence.mu.Lock()
 	defer fence.mu.Unlock()
 	return append([]FollowerPromotionFence(nil), fence.bound...)
 }
 
+// TestPrimaryWriteFenceRejectsBusinessCommitWithoutPoisoningDatabase checks that denied writes leave the commit sequence unchanged and later permitted writes still succeed.
 func TestPrimaryWriteFenceRejectsBusinessCommitWithoutPoisoningDatabase(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{err: errors.New("primary lease expired")}
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced.meld2"), OpenOptions{PrimaryWriteFence: fence})
@@ -98,6 +105,7 @@ func TestPrimaryWriteFenceRejectsBusinessCommitWithoutPoisoningDatabase(t *testi
 	}
 }
 
+// TestPrimaryWriteFenceGuardsEveryGroupedLogicalSequence checks that each logical commit in a group receives a separate write check.
 func TestPrimaryWriteFenceGuardsEveryGroupedLogicalSequence(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{}
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced-group.meld2"), OpenOptions{PrimaryWriteFence: fence})
@@ -129,6 +137,7 @@ func TestPrimaryWriteFenceGuardsEveryGroupedLogicalSequence(t *testing.T) {
 	}
 }
 
+// TestPrimaryWriteFenceGuardsIndexBuildVisibilityCommit checks that an index becomes visible only after its publication passes the write check.
 func TestPrimaryWriteFenceGuardsIndexBuildVisibilityCommit(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{}
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced-index-build.meld2"), OpenOptions{PrimaryWriteFence: fence})
@@ -182,6 +191,7 @@ func TestPrimaryWriteFenceGuardsIndexBuildVisibilityCommit(t *testing.T) {
 	}
 }
 
+// TestPrimaryWriteFenceGuardsStandaloneSystemRecordCommit checks that system record writes require permission from the primary write fence.
 func TestPrimaryWriteFenceGuardsStandaloneSystemRecordCommit(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{err: errors.New("primary lease expired")}
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced-system.meld2"), OpenOptions{PrimaryWriteFence: fence})
@@ -210,6 +220,7 @@ func TestPrimaryWriteFenceGuardsStandaloneSystemRecordCommit(t *testing.T) {
 	}
 }
 
+// TestPrimaryWriteFenceGuardsInitialDurableConsumerControlCommit checks that creating a durable change consumer requires permission from the primary write fence.
 func TestPrimaryWriteFenceGuardsInitialDurableConsumerControlCommit(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{err: errors.New("primary lease expired")}
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "fenced-consumer.meld2"), OpenOptions{PrimaryWriteFence: fence})
@@ -235,6 +246,7 @@ func TestPrimaryWriteFenceGuardsInitialDurableConsumerControlCommit(t *testing.T
 	}
 }
 
+// TestFollowerApplyBypassesPrimaryWriteFence checks that applying replicated changes skips primary write checks.
 func TestFollowerApplyBypassesPrimaryWriteFence(t *testing.T) {
 	directory := t.TempDir()
 	source, err := Open(filepath.Join(directory, "source.meld2"))
@@ -267,6 +279,7 @@ func TestFollowerApplyBypassesPrimaryWriteFence(t *testing.T) {
 	}
 }
 
+// TestFormatDetectionForwardsPrimaryWriteFenceTo checks that opening a new database preserves its configured primary write fence.
 func TestFormatDetectionForwardsPrimaryWriteFenceTo(t *testing.T) {
 	fence := &recordingPrimaryWriteFence{err: errors.New("lease absent")}
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "new-store.meld2"), OpenOptions{PrimaryWriteFence: fence})

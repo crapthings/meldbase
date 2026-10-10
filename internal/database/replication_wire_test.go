@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestReplicationFrameRoundTripPreservesTypedBatch checks that replication encoding preserves typed document changes, index definitions, and batch metadata.
 func TestReplicationFrameRoundTripPreservesTypedBatch(t *testing.T) {
 	id := DocumentID{1}
 	before := Document{"_id": ID(id), "value": Int(1), "at": Time(time.Unix(1_700_000_000, 0))}
@@ -45,6 +46,7 @@ func TestReplicationFrameRoundTripPreservesTypedBatch(t *testing.T) {
 	}
 }
 
+// TestReplicationFrameRejectsMalformedOrAmbiguousInput checks that replication decoding rejects extra fields, repeated fields, and noncanonical identities.
 func TestReplicationFrameRejectsMalformedOrAmbiguousInput(t *testing.T) {
 	identity := [16]byte{1}
 	hello, err := MarshalReplicationFrame(ReplicationFrame{Type: ReplicationHelloFrame, DatabaseID: identity, AfterToken: 4, MaxBytes: 1 << 20}, ReplicationFrameLimits{})
@@ -65,6 +67,7 @@ func TestReplicationFrameRejectsMalformedOrAmbiguousInput(t *testing.T) {
 	}
 }
 
+// TestReplicationWireBatchDrivesFollower checks that a decoded replication batch updates a follower and rejects a mismatched database identity.
 func TestReplicationWireBatchDrivesFollower(t *testing.T) {
 	directory := t.TempDir()
 	source, err := Open(directory + "/source.meld2")

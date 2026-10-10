@@ -4,6 +4,7 @@ import (
 	"testing"
 )
 
+// TestOperationalStateDistinguishesWritableFailStopAndClosed checks that operational state distinguishes writable, read-only after failure, and closed databases without allocating.
 func TestOperationalStateDistinguishesWritableFailStopAndClosed(t *testing.T) {
 	var nilDB *DB
 	if state := nilDB.OperationalState(); state.Readable || state.Writable {
@@ -28,6 +29,7 @@ func TestOperationalStateDistinguishesWritableFailStopAndClosed(t *testing.T) {
 	}
 }
 
+// BenchmarkOperationalState measures the cost of reading an open database operational state.
 func BenchmarkOperationalState(b *testing.B) {
 	db := New()
 	defer db.Close()

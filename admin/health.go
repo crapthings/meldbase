@@ -5,16 +5,22 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+// HealthLevel identifies an aggregate health assessment or unavailable evidence.
 type HealthLevel string
 
 const (
+	// HealthUnavailable marks a component without enough evidence for an assessment.
 	HealthUnavailable HealthLevel = "unavailable"
-	HealthHealthy     HealthLevel = "healthy"
-	HealthDegraded    HealthLevel = "degraded"
-	HealthCritical    HealthLevel = "critical"
+	// HealthHealthy marks a component with no detected health signals.
+	HealthHealthy HealthLevel = "healthy"
+	// HealthDegraded marks a component with detected pressure or recoverable failures.
+	HealthDegraded HealthLevel = "degraded"
+	// HealthCritical marks a component with severe pressure or disabled availability.
+	HealthCritical HealthLevel = "critical"
 )
 
-// HealthSignals is a fixed-cardinality explanation of the current assessment.
+// HealthSignals identifies the conditions behind the current health assessment.
+//
 // Event signals describe increases during the latest sample window; state
 // signals remain set while the underlying condition remains true.
 type HealthSignals struct {
@@ -40,6 +46,7 @@ type HealthSignals struct {
 	WorkerProtocolFailure        bool `json:"workerProtocolFailure"`
 }
 
+// HealthStatus groups component assessments and the signals explaining them.
 type HealthStatus struct {
 	Overall    HealthLevel   `json:"overall"`
 	Database   HealthLevel   `json:"database"`
@@ -51,8 +58,10 @@ type HealthStatus struct {
 	Signals    HealthSignals `json:"signals"`
 }
 
-// Severity maps stable health enums to aggregate metric values: healthy=0,
-// degraded=1, critical=2. Unavailable is intentionally omitted by exporters.
+// Severity returns a numeric health level when an assessment is available.
+//
+// Healthy maps to 0, degraded to 1, and critical to 2. Exporters omit unavailable
+// assessments.
 func (level HealthLevel) Severity() (uint64, bool) {
 	switch level {
 	case HealthHealthy:
@@ -66,6 +75,7 @@ func (level HealthLevel) Severity() (uint64, bool) {
 	}
 }
 
+// assessHealth derives component health from current state and recent activity changes.
 func assessHealth(previous *Sample, current Sample) HealthStatus {
 	health := HealthStatus{
 		Overall: HealthHealthy, Database: HealthHealthy, Durability: HealthHealthy,
@@ -156,6 +166,7 @@ func assessHealth(previous *Sample, current Sample) HealthStatus {
 	return health
 }
 
+// assessTransport degrades transport health when comparable samples show overload or protocol failures.
 func assessTransport(health *HealthStatus, previous *Sample, current Sample) {
 	if health == nil || current.Server == nil {
 		return
@@ -175,6 +186,7 @@ func assessTransport(health *HealthStatus, previous *Sample, current Sample) {
 	}
 }
 
+// reactivePressure returns the highest usage ratio across realtime queues and watchers.
 func reactivePressure(stats meldbase.RealtimeStats) float64 {
 	batch := ratio(stats.PendingBatches, stats.PendingBatchCapacity)
 	changes := ratio(stats.PendingChanges, stats.PendingChangeCapacity)
@@ -186,6 +198,7 @@ func reactivePressure(stats meldbase.RealtimeStats) float64 {
 	return maxFloat(batch, changes, bytes, watcherBytes, dispatchBatch, dispatchChanges, dispatchBytes)
 }
 
+// maxFloat returns the largest positive value or zero when none is positive.
 func maxFloat(values ...float64) float64 {
 	var maximum float64
 	for _, value := range values {
@@ -196,6 +209,7 @@ func maxFloat(values ...float64) float64 {
 	return maximum
 }
 
+// ratio divides usage by capacity and returns zero when capacity is unknown.
 func ratio(value, capacity uint64) float64 {
 	if capacity == 0 {
 		return 0
@@ -203,16 +217,20 @@ func ratio(value, capacity uint64) float64 {
 	return float64(value) / float64(capacity)
 }
 
+// sameDatabaseSession checks whether two database snapshots share a nonzero start time.
 func sameDatabaseSession(previous, current meldbase.DBStats) bool {
 	return !previous.StartedAt.IsZero() && previous.StartedAt == current.StartedAt
 }
 
+// sameServerSession checks whether two nonnil server snapshots share a nonzero start time.
 func sameServerSession(previous, current *meldserver.ServerStats) bool {
 	return previous != nil && current != nil && !previous.StartedAt.IsZero() && previous.StartedAt == current.StartedAt
 }
 
+// increased checks whether a counter rose between samples.
 func increased(previous, current uint64) bool { return current > previous }
 
+// maxHealth returns the most severe available health level, defaulting to healthy.
 func maxHealth(levels ...HealthLevel) HealthLevel {
 	result := HealthHealthy
 	severity := uint64(0)

@@ -23,6 +23,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/anchorhttp"
 )
 
+// anchorTestPKI holds test TLS certificates, trusted roots, and their PEM encodings.
 type anchorTestPKI struct {
 	server       tls.Certificate
 	client       tls.Certificate
@@ -34,6 +35,7 @@ type anchorTestPKI struct {
 	caPEM        []byte
 }
 
+// TestAnchorServeRequiresPrivateFilesAndCompleteConfiguration checks file permissions, key loading, and rejection of incomplete service settings.
 func TestAnchorServeRequiresPrivateFilesAndCompleteConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.Chmod(directory, 0o755); err != nil {
@@ -94,6 +96,7 @@ func TestAnchorServeRequiresPrivateFilesAndCompleteConfiguration(t *testing.T) {
 	}
 }
 
+// TestAnchorServeMTLSQuorumPartitionAndGracefulRejoin checks rollback protection and signed qualification evidence through mTLS quorum outages and recovery.
 func TestAnchorServeMTLSQuorumPartitionAndGracefulRejoin(t *testing.T) {
 	pki := newAnchorTestPKI(t)
 	members := []string{"member-a", "member-b", "member-c"}
@@ -472,6 +475,7 @@ func TestAnchorServeMTLSQuorumPartitionAndGracefulRejoin(t *testing.T) {
 	nodes[2].cancel = nil
 }
 
+// newAnchorTestPKI creates a test certificate authority, server certificate, and client certificate with PEM encodings.
 func newAnchorTestPKI(t *testing.T) anchorTestPKI {
 	t.Helper()
 	_, caKey, err := ed25519.GenerateKey(rand.Reader)
@@ -524,6 +528,7 @@ func newAnchorTestPKI(t *testing.T) anchorTestPKI {
 	return anchorTestPKI{server: server, client: client, rootPool: pool, serverPEM: serverPEM, keyPEM: keyPEM, clientPEM: clientPEM, clientKeyPEM: clientKeyPEM, caPEM: caPEM}
 }
 
+// statusCode returns the response status or zero when no response is available.
 func statusCode(response *http.Response) int {
 	if response == nil {
 		return 0
@@ -531,6 +536,8 @@ func statusCode(response *http.Response) int {
 	return response.StatusCode
 }
 
+// ioDiscard accepts test output without retaining its bytes.
 type ioDiscard struct{}
 
+// Write reports all bytes as written without storing them.
 func (ioDiscard) Write(value []byte) (int, error) { return len(value), nil }

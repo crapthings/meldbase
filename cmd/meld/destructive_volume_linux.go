@@ -12,6 +12,7 @@ import (
 	"strings"
 )
 
+// destructivePathIsMountRoot checks whether the path exactly matches a Linux mount point.
 func destructivePathIsMountRoot(path string) (bool, error) {
 	file, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
@@ -49,6 +50,7 @@ func destructivePathIsMountRoot(path string) (bool, error) {
 	return false, nil
 }
 
+// decodeMountInfoPath decodes octal path escapes from Linux mount information.
 func decodeMountInfoPath(value string) (string, error) {
 	var result strings.Builder
 	result.Grow(len(value))

@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 )
 
+// wireQuerySpec holds the JSON fields of a versioned query request.
 type wireQuerySpec struct {
 	Version int             `json:"version"`
 	Where   json.RawMessage `json:"where"`
@@ -23,6 +24,7 @@ type wireQuerySpec struct {
 	Seek    bool            `json:"seek,omitempty"`
 }
 
+// wireExpr holds the JSON fields shared by query expression variants.
 type wireExpr struct {
 	Op     string            `json:"op"`
 	Args   []json.RawMessage `json:"args,omitempty"`
@@ -34,16 +36,19 @@ type wireExpr struct {
 	Exists *bool             `json:"-"`
 }
 
+// wireValue pairs a wire type tag with its encoded value.
 type wireValue struct {
 	Type  string          `json:"t"`
 	Value json.RawMessage `json:"v,omitempty"`
 }
 
+// queryDecoder tracks query limits and expression node usage during decoding.
 type queryDecoder struct {
 	limits QueryLimits
 	nodes  int
 }
 
+// DecodeQuerySpecJSON validates and decodes a data-only query within the supplied limits.
 func DecodeQuerySpecJSON(data []byte, limits QueryLimits) (QuerySpec, error) {
 	limits = normalizedLimits(limits)
 	if len(data) > limits.MaxWireBytes {
@@ -95,8 +100,9 @@ func DecodeQuerySpecJSON(data []byte, limits QueryLimits) (QuerySpec, error) {
 	return query, nil
 }
 
-// MarshalQuerySpecJSON emits the canonical, data-only wire representation used
-// for transport fingerprints and cross-language conformance.
+// MarshalQuerySpecJSON validates a query and encodes its canonical JSON representation.
+//
+// The encoded query is used for transport fingerprints and cross-language conformance.
 func MarshalQuerySpecJSON(query QuerySpec) ([]byte, error) {
 	if err := query.Validate(); err != nil {
 		return nil, err
@@ -104,6 +110,7 @@ func MarshalQuerySpecJSON(query QuerySpec) ([]byte, error) {
 	return marshalQuerySpecJSONUnchecked(query)
 }
 
+// marshalQuerySpecJSONUnchecked encodes a query that has already been validated.
 func marshalQuerySpecJSONUnchecked(query QuerySpec) ([]byte, error) {
 	where, err := encodeQueryExpression(query.where)
 	if err != nil {
@@ -125,6 +132,7 @@ func marshalQuerySpecJSONUnchecked(query QuerySpec) ([]byte, error) {
 	return json.Marshal(wire)
 }
 
+// encodeQueryExpression converts a compiled document predicate to its wire representation.
 func encodeQueryExpression(expression expr) (any, error) {
 	switch value := expression.(type) {
 	case trueExpr:
@@ -194,6 +202,7 @@ func encodeQueryExpression(expression expr) (any, error) {
 	}
 }
 
+// encodeElementExpression converts a compiled scalar element predicate to its wire representation.
 func encodeElementExpression(expression elementExpr) (any, error) {
 	switch value := expression.(type) {
 	case elementLogicalExpr:
@@ -242,6 +251,7 @@ func ValidateStrictJSON(data []byte, maxBytes int) error {
 	return validateJSON(data)
 }
 
+// normalizedLimits supplies default query decoding limits for unset fields.
 func normalizedLimits(limits QueryLimits) QueryLimits {
 	defaults := DefaultQueryLimits
 	if limits.MaxWireBytes <= 0 {
@@ -268,6 +278,7 @@ func normalizedLimits(limits QueryLimits) QueryLimits {
 	return limits
 }
 
+// decodeExpr validates and decodes a document predicate within query limits.
 func (d *queryDecoder) decodeExpr(data []byte, depth int) (expr, error) {
 	if depth > d.limits.MaxDepth {
 		return nil, fmt.Errorf("%w: query nesting is too deep", ErrInvalidFilter)
@@ -454,6 +465,7 @@ func (d *queryDecoder) decodeExpr(data []byte, depth int) (expr, error) {
 	}
 }
 
+// decodeElementExpr validates and decodes a scalar element predicate within query limits.
 func (d *queryDecoder) decodeElementExpr(data []byte, depth int) (elementExpr, error) {
 	if depth > d.limits.MaxDepth {
 		return nil, fmt.Errorf("%w: query nesting is too deep", ErrInvalidFilter)
@@ -551,6 +563,7 @@ func (d *queryDecoder) decodeElementExpr(data []byte, depth int) (elementExpr, e
 	}
 }
 
+// decodePath reads and validates a required document field path.
 func decodePath(fields map[string]json.RawMessage) (string, error) {
 	var path string
 	if err := requiredField(fields, "path", &path); err != nil {
@@ -562,6 +575,7 @@ func decodePath(fields map[string]json.RawMessage) (string, error) {
 	return path, nil
 }
 
+// decodeWireValue validates and decodes a tagged value within nesting and size limits.
 func decodeWireValue(data []byte, limits QueryLimits, depth int) (Value, error) {
 	if depth > 64 {
 		return Value{}, fmt.Errorf("%w: value nesting is too deep", ErrInvalidFilter)
@@ -696,6 +710,7 @@ func decodeWireValue(data []byte, limits QueryLimits, depth int) (Value, error) 
 	return value, nil
 }
 
+// MarshalWireValue encodes a typed value as wire JSON.
 func MarshalWireValue(value Value) ([]byte, error) {
 	encoded, err := encodeWireValue(value)
 	if err != nil {
@@ -704,9 +719,10 @@ func MarshalWireValue(value Value) ([]byte, error) {
 	return json.Marshal(encoded)
 }
 
-// UnmarshalWireValue decodes one closed, typed wire value using the same
-// depth/item/byte limits as query operands. It is suitable for data-only
-// protocol arguments such as RPC; it never evaluates source or callbacks.
+// UnmarshalWireValue decodes a typed JSON value within the supplied query limits.
+//
+// It applies the same nesting, item count, and size limits as query operands.
+// Protocol arguments such as RPC inputs contain data only; decoding never runs code.
 func UnmarshalWireValue(data []byte, limits QueryLimits) (Value, error) {
 	limits = normalizedLimits(limits)
 	if len(data) > limits.MaxWireBytes {
@@ -722,6 +738,7 @@ func UnmarshalWireValue(data []byte, limits QueryLimits) (Value, error) {
 	return value, nil
 }
 
+// MarshalWireDocument encodes a document as typed wire JSON.
 func MarshalWireDocument(document Document) ([]byte, error) {
 	if err := document.Validate(); err != nil {
 		return nil, err
@@ -729,14 +746,17 @@ func MarshalWireDocument(document Document) ([]byte, error) {
 	return MarshalWireValue(Object(document))
 }
 
+// UnmarshalWireDocument decodes a typed wire document with a required document ID.
 func UnmarshalWireDocument(data []byte, limits QueryLimits) (Document, error) {
 	return unmarshalWireDocument(data, limits, true)
 }
 
+// UnmarshalWireInputDocument decodes a typed wire document whose ID may be omitted.
 func UnmarshalWireInputDocument(data []byte, limits QueryLimits) (Document, error) {
 	return unmarshalWireDocument(data, limits, false)
 }
 
+// unmarshalWireDocument decodes a typed document with optional document ID enforcement.
 func unmarshalWireDocument(data []byte, limits QueryLimits, requireID bool) (Document, error) {
 	limits = normalizedLimits(limits)
 	if len(data) > limits.MaxWireBytes {
@@ -762,6 +782,7 @@ func unmarshalWireDocument(data []byte, limits QueryLimits, requireID bool) (Doc
 	return value.obj.Clone(), nil
 }
 
+// encodeWireValue converts a typed value to its tagged wire representation.
 func encodeWireValue(value Value) (any, error) {
 	switch value.kind {
 	case NullKind:
@@ -816,6 +837,7 @@ func encodeWireValue(value Value) (any, error) {
 	}
 }
 
+// wireValueBytes totals value payload bytes for query resource accounting.
 func wireValueBytes(v Value) int {
 	switch v.kind {
 	case NullKind, BoolKind:
@@ -843,6 +865,7 @@ func wireValueBytes(v Value) int {
 	return total
 }
 
+// requiredField decodes a required JSON field and rejects a missing or invalid value.
 func requiredField[T any](fields map[string]json.RawMessage, name string, target *T) error {
 	raw, ok := fields[name]
 	if !ok {
@@ -854,6 +877,7 @@ func requiredField[T any](fields map[string]json.RawMessage, name string, target
 	return nil
 }
 
+// rawObject reads a non-null JSON object as raw field values.
 func rawObject(data []byte) (map[string]json.RawMessage, error) {
 	var fields map[string]json.RawMessage
 	if err := strictJSON(data, &fields); err != nil || fields == nil {
@@ -861,6 +885,8 @@ func rawObject(data []byte) (map[string]json.RawMessage, error) {
 	}
 	return fields, nil
 }
+
+// strictJSON decodes one JSON value while rejecting unknown struct fields and trailing input.
 func strictJSON(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -873,12 +899,16 @@ func strictJSON(data []byte, target any) error {
 	}
 	return nil
 }
+
+// invalidWire reports malformed wire data as an invalid filter error.
 func invalidWire(err error) error {
 	if err == nil {
 		return fmt.Errorf("%w: malformed wire value", ErrInvalidFilter)
 	}
 	return fmt.Errorf("%w: malformed wire value: %v", ErrInvalidFilter, err)
 }
+
+// canonicalInteger checks a decimal integer string for the canonical sign and digit format.
 func canonicalInteger(value string) bool {
 	if value == "0" {
 		return true
@@ -888,6 +918,8 @@ func canonicalInteger(value string) bool {
 	}
 	return len(value) > 0 && value[0] >= '1' && value[0] <= '9' && allDigits(value)
 }
+
+// allDigits reports whether every character is an ASCII decimal digit.
 func allDigits(value string) bool {
 	for _, r := range value {
 		if r < '0' || r > '9' {
@@ -897,6 +929,7 @@ func allDigits(value string) bool {
 	return true
 }
 
+// validateJSON checks one complete JSON value for duplicate keys and excessive nesting.
 func validateJSON(data []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
@@ -909,6 +942,7 @@ func validateJSON(data []byte) error {
 	return nil
 }
 
+// consumeJSONValue validates one JSON value recursively while tracking object keys and depth.
 func consumeJSONValue(decoder *json.Decoder, depth int) error {
 	if depth > 128 {
 		return errors.New("JSON nesting is too deep")

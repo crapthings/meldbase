@@ -29,15 +29,15 @@ npm install ws
 ```
 
 ```js
-import WebSocket from 'ws'
-import { MeldbaseClient } from '@meldbase/client'
+import WebSocket from "ws";
+import { MeldbaseClient } from "@meldbase/client";
 
 const client = new MeldbaseClient({
-  baseUrl: process.env.MELDBASE_URL ?? 'http://127.0.0.1:8080',
-  webSocketFactory: url => new WebSocket(url)
-})
+  baseUrl: process.env.MELDBASE_URL ?? "http://127.0.0.1:8080",
+  webSocketFactory: (url) => new WebSocket(url),
+});
 
-const todos = client.collection('todos')
+const todos = client.collection("todos");
 ```
 
 For an authenticated service, supply a token issued by your identity system:
@@ -46,25 +46,22 @@ For an authenticated service, supply a token issued by your identity system:
 const client = new MeldbaseClient({
   baseUrl: process.env.MELDBASE_URL,
   accessToken: () => process.env.MELDBASE_ACCESS_TOKEN,
-  webSocketFactory: url => new WebSocket(url)
-})
+  webSocketFactory: (url) => new WebSocket(url),
+});
 ```
 
 ## Read and write documents
 
 ```js
 const todo = await todos.insertOne({
-  title: 'Process a job',
-  done: false
-})
+  title: "Process a job",
+  done: false,
+});
 
-await todos.updateOne(
-  { _id: todo._id },
-  { $set: { done: true } }
-)
+await todos.updateOne({ _id: todo._id }, { $set: { done: true } });
 
-const completed = await todos.find({ done: true }).fetch()
-console.log(completed)
+const completed = await todos.find({ done: true }).fetch();
+console.log(completed);
 ```
 
 Queries and updates are data, not JavaScript expressions. The server validates
@@ -73,18 +70,21 @@ them and applies its own collection policy.
 ## Subscribe to changes
 
 ```js
-const stop = todos.find({ done: false }).subscribe(documents => {
-  queueWork(documents)
-}, {
-  onStatus (status) {
-    logger.info({ state: status.state }, 'meldbase connection')
-  }
-})
+const stop = todos.find({ done: false }).subscribe(
+  (documents) => {
+    queueWork(documents);
+  },
+  {
+    onStatus(status) {
+      logger.info({ state: status.state }, "meldbase connection");
+    },
+  },
+);
 
-process.once('SIGTERM', () => {
-  stop()
-  client.close()
-})
+process.once("SIGTERM", () => {
+  stop();
+  client.close();
+});
 ```
 
 The client reconnects subscriptions after a temporary connection loss. Treat

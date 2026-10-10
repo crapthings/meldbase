@@ -1,6 +1,7 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 
+/** Configures JavaScript linting and SDK TypeScript lint rules. */
 export default tseslint.config(
   {
     ignores: ["**/dist/**", "**/coverage/**", "docs/.vitepress/**", "local-playground/**", "node_modules/**"],

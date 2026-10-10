@@ -14,14 +14,17 @@ import (
 	"time"
 )
 
+// destructiveQMPProofSchema identifies the QMP reset proof format.
 const destructiveQMPProofSchema uint32 = 1
 
+// destructiveQMPExchange records one sent or received QMP message and its timestamp.
 type destructiveQMPExchange struct {
 	Direction string          `json:"direction"`
 	At        time.Time       `json:"at"`
 	Message   json.RawMessage `json:"message"`
 }
 
+// destructiveQMPProof records the QMP transcript and marker hash for a reset trial.
 type destructiveQMPProof struct {
 	SchemaVersion uint32                   `json:"schemaVersion"`
 	MarkerSHA256  string                   `json:"markerSha256"`
@@ -30,6 +33,7 @@ type destructiveQMPProof struct {
 	Exchanges     []destructiveQMPExchange `json:"exchanges"`
 }
 
+// qmpMessageEnvelope holds the greeting, response, or event fields of a QMP message.
 type qmpMessageEnvelope struct {
 	QMP    json.RawMessage `json:"QMP,omitempty"`
 	Return json.RawMessage `json:"return,omitempty"`
@@ -39,6 +43,7 @@ type qmpMessageEnvelope struct {
 	ID     string          `json:"id,omitempty"`
 }
 
+// runDestructiveQEMUReset requests a host QEMU reset after a published marker and records its transcript and controller event.
 func runDestructiveQEMUReset(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-reset", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -207,6 +212,7 @@ func runDestructiveQEMUReset(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(event)
 }
 
+// receiveQMPResponse waits for the matching command response and checks its result with an optional validator.
 func receiveQMPResponse(receive func() (json.RawMessage, qmpMessageEnvelope, error), id string, validate func(qmpMessageEnvelope) error) error {
 	for {
 		_, envelope, err := receive()
@@ -229,6 +235,7 @@ func receiveQMPResponse(receive func() (json.RawMessage, qmpMessageEnvelope, err
 	}
 }
 
+// waitForPowerMarker waits until a power marker can be read as a receipt or the deadline expires.
 func waitForPowerMarker(path string, deadline time.Time) (destructivePowerMarker, []byte, error) {
 	for time.Now().Before(deadline) {
 		var marker destructivePowerMarker
@@ -245,6 +252,7 @@ func waitForPowerMarker(path string, deadline time.Time) (destructivePowerMarker
 	return destructivePowerMarker{}, nil, errors.New("timed out waiting for durable power marker")
 }
 
+// validateDestructiveQMPProof checks that a reset transcript matches its marker, controller event, and reset timestamps.
 func validateDestructiveQMPProof(raw []byte, event destructivePowerControllerEvent, markerRaw []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -293,6 +301,7 @@ func validateDestructiveQMPProof(raw []byte, event destructivePowerControllerEve
 	return nil
 }
 
+// validateQMPProofStructure checks that a reset proof contains valid timing and the required ordered QMP exchange sequence.
 func validateQMPProofStructure(proof destructiveQMPProof) error {
 	if proof.SchemaVersion != destructiveQMPProofSchema || !qualificationHexDigest(proof.MarkerSHA256) || proof.StartedAt.IsZero() ||
 		!proof.FinishedAt.After(proof.StartedAt) || len(proof.Exchanges) < 8 || len(proof.Exchanges) > 1024 {
@@ -373,6 +382,7 @@ func validateQMPProofStructure(proof destructiveQMPProof) error {
 	return nil
 }
 
+// validateQMPBlockInventory checks for a writable direct-I/O device with flushes enabled and an optional expected file.
 func validateQMPBlockInventory(raw json.RawMessage, expectedFile ...string) error {
 	var devices []struct {
 		Inserted *struct {

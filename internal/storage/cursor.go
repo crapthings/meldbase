@@ -9,15 +9,19 @@ import (
 )
 
 var (
-	ErrHistoryLost       = errors.New("meldbase storage: commit history is no longer retained")
-	ErrHistoryPinned     = errors.New("meldbase storage: commit history is pinned by a live replay cursor")
+	// ErrHistoryLost reports that requested commits are no longer retained.
+	ErrHistoryLost = errors.New("meldbase storage: commit history is no longer retained")
+	// ErrHistoryPinned reports that a live replay cursor prevents history removal.
+	ErrHistoryPinned = errors.New("meldbase storage: commit history is pinned by a live replay cursor")
+	// ErrNoDeliveredCommit reports that a live stream has not yet delivered a commit.
 	ErrNoDeliveredCommit = errors.New("meldbase storage: live stream has not delivered a commit")
-	ErrCursorClosed      = errors.New("meldbase storage: commit cursor is closed")
+	// ErrCursorClosed reports that a commit cursor is closed.
+	ErrCursorClosed = errors.New("meldbase storage: commit cursor is closed")
 )
 
-// CommitCursor pins one immutable Commit Log root and replays a finite,
-// gap-checked sequence range. A later live-stream layer tails new roots after
-// this snapshot cursor reaches Through().
+// CommitCursor reads a finite, gap-checked commit range from a pinned history root.
+//
+// Live streams tail later roots after this cursor reaches Through().
 type CommitCursor struct {
 	mu       sync.Mutex
 	file     *File
@@ -28,6 +32,7 @@ type CommitCursor struct {
 	closed   bool
 }
 
+// OpenCommitCursor pins the current history and opens a finite cursor after the given sequence.
 func (f *File) OpenCommitCursor(after uint64) (*CommitCursor, error) {
 	if f == nil {
 		return nil, ErrCorrupt
@@ -56,6 +61,7 @@ func (f *File) OpenCommitCursor(after uint64) (*CommitCursor, error) {
 	return &CommitCursor{file: f, pinID: pinID, rootPage: root.CommitLogRoot, after: after, through: root.CommitSequence}, nil
 }
 
+// Next reads the next retained commit and reports whether one remains.
 func (cursor *CommitCursor) Next() (CommitBatch, bool, error) {
 	if cursor == nil {
 		return CommitBatch{}, false, ErrCursorClosed
@@ -82,6 +88,7 @@ func (cursor *CommitCursor) Next() (CommitBatch, bool, error) {
 	return batch, true, nil
 }
 
+// Through returns the last commit sequence captured when the cursor opened.
 func (cursor *CommitCursor) Through() uint64 {
 	if cursor == nil {
 		return 0
@@ -91,6 +98,7 @@ func (cursor *CommitCursor) Through() uint64 {
 	return cursor.through
 }
 
+// Close releases the cursor's snapshot pin and is safe to call repeatedly.
 func (cursor *CommitCursor) Close() error {
 	if cursor == nil {
 		return nil
@@ -110,9 +118,9 @@ func (cursor *CommitCursor) Close() error {
 	return nil
 }
 
-// RetainCommitsFrom atomically drops logical Commit Log entries older than
-// keepFrom and appends an auditable retention commit. Physical page reclamation
-// remains a separate epoch-safe phase.
+// RetainCommitsFrom removes older commits and records the retention change atomically.
+//
+// Physical page reclamation remains a separate phase protected by reader pins.
 func (f *File) RetainCommitsFrom(keepFrom uint64, transactionID [16]byte, committedAt time.Time) (uint64, error) {
 	if f == nil || allZero(transactionID[:]) {
 		return 0, ErrCorrupt

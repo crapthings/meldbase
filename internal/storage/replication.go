@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// ApplyReplicationNoop advances a replica's logical Commit Log position for a
-// source batch whose public projection is empty. The marker is private to the
+// ApplyReplicationNoop advances a replica for a source commit with no public changes.
+//
+// The marker is private to the
 // target's own Commit Log: it carries no user document or System-record value,
 // but preserves the contiguous token contract required before a later public
 // batch can be applied.

@@ -3,9 +3,11 @@ import WebSocket from "ws";
 import { compileQuery } from "@meldbase/client";
 import { MeldbaseError, MeldbaseWorker, readPolicy, rpc } from "@meldbase/worker";
 
+// Reads the credential used to register this worker.
 const token = process.env.MELDBASE_WORKER_TOKEN;
 if (!token) throw new Error("MELDBASE_WORKER_TOKEN is required");
 
+// Registers order creation and owner access rules with the server.
 const worker = new MeldbaseWorker({
   url: process.env.MELDBASE_WORKER_URL ?? "ws://127.0.0.1:9092/v1/workers",
   token,
@@ -40,6 +42,7 @@ const worker = new MeldbaseWorker({
 await worker.start();
 console.log("Meldbase example worker registered");
 
+// Stops the worker before exiting the process.
 async function shutdown() {
   await worker.stop();
   process.exit(0);

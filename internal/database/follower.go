@@ -9,25 +9,25 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// Follower owns a local, read-only database that advances only through
-// validated DurableDatabaseChangeBatch values. It is the local application
-// half of a future remote replication protocol; transport authentication,
-// snapshot transfer and promotion deliberately remain outside this type.
+// Follower owns a read-only local database advanced by validated source change batches.
+//
+// Transport authentication and snapshot transfer are managed outside this type;
+// promotion requires the external authority and write guard described below.
 type Follower struct {
 	mu       sync.Mutex
 	db       *DB
 	promoted bool
 }
 
-// FollowerPromotionRequest is the exact local state an external fencing
-// system must certify before this process can become writable primary.
+// FollowerPromotionRequest identifies the database version requesting permission to become writable.
 type FollowerPromotionRequest struct {
 	DatabaseID     [16]byte
 	CommitSequence uint64
 }
 
-// FollowerPromotionFence is a controller-issued, non-empty epoch proving the
-// old primary's write authority was fenced for this database/token. Epoch is
+// FollowerPromotionFence proves that the former primary lost write authority for this database version.
+//
+// Epoch is non-empty and
 // deliberately opaque to Meldbase: a controller may use it as an epoch ID or
 // a compact signed lease certificate (as integrations/primarylease does).
 // Meldbase does not invent a local substitute for that distributed safety
@@ -38,16 +38,17 @@ type FollowerPromotionFence struct {
 	Epoch          string
 }
 
-// FollowerPromotionAuthority must make its returned fence durable before it
-// returns. Implementations normally revoke a primary lease through a quorum
+// FollowerPromotionAuthority grants promotion after durably revoking the former primary's write authority.
+//
+// Implementations normally revoke a primary lease through a quorum
 // controller or external consensus store.
 type FollowerPromotionAuthority interface {
 	AuthorizeFollowerPromotion(context.Context, FollowerPromotionRequest) (FollowerPromotionFence, error)
 }
 
-// FollowerPromotionFenceBinder binds one controller-issued promotion fence to
-// the local primary-write guard before a follower becomes writable. The
-// binder may update caller-owned local lease/epoch state, but must not enable
+// FollowerPromotionFenceBinder connects a promotion certificate to the local write protection guard.
+//
+// The binder may update caller-owned local lease/epoch state, but must not enable
 // writes until it has accepted the exact fence. It runs on the promotion
 // control path, outside the DB writer lock; unlike ValidatePrimaryWrite it
 // may coordinate with the controller if the implementation needs to.
@@ -59,8 +60,9 @@ type FollowerPromotionFenceBinder interface {
 	BindFollowerPromotion(context.Context, FollowerPromotionFence) error
 }
 
-// OpenFollower opens a physical archive/bootstrap copy as a replica. Normal
-// public mutations on DB return ErrReplicaReadOnly; use Apply to advance the
+// OpenFollower opens a database copy as a read-only replica.
+//
+// Normal public mutations on DB return ErrReplicaReadOnly; use Apply to advance the
 // next source token. The returned DB remains fully queryable and reactive.
 func OpenFollower(path string, options OpenOptions) (*Follower, error) {
 	options.Follower = true
@@ -72,6 +74,7 @@ func OpenFollower(path string, options OpenOptions) (*Follower, error) {
 	return &Follower{db: db}, nil
 }
 
+// DB returns the follower's database handle for queries and subscriptions.
 func (follower *Follower) DB() *DB {
 	if follower == nil {
 		return nil
@@ -79,6 +82,7 @@ func (follower *Follower) DB() *DB {
 	return follower.db
 }
 
+// Close closes the follower's database while serializing follower operations.
 func (follower *Follower) Close() error {
 	if follower == nil {
 		return nil
@@ -91,8 +95,9 @@ func (follower *Follower) Close() error {
 	return follower.db.Close()
 }
 
-// Promote makes this follower writable only after an external authority fences
-// the former primary at this exact identity/token. There is intentionally no
+// Promote enables writes after an external authority revokes the former primary's write access.
+//
+// The authority must certify this exact database identity and commit token. There is no
 // default or best-effort implementation: promoting without a durable external
 // fence would turn a network partition into split-brain data loss.
 func (follower *Follower) Promote(ctx context.Context, authority FollowerPromotionAuthority) (FollowerPromotionFence, error) {
@@ -162,8 +167,9 @@ func (follower *Follower) Promote(ctx context.Context, authority FollowerPromoti
 	return fence, nil
 }
 
-// ApplyFrame binds the decoded transport envelope to this bootstrap's durable
-// identity before applying its batch. A transport handles hello/ack/resync;
+// ApplyFrame checks a replication frame's database identity before applying its batch.
+//
+// A transport handles hello/ack/resync;
 // only a validated batch frame belongs at the follower mutation boundary.
 func (follower *Follower) ApplyFrame(ctx context.Context, frame ReplicationFrame) error {
 	if follower == nil || follower.db == nil {
@@ -189,8 +195,9 @@ func (follower *Follower) ApplyFrame(ctx context.Context, frame ReplicationFrame
 	return follower.applyLocked(ctx, *frame.Batch)
 }
 
-// Apply durably and atomically applies exactly the next source batch. A gap,
-// duplicate or locally diverged token returns ErrReplicaSequence; it never
+// Apply saves exactly the next source change batch as one atomic commit.
+//
+// A gap, duplicate or locally diverged token returns ErrReplicaSequence; it never
 // guesses, retries business logic or advances past missing history.
 func (follower *Follower) Apply(ctx context.Context, source DurableDatabaseChangeBatch) error {
 	if follower == nil || follower.db == nil {
@@ -204,6 +211,7 @@ func (follower *Follower) Apply(ctx context.Context, source DurableDatabaseChang
 	return follower.applyLocked(ctx, source)
 }
 
+// applyLocked validates and applies the next source batch while the caller holds the follower lock.
 func (follower *Follower) applyLocked(ctx context.Context, source DurableDatabaseChangeBatch) error {
 	if follower == nil || follower.db == nil {
 		return ErrClosed
@@ -240,6 +248,7 @@ func (follower *Follower) applyLocked(ctx context.Context, source DurableDatabas
 	return applyFollowerBatchLocked(ctx, db, store, source, changes)
 }
 
+// applyFollowerBatchLocked validates and stores a source batch while the caller holds the database lock.
 func applyFollowerBatchLocked(ctx context.Context, db *DB, store *durableStore, source DurableDatabaseChangeBatch, changes []Change) error {
 	documents := make([]Change, 0, len(changes))
 	collections := make(map[string]struct{})
@@ -353,6 +362,7 @@ func applyFollowerBatchLocked(ctx context.Context, db *DB, store *durableStore, 
 	return finishFollowerBatchLocked(db, source, nil)
 }
 
+// finishFollowerBatchLocked advances the local token and publishes the applied changes under the database lock.
 func finishFollowerBatchLocked(db *DB, source DurableDatabaseChangeBatch, changes []Change) error {
 	if db == nil || source.Token != db.token+1 {
 		return ErrCorrupt
@@ -364,6 +374,7 @@ func finishFollowerBatchLocked(db *DB, source DurableDatabaseChangeBatch, change
 	return nil
 }
 
+// followerStorageError maps a storage rejection and stops the database for unrecoverable apply failures.
 func followerStorageError(db *DB, err error) error {
 	mapped := mapStorageError(err)
 	if db != nil && !errors.Is(mapped, ErrResourceLimit) && !errors.Is(mapped, ErrDuplicateID) && !errors.Is(mapped, ErrDuplicateKey) && !errors.Is(mapped, ErrInvalidIndex) {
@@ -373,6 +384,7 @@ func followerStorageError(db *DB, err error) error {
 	return mapped
 }
 
+// followerSequenceFault stops the database when a stored commit sequence differs from the expected source sequence.
 func followerSequenceFault(db *DB, actual, expected uint64) error {
 	if db != nil {
 		db.fatalErr = fmt.Errorf("%w: follower applied %d, expected %d", ErrDurability, actual, expected)

@@ -6,13 +6,10 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// submitWriteTransaction admits one completed public WriteTransaction to the
+// submitWriteTransaction queues a completed transaction for grouped publication.
 //
-//	group publisher. Its callback has already returned and its point read set
-//
-// is frozen, so a failed speculative group can safely replay only this exact
-// storage operation in admission order; it never invokes application code a
-// second time.
+// Its callback has already returned and its read set is frozen, so a failed
+// group replays the same storage operation without rerunning application code.
 func (coordinator *commitCoordinator) submitWriteTransaction(
 	ctx context.Context,
 	changes []Change,

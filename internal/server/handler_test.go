@@ -19,8 +19,10 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// testAuthenticator accepts one test bearer token and returns a fixed actor.
 type testAuthenticator struct{}
 
+// AuthenticateHTTP returns the test actor only when the expected bearer token is present.
 func (testAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, error) {
 	if request.Header.Get("authorization") != "Bearer valid" {
 		return Actor{}, ErrUnauthenticated
@@ -28,13 +30,13 @@ func (testAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, error) 
 	return Actor{ID: "user-1", WorkspaceID: "mine"}, nil
 }
 
+// testAuthorizer limits test database operations to one actor and their workspace.
 type testAuthorizer struct{}
 
-// aggregateOnlyFieldAuthorizer models a field that may be grouped but is not
-// safe to return. Group keys must not turn aggregate capability into value
-// enumeration.
+// aggregateOnlyFieldAuthorizer allows grouping by a field that cannot be returned.
 type aggregateOnlyFieldAuthorizer struct{ testAuthorizer }
 
+// AuthorizeQuery permits grouping by workspace while keeping it out of returned fields.
 func (aggregateOnlyFieldAuthorizer) AuthorizeQuery(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
 	policy, err := (testAuthorizer{}).AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
@@ -44,6 +46,7 @@ func (aggregateOnlyFieldAuthorizer) AuthorizeQuery(ctx context.Context, actor Ac
 	return policy, nil
 }
 
+// leaseAuthorizer adds a replaceable policy version and lease to the test query policy.
 type leaseAuthorizer struct {
 	testAuthorizer
 	mu      sync.RWMutex
@@ -51,6 +54,7 @@ type leaseAuthorizer struct {
 	lease   *QueryPolicyLease
 }
 
+// AuthorizeQuery attaches the current version and lease to the base test policy.
 func (authorizer *leaseAuthorizer) AuthorizeQuery(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
 	policy, err := authorizer.testAuthorizer.AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
@@ -63,12 +67,14 @@ func (authorizer *leaseAuthorizer) AuthorizeQuery(ctx context.Context, actor Act
 	return policy, nil
 }
 
+// set replaces the test policy version and lease while holding the authorizer lock.
 func (authorizer *leaseAuthorizer) set(version string, lease *QueryPolicyLease) {
 	authorizer.mu.Lock()
 	authorizer.version, authorizer.lease = version, lease
 	authorizer.mu.Unlock()
 }
 
+// AuthorizeQuery restricts reads to the test actor workspace and selected fields with a result limit.
 func (testAuthorizer) AuthorizeQuery(_ context.Context, actor Actor, collection string, _ meldbase.QuerySpec) (QueryPolicy, error) {
 	if collection != "items" || actor.ID != "user-1" {
 		return QueryPolicy{}, ErrForbidden
@@ -85,6 +91,7 @@ func (testAuthorizer) AuthorizeQuery(_ context.Context, actor Actor, collection 
 	}, nil
 }
 
+// AuthorizeInsert restricts input and result fields and assigns the authenticated workspace.
 func (testAuthorizer) AuthorizeInsert(_ context.Context, actor Actor, collection string, _ meldbase.Document) (InsertPolicy, error) {
 	if collection != "items" || actor.ID != "user-1" {
 		return InsertPolicy{}, ErrForbidden
@@ -92,6 +99,7 @@ func (testAuthorizer) AuthorizeInsert(_ context.Context, actor Actor, collection
 	return InsertPolicy{AllowedInputFields: map[string]struct{}{"rank": {}, "title": {}}, SetFields: meldbase.Document{"workspace": meldbase.String(actor.WorkspaceID)}, AllowedResultFields: map[string]struct{}{"rank": {}, "title": {}}}, nil
 }
 
+// AuthorizeUpdate adds allowed update paths and an affected-document limit to the test query policy.
 func (testAuthorizer) AuthorizeUpdate(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec, _ meldbase.MutationSpec) (UpdatePolicy, error) {
 	base, err := (testAuthorizer{}).AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
@@ -100,11 +108,13 @@ func (testAuthorizer) AuthorizeUpdate(ctx context.Context, actor Actor, collecti
 	return UpdatePolicy{QueryPolicy: base, AllowedUpdatePaths: map[string]struct{}{"rank": {}, "title": {}}, MaxAffected: 10}, nil
 }
 
+// AuthorizeDelete uses the test query policy and limits the number of deleted documents.
 func (testAuthorizer) AuthorizeDelete(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (DeletePolicy, error) {
 	base, err := (testAuthorizer{}).AuthorizeQuery(ctx, actor, collection, query)
 	return DeletePolicy{QueryPolicy: base, MaxAffected: 10}, err
 }
 
+// TestHTTPQueryAppliesRowPolicyBeforeLimitAndRedactsFields checks that queries filter by workspace before applying limits and hide restricted fields.
 func TestHTTPQueryAppliesRowPolicyBeforeLimitAndRedactsFields(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	collection := db.Collection("items")
@@ -169,6 +179,7 @@ func TestHTTPQueryAppliesRowPolicyBeforeLimitAndRedactsFields(t *testing.T) {
 	_ = handler
 }
 
+// TestHTTPCountAppliesWorkspacePolicyAndCapsResult checks that indexed workspace counts respect the policy result cap.
 func TestHTTPCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 	db, _, server := newTestServer(t)
 	collection := db.Collection("items")
@@ -204,6 +215,7 @@ func TestHTTPCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 	}
 }
 
+// TestHTTPGroupCountAppliesWorkspacePolicyAndCapsResult checks that grouped counts respect workspace limits and reject grouping by fields that cannot be returned.
 func TestHTTPGroupCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 	db, _, server := newTestServer(t)
 	collection := db.Collection("items")
@@ -276,6 +288,7 @@ func TestHTTPGroupCountAppliesWorkspacePolicyAndCapsResult(t *testing.T) {
 	}
 }
 
+// TestHTTPAggregatesReportQueryBudgetWithStableCode checks that aggregate query budget failures return HTTP 413 with the stable resource-limit code.
 func TestHTTPAggregatesReportQueryBudgetWithStableCode(t *testing.T) {
 	db, err := meldbase.NewWithOptions(meldbase.DatabaseOptions{ResourceLimits: meldbase.ResourceLimits{MaxQueryDocumentsExamined: 1}})
 	if err != nil {
@@ -324,6 +337,7 @@ func TestHTTPAggregatesReportQueryBudgetWithStableCode(t *testing.T) {
 	}
 }
 
+// TestHTTPInsertAppliesServerOwnedFieldsAndRejectsForbiddenInput checks that inserts assign the authenticated workspace, hide it in responses, and reject forbidden input fields.
 func TestHTTPInsertAppliesServerOwnedFieldsAndRejectsForbiddenInput(t *testing.T) {
 	db, _, server := newTestServer(t)
 	document := `{"t":"object","v":[["rank",{"t":"int64","v":"7"}],["title",{"t":"string","v":"created"}]]}`
@@ -371,6 +385,7 @@ func TestHTTPInsertAppliesServerOwnedFieldsAndRejectsForbiddenInput(t *testing.T
 	}
 }
 
+// TestHTTPUpdateDeleteApplyRowAndFieldPolicies checks that updates and deletes affect only the actor workspace and cannot change restricted fields.
 func TestHTTPUpdateDeleteApplyRowAndFieldPolicies(t *testing.T) {
 	db, _, server := newTestServer(t)
 	collection := db.Collection("items")
@@ -425,6 +440,7 @@ func TestHTTPUpdateDeleteApplyRowAndFieldPolicies(t *testing.T) {
 	}
 }
 
+// TestHTTPMutationAffectedLimitRejectsWholeBatch checks that exceeding the affected-document limit rejects an update without changing any documents.
 func TestHTTPMutationAffectedLimitRejectsWholeBatch(t *testing.T) {
 	db, _, server := newTestServer(t)
 	collection := db.Collection("items")
@@ -452,6 +468,7 @@ func TestHTTPMutationAffectedLimitRejectsWholeBatch(t *testing.T) {
 	}
 }
 
+// TestHTTPOriginAllowlistAndBoundedPreflight checks that HTTP requests and preflight headers obey the configured origin and header allowlists.
 func TestHTTPOriginAllowlistAndBoundedPreflight(t *testing.T) {
 	_, _, server := newTestServer(t)
 	preflight, _ := http.NewRequest(http.MethodOptions, server.URL+"/v1/collections/items/query", nil)
@@ -490,6 +507,7 @@ func TestHTTPOriginAllowlistAndBoundedPreflight(t *testing.T) {
 	}
 }
 
+// TestRealtimeOriginPatternsRejectUntrustedBrowserAndAllowConfiguredClient checks that realtime connections accept configured origins and reject untrusted hosts or incorrect schemes.
 func TestRealtimeOriginPatternsRejectUntrustedBrowserAndAllowConfiguredClient(t *testing.T) {
 	db := meldbase.New()
 	handler, err := New(Config{
@@ -543,6 +561,7 @@ func TestRealtimeOriginPatternsRejectUntrustedBrowserAndAllowConfiguredClient(t 
 	defer loopback.CloseNow()
 }
 
+// TestRealtimeConfiguredSchemePatternRejectsSameHostWrongScheme checks that realtime origin matching enforces the configured scheme even for the server host.
 func TestRealtimeConfiguredSchemePatternRejectsSameHostWrongScheme(t *testing.T) {
 	_, handler, server := newTestServer(t)
 	host := strings.TrimPrefix(server.URL, "http://")
@@ -568,6 +587,7 @@ func TestRealtimeConfiguredSchemePatternRejectsSameHostWrongScheme(t *testing.T)
 	defer connection.CloseNow()
 }
 
+// TestLivenessAndReadinessHaveDistinctFailStopSemantics checks that readiness reflects database availability while liveness remains successful after database closure.
 func TestLivenessAndReadinessHaveDistinctFailStopSemantics(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	for _, path := range []string{"/health", "/readyz"} {
@@ -627,6 +647,7 @@ func TestLivenessAndReadinessHaveDistinctFailStopSemantics(t *testing.T) {
 	}
 }
 
+// TestEngineAvailabilityErrorsUseStableServiceUnavailableCode checks that unavailable databases return HTTP 503 with the stable database-unavailable code.
 func TestEngineAvailabilityErrorsUseStableServiceUnavailableCode(t *testing.T) {
 	for _, err := range []error{meldbase.ErrClosed, meldbase.ErrDurability, errors.Join(errors.New("disk"), meldbase.ErrDurability)} {
 		status, code := engineErrorStatusCode(err)
@@ -664,6 +685,7 @@ func TestEngineAvailabilityErrorsUseStableServiceUnavailableCode(t *testing.T) {
 	}
 }
 
+// TestEngineCommitOutcomeUnknownUsesStableReconciliationCode checks that uncertain commits return HTTP 409 with the outcome-unknown code.
 func TestEngineCommitOutcomeUnknownUsesStableReconciliationCode(t *testing.T) {
 	status, code := engineErrorStatusCode(errors.Join(meldbase.ErrCommitOutcomeUnknown, context.Canceled))
 	if status != http.StatusConflict || code != "rpc_outcome_unknown" {
@@ -671,6 +693,7 @@ func TestEngineCommitOutcomeUnknownUsesStableReconciliationCode(t *testing.T) {
 	}
 }
 
+// TestResourceLimitErrorsUseStableTerminalCode checks that engine and RPC resource-limit failures return HTTP 413 with the same stable code.
 func TestResourceLimitErrorsUseStableTerminalCode(t *testing.T) {
 	status, code := engineErrorStatusCode(errors.Join(errors.New("oversized"), meldbase.ErrResourceLimit))
 	if status != http.StatusRequestEntityTooLarge || code != "resource_limit_exceeded" {
@@ -690,6 +713,7 @@ func TestResourceLimitErrorsUseStableTerminalCode(t *testing.T) {
 	}
 }
 
+// TestUnsupportedTransactionalStorageIsDatabaseUnavailable checks that unsupported transaction storage is classified as database unavailable.
 func TestUnsupportedTransactionalStorageIsDatabaseUnavailable(t *testing.T) {
 	status, code := classifyRPCError(meldbase.ErrWriteTransactionUnsupported)
 	if status != http.StatusServiceUnavailable || code != "database_unavailable" {
@@ -697,6 +721,7 @@ func TestUnsupportedTransactionalStorageIsDatabaseUnavailable(t *testing.T) {
 	}
 }
 
+// TestRealtimeTicketSubscriptionAndAtomicSnapshot checks single-use ticket authentication and updated subscription snapshots with new tokens.
 func TestRealtimeTicketSubscriptionAndAtomicSnapshot(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	collection := db.Collection("items")
@@ -747,6 +772,7 @@ func TestRealtimeTicketSubscriptionAndAtomicSnapshot(t *testing.T) {
 	}
 }
 
+// TestRealtimeOutboundFrameLimitClosesOnlySlowConnection checks that oversized subscription results are rejected before overflowing the outbound queue.
 func TestRealtimeOutboundFrameLimitClosesOnlySlowConnection(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	handler.config.MaxRealtimeFrameBytes = 256
@@ -780,6 +806,7 @@ func TestRealtimeOutboundFrameLimitClosesOnlySlowConnection(t *testing.T) {
 	}
 }
 
+// TestRealtimeDeltaResultBudgetRejectsBeforeOutboundQueue checks that oversized deltas return a resource-limit error before overflowing the outbound queue.
 func TestRealtimeDeltaResultBudgetRejectsBeforeOutboundQueue(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	handler.config.MaxRealtimeFrameBytes = 1024
@@ -815,6 +842,7 @@ func TestRealtimeDeltaResultBudgetRejectsBeforeOutboundQueue(t *testing.T) {
 	}
 }
 
+// TestHTTPQueryResultBudgetRejectsBeforeResponseMarshal checks that an oversized visible query result returns HTTP 413 with the resource-limit code.
 func TestHTTPQueryResultBudgetRejectsBeforeResponseMarshal(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	handler.config.MaxQueryResultBytes = 128
@@ -847,6 +875,7 @@ func TestHTTPQueryResultBudgetRejectsBeforeResponseMarshal(t *testing.T) {
 	}
 }
 
+// TestRealtimeDeltaModeUsesVisibilityOverlayAndOpaqueTokenChain checks that hidden field changes are suppressed while visible deltas preserve the client token chain.
 func TestRealtimeDeltaModeUsesVisibilityOverlayAndOpaqueTokenChain(t *testing.T) {
 	db, _, server := newTestServer(t)
 	collection := db.Collection("items")
@@ -927,6 +956,7 @@ func TestRealtimeDeltaModeUsesVisibilityOverlayAndOpaqueTokenChain(t *testing.T)
 	}
 }
 
+// TestRealtimePolicyLeaseRevocationForcesSafeResubscribe checks that revoked policies require resynchronization and replacement policies allow fresh subscriptions.
 func TestRealtimePolicyLeaseRevocationForcesSafeResubscribe(t *testing.T) {
 	for _, mode := range []string{"", "delta"} {
 		name := "snapshot"
@@ -988,6 +1018,7 @@ func TestRealtimePolicyLeaseRevocationForcesSafeResubscribe(t *testing.T) {
 	}
 }
 
+// TestHTTPQueryRejectsAlreadyRevokedPolicyLease checks that HTTP queries using a revoked policy lease are forbidden.
 func TestHTTPQueryRejectsAlreadyRevokedPolicyLease(t *testing.T) {
 	lease, _ := NewQueryPolicyLease("policy-v1")
 	if err := lease.Revoke(context.Background()); err != nil {
@@ -1009,6 +1040,7 @@ func TestHTTPQueryRejectsAlreadyRevokedPolicyLease(t *testing.T) {
 	}
 }
 
+// TestVisibilityOverlayAppliesHiddenAndStructuralDeltasIncrementally checks that projected deltas suppress hidden changes and preserve document order and visible token continuity.
 func TestVisibilityOverlayAppliesHiddenAndStructuralDeltasIncrementally(t *testing.T) {
 	id1, _ := meldbase.ParseDocumentID("00000000000000000000000000000001")
 	id2, _ := meldbase.ParseDocumentID("00000000000000000000000000000002")
@@ -1061,6 +1093,7 @@ func TestVisibilityOverlayAppliesHiddenAndStructuralDeltasIncrementally(t *testi
 	}
 }
 
+// BenchmarkVisibilityOverlayDeltaTenThousand measures one visible document change in a projected view of ten thousand documents.
 func BenchmarkVisibilityOverlayDeltaTenThousand(b *testing.B) {
 	const count = 10_000
 	documents := make([]meldbase.Document, count)
@@ -1100,6 +1133,7 @@ func BenchmarkVisibilityOverlayDeltaTenThousand(b *testing.B) {
 	}
 }
 
+// TestRealtimeResumeUsesBoundSignedTokenAndRejectsTampering checks that unavailable replay or a changed resume token requires resynchronization.
 func TestRealtimeResumeUsesBoundSignedTokenAndRejectsTampering(t *testing.T) {
 	db, _, server := newTestServer(t)
 	insertServerDocument(t, db.Collection("items"), "mine", 1, "one")
@@ -1154,6 +1188,7 @@ func TestRealtimeResumeUsesBoundSignedTokenAndRejectsTampering(t *testing.T) {
 	}
 }
 
+// replaySourceStub supplies test replay snapshots and channels while recording the requested starting token.
 type replaySourceStub struct {
 	initial meldbase.QuerySnapshot
 	deltas  chan meldbase.QueryDelta
@@ -1161,11 +1196,13 @@ type replaySourceStub struct {
 	after   atomic.Uint64
 }
 
+// OpenQueryReplay records the starting token and returns the configured test replay subscription.
 func (source *replaySourceStub) OpenQueryReplay(_ context.Context, _ string, _ meldbase.QuerySpec, afterToken uint64, _ int) (*meldbase.QueryReplaySubscription, error) {
 	source.after.Store(afterToken)
 	return &meldbase.QueryReplaySubscription{Initial: source.initial, Deltas: source.deltas, Errors: source.errors}, nil
 }
 
+// TestRealtimeResumeAcknowledgesThenReplaysAndSafelyResyncs checks that resume is acknowledged before deltas and lost history requires resynchronization.
 func TestRealtimeResumeAcknowledgesThenReplaysAndSafelyResyncs(t *testing.T) {
 	db, handler, server := newTestServer(t)
 	id := insertServerDocument(t, db.Collection("items"), "mine", 1, "one")
@@ -1217,6 +1254,7 @@ func TestRealtimeResumeAcknowledgesThenReplaysAndSafelyResyncs(t *testing.T) {
 	}
 }
 
+// TestRealtimeResumedSubscriptionHonorsPolicyLeaseRevocation checks that revoking a policy lease forces a resumed subscription to resynchronize.
 func TestRealtimeResumedSubscriptionHonorsPolicyLeaseRevocation(t *testing.T) {
 	lease, err := NewQueryPolicyLease("policy-v1")
 	if err != nil {
@@ -1265,6 +1303,7 @@ func TestRealtimeResumedSubscriptionHonorsPolicyLeaseRevocation(t *testing.T) {
 	}
 }
 
+// TestRealtimeResumeReplaysMissedDeltaEndToEnd checks that reconnecting to a durable database replays each missed delta with a continuous, unique token chain.
 func TestRealtimeResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "server-store.meld2"))
 	if err != nil {
@@ -1349,6 +1388,7 @@ func TestRealtimeResumeReplaysMissedDeltaEndToEnd(t *testing.T) {
 	}
 }
 
+// TestStrictMessagesAndTicketTTLConfiguration checks message validation and rejects unsafe ticket, response, frame, queue, and origin settings.
 func TestStrictMessagesAndTicketTTLConfiguration(t *testing.T) {
 	db := meldbase.New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -1392,6 +1432,7 @@ func TestStrictMessagesAndTicketTTLConfiguration(t *testing.T) {
 	}
 }
 
+// TestRequestRateLimitUsesTrustedProxyOnlyAndPreservesProbes checks trusted proxy handling, probe exemptions, and safe audit counters for rejected requests.
 func TestRequestRateLimitUsesTrustedProxyOnlyAndPreservesProbes(t *testing.T) {
 	db := meldbase.New()
 	defer db.Close()
@@ -1452,6 +1493,7 @@ func TestRequestRateLimitUsesTrustedProxyOnlyAndPreservesProbes(t *testing.T) {
 	}
 }
 
+// TestSocketSessionOutboundByteBudgetBoundsQueuedFrames checks that frame and queue byte limits reject excess output and release accounting after delivery.
 func TestSocketSessionOutboundByteBudgetBoundsQueuedFrames(t *testing.T) {
 	message := map[string]any{"v": protocolVersion, "type": "snapshot", "payload": strings.Repeat("x", 128)}
 	encoded, err := json.Marshal(message)
@@ -1498,6 +1540,7 @@ func TestSocketSessionOutboundByteBudgetBoundsQueuedFrames(t *testing.T) {
 	}
 }
 
+// TestPublicDataAndRealtimeIngressRejectDuplicateJSONKeys checks that HTTP data requests and realtime authentication reject duplicate JSON keys.
 func TestPublicDataAndRealtimeIngressRejectDuplicateJSONKeys(t *testing.T) {
 	_, handler, server := newTestServer(t)
 	for _, scenario := range []struct {
@@ -1547,6 +1590,7 @@ func TestPublicDataAndRealtimeIngressRejectDuplicateJSONKeys(t *testing.T) {
 	}
 }
 
+// TestRealtimeTicketCapabilityDiscoveryIsExplicitAndFixed checks that only explicit discovery adds the expected protocol versions and capabilities.
 func TestRealtimeTicketCapabilityDiscoveryIsExplicitAndFixed(t *testing.T) {
 	_, _, server := newTestServer(t)
 	issue := func(accept string) map[string]any {
@@ -1590,6 +1634,7 @@ func TestRealtimeTicketCapabilityDiscoveryIsExplicitAndFixed(t *testing.T) {
 	}
 }
 
+// TestRealtimeV1LegacyMinimalWireFramesRemainAccepted checks that original v1 authentication, subscription, and ping frames still work.
 func TestRealtimeV1LegacyMinimalWireFramesRemainAccepted(t *testing.T) {
 	db, _, server := newTestServer(t)
 	insertServerDocument(t, db.Collection("items"), "mine", 1, "legacy")
@@ -1626,8 +1671,10 @@ func TestRealtimeV1LegacyMinimalWireFramesRemainAccepted(t *testing.T) {
 	}
 }
 
+// ticketPayload holds the connection URL and single-use authentication ticket returned by the server.
 type ticketPayload struct{ URL, Ticket string }
 
+// obtainTicket requests and decodes a realtime ticket using the test bearer token.
 func obtainTicket(t *testing.T, serverURL string) ticketPayload {
 	t.Helper()
 	request, _ := http.NewRequest(http.MethodPost, serverURL+"/v1/realtime/tickets", nil)
@@ -1644,6 +1691,7 @@ func obtainTicket(t *testing.T, serverURL string) ticketPayload {
 	return ticket
 }
 
+// postMutation validates test JSON and sends an authenticated mutation request.
 func postMutation(t *testing.T, serverURL, body string) *http.Response {
 	t.Helper()
 	if err := meldbase.ValidateStrictJSON([]byte(body), 1<<16); err != nil {
@@ -1658,10 +1706,12 @@ func postMutation(t *testing.T, serverURL, body string) *http.Response {
 	return response
 }
 
+// newTestServer starts a database server with the default test authorizer.
 func newTestServer(t *testing.T) (*meldbase.DB, *Handler, *httptest.Server) {
 	return newTestServerWithAuthorizer(t, testAuthorizer{})
 }
 
+// newTestServerWithAuthorizer starts a database server with the supplied authorizer and arranges cleanup.
 func newTestServerWithAuthorizer(t *testing.T, authorizer Authorizer) (*meldbase.DB, *Handler, *httptest.Server) {
 	t.Helper()
 	db := meldbase.New()
@@ -1675,6 +1725,7 @@ func newTestServerWithAuthorizer(t *testing.T, authorizer Authorizer) (*meldbase
 	return db, handler, server
 }
 
+// insertServerDocument inserts a test document with workspace, rank, and title fields.
 func insertServerDocument(t *testing.T, collection *meldbase.Collection, workspace string, rank int64, title string) meldbase.DocumentID {
 	t.Helper()
 	id, err := collection.InsertOne(context.Background(), meldbase.Document{"workspace": meldbase.String(workspace), "rank": meldbase.Int(rank), "title": meldbase.String(title)})
@@ -1684,6 +1735,7 @@ func insertServerDocument(t *testing.T, collection *meldbase.Collection, workspa
 	return id
 }
 
+// readMap reads a bounded WebSocket JSON message into a map.
 func readMap(t *testing.T, ctx context.Context, connection *websocket.Conn) map[string]any {
 	t.Helper()
 	raw, err := readSocketJSON(ctx, connection, 1<<16)
@@ -1697,6 +1749,7 @@ func readMap(t *testing.T, ctx context.Context, connection *websocket.Conn) map[
 	return message
 }
 
+// snapshotMessage holds subscription identifiers, a resume token, and encoded documents from a test snapshot.
 type snapshotMessage struct {
 	RequestID      string            `json:"requestId"`
 	SubscriptionID string            `json:"subscriptionId"`
@@ -1704,6 +1757,7 @@ type snapshotMessage struct {
 	Documents      []json.RawMessage `json:"documents"`
 }
 
+// readSnapshot reads a bounded WebSocket JSON message into a test snapshot.
 func readSnapshot(t *testing.T, ctx context.Context, connection *websocket.Conn) snapshotMessage {
 	t.Helper()
 	raw, err := readSocketJSON(ctx, connection, 1<<16)

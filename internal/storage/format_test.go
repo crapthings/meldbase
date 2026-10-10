@@ -13,6 +13,7 @@ import (
 	"testing"
 )
 
+// metaGoldenFixture stores metadata fields and expected bytes and hashes from a released format.
 type metaGoldenFixture struct {
 	FormatRevision         uint16 `json:"formatRevision"`
 	DatabaseIDHex          string `json:"databaseIdHex"`
@@ -28,6 +29,7 @@ type metaGoldenFixture struct {
 	EncodedPageSHA256      string `json:"encodedPageSha256"`
 }
 
+// TestMetaRevision3GoldenFixture checks metadata encoding and decoding against the retained revision-three fixture.
 func TestMetaRevision3GoldenFixture(t *testing.T) {
 	fixture := loadMetaGoldenFixture(t)
 	if fixture.FormatRevision != FormatVersion {
@@ -68,6 +70,7 @@ func TestMetaRevision3GoldenFixture(t *testing.T) {
 	}
 }
 
+// TestOpenAndAdvanceRevision3GoldenFixture checks that a revision-three fixture accepts a new commit and preserves it after reopening.
 func TestOpenAndAdvanceRevision3GoldenFixture(t *testing.T) {
 	fixture := loadMetaGoldenFixture(t)
 	prefix, err := base64.StdEncoding.DecodeString(fixture.EncodedPrefixBase64)
@@ -116,6 +119,7 @@ func TestOpenAndAdvanceRevision3GoldenFixture(t *testing.T) {
 	}
 }
 
+// loadMetaGoldenFixture loads the retained metadata fixture or fails the test.
 func loadMetaGoldenFixture(t *testing.T) metaGoldenFixture {
 	t.Helper()
 	var fixture metaGoldenFixture
@@ -129,6 +133,7 @@ func loadMetaGoldenFixture(t *testing.T) metaGoldenFixture {
 	return fixture
 }
 
+// TestMetaCodecRejectsCorruptionAndReservedBytes checks metadata corruption rejection and format and feature compatibility rules.
 func TestMetaCodecRejectsCorruptionAndReservedBytes(t *testing.T) {
 	meta := Meta{
 		DatabaseID: [16]byte{1}, Generation: 4, CommitSequence: 3, RootPage: 9,
@@ -195,6 +200,7 @@ func TestMetaCodecRejectsCorruptionAndReservedBytes(t *testing.T) {
 	}
 }
 
+// TestOpenNeverDowngradesAcrossValidUnsupportedMeta checks that valid unsupported metadata blocks opening without changing the database file.
 func TestOpenNeverDowngradesAcrossValidUnsupportedMeta(t *testing.T) {
 	for _, scenario := range []struct {
 		name   string
@@ -248,6 +254,7 @@ func TestOpenNeverDowngradesAcrossValidUnsupportedMeta(t *testing.T) {
 	}
 }
 
+// TestTornUnsupportedVersionFieldStillFallsBack checks that a version-field change with an invalid checksum allows recovery from older metadata.
 func TestTornUnsupportedVersionFieldStillFallsBack(t *testing.T) {
 	path, newestSlot := createTwoGenerationFormatFile(t)
 	raw, err := os.OpenFile(path, os.O_RDWR, 0)
@@ -277,6 +284,7 @@ func TestTornUnsupportedVersionFieldStillFallsBack(t *testing.T) {
 	}
 }
 
+// TestUnknownOptionalMetaFeatureSurvivesCommit checks that committing preserves an unknown optional metadata feature bit.
 func TestUnknownOptionalMetaFeatureSurvivesCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "optional-feature.meld2")
 	file, _, err := Open(path)
@@ -323,6 +331,7 @@ func TestUnknownOptionalMetaFeatureSurvivesCommit(t *testing.T) {
 	}
 }
 
+// createTwoGenerationFormatFile creates a database with two document revisions and returns its path and newest metadata slot.
 func createTwoGenerationFormatFile(t *testing.T) (string, int) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "feature-negotiation.meld2")
@@ -348,12 +357,14 @@ func createTwoGenerationFormatFile(t *testing.T) (string, int) {
 	return path, newestSlot
 }
 
+// rewriteMetaChecksum replaces the metadata checksum after a test changes the encoded page.
 func rewriteMetaChecksum(page []byte) {
 	clear(page[224:256])
 	checksum := metaChecksum(page)
 	copy(page[224:256], checksum[:])
 }
 
+// TestPageAndDatabaseRootCodec checks page and root round trips and rejection of corrupt bytes or mismatched page identifiers.
 func TestPageAndDatabaseRootCodec(t *testing.T) {
 	root := DatabaseRoot{CommitSequence: 7, OldestRetainedSequence: 3, CatalogGeneration: 2, DocumentCount: 11, CollectionCount: 2, IndexBuildCatalogRoot: 99}
 	encoded, err := EncodeDatabaseRoot(42, 8, root)

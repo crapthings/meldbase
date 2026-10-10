@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestQueryIDSortAndRangeComparisons checks identifier sorting and range filters while preserving insertion order for unsorted results.
 func TestQueryIDSortAndRangeComparisons(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -41,6 +42,7 @@ func TestQueryIDSortAndRangeComparisons(t *testing.T) {
 	}
 }
 
+// TestSortComparisonIsTransitiveForMixedValues checks that sorting different value types obeys transitivity.
 func TestSortComparisonIsTransitiveForMixedValues(t *testing.T) {
 	values := []Value{
 		String("z"), Int(0), String("a"), Null(), Bool(true), Time(time.UnixMilli(0)),
@@ -57,6 +59,7 @@ func TestSortComparisonIsTransitiveForMixedValues(t *testing.T) {
 	}
 }
 
+// TestCompileQueryRejectsDuplicateSortPaths checks that query compilation rejects repeated sort fields.
 func TestCompileQueryRejectsDuplicateSortPaths(t *testing.T) {
 	_, err := CompileQuery(Filter{}, QueryOptions{Sort: []SortField{{Path: "rank", Direction: 1}, {Path: "rank", Direction: -1}}})
 	if !errors.Is(err, ErrInvalidFilter) {
@@ -64,6 +67,7 @@ func TestCompileQueryRejectsDuplicateSortPaths(t *testing.T) {
 	}
 }
 
+// TestZeroQuerySpecIsRejectedAtPublicExecutionBoundaries checks that uninitialized queries are rejected by collection operations and never match documents.
 func TestZeroQuerySpecIsRejectedAtPublicExecutionBoundaries(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -85,6 +89,7 @@ func TestZeroQuerySpecIsRejectedAtPublicExecutionBoundaries(t *testing.T) {
 	}
 }
 
+// TestCompileAndWireDecodeShareNestedValueLimits checks that query compilation and decoding enforce the same value size, array length, and nesting limits.
 func TestCompileAndWireDecodeShareNestedValueLimits(t *testing.T) {
 	tooManyItems := make([]Value, DefaultQueryLimits.MaxArrayItems+1)
 	for index := range tooManyItems {
@@ -119,6 +124,7 @@ func TestCompileAndWireDecodeShareNestedValueLimits(t *testing.T) {
 	}
 }
 
+// TestQueryIDsMustBeCanonicalAndNonZero checks that query compilation and decoding reject zero and noncanonical identifiers.
 func TestQueryIDsMustBeCanonicalAndNonZero(t *testing.T) {
 	for _, value := range []string{"00000000000000000000000000000000", "0000000000000000000000000000000A"} {
 		if _, err := CompileQuery(Filter{"_id": value}, QueryOptions{}); !errors.Is(err, ErrInvalidFilter) {

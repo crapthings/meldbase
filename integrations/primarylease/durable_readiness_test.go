@@ -11,6 +11,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// TestDurableConsumerPromotionReadinessRequiresExactDurableAckAndSourcePosition checks that promotion requires a matching consumer acknowledgement at the current source position.
 func TestDurableConsumerPromotionReadinessRequiresExactDurableAckAndSourcePosition(t *testing.T) {
 	source, err := meldbase.Open(filepath.Join(t.TempDir(), "source.meld2"))
 	if err != nil {
@@ -52,6 +53,7 @@ func TestDurableConsumerPromotionReadinessRequiresExactDurableAckAndSourcePositi
 	}
 }
 
+// receiveReadinessBatch receives a durable batch or fails on closure, error, or a one-second timeout.
 func receiveReadinessBatch(t *testing.T, subscription *meldbase.DurableDatabaseChangeSubscription) meldbase.DurableDatabaseChangeBatch {
 	t.Helper()
 	select {

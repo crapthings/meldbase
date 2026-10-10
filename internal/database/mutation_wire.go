@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// DecodeMutationSpecJSON validates and decodes a data-only mutation within the supplied limits.
 func DecodeMutationSpecJSON(data []byte, limits QueryLimits) (MutationSpec, error) {
 	limits = normalizedLimits(limits)
 	if len(data) > limits.MaxWireBytes {
@@ -79,6 +80,7 @@ func DecodeMutationSpecJSON(data []byte, limits QueryLimits) (MutationSpec, erro
 	return MutationSpec{operations: operations}, nil
 }
 
+// validateMutationPath rejects invalid paths, ID changes, and overlap with previous mutation paths.
 func validateMutationPath(path string, previous []string) error {
 	if err := validatePath(path); err != nil {
 		return fmt.Errorf("%w: invalid mutation path", ErrInvalidUpdate)
@@ -94,6 +96,7 @@ func validateMutationPath(path string, previous []string) error {
 	return nil
 }
 
+// allowOnly rejects JSON fields outside the supplied set of allowed names.
 func allowOnly(fields map[string]json.RawMessage, allowed ...string) error {
 	set := make(map[string]struct{}, len(allowed))
 	for _, field := range allowed {
@@ -106,6 +109,8 @@ func allowOnly(fields map[string]json.RawMessage, allowed ...string) error {
 	}
 	return nil
 }
+
+// updateRequired strictly decodes a required mutation field into its target.
 func updateRequired[T any](fields map[string]json.RawMessage, name string, target *T) error {
 	raw, ok := fields[name]
 	if !ok {

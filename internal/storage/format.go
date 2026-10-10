@@ -10,63 +10,103 @@ import (
 )
 
 const (
-	PageSize       = 16 * 1024
+	// PageSize is the byte size of every stored page.
+	PageSize = 16 * 1024
+	// PageHeaderSize is the byte size of a data page header.
 	PageHeaderSize = 64
+	// MetaHeaderSize is the byte size of the metadata header.
 	MetaHeaderSize = 256
-	FormatVersion  = 3
+	// FormatVersion identifies the current on-disk format revision.
+	FormatVersion = 3
 )
 
 var (
-	ErrCorrupt            = errors.New("meldbase storage: corrupt database")
-	ErrUnsupportedFormat  = errors.New("meldbase storage: unsupported format version")
+	// ErrCorrupt reports invalid stored data.
+	ErrCorrupt = errors.New("meldbase storage: corrupt database")
+	// ErrUnsupportedFormat reports a format revision this binary cannot read.
+	ErrUnsupportedFormat = errors.New("meldbase storage: unsupported format version")
+	// ErrUnsupportedFeature reports a required feature this binary does not understand.
 	ErrUnsupportedFeature = errors.New("meldbase storage: unsupported required feature")
-	metaMagic             = [8]byte{'M', 'E', 'L', 'D', 'M', 'T', '2', 0}
-	pageMagic             = [8]byte{'M', 'E', 'L', 'D', 'P', 'G', '2', 0}
-	crcTable              = crc32.MakeTable(crc32.Castagnoli)
+	// metaMagic identifies metadata pages.
+	metaMagic = [8]byte{'M', 'E', 'L', 'D', 'M', 'T', '2', 0}
+	// pageMagic identifies data pages.
+	pageMagic = [8]byte{'M', 'E', 'L', 'D', 'P', 'G', '2', 0}
+	// crcTable provides the CRC-32C table for data page checksums.
+	crcTable = crc32.MakeTable(crc32.Castagnoli)
 )
 
 const (
+	// RequiredFeatureShadowIndexBuilds marks stored background index build records.
+	//
 	// Required feature bits must be understood before any generation is opened.
 	RequiredFeatureShadowIndexBuilds uint64 = 1 << 0
-	RequiredFeatureCompoundIndexes   uint64 = 1 << 1
-	// RequiredFeatureIndexBuildAppliedRoot means catch-up build records protect
-	// the exact CatalogRoot represented by their AppliedSequence watermark.
+	// RequiredFeatureCompoundIndexes marks indexes with multiple ordered fields.
+	RequiredFeatureCompoundIndexes uint64 = 1 << 1
+	// RequiredFeatureIndexBuildAppliedRoot marks index builds that retain their last applied catalog root.
 	RequiredFeatureIndexBuildAppliedRoot uint64 = 1 << 2
-	SupportedRequiredFeatures            uint64 = RequiredFeatureShadowIndexBuilds | RequiredFeatureCompoundIndexes | RequiredFeatureIndexBuildAppliedRoot
+	// SupportedRequiredFeatures lists the required features this binary understands.
+	SupportedRequiredFeatures uint64 = RequiredFeatureShadowIndexBuilds | RequiredFeatureCompoundIndexes | RequiredFeatureIndexBuildAppliedRoot
+	// OptionalFeaturePersistentFreeSpace marks a stored index of reusable pages.
+	//
 	// Unknown optional bits are preserved and ignored. A writer may only alter
 	// bits it owns; this permits older binaries to carry future acceleration
 	// metadata through a normal commit without treating it as allocation truth.
 	OptionalFeaturePersistentFreeSpace uint64 = 1 << 0
-	SupportedOptionalFeatures          uint64 = OptionalFeaturePersistentFreeSpace
+	// SupportedOptionalFeatures lists the optional features this binary understands.
+	SupportedOptionalFeatures uint64 = OptionalFeaturePersistentFreeSpace
 )
 
+// PageType identifies the kind of content stored in a page.
 type PageType uint8
 
 const (
+	// PageDatabaseRoot marks the page containing database root pointers.
 	PageDatabaseRoot PageType = 1 + iota
+	// PageCatalogBranch marks an internal collection catalog node.
 	PageCatalogBranch
+	// PageCatalogLeaf marks a collection catalog leaf.
 	PageCatalogLeaf
+	// PagePrimaryBranch marks an internal document index node.
 	PagePrimaryBranch
+	// PagePrimaryLeaf marks a document index leaf.
 	PagePrimaryLeaf
+	// PageSecondaryBranch marks an internal secondary index node.
 	PageSecondaryBranch
+	// PageSecondaryLeaf marks a secondary index leaf.
 	PageSecondaryLeaf
+	// PageDocumentOverflow stores document bytes that do not fit in a leaf.
 	PageDocumentOverflow
+	// PageCommitLogBranch marks an internal commit log node.
 	PageCommitLogBranch
+	// PageCommitLogLeaf marks a commit log leaf.
 	PageCommitLogLeaf
+	// PageCommitOverflow stores commit bytes that do not fit in a leaf.
 	PageCommitOverflow
+	// PageFreeSpaceBranch marks an internal free space index node.
 	PageFreeSpaceBranch
+	// PageFreeSpaceLeaf marks a free space index leaf.
 	PageFreeSpaceLeaf
+	// PageIndexCatalogBranch marks an internal index definition catalog node.
 	PageIndexCatalogBranch
+	// PageIndexCatalogLeaf marks an index definition catalog leaf.
 	PageIndexCatalogLeaf
+	// PageOrderBranch marks an internal insertion order index node.
 	PageOrderBranch
+	// PageOrderLeaf marks an insertion order index leaf.
 	PageOrderLeaf
+	// PageSystemBranch marks an internal system record index node.
 	PageSystemBranch
+	// PageSystemLeaf marks a system record index leaf.
 	PageSystemLeaf
+	// PageSystemOverflow stores system record bytes that do not fit in a leaf.
 	PageSystemOverflow
+	// PageIndexBuildCatalogBranch marks an internal index build catalog node.
 	PageIndexBuildCatalogBranch
+	// PageIndexBuildCatalogLeaf marks an index build catalog leaf.
 	PageIndexBuildCatalogLeaf
 )
 
+// Meta describes a published database version and its storage bounds.
 type Meta struct {
 	DatabaseID             [16]byte
 	Generation             uint64
@@ -78,9 +118,10 @@ type Meta struct {
 	OptionalFeatures       uint64
 }
 
-// MetaEnvelope contains only fields whose byte positions are frozen for
-// format negotiation. It can be decoded from a checksum-valid future revision
-// without interpreting that revision's page graph.
+// MetaEnvelope holds the header fields used to identify a database file format.
+//
+// These fields retain their byte positions across revisions and can be read
+// from a checksum-valid future revision without interpreting its page graph.
 type MetaEnvelope struct {
 	Revision          uint16
 	HeaderSize        uint16
@@ -94,6 +135,7 @@ type MetaEnvelope struct {
 	OptionalFeatures  uint64
 }
 
+// Page holds a data page header and its payload.
 type Page struct {
 	Type         PageType
 	Flags        uint8
@@ -105,6 +147,7 @@ type Page struct {
 	Payload      []byte
 }
 
+// DatabaseRoot locates the stored trees belonging to one committed database version.
 type DatabaseRoot struct {
 	CommitSequence         uint64
 	CatalogRoot            uint64
@@ -117,6 +160,7 @@ type DatabaseRoot struct {
 	IndexBuildCatalogRoot  uint64
 }
 
+// EncodeMeta validates and encodes database metadata with its checksum.
 func EncodeMeta(meta Meta) ([]byte, error) {
 	if unsupported := meta.RequiredFeatures &^ SupportedRequiredFeatures; unsupported != 0 {
 		return nil, fmt.Errorf("%w: 0x%x", ErrUnsupportedFeature, unsupported)
@@ -142,6 +186,7 @@ func EncodeMeta(meta Meta) ([]byte, error) {
 	return page, nil
 }
 
+// DecodeMeta validates and reads metadata in the supported format.
 func DecodeMeta(page []byte) (Meta, error) {
 	// The magic, full-page SHA-256 envelope and checksum location are stable
 	// across future  revisions. Validate that envelope before classifying a
@@ -176,9 +221,9 @@ func DecodeMeta(page []byte) (Meta, error) {
 	return meta, nil
 }
 
-// InspectMetaEnvelope validates only the stable magic/full-page checksum
-// envelope and returns negotiation fields even when Revision is newer than this
-// binary. Callers must not treat it as validation of the referenced page graph.
+// InspectMetaEnvelope reads database header fields after checking the file signature and checksum.
+//
+// It can read these fields even when the revision is newer than this binary. Callers must not treat it as validation of the referenced page graph.
 func InspectMetaEnvelope(page []byte) (MetaEnvelope, error) {
 	if len(page) != PageSize || string(page[:8]) != string(metaMagic[:]) {
 		return MetaEnvelope{}, ErrCorrupt
@@ -198,6 +243,7 @@ func InspectMetaEnvelope(page []byte) (MetaEnvelope, error) {
 	return envelope, nil
 }
 
+// EncodePage validates and encodes a data page with its checksum.
 func EncodePage(value Page) ([]byte, error) {
 	if value.Type < PageDatabaseRoot || value.Type > PageIndexBuildCatalogLeaf || value.ID < 2 ||
 		value.Generation == 0 || len(value.Payload) > PageSize-PageHeaderSize {
@@ -219,14 +265,17 @@ func EncodePage(value Page) ([]byte, error) {
 	return page, nil
 }
 
+// DecodePage validates a data page and copies its payload.
 func DecodePage(page []byte, expectedID uint64) (Page, error) {
 	return decodePage(page, expectedID, true)
 }
 
+// decodePageView validates a data page while sharing its input payload bytes.
 func decodePageView(page []byte, expectedID uint64) (Page, error) {
 	return decodePage(page, expectedID, false)
 }
 
+// decodePage validates a data page and optionally copies its payload.
 func decodePage(page []byte, expectedID uint64, copyPayload bool) (Page, error) {
 	if len(page) != PageSize || string(page[:8]) != string(pageMagic[:]) ||
 		binary.LittleEndian.Uint16(page[8:10]) != FormatVersion ||
@@ -260,6 +309,7 @@ func decodePage(page []byte, expectedID uint64, copyPayload bool) (Page, error) 
 	return result, nil
 }
 
+// EncodeDatabaseRoot encodes database root pointers as a data page.
 func EncodeDatabaseRoot(pageID, generation uint64, root DatabaseRoot) ([]byte, error) {
 	if root.OldestRetainedSequence > root.CommitSequence ||
 		(root.CommitSequence == 0 && (root.CatalogRoot != 0 || root.CommitLogRoot != 0 || root.FreeSpaceRoot != 0 || root.IndexBuildCatalogRoot != 0)) {
@@ -278,6 +328,7 @@ func EncodeDatabaseRoot(pageID, generation uint64, root DatabaseRoot) ([]byte, e
 	return EncodePage(Page{Type: PageDatabaseRoot, ID: pageID, Generation: generation, BornSequence: root.CommitSequence, ItemCount: 1, Payload: payload})
 }
 
+// DecodeDatabaseRoot validates and reads a database root page.
 func DecodeDatabaseRoot(page []byte, expectedID uint64) (DatabaseRoot, Page, error) {
 	decoded, err := DecodePage(page, expectedID)
 	if err != nil || decoded.Type != PageDatabaseRoot || decoded.Flags != 0 || decoded.ItemCount != 1 || decoded.Link != 0 || len(decoded.Payload) != 128 || !allZero(decoded.Payload[72:]) {
@@ -300,6 +351,7 @@ func DecodeDatabaseRoot(page []byte, expectedID uint64) (DatabaseRoot, Page, err
 	return root, decoded, nil
 }
 
+// validMeta checks database identity, version bounds, and the root page location.
 func validMeta(meta Meta) bool {
 	if allZero(meta.DatabaseID[:]) || meta.Generation == 0 || meta.PhysicalPageCount < 2 ||
 		meta.OldestRetainedSequence > meta.CommitSequence {
@@ -311,6 +363,7 @@ func validMeta(meta Meta) bool {
 	return meta.RootPage >= 2 && meta.RootPage < meta.PhysicalPageCount && meta.CommitSequence > 0
 }
 
+// metaChecksum hashes a metadata page with its checksum field treated as zero.
 func metaChecksum(page []byte) [32]byte {
 	hash := sha256.New()
 	_, _ = hash.Write(page[:224])
@@ -322,6 +375,7 @@ func metaChecksum(page []byte) [32]byte {
 	return result
 }
 
+// pageChecksum computes CRC-32C with the checksum field treated as zero.
 func pageChecksum(page []byte) uint32 {
 	checksum := crc32.Update(0, crcTable, page[:56])
 	var zero [4]byte
@@ -329,6 +383,7 @@ func pageChecksum(page []byte) uint32 {
 	return crc32.Update(checksum, crcTable, page[60:])
 }
 
+// allZero reports whether every byte is zero.
 func allZero(value []byte) bool {
 	var found byte
 	for _, item := range value {
@@ -337,6 +392,7 @@ func allZero(value []byte) bool {
 	return found == 0
 }
 
+// equalBytes reports whether two byte slices have identical contents.
 func equalBytes(left, right []byte) bool {
 	if len(left) != len(right) {
 		return false

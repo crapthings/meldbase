@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// TestReactiveQueryInitialRelevantAndIrrelevantChanges checks that a query subscription sends an initial snapshot and updates only when matching results change.
 func TestReactiveQueryInitialRelevantAndIrrelevantChanges(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -46,6 +47,7 @@ func TestReactiveQueryInitialRelevantAndIrrelevantChanges(t *testing.T) {
 	}
 }
 
+// TestReactiveQueryFailsBoundedSlowConsumer checks that a full snapshot queue terminates its subscription with a slow-consumer error.
 func TestReactiveQueryFailsBoundedSlowConsumer(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -70,6 +72,7 @@ func TestReactiveQueryFailsBoundedSlowConsumer(t *testing.T) {
 	}
 }
 
+// TestAuthorizationConstraintRunsBeforeCallerPagination checks that authorization filters results before the caller limit is applied.
 func TestAuthorizationConstraintRunsBeforeCallerPagination(t *testing.T) {
 	documents := []Document{
 		{"_id": String("a"), "workspace": String("other"), "rank": Int(1)},
@@ -88,6 +91,7 @@ func TestAuthorizationConstraintRunsBeforeCallerPagination(t *testing.T) {
 	}
 }
 
+// receiveSnapshot waits for a query snapshot and fails the test if the channel closes or times out.
 func receiveSnapshot(t *testing.T, snapshots <-chan QuerySnapshot) QuerySnapshot {
 	t.Helper()
 	select {

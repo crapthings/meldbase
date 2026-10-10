@@ -23,13 +23,19 @@ import (
 )
 
 const (
+	// anchorTLSFileMaximum limits TLS certificate and CA file sizes.
 	anchorTLSFileMaximum = 1 << 20
+	// anchorKeyFileMaximum limits encoded HMAC key file sizes.
 	anchorKeyFileMaximum = 1024
 )
 
+// anchorKeyFlags collects repeated HMAC key file specifications.
 type anchorKeyFlags []string
 
+// String joins the configured key file specifications with commas.
 func (values *anchorKeyFlags) String() string { return strings.Join(*values, ",") }
+
+// Set appends a nonempty key file specification.
 func (values *anchorKeyFlags) Set(value string) error {
 	if value == "" {
 		return errors.New("anchor key specification is empty")
@@ -38,6 +44,7 @@ func (values *anchorKeyFlags) Set(value string) error {
 	return nil
 }
 
+// anchorServeOptions configures one anchor member's storage, identity, TLS, and shutdown.
 type anchorServeOptions struct {
 	address         string
 	directory       string
@@ -52,12 +59,14 @@ type anchorServeOptions struct {
 	ready           chan<- net.Addr
 }
 
+// runAnchorServe runs an anchor member until an interrupt or termination signal requests shutdown.
 func runAnchorServe(args []string, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return runAnchorServeContext(ctx, args, stdout, stderr)
 }
 
+// runAnchorServeContext parses anchor member settings and starts the configured service.
 func runAnchorServeContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("anchor-serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -107,6 +116,7 @@ func runAnchorServeContext(ctx context.Context, args []string, stdout, stderr io
 	return serveAnchor(ctx, options, stdout)
 }
 
+// serveAnchor serves one persistent anchor member over mutually authenticated TLS until shutdown.
 func serveAnchor(ctx context.Context, options anchorServeOptions, stdout io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -160,11 +170,13 @@ func serveAnchor(ctx context.Context, options anchorServeOptions, stdout io.Writ
 	}
 }
 
+// anchorServiceHandler adds health endpoints and shutdown readiness to the anchor API.
 type anchorServiceHandler struct {
 	api      http.Handler
 	draining atomic.Bool
 }
 
+// ServeHTTP answers health probes and forwards other requests to the anchor API.
 func (handler *anchorServiceHandler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
 	response.Header().Set("X-Content-Type-Options", "nosniff")
@@ -185,6 +197,7 @@ func (handler *anchorServiceHandler) ServeHTTP(response http.ResponseWriter, req
 	handler.api.ServeHTTP(response, request)
 }
 
+// validateAnchorDirectory requires an existing directory with no group or other user permissions.
 func validateAnchorDirectory(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -196,6 +209,7 @@ func validateAnchorDirectory(path string) error {
 	return nil
 }
 
+// loadAnchorKeys reads uniquely named HMAC secrets from bounded private base64 files.
 func loadAnchorKeys(specifications []string) (map[string][]byte, error) {
 	if len(specifications) < 1 || len(specifications) > 16 {
 		return nil, errors.New("anchor-serve accepts between 1 and 16 HMAC keys")
@@ -226,10 +240,12 @@ func loadAnchorKeys(specifications []string) (map[string][]byte, error) {
 	return keys, nil
 }
 
+// loadAnchorCertificate loads a certificate and private key for TLS server authentication.
 func loadAnchorCertificate(certificatePath, privateKeyPath string) (tls.Certificate, error) {
 	return loadAnchorCertificateForUsage(certificatePath, privateKeyPath, x509.ExtKeyUsageServerAuth, "server")
 }
 
+// loadAnchorClientCAs loads trusted client certificate authorities from a bounded PEM file.
 func loadAnchorClientCAs(path string) (*x509.CertPool, error) {
 	raw, err := readAnchorFile(path, anchorTLSFileMaximum, false)
 	if err != nil {
@@ -242,6 +258,7 @@ func loadAnchorClientCAs(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
+// readAnchorFile reads a bounded regular file while checking its identity and optional private permissions.
 func readAnchorFile(path string, maximum int64, private bool) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maximum {

@@ -19,13 +19,16 @@ import (
 	"github.com/crapthings/meldbase/internal/qualification"
 )
 
+// anchorHistoryHelperEnvironment selects the subprocess helper mode for anchor history tests.
 const anchorHistoryHelperEnvironment = "MELDBASE_ANCHOR_HISTORY_HELPER"
 
+// anchorHistoryProcessResult records the outcome of an anchor update performed by a test subprocess.
 type anchorHistoryProcessResult struct {
 	Outcome string `json:"outcome"`
 	Error   string `json:"error,omitempty"`
 }
 
+// TestAnchorHistoryProcessHelper waits for the parent signal before updating an anchor and writing its result.
 func TestAnchorHistoryProcessHelper(t *testing.T) {
 	if os.Getenv(anchorHistoryHelperEnvironment) != "1" {
 		return
@@ -84,6 +87,7 @@ func TestAnchorHistoryProcessHelper(t *testing.T) {
 	}
 }
 
+// TestCrossedWritersProduceLinearizableMultiProcessHistory checks that competing subprocess updates produce one winner and a history consistent with sequential execution.
 func TestCrossedWritersProduceLinearizableMultiProcessHistory(t *testing.T) {
 	nodes := newTestNodes(t, 3)
 	for _, node := range nodes {
@@ -188,6 +192,7 @@ func TestCrossedWritersProduceLinearizableMultiProcessHistory(t *testing.T) {
 	}
 }
 
+// waitForHistoryHelpers waits up to ten seconds for all test subprocesses to publish readiness files.
 func waitForHistoryHelpers(t *testing.T, paths []string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

@@ -3,7 +3,9 @@ import test from "node:test";
 import { LocalCollection } from "./local.js";
 import type { Document } from "./index.js";
 
+/** Waits for queued microtasks in local subscription tests. */
 const tick = () => new Promise<void>((resolve) => queueMicrotask(resolve));
+/** Formats a test number as a lowercase hexadecimal document ID. */
 const id = (value: number) => value.toString(16).padStart(32, "0");
 
 test("live query emits initial and changed snapshots, not irrelevant writes", async () => {

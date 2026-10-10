@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestDocumentTransactionGroupPublishesOneGenerationWithOrderedHistory checks that one physical publication preserves ordered commits and their historical snapshots.
 func TestDocumentTransactionGroupPublishesOneGenerationWithOrderedHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "group.meld2")
 	file, initial, err := Open(path)
@@ -89,6 +90,7 @@ func TestDocumentTransactionGroupPublishesOneGenerationWithOrderedHistory(t *tes
 	}
 }
 
+// TestDocumentTransactionGroupRejectsWholeGroupBeforePublication checks that an invalid transaction leaves the entire group unpublished.
 func TestDocumentTransactionGroupRejectsWholeGroupBeforePublication(t *testing.T) {
 	file, initial, err := Open(filepath.Join(t.TempDir(), "group-reject.meld2"))
 	if err != nil {
@@ -113,6 +115,7 @@ func TestDocumentTransactionGroupRejectsWholeGroupBeforePublication(t *testing.T
 	}
 }
 
+// TestENOSPCDocumentTransactionGroupNeverPublishesPrefix checks that disk-full faults recover either the whole transaction group or none of it.
 func TestENOSPCDocumentTransactionGroupNeverPublishesPrefix(t *testing.T) {
 	for _, point := range commitFaultPoints() {
 		t.Run(faultPointName(point), func(t *testing.T) {

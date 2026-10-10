@@ -5,22 +5,30 @@ import (
 	"fmt"
 )
 
+// MaxAnchorHistoryOperations bounds the number of operations searched by the history checker.
 const MaxAnchorHistoryOperations = 24
 
+// AnchorHistoryOperationKind identifies an anchor read or advance.
 type AnchorHistoryOperationKind string
 
 const (
-	AnchorHistoryLoad    AnchorHistoryOperationKind = "load"
+	// AnchorHistoryLoad marks an anchor read.
+	AnchorHistoryLoad AnchorHistoryOperationKind = "load"
+	// AnchorHistoryAdvance marks an attempted anchor advance.
 	AnchorHistoryAdvance AnchorHistoryOperationKind = "advance"
 )
 
+// AnchorHistoryOutcome records whether an operation reported success or failure.
 type AnchorHistoryOutcome string
 
 const (
+	// AnchorHistorySucceeded marks an operation that reported success.
 	AnchorHistorySucceeded AnchorHistoryOutcome = "succeeded"
-	AnchorHistoryFailed    AnchorHistoryOutcome = "failed"
+	// AnchorHistoryFailed marks an operation that reported failure.
+	AnchorHistoryFailed AnchorHistoryOutcome = "failed"
 )
 
+// AnchorHistoryValue represents a stored anchor or its absence in the reference model.
 type AnchorHistoryValue struct {
 	Exists         bool     `json:"exists"`
 	DatabaseID     [16]byte `json:"databaseId"`
@@ -28,6 +36,7 @@ type AnchorHistoryValue struct {
 	Generation     uint64   `json:"generation"`
 }
 
+// AnchorHistoryOperation records an operation's observed result and invocation interval.
 type AnchorHistoryOperation struct {
 	ID      string                     `json:"id"`
 	Kind    AnchorHistoryOperationKind `json:"kind"`
@@ -37,16 +46,19 @@ type AnchorHistoryOperation struct {
 	Value   AnchorHistoryValue         `json:"value"`
 }
 
+// AnchorHistory contains an initial anchor state and the operations to check.
 type AnchorHistory struct {
 	Initial    AnchorHistoryValue       `json:"initial"`
 	Operations []AnchorHistoryOperation `json:"operations"`
 }
 
+// AnchorHistoryStep identifies an operation in a valid ordering and whether an uncertain write took effect.
 type AnchorHistoryStep struct {
 	OperationID      string `json:"operationId"`
 	AmbiguousApplied bool   `json:"ambiguousApplied"`
 }
 
+// AnchorHistoryCheck reports whether a history admits a valid sequential ordering.
 type AnchorHistoryCheck struct {
 	Linearizable   bool                `json:"linearizable"`
 	ExploredStates uint64              `json:"exploredStates"`
@@ -54,10 +66,11 @@ type AnchorHistoryCheck struct {
 	Violation      string              `json:"violation,omitempty"`
 }
 
-// CheckAnchorHistory checks a bounded monotonic-register history. Failed
-// advances are ambiguous: each may linearize as either a durable transition or
-// a no-op. Failed loads are observational no-ops. Invoke/Return are unique
-// controller-assigned event ordinals, not wall-clock timestamps.
+// CheckAnchorHistory checks whether anchor operations can be ordered without violating monotonic updates.
+//
+// A failed advance may have taken effect or left the anchor unchanged. Failed
+// loads leave it unchanged. Invoke and Return are unique controller-assigned
+// event numbers rather than wall-clock timestamps.
 func CheckAnchorHistory(history AnchorHistory) (AnchorHistoryCheck, error) {
 	if err := validateAnchorHistory(history); err != nil {
 		return AnchorHistoryCheck{}, err
@@ -113,11 +126,13 @@ func CheckAnchorHistory(history AnchorHistory) (AnchorHistoryCheck, error) {
 	return check, nil
 }
 
+// anchorHistoryTransition represents a possible state after one observed operation.
 type anchorHistoryTransition struct {
 	value            AnchorHistoryValue
 	ambiguousApplied bool
 }
 
+// anchorHistoryTransitions lists the state changes consistent with an operation's result.
 func anchorHistoryTransitions(current AnchorHistoryValue, operation AnchorHistoryOperation) []anchorHistoryTransition {
 	switch operation.Kind {
 	case AnchorHistoryLoad:
@@ -146,6 +161,7 @@ func anchorHistoryTransitions(current AnchorHistoryValue, operation AnchorHistor
 	}
 }
 
+// advanceAnchorHistoryValue accepts a target only when it preserves database identity and never moves history backward.
 func advanceAnchorHistoryValue(current, target AnchorHistoryValue) (AnchorHistoryValue, bool) {
 	if !target.Exists {
 		return AnchorHistoryValue{}, false
@@ -159,6 +175,7 @@ func advanceAnchorHistoryValue(current, target AnchorHistoryValue) (AnchorHistor
 	return target, true
 }
 
+// validateAnchorHistory checks operation limits, unique identifiers, intervals, and recorded values.
 func validateAnchorHistory(history AnchorHistory) error {
 	if !validAnchorHistoryValue(history.Initial) {
 		return errors.New("anchor history has an invalid initial value")
@@ -210,6 +227,7 @@ func validateAnchorHistory(history AnchorHistory) error {
 	return nil
 }
 
+// validAnchorHistoryValue checks an absent value or a nonzero identity with generation beyond its commit sequence.
 func validAnchorHistoryValue(value AnchorHistoryValue) bool {
 	if !value.Exists {
 		return value == (AnchorHistoryValue{})

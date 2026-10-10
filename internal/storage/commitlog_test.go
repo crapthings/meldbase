@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestCommitLogIsAtomicOrderedAndSupportsOverflow checks persisted commit order, large change images, and isolation of earlier log roots.
 func TestCommitLogIsAtomicOrderedAndSupportsOverflow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commit-log.meld2")
 	file, _, err := Open(path)
@@ -81,6 +82,7 @@ func TestCommitLogIsAtomicOrderedAndSupportsOverflow(t *testing.T) {
 	}
 }
 
+// TestCommitChangePathsHaveCanonicalEncoding checks that encoded change paths are sorted and deduplicated.
 func TestCommitChangePathsHaveCanonicalEncoding(t *testing.T) {
 	change := CommitChange{
 		CollectionID: 1, DocumentID: [16]byte{1}, Operation: CommitUpdate,
@@ -105,6 +107,7 @@ func TestCommitChangePathsHaveCanonicalEncoding(t *testing.T) {
 	}
 }
 
+// TestCatalogChangeCarriesNameWithoutInflatingDocumentChanges checks that collection names are stored only in catalog changes.
 func TestCatalogChangeCarriesNameWithoutInflatingDocumentChanges(t *testing.T) {
 	catalog := CommitChange{CollectionID: 7, CollectionName: "tasks", Operation: CommitCatalog, ChangedPaths: []string{"_catalog"}, After: []byte("meta")}
 	encodedCatalog, err := encodeCommitChange(catalog)
@@ -129,6 +132,7 @@ func TestCatalogChangeCarriesNameWithoutInflatingDocumentChanges(t *testing.T) {
 	}
 }
 
+// TestCommitRejectsNonCatalogHistoricalRootWithoutPublishing checks that a commit with a noncatalog historical root is rejected without advancing the sequence.
 func TestCommitRejectsNonCatalogHistoricalRootWithoutPublishing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-catalog-root.meld2")
 	file, _, err := Open(path)
@@ -159,6 +163,7 @@ func TestCommitRejectsNonCatalogHistoricalRootWithoutPublishing(t *testing.T) {
 	}
 }
 
+// randomTransactionID generates a random transaction identifier or fails the test.
 func randomTransactionID(t *testing.T) [16]byte {
 	t.Helper()
 	var result [16]byte

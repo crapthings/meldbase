@@ -4,6 +4,7 @@ import { loadDiagnostics, loadHistory, loadIndexCatalog, streamStats } from "./a
 import type { AdminSample, ConnectionState, DiagnosticEvent, IndexCatalogEntry } from "./types";
 import { number, object } from "./utils";
 
+/** Holds dashboard connection state, sampled data, and actions for connecting and refreshing diagnostics. */
 type DashboardState = {
   token: string;
   rememberSession: boolean;
@@ -23,15 +24,24 @@ type DashboardState = {
   refreshDiagnostics: () => Promise<void>;
 };
 
+/** Cancels the current statistics stream. */
 let streamController: AbortController | null = null;
+/** Cancels the current dashboard connection attempt. */
 let connectController: AbortController | null = null;
+/** Cancels the current diagnostic fetch. */
 let diagnosticController: AbortController | null = null;
+/** Tracks the last diagnostic sequence requested by the dashboard. */
 let diagnosticAfter = 0;
+/** Identifies the diagnostic session whose events the dashboard retains. */
 let diagnosticSession = "";
+/** Prevents overlapping diagnostic refreshes. */
 let diagnosticsPending = false;
+/** Distinguishes current connection work from results of earlier sessions. */
 let activeSession = 0;
+/** Names the browser session storage entry for remembered admin credentials. */
 const dashboardSessionKey = "meldbase.admin.session.v1";
 
+/** Removes remembered admin credentials when browser storage is available. */
 function clearStoredSession(): void {
   try {
     window.sessionStorage.removeItem(dashboardSessionKey);
@@ -40,21 +50,25 @@ function clearStoredSession(): void {
   }
 }
 
+/** Checks whether the latest sample reports enabled diagnostics. */
 function diagnosticsEnabled(sample: AdminSample | undefined): boolean {
   return Boolean(object(sample?.stats).diagnostics && object(object(sample?.stats).diagnostics).enabled);
 }
 
+/** Formats diagnostic retention counters or reports that diagnostics are disabled. */
 function diagnosticStatus(sample: AdminSample | undefined): string {
   const diagnostics = object(object(sample?.stats).diagnostics);
   if (!diagnostics.enabled) return "disabled";
   return `${number(diagnostics.retained).toLocaleString()} retained · ${number(diagnostics.overwritten).toLocaleString()} overwritten`;
 }
 
+/** Appends a new sample sequence while retaining at most 120 samples. */
 function appendSample(samples: AdminSample[], sample: AdminSample): AdminSample[] {
   if (samples.at(-1)?.sequence === sample.sequence) return samples;
   return [...samples, sample].slice(-120);
 }
 
+/** Manages dashboard connections and sampled data with optional credential persistence for the browser session. */
 export const useDashboardStore = create<DashboardState>()(persist((set, get) => ({
   token: "",
   rememberSession: false,

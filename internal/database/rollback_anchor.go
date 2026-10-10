@@ -15,14 +15,19 @@ import (
 	"time"
 )
 
+// rollbackAnchorRecordVersion identifies the file anchor record revision.
 const rollbackAnchorRecordVersion uint32 = 2
+
+// rollbackAnchorMaximumBytes bounds the byte size of a file anchor record.
 const rollbackAnchorMaximumBytes int64 = 4096
 
+// fileRollbackAnchorStore saves rollback protection state in an atomically replaced file.
 type fileRollbackAnchorStore struct {
 	path string
 	gate chan struct{}
 }
 
+// rollbackAnchorRecord holds the versioned JSON fields and checksum of a saved anchor.
 type rollbackAnchorRecord struct {
 	Version               uint32 `json:"version"`
 	DatabaseID            string `json:"databaseId"`
@@ -31,9 +36,10 @@ type rollbackAnchorRecord struct {
 	Checksum              string `json:"checksum"`
 }
 
-// NewFileRollbackAnchorStore returns a fail-closed, atomically replaced anchor
-// file. The parent directory must already exist. For rollback protection, that
-// directory must be backed by storage trusted independently from the database.
+// NewFileRollbackAnchorStore creates a file-backed store for trusted database version limits.
+//
+// Updates replace the anchor atomically and reject invalid saved state.
+// The parent directory must exist on storage trusted independently from the database.
 func NewFileRollbackAnchorStore(path string) (RollbackAnchorStore, error) {
 	if path == "" {
 		return nil, errors.New("meldbase: empty rollback anchor path")
@@ -54,6 +60,7 @@ func NewFileRollbackAnchorStore(path string) (RollbackAnchorStore, error) {
 	return &fileRollbackAnchorStore{path: absolute, gate: gate}, nil
 }
 
+// Load reads and validates the saved rollback anchor while serializing store access.
 func (store *fileRollbackAnchorStore) Load(ctx context.Context) (RollbackAnchor, bool, error) {
 	if store == nil || store.path == "" || ctx == nil {
 		return RollbackAnchor{}, false, ErrRollbackAnchor
@@ -65,6 +72,7 @@ func (store *fileRollbackAnchorStore) Load(ctx context.Context) (RollbackAnchor,
 	return store.loadUnlocked(ctx)
 }
 
+// loadUnlocked reads and validates the anchor file while the caller owns the store gate.
 func (store *fileRollbackAnchorStore) loadUnlocked(ctx context.Context) (RollbackAnchor, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return RollbackAnchor{}, false, err
@@ -104,6 +112,7 @@ func (store *fileRollbackAnchorStore) loadUnlocked(ctx context.Context) (Rollbac
 	return anchor, true, nil
 }
 
+// Advance atomically saves an anchor without allowing database identity or version regression.
 func (store *fileRollbackAnchorStore) Advance(ctx context.Context, anchor RollbackAnchor) error {
 	if store == nil || store.path == "" || ctx == nil || !validRollbackAnchor(anchor) {
 		return ErrRollbackAnchor
@@ -193,6 +202,7 @@ func (store *fileRollbackAnchorStore) Advance(ctx context.Context, anchor Rollba
 	return nil
 }
 
+// acquire waits for exclusive store access or context cancellation.
 func (store *fileRollbackAnchorStore) acquire(ctx context.Context) error {
 	if store == nil || store.gate == nil || ctx == nil {
 		return ErrRollbackAnchor
@@ -205,18 +215,22 @@ func (store *fileRollbackAnchorStore) acquire(ctx context.Context) error {
 	}
 }
 
+// release returns exclusive access to the store gate.
 func (store *fileRollbackAnchorStore) release() {
 	store.gate <- struct{}{}
 }
 
+// RollbackAnchorStatus reports the single-file store's replica and quorum counts.
 func (*fileRollbackAnchorStore) RollbackAnchorStatus() RollbackAnchorStoreStatus {
 	return RollbackAnchorStoreStatus{Replicas: 1, Quorum: 1}
 }
 
+// encodeRollbackAnchorRecord converts an anchor into a versioned record with a checksum.
 func encodeRollbackAnchorRecord(anchor RollbackAnchor) rollbackAnchorRecord {
 	return rollbackAnchorRecord{Version: rollbackAnchorRecordVersion, DatabaseID: hex.EncodeToString(anchor.DatabaseID[:]), MinimumCommitSequence: anchor.MinimumCommitSequence, MinimumGeneration: anchor.MinimumGeneration, Checksum: rollbackAnchorChecksum(anchor)}
 }
 
+// decodeRollbackAnchorRecord validates record identity and checksum before returning an anchor.
 func decodeRollbackAnchorRecord(record rollbackAnchorRecord) (RollbackAnchor, error) {
 	if record.Version != rollbackAnchorRecordVersion || len(record.DatabaseID) != 32 || len(record.Checksum) != 64 {
 		return RollbackAnchor{}, fmt.Errorf("%w: invalid record identity", ErrRollbackAnchor)
@@ -233,6 +247,7 @@ func decodeRollbackAnchorRecord(record rollbackAnchorRecord) (RollbackAnchor, er
 	return anchor, nil
 }
 
+// rollbackAnchorChecksum hashes database identity and minimum versions into a hexadecimal checksum.
 func rollbackAnchorChecksum(anchor RollbackAnchor) string {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("meldbase-rollback-anchor-store\x00"))
@@ -245,11 +260,13 @@ func rollbackAnchorChecksum(anchor RollbackAnchor) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+// zeroDatabaseID reports whether a database identity is unset.
 func zeroDatabaseID(value [16]byte) bool {
 	var zero [16]byte
 	return value == zero
 }
 
+// validRollbackAnchor checks that an anchor has a database identity and physical generation.
 func validRollbackAnchor(anchor RollbackAnchor) bool {
 	// Commit sequence counts logical operations, while generation counts physical
 	// Meta publications. A group commit can advance several logical sequences
@@ -258,10 +275,12 @@ func validRollbackAnchor(anchor RollbackAnchor) bool {
 	return !zeroDatabaseID(anchor.DatabaseID) && anchor.MinimumGeneration > 0
 }
 
+// rollbackProtectionConfigured reports whether any rollback protection option was supplied.
 func rollbackProtectionConfigured(protection RollbackProtection) bool {
 	return !zeroDatabaseID(protection.ExpectedDatabaseID) || protection.MinimumCommitSequence > 0 || protection.MinimumGeneration > 0 || protection.AnchorStore != nil || protection.InitializeAnchor || protection.OperationTimeout != 0
 }
 
+// persistRollbackAnchor advances an anchor and verifies that its saved version reads back monotonically.
 func persistRollbackAnchor(ctx context.Context, store RollbackAnchorStore, anchor RollbackAnchor) (RollbackAnchor, error) {
 	if ctx == nil || store == nil || !validRollbackAnchor(anchor) {
 		return RollbackAnchor{}, ErrRollbackAnchor

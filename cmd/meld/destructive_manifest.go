@@ -18,9 +18,13 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// destructivePowerReceiptFlags collects receipt paths from repeated power-receipt flags.
 type destructivePowerReceiptFlags []string
 
+// String displays the collected power-receipt paths.
 func (values *destructivePowerReceiptFlags) String() string { return fmt.Sprint([]string(*values)) }
+
+// Set appends a nonempty power-receipt path.
 func (values *destructivePowerReceiptFlags) Set(value string) error {
 	if value == "" {
 		return errors.New("empty power receipt path")
@@ -29,6 +33,7 @@ func (values *destructivePowerReceiptFlags) Set(value string) error {
 	return nil
 }
 
+// runDestructiveManifestBuild assembles and publishes a fault-test manifest after checking its original evidence.
 func runDestructiveManifestBuild(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-manifest-build", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -269,6 +274,7 @@ func runDestructiveManifestBuild(args []string, stdout, stderr io.Writer) error 
 	return encoder.Encode(record)
 }
 
+// validateDestructiveReceiptIdentity requires a clean matching build, runtime, and target volume.
 func validateDestructiveReceiptIdentity(revision string, durability durabilityCheckResult, source, build string, modified bool,
 	goos, goarch, goVersion string, device uint64, filesystemType, filesystemName string, blockSize uint64) error {
 	if source != revision || build != revision || modified || goos != durability.GOOS || goarch != durability.GOARCH ||
@@ -279,6 +285,7 @@ func validateDestructiveReceiptIdentity(revision string, durability durabilityCh
 	return nil
 }
 
+// validateDestructiveProcessReceipt checks trial coverage and reproduces recovery reports from retained crash images.
 func validateDestructiveProcessReceipt(receipt destructiveProcessReceipt) error {
 	if receipt.SchemaVersion != destructiveProcessReceiptSchema || receipt.RequestedTrials < qualificationMinimumProcessTrials ||
 		receipt.CompletedTrials != receipt.RequestedTrials || len(receipt.Trials) != receipt.RequestedTrials ||
@@ -331,10 +338,12 @@ func validateDestructiveProcessReceipt(receipt destructiveProcessReceipt) error 
 	return nil
 }
 
+// validateDestructivePowerReceipt checks a power-recovery receipt using its own evidence for the aggregate hash.
 func validateDestructivePowerReceipt(receipt destructivePowerReceipt) error {
 	return validateDestructivePowerReceiptWithCanonicalEvidence(receipt, receipt.Evidence)
 }
 
+// validateDestructivePowerReceiptWithCanonicalEvidence checks power-recovery artifacts and hashes them with the supplied canonical evidence.
 func validateDestructivePowerReceiptWithCanonicalEvidence(receipt destructivePowerReceipt, canonicalEvidence destructivePowerEvidence) error {
 	trial, evidence := receipt.Trial, receipt.Evidence
 	if receipt.SchemaVersion != destructivePowerReceiptSchema || trial.Kind != qualificationTrialPower ||
@@ -423,6 +432,7 @@ func validateDestructivePowerReceiptWithCanonicalEvidence(receipt destructivePow
 	return nil
 }
 
+// hexDigest formats a SHA-256 digest as lowercase hexadecimal.
 func hexDigest(value [32]byte) string {
 	return fmt.Sprintf("%x", value[:])
 }

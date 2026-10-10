@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prints the required qualification inputs and exits with an argument error.
 usage() {
 	printf 'usage: %s ARTIFACTS_ROOT TARGET_DIR MELD_BINARY SOURCE_REVISION PLATFORM_CLASS CONTROLLER_METHOD OPERATOR_EVIDENCE [CONTROLLER_PUBLIC_KEY CONTROLLER_TARGET_IDENTITY_SHA256]\n' "$0" >&2
 	exit 2
@@ -8,14 +9,23 @@ usage() {
 
 [[ $# -eq 7 || $# -eq 9 ]] || usage
 
+# Holds the directory retaining qualification evidence.
 artifacts_root=$1
+# Holds the target volume directory used by the tests.
 target_dir=$2
+# Holds the Meldbase binary being qualified.
 meld_binary=$3
+# Identifies the source revision required by the qualification session.
 source_revision=$4
+# Labels the platform covered by this qualification session.
 platform_class=$5
+# Selects the interruption method recorded for power tests.
 controller_method=$6
+# Holds the operator evidence retained with the qualification artifacts.
 operator_evidence=$7
+# Holds the optional public key used to verify controller evidence.
 controller_public_key=${8:-}
+# Holds the optional digest identifying the controller target.
 controller_target_identity_sha256=${9:-}
 
 [[ "$source_revision" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]] || usage
@@ -36,8 +46,10 @@ fi
 
 artifacts_root=$(cd "$artifacts_root" && pwd -P)
 target_dir=$(cd "$target_dir" && pwd -P)
+# Resolves the directory containing the qualification binary.
 meld_binary_directory=$(cd "$(dirname "$meld_binary")" && pwd -P)
 meld_binary="$meld_binary_directory/$(basename "$meld_binary")"
+# Resolves the directory containing the operator evidence.
 operator_evidence_directory=$(cd "$(dirname "$operator_evidence")" && pwd -P)
 operator_evidence="$operator_evidence_directory/$(basename "$operator_evidence")"
 if [[ -n "$controller_public_key" ]]; then
@@ -78,12 +90,19 @@ fi
 umask 077
 mkdir -p "$artifacts_root/infrastructure" "$artifacts_root/receipts" "$artifacts_root/artifacts/process"
 
+# Names the captured qualification environment record.
 environment="$artifacts_root/infrastructure/qualification-environment.json"
+# Names the session plan used to track qualification progress.
 plan="$artifacts_root/.qualification-session/plan.json"
+# Names the target volume durability receipt.
 durability="$artifacts_root/receipts/durability-check.json"
+# Names the sustained storage workload receipt.
 soak="$artifacts_root/receipts/storage-soak.json"
+# Names the process interruption test receipt.
 process="$artifacts_root/receipts/process-kill.json"
+# Names the disk exhaustion test receipt.
 capacity="$artifacts_root/enospc-receipt.json"
+# Names the corruption test receipt.
 corruption="$artifacts_root/receipts/corruption.json"
 
 if [[ ! -e "$plan" ]]; then
@@ -103,19 +122,23 @@ if [[ ! -e "$plan" ]]; then
 		--source-revision "$source_revision" --platform-class "$platform_class" >/dev/null
 fi
 
+# Reads the current qualification session status.
 session_status() {
 	"$meld_binary" qualification-session-status --plan "$plan"
 }
 
+# Extracts a named integer from a session status record.
 status_field_number() {
 	local name=$1
 	sed -n 's/.*"'"$name"'":\([0-9][0-9]*\).*/\1/p'
 }
 
+# Extracts the next test kind from a session status record.
 status_next_kind() {
 	sed -n 's/.*"next":{[^}]*"kind":"\([a-z]*\)".*/\1/p'
 }
 
+# Registers a retained receipt when it exists and contains data.
 record_existing() {
 	local kind=$1
 	local receipt=$2
@@ -183,7 +206,9 @@ while :; do
 	esac
 done
 
+# Reads the final session status after the foundation tests.
 status=$(session_status)
+# Extracts the final number of completed qualification steps.
 completed=$(printf '%s\n' "$status" | status_field_number completed)
 if [[ -z "$completed" ]] || (( completed < 5 )) ||
 	{ ! grep -Fq '"kind":"power"' <<<"$status" && ! grep -Fq '"readyToSeal":true' <<<"$status"; }; then

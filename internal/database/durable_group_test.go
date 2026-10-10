@@ -11,6 +11,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestCommitChangeBatchesLockedPublishesOrderedLogicalBatches checks that one physical commit publishes ordered logical batches to collection watchers and database statistics.
 func TestCommitChangeBatchesLockedPublishesOrderedLogicalBatches(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "db-group.meld2"))
 	if err != nil {
@@ -77,6 +78,7 @@ func TestCommitChangeBatchesLockedPublishesOrderedLogicalBatches(t *testing.T) {
 	}
 }
 
+// TestCommitChangeBatchesLockedHonorsPerMemberPointPreconditions checks that grouped writes validate each member read and reject a stale group without publishing a prefix.
 func TestCommitChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "db-group-preconditions.meld2"))
 	if err != nil {
@@ -142,6 +144,7 @@ func TestCommitChangeBatchesLockedHonorsPerMemberPointPreconditions(t *testing.T
 	}
 }
 
+// testDocumentPrecondition builds an existence and content-hash precondition for a test document.
 func testDocumentPrecondition(t *testing.T, collection string, id DocumentID, document Document) storage.DocumentPrecondition {
 	t.Helper()
 	encoded, err := encodeStoredDocument(document)

@@ -8,6 +8,7 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+// TestAssessHealthSeparatesStatePressureAndWindowEvents checks that queue pressure and recent failures affect the appropriate health categories.
 func TestAssessHealthSeparatesStatePressureAndWindowEvents(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{
@@ -41,6 +42,7 @@ func TestAssessHealthSeparatesStatePressureAndWindowEvents(t *testing.T) {
 	}
 }
 
+// TestAssessHealthTreatsFailStopAsCriticalAndFreeSpaceFallbackAsDegraded checks that disabled writes or closure are critical while storage fallback and resource pressure are degraded.
 func TestAssessHealthTreatsFailStopAsCriticalAndFreeSpaceFallbackAsDegraded(t *testing.T) {
 	current := Sample{Stats: meldbase.DBStats{
 		WritesDisabled: true,
@@ -65,6 +67,7 @@ func TestAssessHealthTreatsFailStopAsCriticalAndFreeSpaceFallbackAsDegraded(t *t
 	}
 }
 
+// TestAssessHealthReportsRecentStorageLimitRejection checks that a new storage-limit rejection degrades storage health.
 func TestAssessHealthReportsRecentStorageLimitRejection(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, Storage: meldbase.StorageStats{StorageLimitRejections: 2}}}
@@ -76,6 +79,7 @@ func TestAssessHealthReportsRecentStorageLimitRejection(t *testing.T) {
 	}
 }
 
+// TestAssessHealthReportsCommitCoordinatorPressureAndRejection checks that commit queue pressure and new admission rejections affect database health.
 func TestAssessHealthReportsCommitCoordinatorPressureAndRejection(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, CommitCoordinator: meldbase.CommitCoordinatorStats{Enabled: true, PendingCapacity: 10, AdmissionRejected: 2}}}
@@ -93,6 +97,7 @@ func TestAssessHealthReportsCommitCoordinatorPressureAndRejection(t *testing.T) 
 	}
 }
 
+// TestAssessHealthReportsRecentPrimaryWriteFenceRejection checks that a new write-fence rejection degrades database health.
 func TestAssessHealthReportsRecentPrimaryWriteFenceRejection(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{Stats: meldbase.DBStats{StartedAt: started, PrimaryWriteFence: meldbase.PrimaryWriteFenceStats{
@@ -107,6 +112,7 @@ func TestAssessHealthReportsRecentPrimaryWriteFenceRejection(t *testing.T) {
 	}
 }
 
+// TestAssessHealthIncludesCentralDispatchPressure checks that a nearly full dispatch change queue makes realtime health critical.
 func TestAssessHealthIncludesCentralDispatchPressure(t *testing.T) {
 	current := Sample{Stats: meldbase.DBStats{Realtime: meldbase.RealtimeStats{
 		DispatchPendingChanges: 9, DispatchChangeCapacity: 10,
@@ -117,6 +123,7 @@ func TestAssessHealthIncludesCentralDispatchPressure(t *testing.T) {
 	}
 }
 
+// TestAssessHealthIncludesCentralDispatchBytePressure checks that a nearly full dispatch byte budget makes realtime health critical.
 func TestAssessHealthIncludesCentralDispatchBytePressure(t *testing.T) {
 	current := Sample{Stats: meldbase.DBStats{Realtime: meldbase.RealtimeStats{
 		DispatchPendingBytes: 9, DispatchByteCapacity: 10,
@@ -127,6 +134,7 @@ func TestAssessHealthIncludesCentralDispatchBytePressure(t *testing.T) {
 	}
 }
 
+// TestAssessHealthIncludesReactiveHubBytePressure checks that a nearly full reactive byte budget makes realtime health critical.
 func TestAssessHealthIncludesReactiveHubBytePressure(t *testing.T) {
 	current := Sample{Stats: meldbase.DBStats{Realtime: meldbase.RealtimeStats{
 		PendingBytes: 9, PendingByteCapacity: 10,
@@ -137,6 +145,7 @@ func TestAssessHealthIncludesReactiveHubBytePressure(t *testing.T) {
 	}
 }
 
+// TestAssessHealthIncludesDirectWatcherBytePressure checks that a nearly full watcher byte budget makes realtime health critical.
 func TestAssessHealthIncludesDirectWatcherBytePressure(t *testing.T) {
 	current := Sample{Stats: meldbase.DBStats{Realtime: meldbase.RealtimeStats{
 		WatcherPendingBytes: 9, WatcherByteCapacity: 10,
@@ -147,6 +156,7 @@ func TestAssessHealthIncludesDirectWatcherBytePressure(t *testing.T) {
 	}
 }
 
+// TestAssessHealthReportsRecentRollbackAnchorFailure checks that a new rollback anchor failure degrades durability health.
 func TestAssessHealthReportsRecentRollbackAnchorFailure(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{Stats: meldbase.DBStats{StartedAt: started}}
@@ -159,6 +169,7 @@ func TestAssessHealthReportsRecentRollbackAnchorFailure(t *testing.T) {
 	}
 }
 
+// TestAssessHealthDegradesForPersistentIndexBuildOperatorStates checks that failed index builds and build-owned retention pressure degrade storage health.
 func TestAssessHealthDegradesForPersistentIndexBuildOperatorStates(t *testing.T) {
 	current := Sample{Stats: meldbase.DBStats{
 		IndexBuilds: meldbase.IndexBuildStats{Persistent: 1, PersistentFailed: 1},
@@ -195,6 +206,7 @@ func TestAssessHealthDegradesForPersistentIndexBuildOperatorStates(t *testing.T)
 	}
 }
 
+// TestAssessHealthUsesSessionDeltasForTransportAndTransientEvents checks that recent transport failures degrade health and restart boundaries reset transient signals.
 func TestAssessHealthUsesSessionDeltasForTransportAndTransientEvents(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{
@@ -225,6 +237,7 @@ func TestAssessHealthUsesSessionDeltasForTransportAndTransientEvents(t *testing.
 	}
 }
 
+// TestHealthSeverityContract checks numeric health severity values and excludes unavailable health from that scale.
 func TestHealthSeverityContract(t *testing.T) {
 	for level, want := range map[HealthLevel]uint64{HealthHealthy: 0, HealthDegraded: 1, HealthCritical: 2} {
 		if got, ok := level.Severity(); !ok || got != want {
@@ -236,6 +249,7 @@ func TestHealthSeverityContract(t *testing.T) {
 	}
 }
 
+// TestAssessHealthDoesNotAllocate checks that health assessment uses no heap allocations for the tested samples.
 func TestAssessHealthDoesNotAllocate(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{Stats: meldbase.DBStats{StartedAt: started}, Server: &meldserver.ServerStats{StartedAt: started}}
@@ -248,6 +262,7 @@ func TestAssessHealthDoesNotAllocate(t *testing.T) {
 	}
 }
 
+// BenchmarkAssessHealth measures health assessment time and allocations with queue pressure and a recent busy response.
 func BenchmarkAssessHealth(b *testing.B) {
 	started := time.Unix(1_700_000_000, 0)
 	previous := Sample{Stats: meldbase.DBStats{StartedAt: started}, Server: &meldserver.ServerStats{StartedAt: started}}

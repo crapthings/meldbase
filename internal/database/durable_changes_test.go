@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestDurableCollectionChangesPersistAcrossReopenAndRequireAck checks that acknowledged collection-change checkpoints survive reopening and can be deleted.
 func TestDurableCollectionChangesPersistAcrossReopenAndRequireAck(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "durable-collection-changes.meld2")
 	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: CommitRetentionPolicy{MaxCommits: 2}})
@@ -86,6 +87,7 @@ func TestDurableCollectionChangesPersistAcrossReopenAndRequireAck(t *testing.T) 
 	}
 }
 
+// TestDurableCollectionChangesRejectUnsupportedAndUnsafeArguments checks that durable collection subscriptions reject memory databases, invalid names, and empty buffers.
 func TestDurableCollectionChangesRejectUnsupportedAndUnsafeArguments(t *testing.T) {
 	memory := New()
 	defer memory.Close()
@@ -107,6 +109,7 @@ func TestDurableCollectionChangesRejectUnsupportedAndUnsafeArguments(t *testing.
 	}
 }
 
+// receiveDurableChangeBatch waits for a durable collection-change batch and fails on subscription errors, closed channels, or timeout.
 func receiveDurableChangeBatch(t *testing.T, subscription *DurableChangeSubscription) DurableChangeBatch {
 	t.Helper()
 	select {

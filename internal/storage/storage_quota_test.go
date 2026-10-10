@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestStorageQuotaRejectsBeforePublicationWithoutFailStop checks that quota rejection leaves the file and committed root unchanged without making the database unusable.
 func TestStorageQuotaRejectsBeforePublicationWithoutFailStop(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "quota.meld2")
 	file, _, _, err := OpenWithOptions(path, OpenOptions{})
@@ -68,6 +69,7 @@ func TestStorageQuotaRejectsBeforePublicationWithoutFailStop(t *testing.T) {
 	}
 }
 
+// TestStorageQuotaStillAllowsReclaimedPageReuse checks that reclaimed pages allow another commit without growing a file already at its quota.
 func TestStorageQuotaStillAllowsReclaimedPageReuse(t *testing.T) {
 	file, _, _, err := OpenWithOptions(filepath.Join(t.TempDir(), "quota-reuse.meld2"), OpenOptions{})
 	if err != nil {
@@ -92,6 +94,7 @@ func TestStorageQuotaStillAllowsReclaimedPageReuse(t *testing.T) {
 	}
 }
 
+// TestInvalidStorageQuotaDoesNotCreateFile checks that an invalid file-size quota is rejected before creating the database file.
 func TestInvalidStorageQuotaDoesNotCreateFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-quota.meld2")
 	if _, _, _, err := OpenWithOptions(path, OpenOptions{MaxFileBytes: 2*PageSize + 1}); !errors.Is(err, ErrInvalidStorageLimit) {

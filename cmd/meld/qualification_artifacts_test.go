@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestQualificationArtifactIndexBuildAndVerifyExactTree checks that CLI indexing verifies the complete artifact tree and refuses overwrite or an index inside that tree.
 func TestQualificationArtifactIndexBuildAndVerifyExactTree(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "nested"), 0o700); err != nil {
@@ -56,6 +57,7 @@ func TestQualificationArtifactIndexBuildAndVerifyExactTree(t *testing.T) {
 	}
 }
 
+// TestQualificationArtifactIndexRejectsMutationMissingExtraAndWrongRevision checks that artifact verification rejects changed, missing, or extra files and an incorrect source revision.
 func TestQualificationArtifactIndexRejectsMutationMissingExtraAndWrongRevision(t *testing.T) {
 	root := t.TempDir()
 	artifact := filepath.Join(root, "artifact.bin")
@@ -104,6 +106,7 @@ func TestQualificationArtifactIndexRejectsMutationMissingExtraAndWrongRevision(t
 	}
 }
 
+// TestQualificationArtifactIndexRejectsLinksSpecialAndForgedPaths checks that artifact indexing rejects symbolic links, paths outside the root, and duplicate entries.
 func TestQualificationArtifactIndexRejectsLinksSpecialAndForgedPaths(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")
@@ -130,6 +133,7 @@ func TestQualificationArtifactIndexRejectsLinksSpecialAndForgedPaths(t *testing.
 	}
 }
 
+// TestQualificationArtifactDigestLookupRequiresUniqueContent checks that artifact lookup requires a unique checksum or a matching path suffix to resolve repeated content.
 func TestQualificationArtifactDigestLookupRequiresUniqueContent(t *testing.T) {
 	root := t.TempDir()
 	content := []byte("same receipt bytes\n")

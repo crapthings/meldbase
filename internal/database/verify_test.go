@@ -13,6 +13,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestVerifyFileAuditsBusinessGraphAndDoesNotMutateBytes checks that verification audits documents, indexes, and free space without changing file bytes or bypassing the writer lock.
 func TestVerifyFileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify.meld2")
 	db, err := Open(path)
@@ -69,6 +70,7 @@ func TestVerifyFileAuditsBusinessGraphAndDoesNotMutateBytes(t *testing.T) {
 	}
 }
 
+// TestVerifyFileAuditsCompoundAndPartialIndexContents checks that verification validates compound index entries for complete and missing document fields.
 func TestVerifyFileAuditsCompoundAndPartialIndexContents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify-compound.meld2")
 	db, err := Open(path)
@@ -98,6 +100,7 @@ func TestVerifyFileAuditsCompoundAndPartialIndexContents(t *testing.T) {
 	}
 }
 
+// TestVerifyFileAuditsCaughtUpCompoundIndexBuild checks that verification validates a compound index build against its retained catch-up catalog.
 func TestVerifyFileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify-index-build.meld2")
 	file, _, err := storage.Open(path)
@@ -177,6 +180,7 @@ func TestVerifyFileAuditsCaughtUpCompoundIndexBuild(t *testing.T) {
 	}
 }
 
+// TestVerifyFileTreatsReadyUniqueConflictAsValidPrivateState checks that duplicate keys in an unpublished unique index build do not make the database corrupt.
 func TestVerifyFileTreatsReadyUniqueConflictAsValidPrivateState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify-private-unique-conflict.meld2")
 	db, err := Open(path)
@@ -205,6 +209,7 @@ func TestVerifyFileTreatsReadyUniqueConflictAsValidPrivateState(t *testing.T) {
 	}
 }
 
+// TestVerifyFileRejectsUnsupportedAndCanceledInputs checks that verification rejects missing files and cancelled requests.
 func TestVerifyFileRejectsUnsupportedAndCanceledInputs(t *testing.T) {
 	directory := t.TempDir()
 	if _, err := VerifyFile(context.Background(), filepath.Join(directory, "missing")); !errors.Is(err, ErrVerificationUnsupported) {

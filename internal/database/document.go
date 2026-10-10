@@ -7,8 +7,10 @@ import (
 	"unicode/utf8"
 )
 
+// Document maps field names to typed database values.
 type Document map[string]Value
 
+// NewDocument converts Go fields into a document and rejects invalid names or values.
 func NewDocument(fields map[string]any) (Document, error) {
 	d := make(Document, len(fields))
 	for k, raw := range fields {
@@ -24,6 +26,7 @@ func NewDocument(fields map[string]any) (Document, error) {
 	return d, nil
 }
 
+// Clone copies the document and all nested values.
 func (d Document) Clone() Document {
 	if d == nil {
 		return nil
@@ -35,6 +38,7 @@ func (d Document) Clone() Document {
 	return out
 }
 
+// Equal reports whether both documents contain the same fields and values.
 func (d Document) Equal(other Document) bool {
 	if len(d) != len(other) {
 		return false
@@ -48,6 +52,7 @@ func (d Document) Equal(other Document) bool {
 	return true
 }
 
+// ID returns the document ID if the _id field holds one.
 func (d Document) ID() (DocumentID, bool) {
 	v, ok := d["_id"]
 	if !ok {
@@ -56,6 +61,7 @@ func (d Document) ID() (DocumentID, bool) {
 	return v.IDValue()
 }
 
+// lookup follows a dotted path through nested objects to find a value.
 func lookup(d Document, path string) (Value, bool) {
 	parts := strings.Split(path, ".")
 	current := d
@@ -76,6 +82,7 @@ func lookup(d Document, path string) (Value, bool) {
 	return Value{}, false
 }
 
+// validField rejects names that are unsafe or reserved for query syntax.
 func validField(k string) error {
 	if k == "" || !utf8.ValidString(k) || strings.ContainsRune(k, '\x00') || strings.Contains(k, ".") || strings.HasPrefix(k, "$") || k == "__proto__" || k == "prototype" || k == "constructor" {
 		return fmt.Errorf("%w: invalid field name %q", ErrInvalidDocument, k)
@@ -89,6 +96,7 @@ func (d Document) Validate() error {
 	return validateDocument(d, 0)
 }
 
+// validateDocument checks object fields and nested values within the depth limit.
 func validateDocument(d Document, depth int) error {
 	if depth > 64 {
 		return fmt.Errorf("%w: document nesting is too deep", ErrInvalidDocument)
@@ -117,6 +125,7 @@ func validateDocument(d Document, depth int) error {
 	return nil
 }
 
+// validateArray checks array values and their nested contents within the depth limit.
 func validateArray(values []Value, depth int) error {
 	if depth > 64 {
 		return fmt.Errorf("%w: document nesting is too deep", ErrInvalidDocument)

@@ -14,14 +14,17 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// logicalArchiveArtifact identifies logical archive receipts in command output.
 const logicalArchiveArtifact = "logical-archive"
 
+// logicalArchiveCommandResult wraps archive results with their receipt format and artifact kind.
 type logicalArchiveCommandResult struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	ArtifactKind  string `json:"artifactKind"`
 	meldbase.LogicalArchiveResult
 }
 
+// runLogicalExport exports a database to a new logical archive and prints its receipt.
 func runLogicalExport(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("export", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -58,6 +61,7 @@ func runLogicalExport(args []string, stdout, stderr io.Writer) error {
 	return writeLogicalArchiveResult(stdout, result)
 }
 
+// runLogicalImport imports a logical archive into a new database and prints its receipt.
 func runLogicalImport(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("import", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -106,6 +110,7 @@ func runLogicalImport(args []string, stdout, stderr io.Writer) error {
 	return writeLogicalArchiveResult(stdout, result)
 }
 
+// writeLogicalArchiveResult writes an indented JSON archive receipt.
 func writeLogicalArchiveResult(output io.Writer, result meldbase.LogicalArchiveResult) error {
 	encoder := json.NewEncoder(output)
 	encoder.SetIndent("", "  ")

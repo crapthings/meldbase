@@ -18,6 +18,7 @@ import (
 	"time"
 )
 
+// pageDeltaGoldenFixture stores changed pages and checksums needed to reconstruct a fixed database file.
 type pageDeltaGoldenFixture struct {
 	FormatRevision         uint16   `json:"formatRevision"`
 	BaseFixtureSHA256      string   `json:"baseFixtureSha256"`
@@ -33,8 +34,10 @@ type pageDeltaGoldenFixture struct {
 	PatchGzipBase64        string   `json:"patchGzipBase64"`
 }
 
+// appliedRootFixtureBuildID identifies the index build in the applied-root fixture.
 var appliedRootFixtureBuildID = [16]byte{0xac, 15: 1}
 
+// TestIndexBuildAppliedRootRevision3DeltaFixtureOpensAuditsPublishesAndAdvances checks that the fixed applied-root database can be audited, finalized, and reopened.
 func TestIndexBuildAppliedRootRevision3DeltaFixtureOpensAuditsPublishesAndAdvances(t *testing.T) {
 	fixture := loadAppliedRootGoldenFixture(t)
 	raw := reconstructAppliedRootGoldenFixture(t, fixture)
@@ -127,6 +130,7 @@ func TestIndexBuildAppliedRootRevision3DeltaFixtureOpensAuditsPublishesAndAdvanc
 	}
 }
 
+// TestIndexBuildAppliedRootRevision3WriterMatchesDeltaFixture checks that current writes reproduce the saved page patch and metadata exactly.
 func TestIndexBuildAppliedRootRevision3WriterMatchesDeltaFixture(t *testing.T) {
 	fixture := loadAppliedRootGoldenFixture(t)
 	base, target, meta := buildDeterministicAppliedRootFixture(t)
@@ -158,6 +162,7 @@ func TestIndexBuildAppliedRootRevision3WriterMatchesDeltaFixture(t *testing.T) {
 	}
 }
 
+// TestGenerateIndexBuildAppliedRootRevision3DeltaFixture prints a new page patch when fixture generation is explicitly enabled.
 func TestGenerateIndexBuildAppliedRootRevision3DeltaFixture(t *testing.T) {
 	if os.Getenv("MELDBASE_GENERATE_APPLIED_ROOT_FIXTURE") != "1" {
 		t.Skip("fixture generation is an explicit maintainer action")
@@ -170,6 +175,7 @@ func TestGenerateIndexBuildAppliedRootRevision3DeltaFixture(t *testing.T) {
 	fmt.Println(string(encoded))
 }
 
+// buildDeterministicAppliedRootFixture extends the business fixture with a caught-up index build using fixed identifiers and times.
 func buildDeterministicAppliedRootFixture(t *testing.T) ([]byte, []byte, Meta) {
 	t.Helper()
 	base, _ := buildDeterministicBusinessFixture(t)
@@ -226,6 +232,7 @@ func buildDeterministicAppliedRootFixture(t *testing.T) ([]byte, []byte, Meta) {
 	return base, target, meta
 }
 
+// makePageDeltaGoldenFixture packages changed database pages with compressed bytes and checksums.
 func makePageDeltaGoldenFixture(t *testing.T, base, target []byte, meta Meta) pageDeltaGoldenFixture {
 	t.Helper()
 	if len(base)%PageSize != 0 || len(target)%PageSize != 0 || len(target) < len(base) {
@@ -258,6 +265,7 @@ func makePageDeltaGoldenFixture(t *testing.T, base, target []byte, meta Meta) pa
 	}
 }
 
+// reconstructAppliedRootGoldenFixture validates and applies the saved page patch to the business fixture.
 func reconstructAppliedRootGoldenFixture(t *testing.T, fixture pageDeltaGoldenFixture) []byte {
 	t.Helper()
 	base := decodeBusinessGoldenFixtureBytes(t)
@@ -296,6 +304,7 @@ func reconstructAppliedRootGoldenFixture(t *testing.T, fixture pageDeltaGoldenFi
 	return result
 }
 
+// decodeBusinessGoldenFixtureBytes decompresses the saved business database and verifies its size and checksums.
 func decodeBusinessGoldenFixtureBytes(t *testing.T) []byte {
 	t.Helper()
 	fixture := loadBusinessGoldenFixture(t)
@@ -317,6 +326,7 @@ func decodeBusinessGoldenFixtureBytes(t *testing.T) []byte {
 	return raw
 }
 
+// loadAppliedRootGoldenFixture reads the saved applied-root page patch from its JSON file.
 func loadAppliedRootGoldenFixture(t *testing.T) pageDeltaGoldenFixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "index-build-applied-root-revision-3.json"))

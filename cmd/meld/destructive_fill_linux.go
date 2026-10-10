@@ -10,6 +10,7 @@ import (
 	"syscall"
 )
 
+// destructiveFillResult records allocated space and the observed disk-full boundary.
 type destructiveFillResult struct {
 	Path                   string `json:"-"`
 	AllocatedBytes         uint64 `json:"allocatedBytes"`
@@ -18,6 +19,7 @@ type destructiveFillResult struct {
 	ENOSPCOperation        string `json:"enospcOperation"`
 }
 
+// fillDestructiveVolume allocates a private fill file until a one-block allocation reports disk exhaustion.
 func fillDestructiveVolume(directory string, blockSize uint64) (result destructiveFillResult, resultErr error) {
 	if blockSize == 0 || blockSize > 1<<20 {
 		return result, errors.New("invalid destructive fill block size")
@@ -84,6 +86,7 @@ func fillDestructiveVolume(directory string, blockSize uint64) (result destructi
 	return result, errors.New("destructive fill exceeded allocation attempt limit")
 }
 
+// destructiveAvailableBytes reads the target filesystem's available capacity with overflow checking.
 func destructiveAvailableBytes(directory string) (uint64, error) {
 	var filesystem syscall.Statfs_t
 	if err := syscall.Statfs(directory, &filesystem); err != nil {

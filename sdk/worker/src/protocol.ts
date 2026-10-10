@@ -4,6 +4,7 @@ import type { ProtocolDescriptor } from "@meldbase/client";
 import { MeldbaseWorkerProtocolError } from "./errors.js";
 import type { ReadPolicyDefinition, RPCDefinition } from "./types.js";
 
+/** Checks that the hub protocol supports every capability needed by the declared worker handlers. */
 export function validateWorkerProtocol(
   rawDescriptor: unknown | undefined,
   methods: ReadonlyMap<string, RPCDefinition>,

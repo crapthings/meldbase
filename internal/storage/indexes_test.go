@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// TestCreateIndexPublishesCatalogSecondaryTreeAndCommitAtomically checks that index creation publishes matching catalog entries, sorted index data, and commit history that survive reopening.
 func TestCreateIndexPublishesCatalogSecondaryTreeAndCommitAtomically(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "indexes.meld2")
 	file, _, err := Open(path)
@@ -86,6 +87,7 @@ func TestCreateIndexPublishesCatalogSecondaryTreeAndCommitAtomically(t *testing.
 	}
 }
 
+// metaForCollection loads collection metadata from a snapshot and fails the test if the collection is missing.
 func metaForCollection(t *testing.T, snapshot *ReadSnapshot, name string) CollectionMeta {
 	t.Helper()
 	meta, exists, err := snapshot.CollectionMeta(name)
@@ -95,6 +97,7 @@ func metaForCollection(t *testing.T, snapshot *ReadSnapshot, name string) Collec
 	return meta
 }
 
+// TestCreateUniqueIndexRejectsConflictWithoutPublishing checks that duplicate keys prevent unique index creation without advancing database or catalog versions.
 func TestCreateUniqueIndexRejectsConflictWithoutPublishing(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "unique-index.meld2"))
 	if err != nil {
@@ -121,6 +124,7 @@ func TestCreateUniqueIndexRejectsConflictWithoutPublishing(t *testing.T) {
 	}
 }
 
+// TestCreateIndexCanCreateEmptyCollection checks that index creation can also create an empty collection.
 func TestCreateIndexCanCreateEmptyCollection(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "empty-index.meld2"))
 	if err != nil {
@@ -148,6 +152,7 @@ func TestCreateIndexCanCreateEmptyCollection(t *testing.T) {
 	}
 }
 
+// TestIndexMetaCodecRejectsReservedAndInvalidValues checks that index metadata decoding rejects damaged headers and reserved fields.
 func TestIndexMetaCodecRejectsReservedAndInvalidValues(t *testing.T) {
 	meta := IndexMeta{Name: "by_value", FieldPath: "value", Root: 2, CreatedSequence: 1, UpdatedSequence: 1, KeyCodecVersion: indexKeyCodec}
 	encoded, err := encodeIndexMeta(meta)
@@ -167,6 +172,7 @@ func TestIndexMetaCodecRejectsReservedAndInvalidValues(t *testing.T) {
 	}
 }
 
+// TestCompoundIndexMetaCodecRoundTripsAndRejectsCorruption checks that compound index metadata preserves ordered fields and rejects damaged or repeated field definitions.
 func TestCompoundIndexMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 	meta := IndexMeta{
 		Name: "workspace_score", FieldPath: "workspace",
@@ -202,6 +208,7 @@ func TestCompoundIndexMetaCodecRoundTripsAndRejectsCorruption(t *testing.T) {
 	}
 }
 
+// TestCompoundIndexRequiredFeatureCannotBeDetachedFromReachableMetadata checks that storage audits reject compound index metadata without its required feature flag.
 func TestCompoundIndexRequiredFeatureCannotBeDetachedFromReachableMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compound-feature.meld2")
 	file, _, err := Open(path)
@@ -272,6 +279,7 @@ func TestCompoundIndexRequiredFeatureCannotBeDetachedFromReachableMetadata(t *te
 	}
 }
 
+// TestIndexIteratorOwnsSnapshotPinAndStreamsEntries checks that an index iterator reads ordered entries after its parent snapshot closes and releases its own page protection.
 func TestIndexIteratorOwnsSnapshotPinAndStreamsEntries(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "index-iterator.meld2"))
 	if err != nil {
@@ -328,6 +336,7 @@ func TestIndexIteratorOwnsSnapshotPinAndStreamsEntries(t *testing.T) {
 	}
 }
 
+// TestDocumentTransactionMaintainsIndexesAndAllowsUniqueKeySwap checks that document transactions maintain unique indexes through key swaps, rejected conflicts, deletion, and reopening.
 func TestDocumentTransactionMaintainsIndexesAndAllowsUniqueKeySwap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index-maintenance.meld2")
 	file, _, err := Open(path)
@@ -418,6 +427,7 @@ func TestDocumentTransactionMaintainsIndexesAndAllowsUniqueKeySwap(t *testing.T)
 	}
 }
 
+// TestIndexedDocumentCommitFaultsNeverExposeMixedPrimaryAndSecondaryRoots checks that commit faults recover document data and secondary index entries from the same database version.
 func TestIndexedDocumentCommitFaultsNeverExposeMixedPrimaryAndSecondaryRoots(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "indexed-base.meld2")
 	base, _, err := Open(basePath)

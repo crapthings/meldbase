@@ -2,6 +2,7 @@ package policyrecord
 
 import "testing"
 
+// TestGenerationRecordRoundTripAndValidation checks generation encoding and rejection of corrupt or invalid records.
 func TestGenerationRecordRoundTripAndValidation(t *testing.T) {
 	generation := [16]byte{15: 7}
 	mutation, err := GenerationMutation("orders", generation)

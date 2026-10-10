@@ -7,21 +7,29 @@ import (
 )
 
 const (
-	// ProtocolVersion is the current realtime/RPC envelope version. Existing
+	// ProtocolVersion is the current realtime/RPC envelope version.
+	//
+	// Existing
 	// versions are immutable; incompatible grammar requires a new version.
-	ProtocolVersion                   = 1
-	protocolVersion                   = ProtocolVersion
+	ProtocolVersion = 1
+	// protocolVersion is the internal alias for the public envelope version.
+	protocolVersion = ProtocolVersion
+	// realtimeTicketCapabilityMediaType identifies ticket responses that can include protocol capabilities.
 	realtimeTicketCapabilityMediaType = "application/vnd.meldbase.realtime-ticket+json"
-	workerCapabilityRequestHeader     = "Meldbase-Protocol"
-	workerCapabilityRequestValue      = "capabilities-v1"
+	// workerCapabilityRequestHeader names the header used to request worker capabilities.
+	workerCapabilityRequestHeader = "Meldbase-Protocol"
+	// workerCapabilityRequestValue identifies the supported worker capability request format.
+	workerCapabilityRequestValue = "capabilities-v1"
 )
 
+// protocolDescriptor lists supported envelope versions and protocol capabilities.
 type protocolDescriptor struct {
 	Versions     []int    `json:"versions"`
 	Capabilities []string `json:"capabilities"`
 }
 
 // fixedProtocolErrorCodes is the engine/transport-owned v1 registry.
+//
 // MeldbaseError may additionally carry an application-owned namespaced code;
 // those extensions are intentionally not presented as engine codes.
 var fixedProtocolErrorCodes = []string{
@@ -38,6 +46,7 @@ var fixedProtocolErrorCodes = []string{
 	"unknown_mutation_action", "worker_busy",
 }
 
+// realtimeProtocolDescriptor lists realtime capabilities enabled by the server configuration.
 func realtimeProtocolDescriptor(config Config) protocolDescriptor {
 	capabilities := []string{"query.delta", "query.resume", "rpc", "rpc.cancel"}
 	if config.RPCIdempotencyStore != nil {
@@ -49,6 +58,7 @@ func realtimeProtocolDescriptor(config Config) protocolDescriptor {
 	return protocolDescriptor{Versions: []int{protocolVersion}, Capabilities: capabilities}
 }
 
+// workerProtocolDescriptor lists the versions and operations supported by the worker protocol.
 func workerProtocolDescriptor() protocolDescriptor {
 	return protocolDescriptor{
 		Versions: []int{protocolVersion},
@@ -59,6 +69,7 @@ func workerProtocolDescriptor() protocolDescriptor {
 	}
 }
 
+// requestsRealtimeCapabilities checks whether the Accept header asks for capability information in a ticket response.
 func requestsRealtimeCapabilities(request *http.Request) bool {
 	if request == nil {
 		return false
@@ -72,6 +83,7 @@ func requestsRealtimeCapabilities(request *http.Request) bool {
 	return false
 }
 
+// requestsWorkerCapabilities checks whether the request opts into the worker capability descriptor.
 func requestsWorkerCapabilities(request *http.Request) bool {
 	return request != nil && request.Header.Get(workerCapabilityRequestHeader) == workerCapabilityRequestValue
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// renewalClient records test renewal requests and delegates grants to a replaceable function.
 type renewalClient struct {
 	mu    sync.Mutex
 	grant func(context.Context, [16]byte, uint64) (primarylease.Grant, error)
@@ -21,6 +22,7 @@ type renewalClient struct {
 	seqs  []uint64
 }
 
+// Grant records the requested database and commit sequence before calling the test grant function.
 func (client *renewalClient) Grant(ctx context.Context, databaseID [16]byte, sequence uint64) (primarylease.Grant, error) {
 	client.mu.Lock()
 	client.calls = append(client.calls, databaseID)
@@ -30,12 +32,14 @@ func (client *renewalClient) Grant(ctx context.Context, databaseID [16]byte, seq
 	return grant(ctx, databaseID, sequence)
 }
 
+// sequences returns a copy of the commit sequences requested during renewal.
 func (client *renewalClient) sequences() []uint64 {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	return append([]uint64(nil), client.seqs...)
 }
 
+// TestRenewerInstallsCurrentCheckpointAndFailsClosedAtExpiry checks that renewal tracks committed writes and a failed renewal permits writes only until lease expiry.
 func TestRenewerInstallsCurrentCheckpointAndFailsClosedAtExpiry(t *testing.T) {
 	db, guard, authority, clock := renewalFixture(t)
 	defer db.Close()
@@ -90,6 +94,7 @@ func TestRenewerInstallsCurrentCheckpointAndFailsClosedAtExpiry(t *testing.T) {
 	}
 }
 
+// TestRenewerRunCancellationRevokesLocalGuard checks that canceling the renewal loop removes its lease and blocks writes.
 func TestRenewerRunCancellationRevokesLocalGuard(t *testing.T) {
 	db, guard, authority, clock := renewalFixture(t)
 	defer db.Close()
@@ -142,6 +147,7 @@ func TestRenewerRunCancellationRevokesLocalGuard(t *testing.T) {
 	}
 }
 
+// TestRenewerRejectsMissingFenceOrInvalidIntervals checks that renewal setup rejects a database without a write fence.
 func TestRenewerRejectsMissingFenceOrInvalidIntervals(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "unfenced.meld2"))
 	if err != nil {
@@ -162,6 +168,7 @@ func TestRenewerRejectsMissingFenceOrInvalidIntervals(t *testing.T) {
 	}
 }
 
+// renewalFixture creates a fenced database and matching lease authority with a shared controllable clock.
 func renewalFixture(t *testing.T) (*meldbase.DB, *primarylease.Guard, *primarylease.Authority, *time.Time) {
 	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)

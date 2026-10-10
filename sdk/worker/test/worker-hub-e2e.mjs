@@ -2,10 +2,13 @@ import WebSocket from "ws";
 
 import { MeldbaseError, MeldbaseWorker, readPolicy, rpc } from "../dist/index.js";
 
+// Reads the server address supplied by the Go integration test.
 const url = process.env.MELDBASE_WORKER_URL;
+// Reads the worker credential supplied by the Go integration test.
 const token = process.env.MELDBASE_WORKER_TOKEN;
 if (!url || !token) throw new Error("MELDBASE_WORKER_URL and MELDBASE_WORKER_TOKEN are required");
 
+// Registers test methods and access rules for the Go worker hub integration test.
 const worker = new MeldbaseWorker({
   url,
   token,
@@ -48,6 +51,7 @@ const worker = new MeldbaseWorker({
 await worker.start();
 process.stdout.write("ready\n");
 
+// Stops the test worker before exiting the process.
 async function shutdown() {
   await worker.stop();
   process.exit(0);

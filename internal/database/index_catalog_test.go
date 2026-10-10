@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestIndexCatalogIsCanonicalAndDoesNotShareDefinitions checks that index catalog entries have stable ordering and independent field definitions.
 func TestIndexCatalogIsCanonicalAndDoesNotShareDefinitions(t *testing.T) {
 	db := New()
 	t.Cleanup(func() { _ = db.Close() })
@@ -29,6 +30,7 @@ func TestIndexCatalogIsCanonicalAndDoesNotShareDefinitions(t *testing.T) {
 	}
 }
 
+// TestIndexCatalogSurvivesDurableReopen checks that index catalog definitions survive closing and reopening a durable database.
 func TestIndexCatalogSurvivesDurableReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog.meld")
 	db, err := Open(path)

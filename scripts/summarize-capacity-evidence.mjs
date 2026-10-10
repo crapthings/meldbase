@@ -1,23 +1,28 @@
 import { mkdir, open, readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 
+// Returns the capacity summary command syntax.
 function usage() {
   return "Usage: node scripts/summarize-capacity-evidence.mjs --in-dir EVIDENCE_DIRECTORY --out NEW_MARKDOWN_FILE";
 }
 
+// Throws a capacity evidence validation error.
 function fail(message) {
   throw new Error(message);
 }
 
+// Validates a reported latency and formats it to one decimal place.
 function percentile(value) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) fail("invalid latency in query report");
   return value.toFixed(1);
 }
 
+// Escapes table separators and flattens newlines in Markdown cell text.
 function markdown(value) {
   return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
+// Parses the evidence directory and new output file path.
 async function parseArgs(args) {
   let input = "";
   let output = "";
@@ -34,6 +39,7 @@ async function parseArgs(args) {
   return { input: resolve(input), output: resolve(output) };
 }
 
+// Reads a JSON evidence file and labels parsing failures with its filename.
 async function readJSON(path) {
   let value;
   try {
@@ -44,6 +50,7 @@ async function readJSON(path) {
   return value;
 }
 
+// Writes a private Markdown summary of host facts, query latency, and passing runtime benchmark evidence.
 async function main() {
   const { input, output } = await parseArgs(process.argv.slice(2));
   const inputInfo = await stat(input).catch(() => null);

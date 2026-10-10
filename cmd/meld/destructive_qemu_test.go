@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TestDestructiveQEMUResetCapturesHostResetProof checks that the reset command records verifiable host-reset evidence and rejects a changed transcript.
 func TestDestructiveQEMUResetCapturesHostResetProof(t *testing.T) {
 	directory, err := os.MkdirTemp("/tmp", "meld-qmp-")
 	if err != nil {
@@ -108,6 +109,7 @@ func TestDestructiveQEMUResetCapturesHostResetProof(t *testing.T) {
 	}
 }
 
+// TestQMPProofRejectsGuestReset checks that a guest-initiated reset cannot serve as host-reset evidence.
 func TestQMPProofRejectsGuestReset(t *testing.T) {
 	now := time.Now().UTC()
 	exchanges := []destructiveQMPExchange{
@@ -126,6 +128,7 @@ func TestQMPProofRejectsGuestReset(t *testing.T) {
 	}
 }
 
+// TestWaitForPowerMarkerRetriesVisibleEmptyInode checks that marker polling waits for an initially empty file to receive a complete marker.
 func TestWaitForPowerMarkerRetriesVisibleEmptyInode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "marker.json")
 	if err := os.WriteFile(path, nil, 0o600); err != nil {

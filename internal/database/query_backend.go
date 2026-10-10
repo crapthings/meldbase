@@ -1,12 +1,13 @@
 package database
 
-// querySnapshotSource is the storage-backed read boundary. Implementations pin
-// one immutable commit sequence; planners must never combine entries or primary
-// records from different snapshots.
+// querySnapshotSource opens an immutable storage view for query execution.
+//
+// Planners must read document records and index entries from the same snapshot.
 type querySnapshotSource interface {
 	openQuerySnapshot() (queryStorageSnapshot, error)
 }
 
+// queryStorageSnapshot reads collection records and indexes from one immutable commit.
 type queryStorageSnapshot interface {
 	Sequence() uint64
 	CollectionVersion(collection string) (queryStorageCollectionVersion, bool, error)
@@ -17,15 +18,16 @@ type queryStorageSnapshot interface {
 	Close() error
 }
 
-// queryStorageCollectionVersion is the immutable collection fence exposed by
-// a snapshot. It intentionally contains no page root: callers use it only for
-// optimistic validation, while page topology remains storage-private.
+// queryStorageCollectionVersion identifies a collection version for optimistic validation.
+//
+// It exposes no page roots or other storage topology.
 type queryStorageCollectionVersion struct {
 	ID                   uint32
 	UpdatedSequence      uint64
 	NextDocumentPosition uint64
 }
 
+// queryStorageDocument carries a stored document and its insertion position.
 type queryStorageDocument struct {
 	ID       DocumentID
 	Position uint64
@@ -33,6 +35,7 @@ type queryStorageDocument struct {
 	Decoded  Document
 }
 
+// queryStorageIndex describes an index available in a storage snapshot.
 type queryStorageIndex struct {
 	Name   string
 	Field  string
@@ -40,12 +43,14 @@ type queryStorageIndex struct {
 	Unique bool
 }
 
+// queryStorageIndexEntry links an encoded index key to a document and its insertion position.
 type queryStorageIndexEntry struct {
 	Key      []byte
 	Position uint64
 	ID       DocumentID
 }
 
+// queryStorageIndexIterator reads index entries from a pinned storage view.
 type queryStorageIndexIterator interface {
 	Next() bool
 	Entry() queryStorageIndexEntry
@@ -53,6 +58,7 @@ type queryStorageIndexIterator interface {
 	Close() error
 }
 
+// queryStorageDocumentIterator reads document records from a pinned storage view.
 type queryStorageDocumentIterator interface {
 	Next() bool
 	Record() queryStorageDocument

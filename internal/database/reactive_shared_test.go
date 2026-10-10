@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestSharedReactiveViewReusesOneQueryAndIsolatesSnapshots checks that identical subscriptions share query work while receiving independent document copies.
 func TestSharedReactiveViewReusesOneQueryAndIsolatesSnapshots(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -65,6 +66,7 @@ func TestSharedReactiveViewReusesOneQueryAndIsolatesSnapshots(t *testing.T) {
 	})
 }
 
+// TestSharedReactiveViewDropsOnlySlowSubscriber checks that removing a slow subscriber leaves the shared view serving its other subscriber.
 func TestSharedReactiveViewDropsOnlySlowSubscriber(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -106,6 +108,7 @@ func TestSharedReactiveViewDropsOnlySlowSubscriber(t *testing.T) {
 	})
 }
 
+// TestSharedSubscriberNeverRegressesSnapshotToken checks that a subscriber skips snapshots older than its last delivered commit.
 func TestSharedSubscriberNeverRegressesSnapshotToken(t *testing.T) {
 	subscriber := &sharedQuerySubscriber{
 		snapshots: make(chan QuerySnapshot, 2), errors: make(chan error, 1), lastToken: 5,
@@ -121,6 +124,7 @@ func TestSharedSubscriberNeverRegressesSnapshotToken(t *testing.T) {
 	}
 }
 
+// TestIncrementalReactiveViewsMatchFullQueryModel checks that incremental live results match fresh query snapshots across randomized document changes.
 func TestIncrementalReactiveViewsMatchFullQueryModel(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -214,6 +218,7 @@ func TestIncrementalReactiveViewsMatchFullQueryModel(t *testing.T) {
 	}
 }
 
+// TestIncrementalReactiveSortMatchesFullQueryForMixedValues checks that incremental sorting matches fresh queries when documents contain different value types.
 func TestIncrementalReactiveSortMatchesFullQueryForMixedValues(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -255,6 +260,7 @@ func TestIncrementalReactiveSortMatchesFullQueryForMixedValues(t *testing.T) {
 	assertIncrementalSnapshotMatchesFullQuery(t, collection, query, afterUpdate)
 }
 
+// assertIncrementalSnapshotMatchesFullQuery fails the test unless a live snapshot matches the commit and documents of a fresh query.
 func assertIncrementalSnapshotMatchesFullQuery(t *testing.T, collection *Collection, query QuerySpec, snapshot QuerySnapshot) {
 	t.Helper()
 	full, err := collection.SnapshotQuery(context.Background(), query)
@@ -266,6 +272,7 @@ func assertIncrementalSnapshotMatchesFullQuery(t *testing.T, collection *Collect
 	}
 }
 
+// TestReactiveQueueOverflowFallsBackToFullRecompute checks that exceeding the live change-count limit rebuilds the query result.
 func TestReactiveQueueOverflowFallsBackToFullRecompute(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -293,6 +300,7 @@ func TestReactiveQueueOverflowFallsBackToFullRecompute(t *testing.T) {
 	}
 }
 
+// TestReactiveQueueByteOverflowFallsBackToFullRecompute checks that exceeding the live change-byte limit rebuilds the query result and clears pending bytes.
 func TestReactiveQueueByteOverflowFallsBackToFullRecompute(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -332,6 +340,7 @@ func TestReactiveQueueByteOverflowFallsBackToFullRecompute(t *testing.T) {
 	}
 }
 
+// waitForRealtimeStats waits up to one second for realtime statistics to satisfy a condition or fails the test.
 func waitForRealtimeStats(t *testing.T, db *DB, predicate func(RealtimeStats) bool) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

@@ -1,4 +1,4 @@
-// Package replicationhttp transports a verified  bootstrap over HTTPS.
+// Package replicationhttp transfers verified database snapshots over HTTPS.
 //
 // It is intentionally only the bootstrap half of replication. After an
 // import, callers attach the returned tokens to the WebSocket change-feed
@@ -23,43 +23,58 @@ import (
 	"github.com/crapthings/meldbase/integrations/replicationauth"
 )
 
+// bootstrapVersion identifies the HTTP snapshot transfer protocol.
 const bootstrapVersion = "1"
 
 const (
+	// headerBootstrapVersion names the snapshot transfer protocol version header.
 	headerBootstrapVersion = "X-Meldbase-Bootstrap-Version"
-	headerBytes            = "X-Meldbase-Bytes"
-	headerPages            = "X-Meldbase-Pages"
-	headerCommitSequence   = "X-Meldbase-Commit-Sequence"
-	headerMetaGeneration   = "X-Meldbase-Meta-Generation"
-	headerDatabaseID       = "X-Meldbase-Database-ID"
-	headerSHA256           = "X-Meldbase-SHA256"
-	headerCheckpointToken  = "X-Meldbase-Checkpoint-Token"
-	headerSnapshotToken    = "X-Meldbase-Snapshot-Token"
+	// headerBytes names the snapshot byte count header.
+	headerBytes = "X-Meldbase-Bytes"
+	// headerPages names the snapshot page count header.
+	headerPages = "X-Meldbase-Pages"
+	// headerCommitSequence names the snapshot commit sequence header.
+	headerCommitSequence = "X-Meldbase-Commit-Sequence"
+	// headerMetaGeneration names the snapshot metadata generation header.
+	headerMetaGeneration = "X-Meldbase-Meta-Generation"
+	// headerDatabaseID names the database identity header.
+	headerDatabaseID = "X-Meldbase-Database-ID"
+	// headerSHA256 names the snapshot checksum header.
+	headerSHA256 = "X-Meldbase-SHA256"
+	// headerCheckpointToken names the durable consumer checkpoint header.
+	headerCheckpointToken = "X-Meldbase-Checkpoint-Token"
+	// headerSnapshotToken names the change feed token covered by the snapshot.
+	headerSnapshotToken = "X-Meldbase-Snapshot-Token"
 )
 
 var (
+	// ErrInvalidBootstrapResponse reports missing or inconsistent snapshot response metadata.
 	ErrInvalidBootstrapResponse = errors.New("meldbase replication bootstrap: invalid response")
-	ErrBootstrapHTTPSRequired   = errors.New("meldbase replication bootstrap: HTTPS is required")
+	// ErrBootstrapHTTPSRequired reports a URL or response that fails the verified HTTPS requirement.
+	ErrBootstrapHTTPSRequired = errors.New("meldbase replication bootstrap: HTTPS is required")
 )
 
-// Authorize authenticates an HTTPS request and returns a stable,
-// server-controlled durable consumer name. Typical deployments map a verified
+// Authorize verifies a replication peer and returns its server-assigned durable consumer name.
+//
+// Typical deployments map a verified
 // mTLS client certificate fingerprint to that name. It must not derive the
 // name from a user-controlled request value.
 type Authorize = replicationauth.Authorize
 
-// MTLSConfig is shared with the WebSocket replication adapter, so bootstrap
-// and tail transport cannot accidentally use different peer-name mappings.
+// MTLSConfig sets the verified certificate mappings shared by snapshot and WebSocket replication.
 type MTLSConfig = replicationauth.MTLSConfig
 
-// NewMTLSAuthorizer returns the strict verified-leaf-fingerprint authorizer
-// used by the WebSocket adapter too. The enclosing http.Server must still
+// NewMTLSAuthorizer creates a peer authorizer using verified client certificate fingerprints.
+//
+// The WebSocket adapter uses the same authorizer. The enclosing http.Server must still
 // require and verify client certificates in its tls.Config.
 func NewMTLSAuthorizer(config MTLSConfig) (Authorize, error) {
 	return replicationauth.NewMTLSAuthorizer(config)
 }
 
-// SourceConfig configures an HTTPS handler. TLS and client-certificate
+// SourceConfig sets the database, peer authorization, and temporary snapshot storage for an HTTPS handler.
+//
+// TLS and client-certificate
 // verification belong to the enclosing http.Server; Authorize enforces its
 // application-level identity mapping.
 type SourceConfig struct {
@@ -69,8 +84,7 @@ type SourceConfig struct {
 	Buffer           int
 }
 
-// Source serves one exact, verified  artifact and establishes the source
-// durable checkpoint before it is made available to the receiver.
+// Source serves a verified snapshot after establishing its durable consumer checkpoint.
 type Source struct {
 	db               *meldbase.DB
 	authorize        Authorize
@@ -93,7 +107,9 @@ func NewSource(config SourceConfig) (*Source, error) {
 	return &Source{db: config.DB, authorize: config.Authorize, archiveDirectory: directory, buffer: config.Buffer}, nil
 }
 
-// ServeHTTP accepts only an authenticated GET with no browser Origin. The
+// ServeHTTP sends a verified database snapshot to an authenticated replication peer.
+//
+// It accepts only a GET with no browser Origin. The
 // source lease covers both bootstrap and a subsequent replicationws source
 // session, preventing two transports from racing one durable checkpoint.
 func (source *Source) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -167,6 +183,7 @@ func (source *Source) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	_, _ = io.Copy(writer, file)
 }
 
+// writeBootstrapHeaders writes the snapshot receipt and change feed tokens into response headers.
 func writeBootstrapHeaders(header http.Header, bootstrap meldbase.ArchiveBootstrap) {
 	backup := bootstrap.Backup
 	header.Set("Content-Type", "application/octet-stream")
@@ -183,8 +200,10 @@ func writeBootstrapHeaders(header http.Header, bootstrap meldbase.ArchiveBootstr
 	header.Set(headerSnapshotToken, strconv.FormatUint(bootstrap.SnapshotToken, 10))
 }
 
-// FetchConfig configures a receiving bootstrap. HTTPClient must be configured
-// with the deployment's mTLS client certificate and trusted server roots.
+// FetchConfig sets the snapshot source, destination file, HTTP client, and download limit.
+//
+// HTTPClient must use the deployment's mTLS client certificate and trusted
+// server roots.
 type FetchConfig struct {
 	URL         string
 	HTTPClient  *http.Client
@@ -192,16 +211,18 @@ type FetchConfig struct {
 	MaxBytes    uint64
 }
 
-// Bootstrap is the verified artifact receipt and the durable-feed bridge
-// tokens that must be supplied to replicationws.ReceiverConfig.
+// Bootstrap records the verified snapshot and the positions needed to resume replication.
+//
+// Supply its feed tokens to replicationws.ReceiverConfig.
 type Bootstrap struct {
 	Backup          meldbase.BackupResult
 	CheckpointToken uint64
 	SnapshotToken   uint64
 }
 
-// Fetch downloads one bootstrap over a non-redirected HTTPS connection and
-// imports it atomically. It requires an actual TLS response even when callers
+// Fetch downloads, verifies, and atomically imports a database snapshot over HTTPS.
+//
+// Redirects are disabled. It requires an actual TLS response even when callers
 // provide a custom HTTP transport, preventing a transport shim from silently
 // downgrading the security contract.
 func Fetch(ctx context.Context, config FetchConfig) (Bootstrap, error) {
@@ -238,6 +259,7 @@ func Fetch(ctx context.Context, config FetchConfig) (Bootstrap, error) {
 	return bootstrap, nil
 }
 
+// cloneNoRedirectClient copies an HTTP client and disables redirects.
 func cloneNoRedirectClient(client *http.Client) *http.Client {
 	if client == nil {
 		client = http.DefaultClient
@@ -247,6 +269,7 @@ func cloneNoRedirectClient(client *http.Client) *http.Client {
 	return &copy
 }
 
+// parseBootstrapResponse checks response metadata and reads the snapshot receipt and feed tokens.
 func parseBootstrapResponse(response *http.Response) (Bootstrap, error) {
 	if response == nil || response.ContentLength < 0 {
 		return Bootstrap{}, ErrInvalidBootstrapResponse
@@ -289,6 +312,7 @@ func parseBootstrapResponse(response *http.Response) (Bootstrap, error) {
 	return Bootstrap{Backup: meldbase.BackupResult{Bytes: bytes, Pages: pages, CommitSequence: commitSequence, MetaGeneration: metaGeneration, DatabaseIDHex: databaseID, SHA256: digest}, CheckpointToken: checkpoint, SnapshotToken: snapshot}, nil
 }
 
+// requiredHeader reads one nonempty header value and rejects comma-separated values.
 func requiredHeader(header http.Header, key string) (string, error) {
 	values := header.Values(key)
 	if len(values) != 1 || values[0] == "" || strings.Contains(values[0], ",") {
@@ -297,6 +321,7 @@ func requiredHeader(header http.Header, key string) (string, error) {
 	return values[0], nil
 }
 
+// requiredUintHeader reads a positive decimal header value without leading zeros.
 func requiredUintHeader(header http.Header, key string) (uint64, error) {
 	value, err := requiredHeader(header, key)
 	if err != nil || value == "0" || (len(value) > 1 && value[0] == '0') {

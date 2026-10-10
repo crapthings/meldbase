@@ -24,6 +24,7 @@ import {
   valueEquals,
 } from "./safe-value.js";
 
+/** Preserves each supported value type in a tagged JSON representation. */
 export type WireValue =
   | { readonly t: "null" }
   | { readonly t: "bool"; readonly v: boolean }
@@ -36,6 +37,7 @@ export type WireValue =
   | { readonly t: "array"; readonly v: readonly WireValue[] }
   | { readonly t: "object"; readonly v: readonly (readonly [string, WireValue])[] };
 
+/** Represents a compiled query predicate with encoded operands. */
 export type WireQueryExpr =
   | { readonly op: "true" }
   | { readonly op: "and" | "or"; readonly args: readonly WireQueryExpr[] }
@@ -54,12 +56,14 @@ export type WireQueryExpr =
   | { readonly op: "elem_match"; readonly path: string; readonly mode: "scalar"; readonly arg: WireElementQueryExpr }
   | { readonly op: "elem_match"; readonly path: string; readonly mode: "object"; readonly arg: WireQueryExpr };
 
+/** Represents an encoded predicate applied to one array element. */
 export type WireElementQueryExpr =
   | { readonly op: "and" | "or"; readonly args: readonly WireElementQueryExpr[] }
   | { readonly op: "not"; readonly arg: WireElementQueryExpr }
   | { readonly op: "compare"; readonly cmp: "eq" | "ne" | "gt" | "gte" | "lt" | "lte"; readonly value: WireValue }
   | { readonly op: "in" | "nin"; readonly values: readonly WireValue[] };
 
+/** Combines an encoded predicate with query ordering and pagination settings. */
 export interface WireQuerySpec {
   readonly version: 1;
   readonly where: WireQueryExpr;
@@ -69,10 +73,12 @@ export interface WireQuerySpec {
   readonly seek?: true;
 }
 
+/** Copies and validates a value before encoding its wire representation. */
 export function encodeValue(value: Value): WireValue {
   return encodeCheckedValue(cloneTransportValue(value));
 }
 
+/** Encodes a validated value recursively with sorted object fields. */
 function encodeCheckedValue(value: Value): WireValue {
   if (value === null) return { t: "null" };
   if (typeof value === "boolean") return { t: "bool", v: value };
@@ -95,6 +101,7 @@ function encodeCheckedValue(value: Value): WireValue {
   };
 }
 
+/** Decodes a tagged value while checking its fields, representation, and nesting depth. */
 export function decodeValue(input: unknown, depth = 0): Value {
   if (depth > 64 || !record(input) || typeof input.t !== "string")
     throw new QueryValidationError("Malformed wire value");
@@ -173,14 +180,17 @@ export function decodeValue(input: unknown, depth = 0): Value {
   throw new QueryValidationError("Malformed wire value");
 }
 
+/** Validates and encodes a stored document with a required typed ID. */
 export function encodeDocument(document: Document): WireValue {
   return encodeDocumentFields(cloneTransportValue(document) as Document, true);
 }
 
+/** Validates and encodes document input with an optional typed ID. */
 export function encodeInputDocument(document: InputDocument): WireValue {
   return encodeDocumentFields(cloneTransportValue(document) as InputDocument, false);
 }
 
+/** Encodes sorted document fields while preserving the special wire type of the document ID. */
 function encodeDocumentFields(document: InputDocument, requireID: boolean): WireValue {
   if (requireID && typeof document._id !== "string") throw new QueryValidationError("Persisted document requires _id");
   const entries = Object.keys(document)
@@ -199,6 +209,7 @@ function encodeDocumentFields(document: InputDocument, requireID: boolean): Wire
   return { t: "object", v: entries };
 }
 
+/** Decodes a wire document and exposes its typed ID as a string. */
 export function decodeDocument(input: unknown): Document {
   const value = decodeValue(input);
   if (
@@ -219,6 +230,7 @@ export function decodeDocument(input: unknown): Document {
   return cloneDocument(document as Document);
 }
 
+/** Encodes a query specification and checks its default wire size limit. */
 export function encodeQuerySpec(spec: QuerySpec): WireQuerySpec {
   const encoded = {
     version: 1 as const,
@@ -233,6 +245,7 @@ export function encodeQuerySpec(spec: QuerySpec): WireQuerySpec {
   return encoded;
 }
 
+/** Validates an encoded query against its format and resource limits before decoding it. */
 export function decodeQuerySpec(input: unknown, overrides: Partial<QueryLimits> = {}): QuerySpec {
   const limits: QueryLimits = { ...DEFAULT_QUERY_LIMITS, ...overrides };
   if (wireQueryByteLength(input) > limits.maxWireBytes) throw new QueryValidationError("Query exceeds wire size limit");
@@ -389,6 +402,7 @@ export function decodeQuerySpec(input: unknown, overrides: Partial<QueryLimits> 
   };
 }
 
+/** Measures the UTF-8 size of a JSON-serializable query. */
 export function wireQueryByteLength(value: unknown): number {
   try {
     return new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -397,6 +411,7 @@ export function wireQueryByteLength(value: unknown): number {
   }
 }
 
+/** Encodes a query expression recursively with typed operands. */
 function encodeExpression(expression: QueryExpr): WireQueryExpr {
   switch (expression.op) {
     case "true":
@@ -437,6 +452,7 @@ function encodeExpression(expression: QueryExpr): WireQueryExpr {
   }
 }
 
+/** Encodes a scalar array-element expression recursively with typed operands. */
 function encodeElementExpression(expression: ElementQueryExpr): WireElementQueryExpr {
   switch (expression.op) {
     case "and":
@@ -452,28 +468,33 @@ function encodeElementExpression(expression: ElementQueryExpr): WireElementQuery
   }
 }
 
+/** Checks for an ordinary object or an object with no prototype. */
 function record(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 
+/** Checks whether an object owns a named field. */
 function has(value: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+/** Rejects fields outside the allowed names. */
 function onlyKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
   const permitted = new Set(allowed);
   for (const key of Object.keys(value))
     if (!permitted.has(key)) throw new QueryValidationError(`Unexpected query field: ${key}`);
 }
 
+/** Validates and returns a string query path. */
 function wirePath(value: unknown): string {
   if (typeof value !== "string") throw new QueryValidationError("Query path must be a string");
   assertPath(value);
   return value;
 }
 
+/** Decodes a bounded query operand and converts a typed document ID to its string form when required. */
 function boundedDecodedValue(value: unknown, limits: QueryLimits, path?: string): Value {
   const decoded = decodeValue(value);
   const queryValue = path === "_id" ? decodePersistedID(decoded, "_id query value") : decoded;
@@ -481,11 +502,13 @@ function boundedDecodedValue(value: unknown, limits: QueryLimits, path?: string)
   return queryValue;
 }
 
+/** Requires an ID-valued operand and returns its string identity. */
 function decodePersistedID(value: Value, label: string): string {
   if (!isDocumentIDValue(value)) throw new QueryValidationError(`${label} must use the id wire type`);
   return value.value;
 }
 
+/** Validates an optional safe integer within the supplied range. */
 function optionalBoundedInteger(value: unknown, min: number, max: number, name: string): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max)
@@ -493,12 +516,14 @@ function optionalBoundedInteger(value: unknown, min: number, max: number, name: 
   return value;
 }
 
+/** Encodes a byte array as base64. */
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
 
+/** Decodes base64 into bytes and reports malformed input. */
 function base64ToBytes(value: string): Uint8Array {
   let binary: string;
   try {
@@ -511,6 +536,7 @@ function base64ToBytes(value: string): Uint8Array {
   return bytes;
 }
 
+/** Encodes a query operand while preserving the typed document ID at the ID path. */
 function encodeQueryValue(path: string, value: Value): WireValue {
   if (path === "_id") {
     if (!isDocumentID(value))
@@ -520,6 +546,7 @@ function encodeQueryValue(path: string, value: Value): WireValue {
   return encodeValue(value);
 }
 
+/** Removes equal values while preserving their first occurrence. */
 function dedupeValues(values: readonly Value[]): Value[] {
   const result: Value[] = [];
   for (const value of values) {

@@ -8,9 +8,9 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// VerificationReport is a schema-versioned receipt for a full, read-only
-// protected-page graph and published-index semantic audit. ReclaimablePages is
-// informational; verification never installs a free pool or publishes
+// VerificationReport records the results of a read-only page and index audit.
+//
+// ReclaimablePages is informational; verification never installs a free pool or publishes
 // maintenance metadata.
 type VerificationReport struct {
 	SchemaVersion              int           `json:"schemaVersion"`
@@ -37,7 +37,8 @@ type VerificationReport struct {
 	SHA256                     string        `json:"sha256"`
 }
 
-// VerifyFile performs an offline, non-mutating audit of an existing file.
+// VerifyFile checks an existing database's protected pages and index contents without changing it.
+//
 // It takes a non-blocking shared advisory lock, so an active writer fails with
 // ErrDatabaseLocked. It never creates, truncates, repairs, reclaims, or advances
 // the database. Meta inspection alone is cheaper; this method walks every page
@@ -79,6 +80,7 @@ func VerifyFile(ctx context.Context, path string) (VerificationReport, error) {
 	}, nil
 }
 
+// auditIndexKey derives the expected index key from a stored document and index definition.
 func auditIndexKey(meta storage.IndexMeta, id [16]byte, encoded []byte) ([]byte, bool, error) {
 	fields, err := publicIndexFields(meta.FieldPath, meta.Fields)
 	if err != nil {

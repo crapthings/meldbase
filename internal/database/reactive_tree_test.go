@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestPersistentReactiveTreesPreserveOldRootsAndOrdering checks that reactive trees preserve query ordering and leave old roots unchanged after randomized edits.
 func TestPersistentReactiveTreesPreserveOldRootsAndOrdering(t *testing.T) {
 	seed := maphash.MakeSeed()
 	random := rand.New(rand.NewSource(42))
@@ -65,6 +66,7 @@ func TestPersistentReactiveTreesPreserveOldRootsAndOrdering(t *testing.T) {
 	}
 }
 
+// assertReactiveTreesValid checks that reactive identifier and ordering trees contain the expected members and satisfy their tree rules.
 func assertReactiveTreesValid(t *testing.T, query QuerySpec, byID *reactiveIDNode, ordered *reactiveOrderNode, expected int) {
 	t.Helper()
 	if countReactiveIDs(byID) != expected || reactiveOrderSize(ordered) != uint64(expected) {
@@ -74,6 +76,7 @@ func assertReactiveTreesValid(t *testing.T, query QuerySpec, byID *reactiveIDNod
 	validateReactiveOrderNode(t, query, ordered, nil, nil)
 }
 
+// validateReactiveIDNode checks identifier ordering and heap priorities throughout a reactive identifier tree.
 func validateReactiveIDNode(t *testing.T, node *reactiveIDNode, lower, upper *DocumentID) {
 	t.Helper()
 	if node == nil {
@@ -91,6 +94,7 @@ func validateReactiveIDNode(t *testing.T, node *reactiveIDNode, lower, upper *Do
 	validateReactiveIDNode(t, node.right, &node.id, upper)
 }
 
+// validateReactiveOrderNode checks query ordering, heap priorities, and stored subtree sizes throughout a reactive ordering tree.
 func validateReactiveOrderNode(t *testing.T, query QuerySpec, node *reactiveOrderNode, lower, upper *reactiveOrderNode) uint64 {
 	t.Helper()
 	if node == nil {
@@ -112,6 +116,7 @@ func validateReactiveOrderNode(t *testing.T, query QuerySpec, node *reactiveOrde
 	return size
 }
 
+// countReactiveIDs counts the members of a reactive identifier tree.
 func countReactiveIDs(node *reactiveIDNode) int {
 	if node == nil {
 		return 0
@@ -119,6 +124,7 @@ func countReactiveIDs(node *reactiveIDNode) int {
 	return 1 + countReactiveIDs(node.left) + countReactiveIDs(node.right)
 }
 
+// deterministicDocumentID creates a repeatable document identifier from a zero-based test index.
 func deterministicDocumentID(index int) DocumentID {
 	index++
 	return DocumentID{12: byte(index >> 24), 13: byte(index >> 16), 14: byte(index >> 8), 15: byte(index)}

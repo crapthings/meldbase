@@ -10,6 +10,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestPublicCommitRetentionPolicyBoundsNormalHistory checks that commit-count retention prunes old history and keeps its configured limit after reopening.
 func TestPublicCommitRetentionPolicyBoundsNormalHistory(t *testing.T) {
 	if DefaultCommitRetentionMaxCommits != storage.DefaultCommitRetentionMaxCommits {
 		t.Fatalf("public/internal retention defaults drifted: %d/%d", DefaultCommitRetentionMaxCommits, storage.DefaultCommitRetentionMaxCommits)
@@ -50,6 +51,7 @@ func TestPublicCommitRetentionPolicyBoundsNormalHistory(t *testing.T) {
 	}
 }
 
+// TestPublicCommitRetentionByteBudget checks that history stays within its byte budget through writes and reopening.
 func TestPublicCommitRetentionByteBudget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-retention-bytes.meld2")
 	policy := CommitRetentionPolicy{MaxCommits: 100, MaxBytes: 500}
@@ -81,6 +83,7 @@ func TestPublicCommitRetentionByteBudget(t *testing.T) {
 	}
 }
 
+// TestReplayDeliveryTimeoutReleasesRetentionLease checks that stalled replay delivery ends the consumer and releases history for pruning.
 func TestReplayDeliveryTimeoutReleasesRetentionLease(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "replay-timeout.meld2"), OpenOptions{
 		CommitRetention:       CommitRetentionPolicy{MaxCommits: 2},
@@ -136,6 +139,7 @@ func TestReplayDeliveryTimeoutReleasesRetentionLease(t *testing.T) {
 	}
 }
 
+// TestReplayDeliveryTimeoutValidation checks replay timeout bounds and forwards a valid timeout to the replay source.
 func TestReplayDeliveryTimeoutValidation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-replay-timeout.meld2")
 	if db, err := OpenWithOptions(path, OpenOptions{ReplayDeliveryTimeout: time.Nanosecond}); db != nil || !errors.Is(err, ErrInvalidReplayDeliveryTimeout) {

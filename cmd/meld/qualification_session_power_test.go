@@ -13,6 +13,7 @@ import (
 	"testing"
 )
 
+// TestQualificationSessionPowerPrepareDerivesImmutableNextStep checks that power preparation uses the session plan and refuses existing output files.
 func TestQualificationSessionPowerPrepareDerivesImmutableNextStep(t *testing.T) {
 	root, planPath := qualificationSessionAtFirstPowerStep(t)
 	oldPrepare := qualificationSessionPowerPrepareFn
@@ -44,6 +45,7 @@ func TestQualificationSessionPowerPrepareDerivesImmutableNextStep(t *testing.T) 
 	}
 }
 
+// TestQualificationSessionPowerStatusReportsOnlyValidNextPhase checks that power status advances from preparation to controller execution and rejects partially published evidence.
 func TestQualificationSessionPowerStatusReportsOnlyValidNextPhase(t *testing.T) {
 	root, planPath := qualificationSessionAtFirstPowerStep(t)
 	var output bytes.Buffer
@@ -73,6 +75,7 @@ func TestQualificationSessionPowerStatusReportsOnlyValidNextPhase(t *testing.T) 
 	}
 }
 
+// TestQualificationSessionPowerRecoverPreflightsPlanAndRecords checks that power recovery records its receipt and rejects a controller key that differs from the session plan.
 func TestQualificationSessionPowerRecoverPreflightsPlanAndRecords(t *testing.T) {
 	root, planPath := qualificationSessionAtFirstPowerStep(t)
 	privateKey := qualificationPhysicalControllerTestPrivateKey()
@@ -124,6 +127,7 @@ func TestQualificationSessionPowerRecoverPreflightsPlanAndRecords(t *testing.T) 
 	}
 }
 
+// qualificationSessionAtFirstPowerStep creates a test session with its first five steps recorded so the first power trial is next.
 func qualificationSessionAtFirstPowerStep(t *testing.T) (string, string) {
 	t.Helper()
 	root, planPath := newQualificationSessionTestFixture(t)

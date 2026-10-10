@@ -54,11 +54,13 @@ export type {
   WriteTransaction,
 } from "./types.js";
 
+/** Tracks cancellation and an optional transaction for an active worker call. */
 interface ActiveCall {
   readonly controller: AbortController;
   readonly transaction?: RemoteWriteTransaction;
 }
 
+/** Lists the fields required in hub registration limits. */
 const REGISTRATION_LIMIT_KEYS = [
   "maxPendingCalls",
   "maxOperationsPerCall",
@@ -66,6 +68,7 @@ const REGISTRATION_LIMIT_KEYS = [
   "policyEvaluationTimeoutMs",
 ] as const;
 
+/** Maintains a hub connection that serves registered RPC methods and read policy decisions. */
 export class MeldbaseWorker {
   readonly #options: Required<Pick<WorkerOptions, "reconnectMinMs" | "reconnectMaxMs">> & WorkerOptions;
   readonly #methods: ReadonlyMap<string, RPCDefinition>;
@@ -407,6 +410,7 @@ export class MeldbaseWorker {
   }
 }
 
+/** Checks that hub registration limits contain exactly the required bounded values. */
 function validateRegistrationLimits(value: unknown): void {
   if (!record(value)) throw new Error("Invalid worker registration limits");
   exactKeys(value, REGISTRATION_LIMIT_KEYS);
@@ -416,12 +420,14 @@ function validateRegistrationLimits(value: unknown): void {
   assertBoundedPositiveInteger(value.policyEvaluationTimeoutMs, "policyEvaluationTimeoutMs", 30_000);
 }
 
+/** Rejects registration limits that are not positive safe integers within the allowed maximum. */
 function assertBoundedPositiveInteger(value: unknown, label: string, maximum: number): void {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0 || value > maximum) {
     throw new Error(`Invalid worker registration limit ${label}`);
   }
 }
 
+/** Validates and extracts the actor and workspace identities supplied by the hub. */
 function decodeActor(value: unknown): { readonly id: string; readonly workspaceId: string } {
   if (!record(value)) throw new Error("Invalid worker actor");
   exactKeys(value, ["id", "workspaceId"]);
@@ -431,6 +437,7 @@ function decodeActor(value: unknown): { readonly id: string; readonly workspaceI
   return { id: value.id, workspaceId: value.workspaceId };
 }
 
+/** Checks an identity’s UTF-8 validity, byte limit, and required presence. */
 function isWorkerIdentity(value: unknown, required: boolean): value is string {
   if (typeof value !== "string") return false;
   try {

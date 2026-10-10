@@ -24,31 +24,47 @@ import (
 	"github.com/crapthings/meldbase/internal/policyrecord"
 )
 
+// workerIDPattern defines accepted worker registration identifiers.
 var workerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+// workerOperationIDPattern defines accepted worker operation identifiers.
 var workerOperationIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// workerCollectionNamePattern defines accepted collection names in worker policy declarations.
 var workerCollectionNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,127}$`)
 
+// errRPCWorkerBusy reports that a worker cannot accept another RPC call.
 var errRPCWorkerBusy = errors.New("RPC worker is busy")
+
+// errPolicyInvalidationUnavailable reports that durable policy invalidation cannot be performed.
 var errPolicyInvalidationUnavailable = errors.New("durable policy invalidation is unavailable")
 
+// workerProtocolError identifies an invalid worker protocol message or operation.
 type workerProtocolError struct{ message string }
 
+// Error returns the worker protocol failure description.
 func (err *workerProtocolError) Error() string { return err.message }
-func workerProtocol(message string) error      { return &workerProtocolError{message: message} }
 
-// WorkerIdentity identifies a control-plane worker credential. It is separate
-// from the application Actor passed to RPC and read-policy handlers.
+// workerProtocol constructs a worker protocol error from a failure description.
+func workerProtocol(message string) error { return &workerProtocolError{message: message} }
+
+// WorkerIdentity identifies an authenticated worker that registers methods and read policies.
+//
+// It is separate from the application Actor passed to RPC and read-policy handlers.
 type WorkerIdentity struct{ ID string }
 
-// WorkerAuthenticator is a separate control-plane trust boundary. Client
-// authenticators must never be reused implicitly for worker connections.
+// WorkerAuthenticator verifies worker credentials separately from application credentials.
+//
+// Client authenticators must never be reused implicitly for worker connections.
 type WorkerAuthenticator interface {
 	AuthenticateWorker(*http.Request) (WorkerIdentity, error)
 }
 
+// workerTokenAuthenticator verifies worker bearer credentials against a retained token hash.
 type workerTokenAuthenticator struct{ digest [32]byte }
 
-// NewWorkerTokenAuthenticator creates a constant-time bearer authenticator.
+// NewWorkerTokenAuthenticator creates a bearer token authenticator for workers using constant-time comparisons.
+//
 // The raw token is not retained after construction.
 func NewWorkerTokenAuthenticator(token string) (WorkerAuthenticator, error) {
 	if len(token) < 32 || len(token) > 4096 {
@@ -57,6 +73,7 @@ func NewWorkerTokenAuthenticator(token string) (WorkerAuthenticator, error) {
 	return &workerTokenAuthenticator{digest: sha256.Sum256([]byte(token))}, nil
 }
 
+// AuthenticateWorker verifies the worker bearer token and rejects credentials passed through URL query parameters.
 func (authenticator *workerTokenAuthenticator) AuthenticateWorker(request *http.Request) (WorkerIdentity, error) {
 	if authenticator == nil || request == nil || request.URL == nil || request.URL.RawQuery != "" {
 		return WorkerIdentity{}, ErrUnauthenticated
@@ -72,6 +89,7 @@ func (authenticator *workerTokenAuthenticator) AuthenticateWorker(request *http.
 	return WorkerIdentity{ID: "static-token"}, nil
 }
 
+// WorkerHubConfig sets worker authentication, registration limits, and dynamic read-policy controls.
 type WorkerHubConfig struct {
 	Authenticator            WorkerAuthenticator
 	ReadPolicyCollections    []string
@@ -86,9 +104,10 @@ type WorkerHubConfig struct {
 	PolicyGenerationStore    PolicyGenerationStore
 }
 
-// WorkerHub routes dynamically registered, separately authenticated worker
-// methods. Mount it on a private control listener and pass it as both resolver
-// fields when transactional worker methods are desired.
+// WorkerHub routes calls to methods registered by separately authenticated workers.
+//
+// Mount it on a private control listener and pass it as both resolver fields
+// when transactional worker methods are desired.
 type WorkerHub struct {
 	config              WorkerHubConfig
 	mu                  sync.RWMutex
@@ -99,16 +118,19 @@ type WorkerHub struct {
 	stats               workerHubMetrics
 }
 
+// workerMethodOwner pairs a registered method's connection with its execution mode.
 type workerMethodOwner struct {
 	connection *workerConnection
 	mode       string
 }
 
+// workerReadPolicyOwner pairs a collection's registered read policy with its worker connection.
 type workerReadPolicyOwner struct {
 	connection *workerConnection
 	readPolicy workerReadPolicy
 }
 
+// WorkerHubStats captures worker connection, execution, protocol, and policy activity counters.
 type WorkerHubStats struct {
 	ConnectedWorkers       uint64 `json:"connectedWorkers"`
 	RegisteredMethods      uint64 `json:"registeredMethods"`
@@ -133,6 +155,7 @@ type WorkerHubStats struct {
 	PolicyInvalidations    uint64 `json:"policyInvalidations"`
 }
 
+// workerHubMetrics stores atomic counters for worker connections, calls, and read-policy evaluation.
 type workerHubMetrics struct {
 	connectedWorkers, registeredMethods, registeredReadPolicies atomic.Uint64
 	callsStarted, callsActive                                   atomic.Uint64
@@ -148,6 +171,7 @@ type workerHubMetrics struct {
 	policyInvalidations                                         atomic.Uint64
 }
 
+// NewWorkerHub validates and normalizes worker settings and creates an empty registration hub.
 func NewWorkerHub(config WorkerHubConfig) (*WorkerHub, error) {
 	if config.Authenticator == nil {
 		return nil, errors.New("worker authenticator is required")
@@ -212,6 +236,7 @@ func NewWorkerHub(config WorkerHubConfig) (*WorkerHub, error) {
 	}, nil
 }
 
+// reserveRPCMethods reserves local method names after checking for existing worker registrations.
 func (hub *WorkerHub) reserveRPCMethods(names []string) error {
 	if hub == nil {
 		return errors.New("worker hub is required")
@@ -229,6 +254,7 @@ func (hub *WorkerHub) reserveRPCMethods(names []string) error {
 	return nil
 }
 
+// Stats captures the hub's connection, call, protocol, and policy counters.
 func (hub *WorkerHub) Stats() WorkerHubStats {
 	if hub == nil {
 		return WorkerHubStats{}
@@ -249,6 +275,7 @@ func (hub *WorkerHub) Stats() WorkerHubStats {
 	}
 }
 
+// ResolveRPCMethod returns a callable adapter for a registered non-transactional worker method.
 func (hub *WorkerHub) ResolveRPCMethod(name string) (RPCMethod, bool) {
 	owner, ok := hub.resolve(name, "rpc")
 	if !ok {
@@ -259,6 +286,7 @@ func (hub *WorkerHub) ResolveRPCMethod(name string) (RPCMethod, bool) {
 	}, true
 }
 
+// ResolveRPCTransactionalMethod returns a callable adapter for a registered transaction-aware worker method.
 func (hub *WorkerHub) ResolveRPCTransactionalMethod(name string) (RPCTransactionalMethod, bool) {
 	owner, ok := hub.resolve(name, "transactional")
 	if !ok {
@@ -269,6 +297,7 @@ func (hub *WorkerHub) ResolveRPCTransactionalMethod(name string) (RPCTransaction
 	}, true
 }
 
+// ResolveQueryPolicy evaluates a managed collection's worker policy and rejects access when its worker is unavailable.
 func (hub *WorkerHub) ResolveQueryPolicy(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (QueryPolicy, bool, error) {
 	if hub == nil || !workerCollectionNamePattern.MatchString(collection) {
 		return QueryPolicy{}, false, nil
@@ -287,6 +316,7 @@ func (hub *WorkerHub) ResolveQueryPolicy(ctx context.Context, actor Actor, colle
 	return policy, true, err
 }
 
+// resolve finds a registered worker method only when its execution mode matches.
 func (hub *WorkerHub) resolve(name, mode string) (workerMethodOwner, bool) {
 	if hub == nil || !validRPCMethodName(name) {
 		return workerMethodOwner{}, false
@@ -297,6 +327,7 @@ func (hub *WorkerHub) resolve(name, mode string) (workerMethodOwner, bool) {
 	return owner, ok && owner.mode == mode
 }
 
+// workerRegistration carries a worker's identity, methods, and optional collection read policies.
 type workerRegistration struct {
 	Version      int                            `json:"v"`
 	Type         string                         `json:"type"`
@@ -305,11 +336,13 @@ type workerRegistration struct {
 	ReadPolicies []workerRegistrationReadPolicy `json:"readPolicies,omitempty"`
 }
 
+// workerRegistrationMethod declares a worker method name and its execution mode.
 type workerRegistrationMethod struct {
 	Name string `json:"name"`
 	Mode string `json:"mode"`
 }
 
+// workerRegistrationReadPolicy declares a collection's policy version, result limit, and field permissions.
 type workerRegistrationReadPolicy struct {
 	Collection   string          `json:"collection"`
 	Version      string          `json:"version"`
@@ -318,6 +351,7 @@ type workerRegistrationReadPolicy struct {
 	ResultFields json.RawMessage `json:"resultFields"`
 }
 
+// workerReadPolicy holds validated permissions and the generation-bound lease for a collection policy.
 type workerReadPolicy struct {
 	collection           string
 	declarationDigest    [32]byte
@@ -331,6 +365,7 @@ type workerReadPolicy struct {
 	lease                *QueryPolicyLease
 }
 
+// normalizeWorkerReadPolicy validates a policy declaration and activates its initial version and lease.
 func normalizeWorkerReadPolicy(registration workerRegistrationReadPolicy) (workerReadPolicy, error) {
 	if !workerCollectionNamePattern.MatchString(registration.Collection) || !validPolicyVersion(registration.Version) ||
 		registration.MaxResults <= 0 || registration.MaxResults > meldbase.DefaultQueryLimits.MaxLimit {
@@ -359,6 +394,7 @@ func normalizeWorkerReadPolicy(registration workerRegistrationReadPolicy) (worke
 	return activateWorkerReadPolicy(readPolicy, [16]byte{})
 }
 
+// activateWorkerReadPolicy derives a generation-bound policy version and creates its revocation lease.
 func activateWorkerReadPolicy(readPolicy workerReadPolicy, generation [16]byte) (workerReadPolicy, error) {
 	versionInput := make([]byte, 0, len(readPolicy.declarationDigest)+len(generation))
 	versionInput = append(versionInput, readPolicy.declarationDigest[:]...)
@@ -374,6 +410,7 @@ func activateWorkerReadPolicy(readPolicy workerReadPolicy, generation [16]byte) 
 	return readPolicy, nil
 }
 
+// decodeWorkerPolicyFields validates a wildcard or bounded field list and returns its sorted declaration and lookup set.
 func decodeWorkerPolicyFields(raw json.RawMessage, queryPaths bool) (bool, map[string]struct{}, []string, error) {
 	var wildcard string
 	if err := json.Unmarshal(raw, &wildcard); err == nil {
@@ -405,6 +442,7 @@ func decodeWorkerPolicyFields(raw json.RawMessage, queryPaths bool) (bool, map[s
 	return false, result, values, nil
 }
 
+// policyFieldDeclaration returns the wildcard or explicit list used in a canonical policy declaration.
 func policyFieldDeclaration(all bool, values []string) any {
 	if all {
 		return "*"
@@ -412,6 +450,7 @@ func policyFieldDeclaration(all bool, values []string) any {
 	return values
 }
 
+// ServeHTTP authenticates and registers a worker WebSocket before processing its protocol messages.
 func (hub *WorkerHub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if hub == nil || request == nil || request.Method != http.MethodGet {
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
@@ -471,11 +510,13 @@ func (hub *WorkerHub) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	}
 }
 
+// isWorkerProtocolError checks whether an error contains a worker protocol failure.
 func isWorkerProtocolError(err error) bool {
 	var protocol *workerProtocolError
 	return errors.As(err, &protocol)
 }
 
+// readRegistration reads and validates a worker's method and read-policy declarations within registration limits.
 func (worker *workerConnection) readRegistration(ctx context.Context) (workerRegistration, error) {
 	raw, err := worker.readText(ctx)
 	if err != nil {
@@ -512,6 +553,7 @@ func (worker *workerConnection) readRegistration(ctx context.Context) (workerReg
 	return registration, nil
 }
 
+// register validates ownership and publishes a worker's methods and read policies together.
 func (hub *WorkerHub) register(ctx context.Context, worker *workerConnection, registration workerRegistration) error {
 	readPolicies := make([]workerReadPolicy, len(registration.ReadPolicies))
 	for index, declared := range registration.ReadPolicies {
@@ -564,6 +606,7 @@ func (hub *WorkerHub) register(ctx context.Context, worker *workerConnection, re
 	return nil
 }
 
+// unregister removes a worker's registrations, revokes its policy leases, and fails pending work.
 func (hub *WorkerHub) unregister(worker *workerConnection) {
 	if hub == nil || worker == nil {
 		return
@@ -591,6 +634,7 @@ func (hub *WorkerHub) unregister(worker *workerConnection) {
 	}
 }
 
+// stagePolicyInvalidation stages a new policy generation and schedules lease replacement after its transaction commits.
 func (hub *WorkerHub) stagePolicyInvalidation(worker *workerConnection, tx *meldbase.WriteTransaction, collection string) error {
 	if hub == nil || worker == nil || tx == nil || hub.config.PolicyGenerationStore == nil || !workerCollectionNamePattern.MatchString(collection) {
 		return errPolicyInvalidationUnavailable
@@ -614,6 +658,7 @@ func (hub *WorkerHub) stagePolicyInvalidation(worker *workerConnection, tx *meld
 	})
 }
 
+// commitPolicyInvalidation installs a committed policy generation and revokes the previous lease.
 func (hub *WorkerHub) commitPolicyInvalidation(worker *workerConnection, collection string, generation [16]byte) {
 	if hub == nil || worker == nil || generation == [16]byte{} {
 		return
@@ -642,6 +687,7 @@ func (hub *WorkerHub) commitPolicyInvalidation(worker *workerConnection, collect
 	hub.stats.policyInvalidations.Add(1)
 }
 
+// revokePolicyLeaseNow prevents new lease acquisitions without waiting for active actions to finish.
 func revokePolicyLeaseNow(lease *QueryPolicyLease) {
 	if lease == nil {
 		return
@@ -651,6 +697,7 @@ func revokePolicyLeaseNow(lease *QueryPolicyLease) {
 	_ = lease.Revoke(ctx)
 }
 
+// workerConnection owns a registered worker socket and its pending calls and policy evaluations.
 type workerConnection struct {
 	hub          *WorkerHub
 	socket       *websocket.Conn
@@ -664,6 +711,7 @@ type workerConnection struct {
 	close        sync.Once
 }
 
+// workerPendingCall tracks result delivery and optional transaction operations for one worker request.
 type workerPendingCall struct {
 	result     chan workerCallResult
 	policy     chan workerPolicyResult
@@ -673,16 +721,19 @@ type workerPendingCall struct {
 	seenOps    map[string]struct{}
 }
 
+// workerCallResult carries a decoded worker result or execution error.
 type workerCallResult struct {
 	value meldbase.Value
 	err   error
 }
 
+// workerPolicyResult carries a worker-provided row constraint or evaluation error.
 type workerPolicyResult struct {
 	constraint *meldbase.QuerySpec
 	err        error
 }
 
+// invoke sends a bounded worker call and waits for its result, cancellation, or disconnection.
 func (worker *workerConnection) invoke(ctx context.Context, method, mode string, actor Actor, input meldbase.Value, tx *meldbase.WriteTransaction) (meldbase.Value, error) {
 	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || (mode == "transactional") != (tx != nil) {
 		return meldbase.Value{}, errors.New("worker invocation unavailable")
@@ -750,6 +801,7 @@ func (worker *workerConnection) invoke(ctx context.Context, method, mode string,
 	}
 }
 
+// invokePolicy requests a worker row constraint within the evaluation timeout and combines it with registered permissions.
 func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, query meldbase.QuerySpec, readPolicy workerReadPolicy) (QueryPolicy, error) {
 	if worker == nil || worker.hub == nil || worker.socket == nil || ctx == nil || readPolicy.lease == nil ||
 		actor.ID == "" || len(actor.ID) > 4096 || len(actor.WorkspaceID) > 4096 ||
@@ -831,6 +883,7 @@ func (worker *workerConnection) invokePolicy(ctx context.Context, actor Actor, q
 	}
 }
 
+// send serializes and writes a worker message within the frame limit under the socket write lock.
 func (worker *workerConnection) send(ctx context.Context, value any) error {
 	encoded, err := json.Marshal(value)
 	if err != nil || len(encoded) > worker.hub.config.MaxFrameBytes {
@@ -845,6 +898,7 @@ func (worker *workerConnection) send(ctx context.Context, value any) error {
 	return nil
 }
 
+// readText reads a nonempty bounded text frame and validates its JSON.
 func (worker *workerConnection) readText(ctx context.Context) ([]byte, error) {
 	messageType, raw, err := worker.socket.Read(ctx)
 	if err != nil {
@@ -860,6 +914,7 @@ func (worker *workerConnection) readText(ctx context.Context) ([]byte, error) {
 	return raw, nil
 }
 
+// readLoop dispatches supported worker messages until reading or protocol processing fails.
 func (worker *workerConnection) readLoop(ctx context.Context) error {
 	for {
 		raw, err := worker.readText(ctx)
@@ -900,6 +955,7 @@ func (worker *workerConnection) readLoop(ctx context.Context) error {
 	}
 }
 
+// workerResultFrame carries a typed result for one pending worker call.
 type workerResultFrame struct {
 	Version int             `json:"v"`
 	Type    string          `json:"type"`
@@ -907,6 +963,7 @@ type workerResultFrame struct {
 	Result  json.RawMessage `json:"result"`
 }
 
+// handleResult validates a canonical typed result and delivers it to the matching pending call.
 func (worker *workerConnection) handleResult(raw []byte) error {
 	var frame workerResultFrame
 	if err := decodeStrict(raw, &frame); err != nil || frame.Version != protocolVersion || frame.Type != "result" || !workerOperationIDPattern.MatchString(frame.CallID) {
@@ -928,6 +985,7 @@ func (worker *workerConnection) handleResult(raw []byte) error {
 	return nil
 }
 
+// workerErrorFrame carries a classified error for a worker call or policy evaluation.
 type workerErrorFrame struct {
 	Version int    `json:"v"`
 	Type    string `json:"type"`
@@ -939,6 +997,7 @@ type workerErrorFrame struct {
 	} `json:"error"`
 }
 
+// handleError validates an application or server-owned error and delivers it to the pending call.
 func (worker *workerConnection) handleError(raw []byte) error {
 	var frame workerErrorFrame
 	if err := decodeStrict(raw, &frame); err != nil || frame.Version != protocolVersion || frame.Type != "error" ||
@@ -979,6 +1038,7 @@ func (worker *workerConnection) handleError(raw []byte) error {
 	return nil
 }
 
+// workerPolicyFrame carries a row constraint for one pending policy evaluation.
 type workerPolicyFrame struct {
 	Version    int             `json:"v"`
 	Type       string          `json:"type"`
@@ -986,6 +1046,7 @@ type workerPolicyFrame struct {
 	Constraint json.RawMessage `json:"constraint"`
 }
 
+// handlePolicy validates an unmodified query constraint and delivers it to the pending policy evaluation.
 func (worker *workerConnection) handlePolicy(raw []byte) error {
 	var frame workerPolicyFrame
 	if err := decodeStrict(raw, &frame); err != nil || frame.Version != protocolVersion || frame.Type != "policy" ||
@@ -1004,6 +1065,7 @@ func (worker *workerConnection) handlePolicy(raw []byte) error {
 	return nil
 }
 
+// handlePolicyError validates and delivers a rejection or failure for a pending policy evaluation.
 func (worker *workerConnection) handlePolicyError(raw []byte) error {
 	var frame workerErrorFrame
 	if err := decodeStrict(raw, &frame); err != nil || frame.Version != protocolVersion || frame.Type != "policy_error" ||
@@ -1023,6 +1085,7 @@ func (worker *workerConnection) handlePolicyError(raw []byte) error {
 	return nil
 }
 
+// takePending removes and returns a tracked worker request under the connection lock.
 func (worker *workerConnection) takePending(callID string) *workerPendingCall {
 	worker.mu.Lock()
 	pending := worker.pending[callID]
@@ -1033,6 +1096,7 @@ func (worker *workerConnection) takePending(callID string) *workerPendingCall {
 	return pending
 }
 
+// workerTransactionOperationFrame identifies a point operation or policy invalidation within an active worker transaction.
 type workerTransactionOperationFrame struct {
 	Version     int             `json:"v"`
 	Type        string          `json:"type"`
@@ -1045,6 +1109,7 @@ type workerTransactionOperationFrame struct {
 	Mutation    json.RawMessage `json:"mutation,omitempty"`
 }
 
+// handleTransactionOperation validates and executes a bounded worker transaction operation and sends its outcome.
 func (worker *workerConnection) handleTransactionOperation(ctx context.Context, raw []byte) error {
 	var frame workerTransactionOperationFrame
 	if err := decodeStrict(raw, &frame); err != nil || frame.Version != protocolVersion || frame.Type != "tx_op" ||
@@ -1095,6 +1160,7 @@ func (worker *workerConnection) handleTransactionOperation(ctx context.Context, 
 	})
 }
 
+// executeWorkerTransactionOperation validates operation arguments and performs a document read or staged point write.
 func executeWorkerTransactionOperation(tx *meldbase.WriteTransaction, frame workerTransactionOperationFrame) (meldbase.Value, error) {
 	if tx == nil || !workerCollectionNamePattern.MatchString(frame.Collection) {
 		return meldbase.Value{}, meldbase.ErrInvalidCollection
@@ -1180,6 +1246,7 @@ func executeWorkerTransactionOperation(tx *meldbase.WriteTransaction, frame work
 	}
 }
 
+// classifyWorkerTransactionError maps transaction failures to worker protocol error codes.
 func classifyWorkerTransactionError(err error) string {
 	switch {
 	case errors.Is(err, meldbase.ErrNotFound):
@@ -1203,6 +1270,7 @@ func classifyWorkerTransactionError(err error) string {
 	}
 }
 
+// fail closes the worker connection once and reports the failure to all pending requests.
 func (worker *workerConnection) fail(err error) {
 	worker.close.Do(func() {
 		close(worker.done)

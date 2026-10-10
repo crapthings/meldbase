@@ -21,10 +21,13 @@ import (
 	"github.com/crapthings/meldbase/integrations/anchorhttp"
 )
 
+// anchorQualificationSchema identifies the signed qualification receipt format.
 const anchorQualificationSchema uint32 = 1
 
+// anchorQualificationPhases defines the required order of qualification phases.
 var anchorQualificationPhases = [...]string{"healthy", "degraded", "minority", "recovered", "rollback-rejected"}
 
+// anchorQualificationMember records one member's endpoint identity, availability, and anchor value.
 type anchorQualificationMember struct {
 	MemberID              string `json:"memberId"`
 	EndpointSHA256        string `json:"endpointSha256"`
@@ -35,6 +38,7 @@ type anchorQualificationMember struct {
 	MinimumGeneration     uint64 `json:"minimumGeneration"`
 }
 
+// anchorQualificationReceipt records signed database and quorum evidence for one qualification phase.
 type anchorQualificationReceipt struct {
 	SchemaVersion          uint32                      `json:"schemaVersion"`
 	ProtocolVersion        uint32                      `json:"protocolVersion"`
@@ -68,6 +72,7 @@ type anchorQualificationReceipt struct {
 	Signature              string                      `json:"signature"`
 }
 
+// runAnchorQualification dispatches the requested anchor qualification command.
 func runAnchorQualification(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("anchor-qualification requires keygen, probe, verify, history-agent, history-run, history-sign or history-verify")
@@ -92,6 +97,7 @@ func runAnchorQualification(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// runAnchorQualificationKeygen creates new Ed25519 signing and verification key files.
 func runAnchorQualificationKeygen(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("anchor-qualification keygen", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -117,6 +123,7 @@ func runAnchorQualificationKeygen(args []string, stdout, stderr io.Writer) error
 	return nil
 }
 
+// runAnchorQualificationProbe checks one qualification phase and publishes its signed receipt.
 func runAnchorQualificationProbe(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("anchor-qualification probe", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -289,9 +296,13 @@ func runAnchorQualificationProbe(args []string, stdout, stderr io.Writer) error 
 	return encoder.Encode(receipt)
 }
 
+// anchorReceiptFlags collects receipt paths in their supplied order.
 type anchorReceiptFlags []string
 
+// String joins the supplied receipt paths with commas.
 func (values *anchorReceiptFlags) String() string { return strings.Join(*values, ",") }
+
+// Set appends a nonempty receipt path.
 func (values *anchorReceiptFlags) Set(value string) error {
 	if value == "" {
 		return errors.New("empty anchor qualification receipt")
@@ -300,6 +311,7 @@ func (values *anchorReceiptFlags) Set(value string) error {
 	return nil
 }
 
+// runAnchorQualificationVerify verifies an ordered receipt chain and prints its result.
 func runAnchorQualificationVerify(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("anchor-qualification verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -332,6 +344,7 @@ func runAnchorQualificationVerify(args []string, stdout, stderr io.Writer) error
 	return json.NewEncoder(stdout).Encode(result)
 }
 
+// anchorQualificationChainVerification holds verified phase receipts and their hashes.
 type anchorQualificationChainVerification struct {
 	RunID           string
 	ConfigurationID string
@@ -340,6 +353,7 @@ type anchorQualificationChainVerification struct {
 	ReceiptSHA256   []string
 }
 
+// verifyAnchorQualificationChain checks receipt signatures, phase order, and consistent evidence across the run.
 func verifyAnchorQualificationChain(paths []string, publicKey ed25519.PublicKey, requireComplete bool) (anchorQualificationChainVerification, error) {
 	if len(publicKey) != ed25519.PublicKeySize || len(paths) == 0 || (requireComplete && len(paths) != len(anchorQualificationPhases)) {
 		return anchorQualificationChainVerification{}, errors.New("anchor qualification chain inputs are incomplete")
@@ -395,6 +409,7 @@ func verifyAnchorQualificationChain(paths []string, publicKey ed25519.PublicKey,
 	return verified, nil
 }
 
+// anchorQualificationMembers converts replica checks into member evidence and availability counts.
 func anchorQualificationMembers(checks []anchorhttp.ReplicaCheck, replicaSpecs []string) ([]anchorQualificationMember, uint64, uint64) {
 	members := make([]anchorQualificationMember, len(checks))
 	var available, unavailable uint64
@@ -419,6 +434,7 @@ func anchorQualificationMembers(checks []anchorhttp.ReplicaCheck, replicaSpecs [
 	return members, available, unavailable
 }
 
+// anchorQualificationRelation compares the verified database with the quorum anchor.
 func anchorQualificationRelation(database meldbase.VerificationReport, anchor meldbase.RollbackAnchor, exists bool, loadErr error) (string, error) {
 	if loadErr != nil {
 		return "unavailable", nil
@@ -438,6 +454,7 @@ func anchorQualificationRelation(database meldbase.VerificationReport, anchor me
 	return "database-ahead", nil
 }
 
+// validateAnchorQualificationPhase checks that observed quorum and database behavior matches the requested phase.
 func validateAnchorQualificationPhase(phase string, replicas, quorum, available, unavailable uint64, load, relation, opened string, anchorExists bool) error {
 	switch phase {
 	case "healthy":
@@ -466,6 +483,7 @@ func validateAnchorQualificationPhase(phase string, replicas, quorum, available,
 	return nil
 }
 
+// anchorQualificationPhaseIndex returns a qualification phase's position or -1 when it is unknown.
 func anchorQualificationPhaseIndex(phase string) int {
 	for index, expected := range anchorQualificationPhases {
 		if phase == expected {
@@ -475,6 +493,7 @@ func anchorQualificationPhaseIndex(phase string) int {
 	return -1
 }
 
+// validateAnchorQualificationReceipt checks that a receipt's database, member, and phase evidence is complete and consistent.
 func validateAnchorQualificationReceipt(receipt anchorQualificationReceipt) error {
 	if receipt.SchemaVersion != anchorQualificationSchema || receipt.ProtocolVersion != anchorhttp.ProtocolVersion || anchorQualificationPhaseIndex(receipt.Phase) < 0 ||
 		!anchorQualificationHex(receipt.RunID, 16) || !qualificationHexDigest(receipt.ConfigurationID) || !qualificationHexDigest(receipt.ExternalEvidenceSHA256) || receipt.Replicas == 0 || receipt.Quorum != receipt.Replicas/2+1 ||
@@ -536,6 +555,7 @@ func validateAnchorQualificationReceipt(receipt anchorQualificationReceipt) erro
 	return nil
 }
 
+// anchorQualificationHex checks that a value is lowercase hexadecimal encoding of the required byte length.
 func anchorQualificationHex(value string, bytes int) bool {
 	if len(value) != bytes*2 || value != strings.ToLower(value) {
 		return false
@@ -544,6 +564,7 @@ func anchorQualificationHex(value string, bytes int) bool {
 	return err == nil && len(decoded) == bytes
 }
 
+// sameAnchorQualificationMembers compares member IDs and endpoint hashes in matching list positions.
 func sameAnchorQualificationMembers(left, right []anchorQualificationMember) bool {
 	if len(left) != len(right) {
 		return false
@@ -556,6 +577,7 @@ func sameAnchorQualificationMembers(left, right []anchorQualificationMember) boo
 	return true
 }
 
+// signAnchorQualificationReceipt signs a receipt's JSON contents with an Ed25519 private key.
 func signAnchorQualificationReceipt(receipt *anchorQualificationReceipt, privateKey ed25519.PrivateKey) error {
 	receipt.Signature = ""
 	payload, err := json.Marshal(receipt)
@@ -566,6 +588,7 @@ func signAnchorQualificationReceipt(receipt *anchorQualificationReceipt, private
 	return nil
 }
 
+// verifyAnchorQualificationReceipt validates a receipt and verifies its signature against the trusted public key.
 func verifyAnchorQualificationReceipt(receipt anchorQualificationReceipt, publicKey ed25519.PublicKey) error {
 	if err := validateAnchorQualificationReceipt(receipt); err != nil {
 		return err
@@ -586,6 +609,7 @@ func verifyAnchorQualificationReceipt(receipt anchorQualificationReceipt, public
 	return nil
 }
 
+// newAnchorQualificationRunID generates a random 16-byte run ID encoded as hexadecimal.
 func newAnchorQualificationRunID() (string, error) {
 	var identifier [16]byte
 	if _, err := io.ReadFull(rand.Reader, identifier[:]); err != nil {
@@ -594,6 +618,7 @@ func newAnchorQualificationRunID() (string, error) {
 	return hex.EncodeToString(identifier[:]), nil
 }
 
+// writeAnchorQualificationKey creates a base64 key file without overwriting and syncs the file and parent directory.
 func writeAnchorQualificationKey(path string, key []byte, mode os.FileMode) error {
 	raw := []byte(base64.StdEncoding.EncodeToString(key) + "\n")
 	clean, err := filepath.Abs(filepath.Clean(path))
@@ -612,6 +637,7 @@ func writeAnchorQualificationKey(path string, key []byte, mode os.FileMode) erro
 	return errors.Join(writeErr, syncProbeDirectory(filepath.Dir(clean)))
 }
 
+// loadAnchorQualificationPrivateKey reads an Ed25519 private key from a bounded private base64 file.
 func loadAnchorQualificationPrivateKey(path string) (ed25519.PrivateKey, error) {
 	raw, err := readAnchorFile(path, 1024, true)
 	if err != nil {
@@ -621,6 +647,7 @@ func loadAnchorQualificationPrivateKey(path string) (ed25519.PrivateKey, error) 
 	return ed25519.PrivateKey(decoded), err
 }
 
+// loadAnchorQualificationPublicKey reads an Ed25519 public key from a bounded base64 file.
 func loadAnchorQualificationPublicKey(path string) (ed25519.PublicKey, error) {
 	raw, err := readAnchorFile(path, 1024, false)
 	if err != nil {
@@ -630,6 +657,7 @@ func loadAnchorQualificationPublicKey(path string) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(decoded), err
 }
 
+// decodeAnchorQualificationKey decodes one strict base64 key with the required byte length.
 func decodeAnchorQualificationKey(raw []byte, size int) ([]byte, error) {
 	encoded := strings.TrimSuffix(string(raw), "\n")
 	if encoded == "" || strings.ContainsAny(encoded, "\r\n\t ") {

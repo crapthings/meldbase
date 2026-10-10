@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// request holds the controller fields echoed by the test power adapter.
 type request struct {
 	SchemaVersion        uint32    `json:"schemaVersion"`
 	ControllerRunID      string    `json:"controllerRunId"`
@@ -15,6 +16,7 @@ type request struct {
 	RequestedAt          time.Time `json:"requestedAt"`
 }
 
+// main echoes one request as a successful simulated power cycle with fixed hardware evidence.
 func main() {
 	var input request
 	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {

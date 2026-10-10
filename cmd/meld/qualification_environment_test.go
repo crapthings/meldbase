@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// TestQualificationEnvironmentEvidenceBindsRevisionVolumeControllerAndTime checks that environment evidence matches the tested build, volume, controller, and campaign timing.
 func TestQualificationEnvironmentEvidenceBindsRevisionVolumeControllerAndTime(t *testing.T) {
 	durability, _ := qualificationFixtures()
 	root := t.TempDir()
@@ -53,6 +54,7 @@ func TestQualificationEnvironmentEvidenceBindsRevisionVolumeControllerAndTime(t 
 	}
 }
 
+// TestQualificationEnvironmentCaptureFailsClosedOffLinux checks that environment capture rejects platforms other than Linux.
 func TestQualificationEnvironmentCaptureFailsClosedOffLinux(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		t.Skip("non-Linux contract test")

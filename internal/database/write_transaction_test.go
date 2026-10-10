@@ -12,6 +12,7 @@ import (
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
+// TestMeldbaseSystemWriteCommitsPointMutationsAndTerminalAtomically checks that document edits and system records are committed together before subscribers see them.
 func TestMeldbaseSystemWriteCommitsPointMutationsAndTerminalAtomically(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "atomic-write.meld2"))
 	if err != nil {
@@ -99,6 +100,7 @@ func TestMeldbaseSystemWriteCommitsPointMutationsAndTerminalAtomically(t *testin
 	}
 }
 
+// TestMeldbaseSystemWriteRollsBackOnCASMismatchAndHandlerError checks that a record mismatch or callback error discards staged writes without running commit hooks.
 func TestMeldbaseSystemWriteRollsBackOnCASMismatchAndHandlerError(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "atomic-rollback.meld2"))
 	if err != nil {
@@ -153,6 +155,7 @@ func TestMeldbaseSystemWriteRollsBackOnCASMismatchAndHandlerError(t *testing.T) 
 	}
 }
 
+// TestMeldbaseSystemWriteSharesOverlayAndSystemByteBudget checks that transaction documents and system records share one byte limit.
 func TestMeldbaseSystemWriteSharesOverlayAndSystemByteBudget(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "shared-overlay-system-budget.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxDocumentBytes: 256, MaxTransactionBytes: 300, MaxTransactionChanges: 4},
@@ -186,6 +189,7 @@ func TestMeldbaseSystemWriteSharesOverlayAndSystemByteBudget(t *testing.T) {
 	}
 }
 
+// TestMeldbaseSystemWriteDoesNotHoldWriterLockAndRejectsStaleSnapshot checks that concurrent writes can proceed during a callback and conflicting staged writes are discarded.
 func TestMeldbaseSystemWriteDoesNotHoldWriterLockAndRejectsStaleSnapshot(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "atomic-conflict.meld2"))
 	if err != nil {
@@ -251,6 +255,7 @@ func TestMeldbaseSystemWriteDoesNotHoldWriterLockAndRejectsStaleSnapshot(t *test
 	}
 }
 
+// TestMeldbaseSystemWriteReadOnlyResultRejectsStaleSnapshot checks that a read-only callback rejects a result based on a document changed by another writer.
 func TestMeldbaseSystemWriteReadOnlyResultRejectsStaleSnapshot(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "atomic-read-conflict.meld2"))
 	if err != nil {

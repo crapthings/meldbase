@@ -12,48 +12,58 @@ import (
 )
 
 var (
-	rpcMethodNamePattern        = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
+	// rpcMethodNamePattern defines accepted RPC method names.
+	rpcMethodNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
+	// rpcInternalErrorCodePattern defines accepted server-owned RPC error codes.
 	rpcInternalErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	// rpcBusinessErrorCodePattern defines accepted namespaced application error codes.
 	rpcBusinessErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})+$`)
-	rpcRequestIDPattern         = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-	rpcIdempotencyKeyPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{22,128}$`)
+	// rpcRequestIDPattern defines accepted caller request identifiers.
+	rpcRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	// rpcIdempotencyKeyPattern defines accepted caller idempotency keys.
+	rpcIdempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22,128}$`)
 )
 
+// maxRPCErrorDataBytes limits encoded application error data.
 const maxRPCErrorDataBytes = 64 << 10
 
-// RPCMethod is a bounded, authenticated non-atomic application operation.
+// RPCMethod handles an authenticated application call whose effects are not atomic with its result.
+//
 // Input and results use Meldbase's closed Value model, preserving Int64,
 // Date, Binary and object semantics across Go and JavaScript. Any database
 // write or external effect a handler reaches outside a WriteTransaction is not
 // atomic with its RPC terminal result.
 type RPCMethod func(context.Context, Actor, meldbase.Value) (meldbase.Value, error)
 
-// RPCTransactionalMethod stages point writes against a short immutable
-// snapshot. A successful result and all staged writes share one durable
+// RPCTransactionalMethod stages database writes that commit together with a successful RPC result.
+//
+// Writes use a short immutable snapshot. A successful result and all staged
+// writes share one durable
 // publication with the RPC idempotency terminal record after optimistic commit
 // validation.
 type RPCTransactionalMethod func(context.Context, Actor, meldbase.Value, *meldbase.WriteTransaction) (meldbase.Value, error)
 
-// RPCMethodResolver resolves dynamic trusted-worker methods. It is consulted
-// only after the immutable local registry misses.
+// RPCMethodResolver looks up trusted-worker methods when the local method registry has no match.
 type RPCMethodResolver interface {
 	ResolveRPCMethod(string) (RPCMethod, bool)
 }
 
-// RPCTransactionalMethodResolver is the equivalent dynamic boundary for
-// transaction-aware methods.
+// RPCTransactionalMethodResolver looks up dynamically registered methods that stage database writes.
 type RPCTransactionalMethodResolver interface {
 	ResolveRPCTransactionalMethod(string) (RPCTransactionalMethod, bool)
 }
 
-// RPCAuthorizer is evaluated for every call before input is decoded or
-// application code runs. Registration alone never grants call permission.
+// RPCAuthorizer checks call permission before input decoding or application execution.
+//
+// Registration alone never grants call permission.
 type RPCAuthorizer interface {
 	AuthorizeRPC(context.Context, Actor, string) error
 }
 
-// MeldbaseError is an expected, application-owned RPC failure. Code is a
-// namespaced stable identifier (for example "orders.already_paid"); Data is an
+// MeldbaseError carries an expected business error code and optional safe data for the caller.
+//
+// Code is a namespaced stable identifier (for example "orders.already_paid");
+// Data is an
 // optional safe document sent to the caller. Arbitrary handler errors are
 // always classified as MeldbaseInternalError instead.
 type MeldbaseError struct {
@@ -61,6 +71,7 @@ type MeldbaseError struct {
 	Data meldbase.Document
 }
 
+// Error returns the application error code as diagnostic text.
 func (err *MeldbaseError) Error() string {
 	if err == nil {
 		return "meldbase error"
@@ -68,14 +79,17 @@ func (err *MeldbaseError) Error() string {
 	return "meldbase: " + err.Code
 }
 
-// MeldbaseInternalError is Meldbase-owned error state. Applications should
-// return MeldbaseError for deliberate business outcomes and let all other
+// MeldbaseInternalError carries a server-owned RPC error code and HTTP status.
+//
+// Applications should return MeldbaseError for deliberate business outcomes
+// and let all other
 // failures be safely normalized by the server.
 type MeldbaseInternalError struct {
 	Code   string
 	Status int
 }
 
+// Error returns the server-owned error code as diagnostic text.
 func (err *MeldbaseInternalError) Error() string {
 	if err == nil {
 		return "meldbase internal error"
@@ -83,6 +97,7 @@ func (err *MeldbaseInternalError) Error() string {
 	return "meldbase internal: " + err.Code
 }
 
+// rpcCallEnvelope holds the versioned caller request fields before input decoding.
 type rpcCallEnvelope struct {
 	Version        int              `json:"v"`
 	Type           string           `json:"type"`
@@ -92,6 +107,7 @@ type rpcCallEnvelope struct {
 	Input          *json.RawMessage `json:"input"`
 }
 
+// rpcOutcome carries an encoded result or a classified error for transport delivery.
 type rpcOutcome struct {
 	result json.RawMessage
 	status int
@@ -100,9 +116,13 @@ type rpcOutcome struct {
 	data   json.RawMessage
 }
 
-func validRPCMethodName(name string) bool    { return rpcMethodNamePattern.MatchString(name) }
+// validRPCMethodName checks the allowed spelling and length of an RPC method name.
+func validRPCMethodName(name string) bool { return rpcMethodNamePattern.MatchString(name) }
+
+// validRPCIdempotencyKey checks the allowed spelling and length of a caller idempotency key.
 func validRPCIdempotencyKey(key string) bool { return rpcIdempotencyKeyPattern.MatchString(key) }
 
+// rpc authenticates and authorizes an HTTP RPC request before executing it within the concurrency limit.
 func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("cache-control", "no-store")
 	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
@@ -160,6 +180,7 @@ func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// resolveRPCMethod looks up a local method before consulting dynamic method resolvers.
 func (h *Handler) resolveRPCMethod(name string) (RPCMethod, RPCTransactionalMethod, bool, bool) {
 	method, standardExists := h.config.RPCMethods[name]
 	transactionalMethod, transactionalExists := h.config.RPCTransactionalMethods[name]
@@ -175,6 +196,7 @@ func (h *Handler) resolveRPCMethod(name string) (RPCMethod, RPCTransactionalMeth
 	return method, transactionalMethod, standardExists, transactionalExists
 }
 
+// executeRPC resolves optional idempotency ownership or replay before executing a method and recording its outcome.
 func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod, transactionalMethod RPCTransactionalMethod, envelope rpcCallEnvelope, input meldbase.Value, requestBytes int) rpcOutcome {
 	var action *rpcIdempotencyAction
 	if envelope.IdempotencyKey != nil {
@@ -315,6 +337,7 @@ func (h *Handler) executeRPC(ctx context.Context, actor Actor, method RPCMethod,
 	return rpcOutcome{result: json.RawMessage(encoded)}
 }
 
+// executeTransactionalRPC runs a method whose staged writes and successful result share one durable commit.
 func (h *Handler) executeTransactionalRPC(ctx context.Context, actor Actor, method RPCTransactionalMethod, input meldbase.Value, requestBytes int, action rpcIdempotencyAction) rpcOutcome {
 	store, ok := action.store.(*durableRPCIdempotencyStore)
 	if !ok || store.db != h.config.DB {
@@ -419,6 +442,7 @@ func (h *Handler) executeTransactionalRPC(ctx context.Context, actor Actor, meth
 	return rpcOutcome{result: json.RawMessage(encoded)}
 }
 
+// completeRPCIdempotency persists an outcome within the commit timeout and attempts to mark it unknown on failure.
 func (h *Handler) completeRPCIdempotency(action rpcIdempotencyAction, completion RPCIdempotencyCompletion) bool {
 	if completion.ErrorCode != "" && completion.ErrorKind == "" {
 		completion.ErrorKind = "internal"
@@ -432,12 +456,14 @@ func (h *Handler) completeRPCIdempotency(action rpcIdempotencyAction, completion
 	return true
 }
 
+// markRPCUnknown attempts to record an uncertain request outcome within the configured commit timeout.
 func (h *Handler) markRPCUnknown(action rpcIdempotencyAction) {
 	ctx, cancel := context.WithTimeout(context.Background(), h.config.RPCIdempotencyCommitTimeout)
 	defer cancel()
 	_ = action.store.MarkUnknown(ctx, action.claim)
 }
 
+// decodeRPCCallEnvelope strictly decodes and validates the versioned RPC call fields.
 func decodeRPCCallEnvelope(raw []byte) (rpcCallEnvelope, error) {
 	var envelope rpcCallEnvelope
 	if err := decodeStrict(raw, &envelope); err != nil || envelope.Version != protocolVersion || envelope.Type != "call" ||
@@ -449,14 +475,17 @@ func decodeRPCCallEnvelope(raw []byte) (rpcCallEnvelope, error) {
 	return envelope, nil
 }
 
+// decodeRPCInput decodes a typed RPC argument within the supplied value limits.
 func decodeRPCInput(rawInput json.RawMessage, limits meldbase.QueryLimits) (meldbase.Value, error) {
 	return meldbase.UnmarshalWireValue(rawInput, limits)
 }
 
+// internalRPCOutcome constructs a server-owned error outcome with an HTTP status and code.
 func internalRPCOutcome(status int, code string) rpcOutcome {
 	return rpcOutcome{status: status, code: code, kind: "internal"}
 }
 
+// classifyRPCOutcome converts an execution error into a safe application or server-owned error response.
 func classifyRPCOutcome(err error) rpcOutcome {
 	if errors.Is(err, meldbase.ErrCommitOutcomeUnknown) {
 		return internalRPCOutcome(http.StatusConflict, "rpc_outcome_unknown")
@@ -497,6 +526,7 @@ func classifyRPCOutcome(err error) rpcOutcome {
 	return internalRPCOutcome(http.StatusInternalServerError, "internal")
 }
 
+// validRPCBusinessErrorData checks that optional error data is a bounded canonical typed object.
 func validRPCBusinessErrorData(data []byte) bool {
 	if len(data) == 0 {
 		return true
@@ -526,14 +556,17 @@ func classifyRPCError(err error) (int, string) {
 	return outcome.status, outcome.code
 }
 
+// rpcResultMessage builds a versioned success message for a caller request ID.
 func rpcResultMessage(requestID string, encoded json.RawMessage) map[string]any {
 	return map[string]any{"v": protocolVersion, "type": "result", "requestId": requestID, "result": encoded}
 }
 
+// rpcErrorMessage builds a server-owned error message for a caller request ID.
 func rpcErrorMessage(requestID, code string) map[string]any {
 	return rpcOutcomeErrorMessage(requestID, internalRPCOutcome(http.StatusInternalServerError, code))
 }
 
+// rpcOutcomeErrorMessage builds a versioned error message from a classified outcome.
 func rpcOutcomeErrorMessage(requestID string, outcome rpcOutcome) map[string]any {
 	if outcome.kind == "" {
 		outcome.kind = "internal"
@@ -545,10 +578,12 @@ func rpcOutcomeErrorMessage(requestID string, outcome rpcOutcome) map[string]any
 	return map[string]any{"v": protocolVersion, "type": "error", "requestId": requestID, "error": errorBody}
 }
 
+// writeRPCError writes a server-owned RPC error as an HTTP JSON response.
 func writeRPCError(w http.ResponseWriter, status int, requestID, code string) {
 	writeJSON(w, status, rpcOutcomeErrorMessage(requestID, internalRPCOutcome(status, code)))
 }
 
+// startRPCCall authorizes and starts a socket RPC within request-ID and concurrency limits.
 func (s *socketSession) startRPCCall(envelope rpcCallEnvelope, requestBytes int) {
 	s.handler.metrics.rpcRequests.Add(1)
 	method, transactionalMethod, standardExists, transactionalExists := s.handler.resolveRPCMethod(envelope.Method)
@@ -623,6 +658,7 @@ func (s *socketSession) startRPCCall(envelope rpcCallEnvelope, requestBytes int)
 	}()
 }
 
+// cancelRPCCall cancels a tracked socket request when its ID is present.
 func (s *socketSession) cancelRPCCall(requestID string) {
 	s.mu.Lock()
 	cancel := s.rpcCalls[requestID]
@@ -632,12 +668,14 @@ func (s *socketSession) cancelRPCCall(requestID string) {
 	}
 }
 
+// removeRPCCall removes a finished request from the socket's active call map.
 func (s *socketSession) removeRPCCall(requestID string) {
 	s.mu.Lock()
 	delete(s.rpcCalls, requestID)
 	s.mu.Unlock()
 }
 
+// invokeRPCMethod calls an application method and converts a panic into an RPC execution error.
 func invokeRPCMethod(ctx context.Context, method RPCMethod, actor Actor, input meldbase.Value) (result meldbase.Value, err error) {
 	defer func() {
 		if recover() != nil {
@@ -647,6 +685,7 @@ func invokeRPCMethod(ctx context.Context, method RPCMethod, actor Actor, input m
 	return method(ctx, actor, input)
 }
 
+// invokeRPCTransactionalMethod calls a transaction-aware method and converts a panic into an RPC execution error.
 func invokeRPCTransactionalMethod(ctx context.Context, method RPCTransactionalMethod, actor Actor, input meldbase.Value, tx *meldbase.WriteTransaction) (result meldbase.Value, err error) {
 	defer func() {
 		if recover() != nil {

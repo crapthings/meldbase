@@ -9,15 +9,19 @@ import (
 )
 
 const (
+	// maxPendingReactiveBatches limits committed batches waiting for shared view updates.
 	maxPendingReactiveBatches = 1024
+	// maxPendingReactiveChanges limits document and catalog changes waiting for shared view updates.
 	maxPendingReactiveChanges = 64 * 1024
-	// The hub can be rebuilding a view while the dispatcher continues to hand it
-	// ordered batches, so it needs its own byte boundary rather than relying on
-	// the upstream dispatch queue.
+	// maxPendingReactiveBytes limits bytes queued for shared query view updates.
+	//
+	// The hub may rebuild a view while the dispatcher continues delivering batches,
+	// so its queue needs a separate limit from the upstream dispatch queue.
 	maxPendingReactiveBytes uint64 = 64 << 20
 )
 
 // reactiveHub owns one canonical view per effective collection/query pair.
+//
 // Commits enqueue one shared immutable ChangeBatch reference. Query state and
 // subscriber delivery never run on the commit goroutine.
 type reactiveHub struct {
@@ -42,12 +46,14 @@ type reactiveHub struct {
 	closed         bool
 }
 
+// reactiveDependencySignature records the fields, ordering, and result window a query depends on.
 type reactiveDependencySignature struct {
 	paths       []string
 	hasOrdering bool
 	hasWindow   bool
 }
 
+// sharedReactiveView holds one query state shared by subscribers to the same collection and query.
 type sharedReactiveView struct {
 	key          string
 	collection   string
@@ -57,8 +63,10 @@ type sharedReactiveView struct {
 	subscribers  map[uint64]*sharedQuerySubscriber // protected by hub.mu
 }
 
-// reactiveViewState is immutable after publication. Member documents and the
-// output snapshot never alias public subscriber documents.
+// reactiveViewState holds a query's matching documents, ordering, and result snapshot at one token.
+//
+// It is immutable after publication. Member documents and the output snapshot
+// never share mutable data with documents delivered to subscribers.
 type reactiveViewState struct {
 	token       uint64
 	memberCount uint64
@@ -68,12 +76,14 @@ type reactiveViewState struct {
 	snapshot    QuerySnapshot
 }
 
+// reactiveMember pairs a matching document with its insertion position and accounted byte size.
 type reactiveMember struct {
 	document Document
 	position uint64
 	bytes    uint64
 }
 
+// reactiveMemberCanonicalBytes returns a member's cached byte size or computes it from the document.
 func reactiveMemberCanonicalBytes(member reactiveMember) (uint64, error) {
 	if member.bytes != 0 {
 		return member.bytes, nil
@@ -81,8 +91,10 @@ func reactiveMemberCanonicalBytes(member reactiveMember) (uint64, error) {
 	return canonicalDocumentSize(member.document)
 }
 
-// One order table is shared by every query on a collection. It preserves the
-// insertion-order tie breaker without storing all nonmatching IDs per view.
+// reactiveCollectionOrder stores insertion positions shared by all queries on a collection.
+//
+// It preserves insertion order when sort values tie without storing every
+// nonmatching document ID in each view.
 type reactiveCollectionOrder struct {
 	mu        sync.RWMutex
 	token     uint64
@@ -90,6 +102,7 @@ type reactiveCollectionOrder struct {
 	positions map[DocumentID]uint64
 }
 
+// sharedQuerySubscriber holds delivery channels and cancellation state for one query subscriber.
 type sharedQuerySubscriber struct {
 	mu        sync.Mutex
 	id        uint64
@@ -103,15 +116,21 @@ type sharedQuerySubscriber struct {
 	closed    bool
 }
 
+// reactiveDeliveryStatus identifies the outcome of a subscriber delivery attempt.
 type reactiveDeliveryStatus uint8
 
 const (
+	// reactiveDeliverySkipped marks a closed subscriber or a result whose token is not newer.
 	reactiveDeliverySkipped reactiveDeliveryStatus = iota
+	// reactiveDeliverySent marks a result accepted by the subscriber's delivery channel.
 	reactiveDeliverySent
+	// reactiveDeliverySlow marks a subscriber whose delivery channel is full.
 	reactiveDeliverySlow
+	// reactiveDeliveryInvalid marks a missing delta or one whose token does not match the snapshot.
 	reactiveDeliveryInvalid
 )
 
+// newReactiveHub creates the shared query registry and bounded queue for committed changes.
 func newReactiveHub(db *DB) *reactiveHub {
 	return &reactiveHub{
 		db: db, views: make(map[string]*sharedReactiveView),
@@ -126,14 +145,16 @@ func newReactiveHub(db *DB) *reactiveHub {
 	}
 }
 
+// subscribe registers a query subscriber and allows its first stored view to be built outside the database lock.
 func (hub *reactiveHub) subscribe(ctx context.Context, collection string, query QuerySpec, canonical []byte, buffer int, cancel context.CancelFunc, deltas bool) (*sharedQuerySubscriber, error) {
 	return hub.subscribeMode(ctx, collection, query, canonical, buffer, cancel, deltas, true)
 }
 
-// subscribeMode establishes a subscriber with a short database read-lock
-// boundary. Cold  collections may build their first immutable view outside
-// that boundary and then prove the snapshot token is still current before
-// registration; all warm/retry paths retain the established lock-held logic.
+// subscribeMode registers a query subscriber using an existing or newly built view.
+//
+// The first stored view for a collection may be built outside the database lock,
+// then registered only if its snapshot token is still current. Existing views
+// and fallback attempts use the database read lock.
 func (hub *reactiveHub) subscribeMode(ctx context.Context, collection string, query QuerySpec, canonical []byte, buffer int, cancel context.CancelFunc, deltas, allowColdStorage bool) (*sharedQuerySubscriber, error) {
 	if hub == nil || hub.db == nil {
 		return nil, ErrClosed
@@ -256,12 +277,13 @@ func (hub *reactiveHub) subscribeMode(ctx context.Context, collection string, qu
 	return subscriber, nil
 }
 
+// maxColdReactiveSubscriptionAttempts limits snapshot attempts before a subscription or rebuild uses the lock-held path.
 const maxColdReactiveSubscriptionAttempts = 3
 
-// subscribeColdStorage avoids holding db.mu while a first view scans its
-// immutable storage snapshot. A current-token check under db.mu before
-// publication closes the snapshot/register gap; repeated write contention
-// falls back to the original lock-held path rather than weakening ordering.
+// subscribeColdStorage builds a collection's first stored view outside the database lock.
+//
+// It checks the snapshot token under db.mu before registering the subscriber.
+// Repeated concurrent writes cause it to fall back to building under the lock.
 func (hub *reactiveHub) subscribeColdStorage(ctx context.Context, collection string, query QuerySpec, canonical []byte, buffer int, cancel context.CancelFunc, deltas bool) (*sharedQuerySubscriber, error) {
 	if hub == nil || hub.db == nil || hub.db.querySource == nil {
 		return nil, ErrClosed
@@ -344,6 +366,7 @@ func (hub *reactiveHub) subscribeColdStorage(ctx context.Context, collection str
 	return hub.subscribeMode(ctx, collection, query, canonical, buffer, cancel, deltas, false)
 }
 
+// dependencySignature extracts the field, ordering, and window dependencies of a query.
 func dependencySignature(query QuerySpec) reactiveDependencySignature {
 	_, limited := query.Limit()
 	return reactiveDependencySignature{
@@ -352,6 +375,7 @@ func dependencySignature(query QuerySpec) reactiveDependencySignature {
 	}
 }
 
+// ensureOrder returns or creates the shared insertion-order table for a collection.
 func (hub *reactiveHub) ensureOrder(collection string) *reactiveCollectionOrder {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
@@ -363,6 +387,7 @@ func (hub *reactiveHub) ensureOrder(collection string) *reactiveCollectionOrder 
 	return order
 }
 
+// rebuild refreshes the collection order table while preserving positions of surviving documents.
 func (order *reactiveCollectionOrder) rebuild(data *collectionData, token uint64) error {
 	order.mu.Lock()
 	defer order.mu.Unlock()
@@ -388,16 +413,18 @@ func (order *reactiveCollectionOrder) rebuild(data *collectionData, token uint64
 	return nil
 }
 
+// replace installs a complete collection order table and its counters under the order lock.
 func (order *reactiveCollectionOrder) replace(token, next uint64, positions map[DocumentID]uint64) {
 	order.mu.Lock()
 	order.token, order.next, order.positions = token, next, positions
 	order.mu.Unlock()
 }
 
-// buildStorageReactiveViewStates scans one immutable Primary snapshot for all
-// views being rebuilt. Only matching documents are retained by each view; the
-// collection-wide structure stores IDs and insertion positions, not decoded
-// documents. Snapshot and iterator pins are released before publication.
+// buildStorageReactiveViewStates rebuilds query views from one immutable collection snapshot.
+//
+// Each view retains only matching documents. The shared collection order stores
+// IDs and insertion positions, and snapshot and iterator pins are released
+// before the rebuilt views are published.
 func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken uint64, collection string, queries []QuerySpec, order *reactiveCollectionOrder, seed maphash.Seed, limits ResourceLimits) ([]*reactiveViewState, error) {
 	if source == nil || order == nil || len(queries) == 0 {
 		return nil, ErrCorrupt
@@ -485,6 +512,7 @@ func buildStorageReactiveViewStates(source querySnapshotSource, expectedToken ui
 	return states, nil
 }
 
+// buildReactiveViewState builds an immutable query result from in-memory documents within the view limits.
 func buildReactiveViewState(query QuerySpec, data *collectionData, order *reactiveCollectionOrder, seed maphash.Seed, token uint64, limits ResourceLimits) (*reactiveViewState, error) {
 	entries := make([]reactiveTreeEntry, 0)
 	budget := newPredicateBudget(query, limits)
@@ -527,6 +555,7 @@ func buildReactiveViewState(query QuerySpec, data *collectionData, order *reacti
 	return &reactiveViewState{token: token, memberCount: memberCount, memberBytes: memberBytes, byID: byID, ordered: ordered, snapshot: QuerySnapshot{Token: token, Documents: documents}}, nil
 }
 
+// publishNewerViewState atomically installs a newer view state and reports whether its result documents changed.
 func publishNewerViewState(view *sharedReactiveView, next *reactiveViewState) (published, changed bool, previous *reactiveViewState) {
 	for {
 		current := view.state.Load()
@@ -540,6 +569,7 @@ func publishNewerViewState(view *sharedReactiveView, next *reactiveViewState) (p
 	}
 }
 
+// addSubscriberLocked registers a subscriber with its initial result while the caller holds the hub lock.
 func (hub *reactiveHub) addSubscriberLocked(view *sharedReactiveView, snapshot QuerySnapshot, buffer int, cancel context.CancelFunc, deltas bool) (*sharedQuerySubscriber, error) {
 	if hub.closed || view == nil {
 		return nil, ErrClosed
@@ -571,6 +601,7 @@ func (hub *reactiveHub) addSubscriberLocked(view *sharedReactiveView, snapshot Q
 	return subscriber, nil
 }
 
+// watchContext detaches and finishes a subscriber when its context ends.
 func (hub *reactiveHub) watchContext(ctx context.Context, key string, view *sharedReactiveView, subscriber *sharedQuerySubscriber) {
 	stop := context.AfterFunc(ctx, func() {
 		hub.detach(key, view, subscriber)
@@ -586,6 +617,7 @@ func (hub *reactiveHub) watchContext(ctx context.Context, key string, view *shar
 	subscriber.mu.Unlock()
 }
 
+// notify queues a relevant committed batch or requests view rebuilds when the queue would overflow.
 func (hub *reactiveHub) notify(batch ChangeBatch) {
 	if hub == nil || len(batch.Changes) == 0 {
 		return
@@ -645,7 +677,9 @@ func (hub *reactiveHub) notify(batch ChangeBatch) {
 }
 
 // resyncAll is the safe loss-of-continuity path used by the upstream change
-// dispatcher. It never synthesizes a delta across omitted commits: each live
+// dispatcher.
+//
+// It never synthesizes a delta across omitted commits: each live
 // view is rebuilt from one current atomic database snapshot instead.
 func (hub *reactiveHub) resyncAll() {
 	if hub == nil {
@@ -666,6 +700,7 @@ func (hub *reactiveHub) resyncAll() {
 	hub.changed = make(chan struct{})
 }
 
+// run processes pending changes and rebuild requests until the hub closes.
 func (hub *reactiveHub) run() {
 	for {
 		hub.mu.Lock()
@@ -688,6 +723,7 @@ func (hub *reactiveHub) run() {
 	}
 }
 
+// processPending drains queued work and rebuilds requested collections before applying batches.
 func (hub *reactiveHub) processPending() {
 	hub.mu.Lock()
 	batches := append([]ChangeBatch(nil), hub.queue...)
@@ -712,6 +748,7 @@ func (hub *reactiveHub) processPending() {
 	}
 }
 
+// applyBatch updates subscribed collection views and rebuilds collections when incremental updates are invalid.
 func (hub *reactiveHub) applyBatch(batch ChangeBatch) {
 	grouped := make(map[string][]Change)
 	hub.mu.Lock()
@@ -746,6 +783,7 @@ func (hub *reactiveHub) applyBatch(batch ChangeBatch) {
 	}
 }
 
+// apply updates insertion positions for a newer batch and reports invalid order changes.
 func (order *reactiveCollectionOrder) apply(token uint64, changes []Change) bool {
 	order.mu.Lock()
 	defer order.mu.Unlock()
@@ -781,6 +819,7 @@ func (order *reactiveCollectionOrder) apply(token uint64, changes []Change) bool
 	return true
 }
 
+// position returns a document's insertion position under the order read lock.
 func (order *reactiveCollectionOrder) position(id DocumentID) (uint64, bool) {
 	order.mu.RLock()
 	position, exists := order.positions[id]
@@ -788,6 +827,7 @@ func (order *reactiveCollectionOrder) position(id DocumentID) (uint64, bool) {
 	return position, exists
 }
 
+// applyViewBatch publishes an incremental view update and delivers changes or reports that a rebuild is needed.
 func (hub *reactiveHub) applyViewBatch(view *sharedReactiveView, order *reactiveCollectionOrder, token uint64, changes []Change) bool {
 	for {
 		current := view.state.Load()
@@ -826,6 +866,7 @@ func (hub *reactiveHub) applyViewBatch(view *sharedReactiveView, order *reactive
 
 // transitionReactiveViewState is the single incremental membership/order
 // algorithm used by both process-local commits and durable historical replay.
+//
 // It is pure with respect to view state; order must already include the batch.
 func transitionReactiveViewState(current *reactiveViewState, query QuerySpec, order *reactiveCollectionOrder, seed maphash.Seed, token uint64, changes []Change, limits ResourceLimits) (*reactiveViewState, bool, error) {
 	if current == nil {
@@ -919,6 +960,7 @@ func transitionReactiveViewState(current *reactiveViewState, query QuerySpec, or
 	return next, true, nil
 }
 
+// changeAfterCanonicalBytes returns the cached or computed size of a change's resulting document.
 func changeAfterCanonicalBytes(change Change) (uint64, error) {
 	if change.After == nil {
 		return 0, ErrCorrupt
@@ -929,13 +971,15 @@ func changeAfterCanonicalBytes(change Change) (uint64, error) {
 	return canonicalDocumentSize(*change.After)
 }
 
+// reactiveRebuildTarget pairs an existing view with the query to use during its rebuild.
 type reactiveRebuildTarget struct {
 	view  *sharedReactiveView
 	query QuerySpec
 }
 
-// tryFullRecomputeStorageCollection rebuilds every existing view from one
-// snapshot without retaining db.mu during the scan. It succeeds only when both
+// tryFullRecomputeStorageCollection attempts to replace a collection's live query views from one storage snapshot.
+//
+// The scan runs without retaining db.mu. Replacement succeeds only when both
 // the database token and the exact collection view set are unchanged at the
 // handoff. Replacing the shared order at that token makes queued older batches
 // harmless (their token is already covered); later commits are admitted only
@@ -1049,6 +1093,7 @@ func (hub *reactiveHub) tryFullRecomputeStorageCollection(collection string) boo
 	return false
 }
 
+// fullRecomputeCollection rebuilds collection views with a stable storage snapshot or the lock-held fallback.
 func (hub *reactiveHub) fullRecomputeCollection(collection string) {
 	if hub != nil && hub.db != nil && hub.db.querySource != nil && hub.tryFullRecomputeStorageCollection(collection) {
 		return
@@ -1150,6 +1195,7 @@ func (hub *reactiveHub) fullRecomputeCollectionLocked(collection string) {
 	}
 }
 
+// deliverView sends a changed result to the current subscribers of a registered view.
 func (hub *reactiveHub) deliverView(view *sharedReactiveView, snapshot QuerySnapshot, delta *sharedQueryDelta) {
 	hub.mu.Lock()
 	if hub.views[view.key] != view {
@@ -1163,6 +1209,7 @@ func (hub *reactiveHub) deliverView(view *sharedReactiveView, snapshot QuerySnap
 	}
 }
 
+// deliver records a delivery outcome and terminates slow subscribers or invalid views.
 func (hub *reactiveHub) deliver(key string, view *sharedReactiveView, subscriber *sharedQuerySubscriber, snapshot QuerySnapshot, delta *sharedQueryDelta) {
 	switch subscriber.deliver(snapshot, delta) {
 	case reactiveDeliverySkipped:
@@ -1185,6 +1232,7 @@ func (hub *reactiveHub) deliver(key string, view *sharedReactiveView, subscriber
 	subscriber.finish(ErrSlowConsumer)
 }
 
+// deliver attempts a nonblocking delivery of a newer snapshot or delta and reports the outcome.
 func (subscriber *sharedQuerySubscriber) deliver(snapshot QuerySnapshot, delta *sharedQueryDelta) reactiveDeliveryStatus {
 	subscriber.mu.Lock()
 	defer subscriber.mu.Unlock()
@@ -1214,6 +1262,7 @@ func (subscriber *sharedQuerySubscriber) deliver(snapshot QuerySnapshot, delta *
 	}
 }
 
+// finish closes delivery channels, reports an optional error, and releases cancellation callbacks.
 func (subscriber *sharedQuerySubscriber) finish(err error) {
 	subscriber.mu.Lock()
 	if subscriber.closed {
@@ -1245,6 +1294,7 @@ func (subscriber *sharedQuerySubscriber) finish(err error) {
 	}
 }
 
+// detach removes a subscriber and deletes its view when no subscribers remain.
 func (hub *reactiveHub) detach(key string, view *sharedReactiveView, subscriber *sharedQuerySubscriber) {
 	if hub == nil || subscriber == nil {
 		return
@@ -1262,6 +1312,7 @@ func (hub *reactiveHub) detach(key string, view *sharedReactiveView, subscriber 
 	}
 }
 
+// failCollection terminates every registered view of a collection with the supplied error.
 func (hub *reactiveHub) failCollection(collection string, err error) {
 	hub.mu.Lock()
 	views := make([]*sharedReactiveView, 0, len(hub.byCollection[collection]))
@@ -1274,6 +1325,7 @@ func (hub *reactiveHub) failCollection(collection string, err error) {
 	}
 }
 
+// failView removes a registered view and terminates its subscribers with the supplied error.
 func (hub *reactiveHub) failView(view *sharedReactiveView, err error) {
 	hub.mu.Lock()
 	if hub.views[view.key] != view {
@@ -1291,6 +1343,7 @@ func (hub *reactiveHub) failView(view *sharedReactiveView, err error) {
 	}
 }
 
+// deleteViewLocked removes a view and unused collection state while the caller holds the hub lock.
 func (hub *reactiveHub) deleteViewLocked(view *sharedReactiveView) {
 	delete(hub.views, view.key)
 	group := hub.byCollection[view.collection]
@@ -1303,6 +1356,7 @@ func (hub *reactiveHub) deleteViewLocked(view *sharedReactiveView) {
 	hub.db.metrics.sharedViews.Add(^uint64(0))
 }
 
+// close stops the hub, clears queued state, and terminates all subscribers.
 func (hub *reactiveHub) close() {
 	if hub == nil {
 		return
@@ -1334,6 +1388,7 @@ func (hub *reactiveHub) close() {
 	}
 }
 
+// subscribersOf copies a view's subscriber list while the caller holds the hub lock.
 func subscribersOf(view *sharedReactiveView) []*sharedQuerySubscriber {
 	result := make([]*sharedQuerySubscriber, 0, len(view.subscribers))
 	for _, subscriber := range view.subscribers {
@@ -1342,6 +1397,7 @@ func subscribersOf(view *sharedReactiveView) []*sharedQuerySubscriber {
 	return result
 }
 
+// snapshotQueryBudgetedUnlocked scans in-memory documents within a query budget while the caller protects database state.
 func snapshotQueryBudgetedUnlocked(ctx context.Context, db *DB, collection string, query QuerySpec, budget *queryBudget) (QuerySnapshot, error) {
 	data := db.collections[collection]
 	if data == nil {

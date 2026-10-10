@@ -21,6 +21,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestDestructiveManifestBuildImportsAndReverifiesMachineReceipts checks that manifests preserve verified evidence through relocation and reject altered receipts or session records.
 func TestDestructiveManifestBuildImportsAndReverifiesMachineReceipts(t *testing.T) {
 	directory := t.TempDir()
 	templatePath := filepath.Join(directory, "template.meld")
@@ -365,6 +366,7 @@ func TestDestructiveManifestBuildImportsAndReverifiesMachineReceipts(t *testing.
 	}
 }
 
+// writeQualificationSessionArtifactFixture writes a test session plan and linked events that bind its executable, environment, and receipts.
 func writeQualificationSessionArtifactFixture(t *testing.T, root, environmentPath string, environment qualificationEnvironmentEvidence,
 	durability durabilityCheckResult, platformClass string, receiptPaths []string) {
 	t.Helper()
@@ -438,6 +440,7 @@ func writeQualificationSessionArtifactFixture(t *testing.T, root, environmentPat
 	}
 }
 
+// environmentRecordDigest hashes the bytes of a test environment record.
 func environmentRecordDigest(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -447,6 +450,7 @@ func environmentRecordDigest(t *testing.T, path string) string {
 	return qualificationSHA256(raw)
 }
 
+// qualificationVerifiedIndexFixture builds a test artifact index with entries available by path.
 func qualificationVerifiedIndexFixture(t *testing.T, root string) verifiedQualificationArtifactIndex {
 	t.Helper()
 	index, err := buildQualificationArtifactIndex(root, qualificationTestRevision)
@@ -460,6 +464,7 @@ func qualificationVerifiedIndexFixture(t *testing.T, root string) verifiedQualif
 	return verifiedQualificationArtifactIndex{Root: root, Index: index, Entries: entries}
 }
 
+// copyQualificationArtifactTree copies test artifact directories and regular files into a temporary private directory.
 func copyQualificationArtifactTree(t *testing.T, source string) string {
 	t.Helper()
 	destination, err := os.MkdirTemp("", "meldbase-relocated-artifacts-")
@@ -500,6 +505,7 @@ func copyQualificationArtifactTree(t *testing.T, source string) string {
 	return destination
 }
 
+// buildPowerReceiptFixture writes a synthetic power-loss receipt with signed controller evidence and artifact hashes.
 func buildPowerReceiptFixture(t *testing.T, directory string, trial qualificationDestructiveTrial, durability durabilityCheckResult, databaseRaw []byte, verified storage.VerificationResult, method, bootNonce string) string {
 	t.Helper()
 	databasePath := filepath.Join(directory, trial.ID+"-power.meld")

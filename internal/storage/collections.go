@@ -6,20 +6,19 @@ import (
 	"time"
 )
 
+// ErrCollectionExists reports an attempt to create a collection that already exists.
 var ErrCollectionExists = errors.New("meldbase storage: collection exists")
 
-// CreateCollectionTransaction creates durable empty collection metadata without
-// manufacturing a document mutation. It is primarily the schema primitive used
-// by logical migration, but it also gives collection creation an explicit commit
-// identity and replay event.
+// CreateCollectionTransaction describes the creation of an empty stored collection.
+//
+// Creation receives its own commit identity and replay event without a document mutation.
 type CreateCollectionTransaction struct {
 	TransactionID [16]byte
 	CommittedAt   time.Time
 	Collection    string
 }
 
-// ApplyCreateCollection atomically publishes an empty Primary tree, an empty
-// IndexCatalog tree, CollectionMeta, and one matching catalog CommitBatch.
+// ApplyCreateCollection commits an empty collection and its catalog change event together.
 func (f *File) ApplyCreateCollection(transaction CreateCollectionTransaction) (uint64, error) {
 	if f == nil || allZero(transaction.TransactionID[:]) || !validCollectionName(transaction.Collection) {
 		return 0, ErrCorrupt

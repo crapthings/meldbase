@@ -14,6 +14,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// TestOpenPersistsCRUDIndexesOrderAndIdentity checks that reopening preserves database identity, document order, and index behavior after committed edits.
 func TestOpenPersistsCRUDIndexesOrderAndIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-store.meld2")
 	db, err := Open(path)
@@ -86,6 +87,7 @@ func TestOpenPersistsCRUDIndexesOrderAndIdentity(t *testing.T) {
 	}
 }
 
+// TestOpenPreservesMixedValueQueryOrderAfterReopen checks that sorting different value types matches the query model before and after reopening.
 func TestOpenPreservesMixedValueQueryOrderAfterReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mixed-query-order.meld2")
 	db, err := Open(path)
@@ -134,6 +136,7 @@ func TestOpenPreservesMixedValueQueryOrderAfterReopen(t *testing.T) {
 	}
 }
 
+// TestOpenPersistsCompoundIndexCRUDAndPlanner checks that compound index queries and uniqueness remain correct across document edits and reopening.
 func TestOpenPersistsCompoundIndexCRUDAndPlanner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compound-store.meld2")
 	db, err := Open(path)
@@ -214,6 +217,7 @@ func TestOpenPersistsCompoundIndexCRUDAndPlanner(t *testing.T) {
 	}
 }
 
+// TestOpenProvidesGapFreeQueryReplay checks that replay starts from a committed snapshot and delivers the next document change with a continuous token chain.
 func TestOpenProvidesGapFreeQueryReplay(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "public-store-replay.meld2"))
 	if err != nil {
@@ -260,6 +264,7 @@ func TestOpenProvidesGapFreeQueryReplay(t *testing.T) {
 	}
 }
 
+// TestColdReactiveSubscriptionPinsSnapshotWithoutBlockingWriter checks that starting a live subscription allows concurrent writes and retries to a current snapshot.
 func TestColdReactiveSubscriptionPinsSnapshotWithoutBlockingWriter(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "cold-reactive.meld2"))
 	if err != nil {
@@ -328,6 +333,7 @@ func TestColdReactiveSubscriptionPinsSnapshotWithoutBlockingWriter(t *testing.T)
 	}
 }
 
+// TestWarmReactiveRecomputePinsSnapshotWithoutBlockingWriter checks that rebuilding a live view allows concurrent writes and converges to their committed result.
 func TestWarmReactiveRecomputePinsSnapshotWithoutBlockingWriter(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "warm-reactive.meld2"))
 	if err != nil {
@@ -410,6 +416,7 @@ func TestWarmReactiveRecomputePinsSnapshotWithoutBlockingWriter(t *testing.T) {
 	}
 }
 
+// TestUpdateChangedPathsReachWatchersAndDurableCommitLog checks that updated field paths reach watchers and remain unchanged in the persisted commit log.
 func TestUpdateChangedPathsReachWatchersAndDurableCommitLog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "changed-paths.meld2")
 	db, err := Open(path)
@@ -474,6 +481,7 @@ func TestUpdateChangedPathsReachWatchersAndDurableCommitLog(t *testing.T) {
 	}
 }
 
+// TestOpenStatsTrackRejectedTransactionAndResetOnReopen checks that storage statistics count rejected transactions and reset operation counters after reopening.
 func TestOpenStatsTrackRejectedTransactionAndResetOnReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "public-store-stats.meld2")
 	db, err := Open(path)
@@ -514,6 +522,7 @@ func TestOpenStatsTrackRejectedTransactionAndResetOnReopen(t *testing.T) {
 	}
 }
 
+// TestOpenDetectsCorruptPersistentIndexWhenRead checks that verification and indexed reads reject a stored index key inconsistent with its document.
 func TestOpenDetectsCorruptPersistentIndexWhenRead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store-index-audit.meld2")
 	file, _, err := storage.Open(path)
@@ -553,6 +562,7 @@ func TestOpenDetectsCorruptPersistentIndexWhenRead(t *testing.T) {
 	}
 }
 
+// TestOpenQueriesUsePinnedStorageSnapshotNotMemoryMirror checks that durable queries read stored documents and indexes even when their memory mirror is empty.
 func TestOpenQueriesUsePinnedStorageSnapshotNotMemoryMirror(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "storage-query.meld2"))
 	if err != nil {
@@ -621,6 +631,7 @@ func TestOpenQueriesUsePinnedStorageSnapshotNotMemoryMirror(t *testing.T) {
 	assertQueryIDs(Filter{"visible": true}, QueryOptions{}, []DocumentID{first, third, fourth, fifth}, "COLLSCAN", "")
 }
 
+// TestOpenCreateIndexAndMutationsDoNotReadDocumentMirror checks that index creation and document mutations use storage snapshots when the memory mirror is empty.
 func TestOpenCreateIndexAndMutationsDoNotReadDocumentMirror(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage-mutations.meld2")
 	db, err := Open(path)
@@ -687,6 +698,7 @@ func TestOpenCreateIndexAndMutationsDoNotReadDocumentMirror(t *testing.T) {
 	}
 }
 
+// TestOpenReactiveInitializationAndResyncDoNotReadDocumentMirror checks that live query initialization and overflow recovery read stored documents without a memory mirror.
 func TestOpenReactiveInitializationAndResyncDoNotReadDocumentMirror(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "storage-reactive.meld2"))
 	if err != nil {
@@ -758,6 +770,7 @@ func TestOpenReactiveInitializationAndResyncDoNotReadDocumentMirror(t *testing.T
 	}
 }
 
+// TestOpenKeepsLargeCollectionMetadataOnly checks that durable collections retain metadata without loading their documents into memory on opening.
 func TestOpenKeepsLargeCollectionMetadataOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "metadata-only.meld2")
 	db, err := Open(path)
@@ -803,6 +816,7 @@ func TestOpenKeepsLargeCollectionMetadataOnly(t *testing.T) {
 	}
 }
 
+// TestOpenCreateIndexScanHonorsContextBeforePublication checks that canceling an index scan prevents publication and releases its storage reader.
 func TestOpenCreateIndexScanHonorsContextBeforePublication(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "cancel-index.meld2"))
 	if err != nil {
@@ -830,6 +844,7 @@ func TestOpenCreateIndexScanHonorsContextBeforePublication(t *testing.T) {
 	}
 }
 
+// TestOpenCreateIndexScansWithoutBlockingWritesAndRetriesSnapshot checks that index creation allows concurrent writes and retries its snapshot to include them.
 func TestOpenCreateIndexScansWithoutBlockingWritesAndRetriesSnapshot(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "optimistic-index.meld2"))
 	if err != nil {
@@ -897,6 +912,7 @@ func TestOpenCreateIndexScansWithoutBlockingWritesAndRetriesSnapshot(t *testing.
 	}
 }
 
+// TestOpenCreateIndexBoundsContinuousWriteConflictsWithoutPublication checks that repeated write conflicts stop index creation after bounded retries without disabling writes.
 func TestOpenCreateIndexBoundsContinuousWriteConflictsWithoutPublication(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "conflicted-index.meld2"))
 	if err != nil {
@@ -930,6 +946,7 @@ func TestOpenCreateIndexBoundsContinuousWriteConflictsWithoutPublication(t *test
 	}
 }
 
+// TestOpenOversizedIndexKeyIsValidationErrorNotFatal checks that an oversized index key rejects index creation while leaving the database writable.
 func TestOpenOversizedIndexKeyIsValidationErrorNotFatal(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "oversized-index-key.meld2"))
 	if err != nil {
@@ -951,6 +968,7 @@ func TestOpenOversizedIndexKeyIsValidationErrorNotFatal(t *testing.T) {
 	}
 }
 
+// TestOpenFindStreamsInsertionOrderCOLLSCANAndReleasesPins checks that scan cursors preserve snapshot insertion order and release storage readers when finished, closed, or canceled.
 func TestOpenFindStreamsInsertionOrderCOLLSCANAndReleasesPins(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "streaming-cursor.meld2"))
 	if err != nil {
@@ -1067,6 +1085,7 @@ func TestOpenFindStreamsInsertionOrderCOLLSCANAndReleasesPins(t *testing.T) {
 	}
 }
 
+// cancelAfterChecksContext cancels after a fixed number of cancellation checks.
 type cancelAfterChecksContext struct {
 	checks    int
 	threshold int
@@ -1074,11 +1093,15 @@ type cancelAfterChecksContext struct {
 	cancelled bool
 }
 
+// newCancelAfterChecksContext creates a test context that cancels after a chosen number of Done calls.
 func newCancelAfterChecksContext(threshold int) *cancelAfterChecksContext {
 	return &cancelAfterChecksContext{threshold: threshold, done: make(chan struct{})}
 }
 
+// Deadline reports that the test context has no deadline.
 func (ctx *cancelAfterChecksContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+// Done counts cancellation checks and closes the channel when the threshold is reached.
 func (ctx *cancelAfterChecksContext) Done() <-chan struct{} {
 	ctx.checks++
 	if !ctx.cancelled && ctx.checks >= ctx.threshold {
@@ -1087,10 +1110,14 @@ func (ctx *cancelAfterChecksContext) Done() <-chan struct{} {
 	}
 	return ctx.done
 }
+
+// Err reports cancellation once the test threshold has been reached.
 func (ctx *cancelAfterChecksContext) Err() error {
 	if ctx.cancelled {
 		return context.Canceled
 	}
 	return nil
 }
+
+// Value returns no context values.
 func (ctx *cancelAfterChecksContext) Value(any) any { return nil }

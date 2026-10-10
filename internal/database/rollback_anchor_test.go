@@ -13,6 +13,7 @@ import (
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
+// testRollbackAnchorStore keeps a test anchor with configurable failures before or after saving.
 type testRollbackAnchorStore struct {
 	anchor      RollbackAnchor
 	exists      bool
@@ -20,39 +21,48 @@ type testRollbackAnchorStore struct {
 	saveThenErr error
 }
 
+// blockingAdvanceRollbackAnchorStore delays anchor updates until their context ends.
 type blockingAdvanceRollbackAnchorStore struct {
 	anchor RollbackAnchor
 	done   chan struct{}
 }
 
+// blockingLoadRollbackAnchorStore delays anchor reads until their context ends.
 type blockingLoadRollbackAnchorStore struct{ done chan struct{} }
 
+// Load waits for cancellation and signals that the blocked read has ended.
 func (store *blockingLoadRollbackAnchorStore) Load(ctx context.Context) (RollbackAnchor, bool, error) {
 	<-ctx.Done()
 	close(store.done)
 	return RollbackAnchor{}, false, ctx.Err()
 }
 
+// Advance returns the context error without saving an anchor.
 func (store *blockingLoadRollbackAnchorStore) Advance(ctx context.Context, _ RollbackAnchor) error {
 	return ctx.Err()
 }
 
+// Load returns the stored anchor and any context error.
 func (store *blockingAdvanceRollbackAnchorStore) Load(ctx context.Context) (RollbackAnchor, bool, error) {
 	return store.anchor, true, ctx.Err()
 }
 
+// Advance waits for cancellation and signals that the blocked update has ended.
 func (store *blockingAdvanceRollbackAnchorStore) Advance(ctx context.Context, _ RollbackAnchor) error {
 	<-ctx.Done()
 	close(store.done)
 	return ctx.Err()
 }
 
+// Load returns the test anchor unless its context has ended.
 func (store *testRollbackAnchorStore) Load(ctx context.Context) (RollbackAnchor, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return RollbackAnchor{}, false, err
 	}
 	return store.anchor, store.exists, nil
 }
+
+// Advance saves a nonregressing anchor subject to cancellation and configured failures.
 func (store *testRollbackAnchorStore) Advance(ctx context.Context, anchor RollbackAnchor) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -67,6 +77,7 @@ func (store *testRollbackAnchorStore) Advance(ctx context.Context, anchor Rollba
 	return store.saveThenErr
 }
 
+// TestFileRollbackAnchorStoreRejectsCorruptionAndRegression checks that file anchors reject corrupt data, identity changes, and decreasing commit or generation bounds.
 func TestFileRollbackAnchorStoreRejectsCorruptionAndRegression(t *testing.T) {
 	directory := t.TempDir()
 	storeValue, err := NewFileRollbackAnchorStore(filepath.Join(directory, "db.anchor"))
@@ -109,6 +120,7 @@ func TestFileRollbackAnchorStoreRejectsCorruptionAndRegression(t *testing.T) {
 	}
 }
 
+// TestFileRollbackAnchorStoreSerializesIndependentWriters checks that competing writers cannot initialize one anchor with different database identities.
 func TestFileRollbackAnchorStoreSerializesIndependentWriters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.anchor")
 	first, err := NewFileRollbackAnchorStore(path)
@@ -154,6 +166,7 @@ func TestFileRollbackAnchorStoreSerializesIndependentWriters(t *testing.T) {
 	}
 }
 
+// TestFileRollbackAnchorStoreHonorsContextWhileLocallyContended checks that canceled anchor operations stop without creating an anchor file.
 func TestFileRollbackAnchorStoreHonorsContextWhileLocallyContended(t *testing.T) {
 	directory := t.TempDir()
 	storeValue, err := NewFileRollbackAnchorStore(filepath.Join(directory, "context.anchor"))
@@ -182,6 +195,7 @@ func TestFileRollbackAnchorStoreHonorsContextWhileLocallyContended(t *testing.T)
 	}
 }
 
+// TestRollbackAnchorRejectsAcknowledgedSnapshotRollback checks that opening rejects an older acknowledged snapshot without changing its file.
 func TestRollbackAnchorRejectsAcknowledgedSnapshotRollback(t *testing.T) {
 	directory := t.TempDir()
 	databasePath := filepath.Join(directory, "current.meld")
@@ -251,6 +265,7 @@ func TestRollbackAnchorRejectsAcknowledgedSnapshotRollback(t *testing.T) {
 	}
 }
 
+// TestRollbackAnchorRejectsAcknowledgedMaintenanceGenerationRollback checks that rollback protection detects older maintenance generations even when the commit sequence is unchanged.
 func TestRollbackAnchorRejectsAcknowledgedMaintenanceGenerationRollback(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "maintenance.meld")
@@ -289,6 +304,7 @@ func TestRollbackAnchorRejectsAcknowledgedMaintenanceGenerationRollback(t *testi
 	}
 }
 
+// TestRollbackAnchorTracksIndexBuildAndReclamationGenerations checks that anchors follow generations published by index build maintenance and page reclamation.
 func TestRollbackAnchorTracksIndexBuildAndReclamationGenerations(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "maintenance-lifecycle.meld")
@@ -349,6 +365,7 @@ func TestRollbackAnchorTracksIndexBuildAndReclamationGenerations(t *testing.T) {
 	assertRollbackAnchorCurrent(t, db, anchor)
 }
 
+// assertRollbackAnchorCurrent fails the test unless the anchor and its statistics match the current database identity, commit, and generation.
 func assertRollbackAnchorCurrent(t *testing.T, db *DB, store RollbackAnchorStore) {
 	t.Helper()
 	anchor, exists, err := store.Load(context.Background())
@@ -359,6 +376,7 @@ func assertRollbackAnchorCurrent(t *testing.T, db *DB, store RollbackAnchorStore
 	}
 }
 
+// TestRollbackAnchorFailureIsFailStopAndRecoversAheadDatabase checks that an anchor failure disables writes and reopening recovers durable data ahead of the anchor.
 func TestRollbackAnchorFailureIsFailStopAndRecoversAheadDatabase(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "anchor-failure.meld")
 	seed, err := Open(databasePath)
@@ -400,6 +418,7 @@ func TestRollbackAnchorFailureIsFailStopAndRecoversAheadDatabase(t *testing.T) {
 	}
 }
 
+// TestRollbackAnchorCoversStandaloneSystemRecordCommit checks that a system record commit advances the rollback anchor.
 func TestRollbackAnchorCoversStandaloneSystemRecordCommit(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "anchor-system.meld")
 	seed, err := Open(databasePath)
@@ -427,6 +446,7 @@ func TestRollbackAnchorCoversStandaloneSystemRecordCommit(t *testing.T) {
 	}
 }
 
+// TestRollbackAnchorMissingRequiresExplicitInitialization checks that opening a database with a missing anchor requires explicit initialization.
 func TestRollbackAnchorMissingRequiresExplicitInitialization(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "existing.meld")
 	db, err := Open(path)
@@ -442,6 +462,7 @@ func TestRollbackAnchorMissingRequiresExplicitInitialization(t *testing.T) {
 	}
 }
 
+// TestRollbackAnchorOperationTimeoutIsFailStop checks that an anchor update timeout disables writes and cancels the blocked store operation.
 func TestRollbackAnchorOperationTimeoutIsFailStop(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "timeout.meld")
 	seed, err := Open(path)
@@ -476,6 +497,7 @@ func TestRollbackAnchorOperationTimeoutIsFailStop(t *testing.T) {
 	}
 }
 
+// TestRollbackAnchorOpenTimeoutAndInvalidOptions checks that anchor read timeouts and invalid protection options prevent database opening.
 func TestRollbackAnchorOpenTimeoutAndInvalidOptions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "open-timeout.meld")
 	store := &blockingLoadRollbackAnchorStore{done: make(chan struct{})}
@@ -503,6 +525,7 @@ func TestRollbackAnchorOpenTimeoutAndInvalidOptions(t *testing.T) {
 	}
 }
 
+// TestRollbackStaticGuardsMapPublicErrors checks that static rollback bounds and identity checks return their public errors.
 func TestRollbackStaticGuardsMapPublicErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guarded.meld")
 	db, err := Open(path)

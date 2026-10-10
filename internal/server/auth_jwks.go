@@ -17,9 +17,10 @@ import (
 	"time"
 )
 
-// RS256JWKSAuthenticatorConfig configures verification against an OIDC-style
-// JSON Web Key Set. Issuer and audience are required so a token minted for a
-// different API cannot become a Meldbase credential.
+// RS256JWKSAuthenticatorConfig sets the public key source and rules for verifying signed tokens.
+//
+// Issuer and audience are required so a token minted for a different API
+// cannot become a Meldbase credential.
 type RS256JWKSAuthenticatorConfig struct {
 	JWKSURL        string
 	Issuer         string
@@ -30,6 +31,7 @@ type RS256JWKSAuthenticatorConfig struct {
 	CacheTTL       time.Duration
 }
 
+// RS256JWKSAuthenticator verifies bearer tokens using cached RSA signing keys from a JWKS endpoint.
 type RS256JWKSAuthenticator struct {
 	url            string
 	issuer         string
@@ -44,6 +46,7 @@ type RS256JWKSAuthenticator struct {
 	expires time.Time
 }
 
+// NewRS256JWKSAuthenticator validates settings and creates an authenticator with an initially empty key cache.
 func NewRS256JWKSAuthenticator(config RS256JWKSAuthenticatorConfig) (*RS256JWKSAuthenticator, error) {
 	parsed, err := url.Parse(config.JWKSURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
@@ -76,6 +79,7 @@ func NewRS256JWKSAuthenticator(config RS256JWKSAuthenticatorConfig) (*RS256JWKSA
 	}, nil
 }
 
+// AuthenticateHTTP verifies an RS256 bearer token and returns its subject and workspace as an actor.
 func (a *RS256JWKSAuthenticator) AuthenticateHTTP(request *http.Request) (Actor, error) {
 	token, ok := bearerToken(request.Header.Get("Authorization"))
 	if !ok || len(token) > 8192 {
@@ -115,6 +119,7 @@ func (a *RS256JWKSAuthenticator) AuthenticateHTTP(request *http.Request) (Actor,
 	return Actor{ID: actorID, WorkspaceID: workspaceID}, nil
 }
 
+// splitJWT returns the three encoded token parts or nil when their count is invalid.
 func splitJWT(token string) []string {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -123,6 +128,7 @@ func splitJWT(token string) []string {
 	return parts
 }
 
+// keyFor returns a cached signing key or refreshes the key set when the cache is expired or the key is missing.
 func (a *RS256JWKSAuthenticator) keyFor(ctx context.Context, keyID string) (*rsa.PublicKey, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -141,6 +147,7 @@ func (a *RS256JWKSAuthenticator) keyFor(ctx context.Context, keyID string) (*rsa
 	return key, nil
 }
 
+// refreshLocked fetches supported RSA signing keys and replaces the cache while the caller holds the authenticator lock.
 func (a *RS256JWKSAuthenticator) refreshLocked(ctx context.Context) error {
 	requestContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -194,6 +201,7 @@ func (a *RS256JWKSAuthenticator) refreshLocked(ctx context.Context) error {
 	return nil
 }
 
+// decodeRSAJWK decodes canonical RSA key components and checks the minimum modulus size and exponent rules.
 func decodeRSAJWK(encodedN, encodedE string) (*rsa.PublicKey, bool) {
 	n, err := base64.RawURLEncoding.DecodeString(encodedN)
 	if err != nil || len(n) == 0 || base64.RawURLEncoding.EncodeToString(n) != encodedN {

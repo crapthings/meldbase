@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+# Reports an unexpected guest exit and powers off the test machine.
 qualification_failure() {
 	status=$?
 	trap - EXIT
@@ -10,7 +11,9 @@ qualification_failure() {
 }
 trap qualification_failure EXIT
 
+# Selects the guest directories used to find system commands.
 export PATH=/usr/bin:/usr/sbin:/bin:/sbin
+# Locates BusyBox so its commands can be installed in the guest.
 busybox=/bin/busybox
 [ -x "$busybox" ] || busybox=/usr/bin/busybox
 "$busybox" --install -s /bin
@@ -23,8 +26,11 @@ mdev -s
 modprobe virtio_blk
 mdev -s
 
+# Holds the commit stage where the host will interrupt the guest.
 boundary=
+# Holds the trial name read from the guest boot arguments.
 trial=
+# Holds the optional source revision required by the test.
 revision=
 for argument in $(cat /proc/cmdline); do
 	case "$argument" in
@@ -61,10 +67,15 @@ chown 65534:65534 /target
 chmod 0700 /target
 chmod 0777 /control
 
+# Names the commit marker used to distinguish preparation from recovery.
 marker="/control/${trial}-marker.json"
+# Names the host record of the guest interruption.
 event="/control/${trial}-controller.json"
+# Names the QEMU evidence required before recovery.
 proof="/control/${trial}-qmp-proof.json"
+# Names the recovery receipt retained by the host.
 receipt="/control/${trial}-recovery.json"
+# Names the file preserving the volume check token across guest boots.
 token_file="/control/${trial}-token"
 
 if [ ! -f "$marker" ]; then
@@ -89,6 +100,7 @@ for ignored in $(seq 1 600); do
 	sleep 0.1
 done
 su nobody -s /bin/sh -c "test -s '$event' && test -r '$event' && test -s '$proof' && test -r '$proof'"
+# Reads the saved volume check token for recovery.
 token=$(sed -n '1p' "$token_file")
 su nobody -s /bin/sh -c "/control/meld destructive-power-recover \
 	--dir /target --control-dir /control --marker '$marker' \

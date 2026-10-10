@@ -15,15 +15,23 @@ import (
 )
 
 var (
-	ErrLocked              = errors.New("meldbase storage: database is locked")
-	ErrRecoveryRequired    = errors.New("meldbase storage: recovery required")
+	// ErrLocked reports that another writer owns the database file.
+	ErrLocked = errors.New("meldbase storage: database is locked")
+	// ErrRecoveryRequired reports that opening requires recovery disallowed by the chosen options.
+	ErrRecoveryRequired = errors.New("meldbase storage: recovery required")
+	// ErrInvalidStorageLimit reports an invalid physical file size limit.
 	ErrInvalidStorageLimit = errors.New("meldbase storage: invalid storage limit")
-	ErrStorageLimit        = errors.New("meldbase storage: storage limit exceeded")
-	ErrStaleSnapshot       = errors.New("meldbase storage: commit sequence is below the required minimum")
-	ErrDatabaseIdentity    = errors.New("meldbase storage: unexpected database identity")
-	ErrInsecureFileMode    = errors.New("meldbase storage: database file permissions are not owner-private")
+	// ErrStorageLimit reports that allocating pages would exceed the physical storage limit.
+	ErrStorageLimit = errors.New("meldbase storage: storage limit exceeded")
+	// ErrStaleSnapshot reports that the database is older than the required minimum version.
+	ErrStaleSnapshot = errors.New("meldbase storage: commit sequence is below the required minimum")
+	// ErrDatabaseIdentity reports a database identity different from the expected identity.
+	ErrDatabaseIdentity = errors.New("meldbase storage: unexpected database identity")
+	// ErrInsecureFileMode reports file permissions that allow access by other users.
+	ErrInsecureFileMode = errors.New("meldbase storage: database file permissions are not owner-private")
 )
 
+// OpenOptions sets storage safety checks, retention limits, and file size bounds.
 type OpenOptions struct {
 	RequireClean bool
 	// RequireGraphAudit verifies every page protected by either valid Meta root
@@ -46,34 +54,49 @@ type OpenOptions struct {
 }
 
 const (
+	// DefaultCommitRetentionMaxCommits sets the default retained commit count.
 	DefaultCommitRetentionMaxCommits uint64 = 10_000
-	DefaultCommitRetentionMaxBytes   uint64 = 256 << 20
-	DefaultMaxFileBytes              uint64 = 8 << 30
+	// DefaultCommitRetentionMaxBytes sets the default retained commit byte limit.
+	DefaultCommitRetentionMaxBytes uint64 = 256 << 20
+	// DefaultMaxFileBytes sets the default physical database file size limit.
+	DefaultMaxFileBytes uint64 = 8 << 30
 )
 
+// faultPoint identifies a commit stage where tests can inject a failure.
 type faultPoint uint8
 
 const (
+	// faultAfterPageWrite injects a failure after writing staged pages.
 	faultAfterPageWrite faultPoint = 1 + iota
+	// faultBeforeDataSync injects a failure before syncing staged page data.
 	faultBeforeDataSync
+	// faultAfterDataSync injects a failure after syncing staged page data.
 	faultAfterDataSync
+	// faultAfterMetaWrite injects a failure after writing publication metadata.
 	faultAfterMetaWrite
+	// faultAfterMetaSync injects a failure after syncing publication metadata.
 	faultAfterMetaSync
 )
 
-// QualificationBoundary identifies a physical publication boundary exposed
-// only to repository-internal destructive qualification runners. It is not a
-// storage or application API contract.
+// QualificationBoundary names a commit stage used by internal destructive tests.
+//
+// This type is not a storage or application API contract.
 type QualificationBoundary string
 
 const (
+	// QualificationAfterPageWrite identifies the stage after staged pages are written.
 	QualificationAfterPageWrite QualificationBoundary = "after-page-write"
+	// QualificationBeforeDataSync identifies the stage before staged page data is synced.
 	QualificationBeforeDataSync QualificationBoundary = "before-data-sync"
-	QualificationAfterDataSync  QualificationBoundary = "after-data-sync"
+	// QualificationAfterDataSync identifies the stage after staged page data is synced.
+	QualificationAfterDataSync QualificationBoundary = "after-data-sync"
+	// QualificationAfterMetaWrite identifies the stage after publication metadata is written.
 	QualificationAfterMetaWrite QualificationBoundary = "after-meta-write"
-	QualificationAfterMetaSync  QualificationBoundary = "after-meta-sync"
+	// QualificationAfterMetaSync identifies the stage after publication metadata is synced.
+	QualificationAfterMetaSync QualificationBoundary = "after-meta-sync"
 )
 
+// File owns the database file, committed roots, reader pins, and page allocation state.
 type File struct {
 	file                     *os.File
 	mu                       sync.RWMutex
@@ -110,16 +133,19 @@ type File struct {
 	storageLimitRejections   atomic.Uint64
 }
 
+// readerPin records a database version that an active reader or replay stream needs retained.
 type readerPin struct {
 	generation, sequence, rootPage uint64
 	replay                         bool
 }
 
+// stagedPage holds encoded page bytes waiting for transaction publication.
 type stagedPage struct {
 	id   uint64
 	data []byte
 }
 
+// existingFileState holds the validated metadata and root selected while opening a file.
 type existingFileState struct {
 	meta     Meta
 	root     DatabaseRoot
@@ -129,7 +155,9 @@ type existingFileState struct {
 	nextPage uint64
 }
 
-// OpenReport describes only recovery decisions made while opening a file. It
+// OpenReport describes only recovery decisions made while opening a file.
+//
+// It
 // contains no path or user data and is immutable after OpenWithReport returns.
 type OpenReport struct {
 	Created                bool
@@ -142,7 +170,9 @@ type OpenReport struct {
 	FreeSpaceLoadDegraded  bool
 }
 
-// WriteTxn stages immutable pages in memory. Nothing becomes visible until the
+// WriteTxn stages immutable pages in memory.
+//
+// Nothing becomes visible until the
 // DatabaseRoot and inactive MetaPage are durably published by File.Update.
 type WriteTxn struct {
 	file                     *File
@@ -167,15 +197,18 @@ type WriteTxn struct {
 	indexBuildCatalogChanged bool
 }
 
+// Open creates or opens a database file with default storage options.
 func Open(path string) (*File, Meta, error) {
 	file, meta, _, err := OpenWithReport(path)
 	return file, meta, err
 }
 
+// OpenWithReport opens a database file and reports the recovery decisions made during startup.
 func OpenWithReport(path string) (*File, Meta, OpenReport, error) {
 	return OpenWithOptions(path, OpenOptions{})
 }
 
+// OpenWithOptions opens and validates a database file using the requested safety and resource limits.
 func OpenWithOptions(path string, options OpenOptions) (*File, Meta, OpenReport, error) {
 	if path == "" {
 		return nil, Meta{}, OpenReport{}, errors.New("meldbase storage: empty path")
@@ -322,8 +355,9 @@ func OpenWithOptions(path string, options OpenOptions) (*File, Meta, OpenReport,
 	return opened, state.meta, report, nil
 }
 
-// OpenForQualification installs a synchronous boundary hook before returning
-// an otherwise normal file. The hook may block while an external controller
+// OpenForQualification opens a database file with a hook for destructive commit tests.
+//
+// The hook runs synchronously and may block while an external controller
 // cuts power, exhausts a disposable volume or terminates the process. This
 // entry point lives in internal/storage so external applications cannot opt
 // into qualification behavior accidentally.
@@ -345,6 +379,7 @@ func OpenForQualification(path string, options OpenOptions, hook func(Qualificat
 	return file, meta, report, nil
 }
 
+// qualificationBoundary maps a test failure point to its named publication stage.
 func qualificationBoundary(point faultPoint) (QualificationBoundary, bool) {
 	switch point {
 	case faultAfterPageWrite:
@@ -362,6 +397,7 @@ func qualificationBoundary(point faultPoint) (QualificationBoundary, bool) {
 	}
 }
 
+// normalizedCommitRetention supplies the default retained commit count for a zero limit.
 func normalizedCommitRetention(value uint64) uint64 {
 	if value == 0 {
 		return DefaultCommitRetentionMaxCommits
@@ -369,6 +405,7 @@ func normalizedCommitRetention(value uint64) uint64 {
 	return value
 }
 
+// normalizedCommitRetentionBytes supplies the default retained byte count for a zero limit.
 func normalizedCommitRetentionBytes(value uint64) uint64 {
 	if value == 0 {
 		return DefaultCommitRetentionMaxBytes
@@ -376,6 +413,7 @@ func normalizedCommitRetentionBytes(value uint64) uint64 {
 	return value
 }
 
+// normalizeMaxFileBytes validates an aligned file byte limit and converts it to pages.
 func normalizeMaxFileBytes(value uint64) (uint64, error) {
 	if value == 0 {
 		value = DefaultMaxFileBytes
@@ -387,6 +425,7 @@ func normalizeMaxFileBytes(value uint64) (uint64, error) {
 	return value / PageSize, nil
 }
 
+// openReport summarizes metadata validity, root fallback, and removed trailing bytes.
 func (state existingFileState) openReport(trailing uint64) OpenReport {
 	report := OpenReport{SelectedMetaSlot: uint8(state.metaSlot), TrailingBytesRemoved: trailing}
 	newestGeneration := uint64(0)
@@ -407,6 +446,7 @@ func (state existingFileState) openReport(trailing uint64) OpenReport {
 	return report
 }
 
+// inspectExistingFile selects the newest valid supported metadata and database root.
 func inspectExistingFile(file *os.File, physicalPages uint64) (existingFileState, error) {
 	if file == nil || physicalPages < 2 {
 		return existingFileState{}, ErrCorrupt
@@ -470,6 +510,7 @@ func inspectExistingFile(file *os.File, physicalPages uint64) (existingFileState
 	}, nil
 }
 
+// open initializes a storage handle from validated existing file state.
 func (state existingFileState) open(file *os.File) *File {
 	return &File{
 		file: file, meta: state.meta, root: state.root, metaSlot: state.metaSlot, metas: state.metas, metaOK: state.metaOK,
@@ -477,9 +518,10 @@ func (state existingFileState) open(file *os.File) *File {
 	}
 }
 
-// CommitRoot appends one experimental DatabaseRoot generation and publishes it
-// through the inactive meta slot. Tree roots referenced by root must already be
-// durable; the first vertical slice uses zero roots to exercise atomicity.
+// CommitRoot publishes the supplied database root as the next committed generation.
+//
+// Referenced tree roots must already be durable, and the supplied sequence must
+// match the next transaction sequence.
 func (f *File) CommitRoot(root DatabaseRoot) error {
 	return f.Update(func(tx *WriteTxn) (DatabaseRoot, error) {
 		if root.CommitSequence != tx.Sequence() {
@@ -489,8 +531,9 @@ func (f *File) CommitRoot(root DatabaseRoot) error {
 	})
 }
 
-// Update builds and atomically publishes one copy-on-write generation. The
-// callback must not retain tx and must not perform network or user callbacks.
+// Update builds and publishes a new database version atomically.
+//
+// The callback must not retain tx and must not perform network or user callbacks.
 func (f *File) Update(build func(*WriteTxn) (DatabaseRoot, error)) error {
 	if f == nil || build == nil {
 		return errors.New("meldbase storage: invalid update")
@@ -500,6 +543,7 @@ func (f *File) Update(build func(*WriteTxn) (DatabaseRoot, error)) error {
 	return f.updateUnlocked(true, build)
 }
 
+// updateUnlocked publishes a generation with an optional commit sequence advance while the caller holds the file lock.
 func (f *File) updateUnlocked(advanceSequence bool, build func(*WriteTxn) (DatabaseRoot, error)) error {
 	advance := uint64(0)
 	if advanceSequence {
@@ -508,10 +552,10 @@ func (f *File) updateUnlocked(advanceSequence bool, build func(*WriteTxn) (Datab
 	return f.updateUnlockedAdvance(advance, build)
 }
 
-// updateUnlockedAdvance publishes one physical COW generation whose logical
-// commit sequence advances by advance. Normal callers use zero (maintenance)
-// or one. The internal document-group primitive uses a value greater than one
-// after constructing every intermediate CommitBatch in the same WriteTxn.
+// updateUnlockedAdvance publishes a physical generation with the requested logical sequence advance.
+//
+// The caller holds the file lock; zero advances are for maintenance, and
+// grouped document commits advance by the number of logical batches built.
 func (f *File) updateUnlockedAdvance(advance uint64, build func(*WriteTxn) (DatabaseRoot, error)) error {
 	if f.file == nil {
 		return errors.New("meldbase storage: file is closed")
@@ -635,6 +679,7 @@ func (f *File) updateUnlockedAdvance(advance uint64, build func(*WriteTxn) (Data
 	return nil
 }
 
+// inject runs the configured test failure hook at a commit stage.
 func (f *File) inject(point faultPoint) error {
 	if f.fault == nil {
 		return nil
@@ -642,6 +687,7 @@ func (f *File) inject(point faultPoint) error {
 	return f.fault(point)
 }
 
+// failCommit records a fatal commit error that prevents further writes.
 func (f *File) failCommit(err error) error {
 	if err == nil {
 		err = ErrCorrupt
@@ -650,8 +696,10 @@ func (f *File) failCommit(err error) error {
 	return err
 }
 
+// Sequence returns the logical commit number being built by the transaction.
 func (tx *WriteTxn) Sequence() uint64 { return tx.sequence }
 
+// requireFeature adds a supported required feature to the transaction's published metadata.
 func (tx *WriteTxn) requireFeature(feature uint64) error {
 	if tx == nil || feature == 0 || feature&^SupportedRequiredFeatures != 0 {
 		return ErrUnsupportedFeature
@@ -659,6 +707,8 @@ func (tx *WriteTxn) requireFeature(feature uint64) error {
 	tx.requiredFeatures |= feature
 	return nil
 }
+
+// BaseRoot returns the committed database root from which the transaction started.
 func (tx *WriteTxn) BaseRoot() DatabaseRoot {
 	if tx == nil {
 		return DatabaseRoot{}
@@ -666,6 +716,7 @@ func (tx *WriteTxn) BaseRoot() DatabaseRoot {
 	return tx.baseRoot
 }
 
+// appendPage allocates an ID and stages an encoded page for publication.
 func (tx *WriteTxn) appendPage(pageType PageType, flags uint8, itemCount uint32, link uint64, payload []byte) (uint64, error) {
 	if tx == nil || tx.file == nil {
 		return 0, ErrCorrupt
@@ -680,6 +731,7 @@ func (tx *WriteTxn) appendPage(pageType PageType, flags uint8, itemCount uint32,
 	return id, nil
 }
 
+// appendPageAt stages an encoded page at an already allocated page ID.
 func (tx *WriteTxn) appendPageAt(id uint64, pageType PageType, flags uint8, itemCount uint32, link uint64, payload []byte) error {
 	if tx == nil || tx.file == nil || id < 2 {
 		return ErrCorrupt
@@ -696,6 +748,7 @@ func (tx *WriteTxn) appendPageAt(id uint64, pageType PageType, flags uint8, item
 	return nil
 }
 
+// allocatePageID reuses an available page or allocates one within the file size limit.
 func (tx *WriteTxn) allocatePageID() (uint64, error) {
 	if tx == nil || tx.nextPage < 2 {
 		return 0, ErrCorrupt
@@ -721,6 +774,7 @@ func (tx *WriteTxn) allocatePageID() (uint64, error) {
 	return id, nil
 }
 
+// allocatePageIDs allocates the requested number of page IDs.
 func (tx *WriteTxn) allocatePageIDs(count int) ([]uint64, error) {
 	if count < 0 {
 		return nil, ErrCorrupt
@@ -736,6 +790,7 @@ func (tx *WriteTxn) allocatePageIDs(count int) ([]uint64, error) {
 	return result, nil
 }
 
+// readPage reads encoded page bytes from staged changes or stored pages.
 func (tx *WriteTxn) readPage(pageID uint64) ([]byte, error) {
 	if page := tx.byID[pageID]; page != nil {
 		return append([]byte(nil), page...), nil
@@ -750,6 +805,7 @@ func (tx *WriteTxn) readPage(pageID uint64) ([]byte, error) {
 	return page.raw, nil
 }
 
+// readDataPageUnlocked reads and validates a cached or stored page while the caller holds the file lock.
 func (f *File) readDataPageUnlocked(pageID uint64) (*cachedPage, error) {
 	if pageID < 2 || pageID >= f.nextPage {
 		return nil, ErrCorrupt
@@ -768,6 +824,7 @@ func (f *File) readDataPageUnlocked(pageID uint64) (*cachedPage, error) {
 	return f.cache.put(pageID, raw, decoded), nil
 }
 
+// PageCacheStats samples page cache occupancy and access counters.
 func (f *File) PageCacheStats() PageCacheStats {
 	if f == nil {
 		return PageCacheStats{}
@@ -776,7 +833,9 @@ func (f *File) PageCacheStats() PageCacheStats {
 }
 
 // StorageStats returns a bounded snapshot intended for low-frequency admin
-// sampling. It does not traverse database trees or perform file IO.
+// sampling.
+//
+// It does not traverse database trees or perform file IO.
 func (f *File) StorageStats() StorageStats {
 	if f == nil {
 		return StorageStats{}
@@ -832,6 +891,7 @@ func (f *File) StorageStats() StorageStats {
 	return stats
 }
 
+// Meta returns a copy of the current committed metadata.
 func (f *File) Meta() Meta {
 	if f == nil {
 		return Meta{}
@@ -841,6 +901,7 @@ func (f *File) Meta() Meta {
 	return f.meta
 }
 
+// DatabaseRoot returns the current committed root while the file is open.
 func (f *File) DatabaseRoot() (DatabaseRoot, error) {
 	if f == nil {
 		return DatabaseRoot{}, ErrCorrupt
@@ -853,10 +914,12 @@ func (f *File) DatabaseRoot() (DatabaseRoot, error) {
 	return f.databaseRootUnlocked()
 }
 
+// databaseRootUnlocked returns the cached committed root while the caller holds the file lock.
 func (f *File) databaseRootUnlocked() (DatabaseRoot, error) {
 	return f.root, nil
 }
 
+// readDatabaseRoot reads the root page named by metadata and checks its commit sequence.
 func readDatabaseRoot(file *os.File, meta Meta) (DatabaseRoot, error) {
 	if meta.RootPage == 0 {
 		return DatabaseRoot{CommitSequence: meta.CommitSequence}, nil
@@ -872,6 +935,7 @@ func readDatabaseRoot(file *os.File, meta Meta) (DatabaseRoot, error) {
 	return root, err
 }
 
+// TreeGet looks up a stored tree key and returns a copied value.
 func (f *File) TreeGet(rootPage uint64, kind TreeKind, key []byte) ([]byte, bool, error) {
 	if f == nil {
 		return nil, false, ErrCorrupt
@@ -884,6 +948,7 @@ func (f *File) TreeGet(rootPage uint64, kind TreeKind, key []byte) ([]byte, bool
 	return f.treeGetUnlocked(rootPage, kind, key)
 }
 
+// TreeScan collects copied entries from a stored tree within the requested range and limit.
 func (f *File) TreeScan(rootPage uint64, kind TreeKind, start, end []byte, limit int) ([]KeyValue, error) {
 	if f == nil {
 		return nil, ErrCorrupt
@@ -909,6 +974,7 @@ func (f *File) TreeScan(rootPage uint64, kind TreeKind, start, end []byte, limit
 	return result, iterator.err
 }
 
+// Close releases the writer lock, closes the file, and wakes commit stream waiters.
 func (f *File) Close() error {
 	if f == nil {
 		return nil
@@ -926,6 +992,7 @@ func (f *File) Close() error {
 	return err
 }
 
+// validateRoot checks that a stored root matches metadata and references pages within the file bounds.
 func validateRoot(file *os.File, meta Meta) error {
 	if meta.RootPage == 0 {
 		if meta.CommitSequence != 0 {
@@ -959,6 +1026,7 @@ func validateRoot(file *os.File, meta Meta) error {
 	return nil
 }
 
+// syncDirectory flushes directory metadata to durable storage.
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {

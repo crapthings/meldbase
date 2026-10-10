@@ -14,30 +14,41 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 )
 
+// fakeSource supplies a configurable sample and availability flag for adapter tests.
 type fakeSource struct {
 	sample admin.Sample
 	ok     bool
 }
 
+// Latest returns the configured test sample and availability flag.
 func (source *fakeSource) Latest() (admin.Sample, bool) { return source.sample, source.ok }
 
+// capturedSink stores observed integer and floating-point measurements by name.
 type capturedSink struct {
 	ints   map[string]int64
 	floats map[string]float64
 }
 
+// discardSink ignores measurements during adapter benchmarks.
 type discardSink struct{}
 
-func (discardSink) Int64(string, metric.Int64Observable, int64)       {}
+// Int64 discards an integer measurement.
+func (discardSink) Int64(string, metric.Int64Observable, int64) {}
+
+// Float64 discards a floating-point measurement.
 func (discardSink) Float64(string, metric.Float64Observable, float64) {}
 
+// Int64 records an integer measurement by name.
 func (sink *capturedSink) Int64(name string, _ metric.Int64Observable, value int64) {
 	sink.ints[name] = value
 }
+
+// Float64 records a floating-point measurement by name.
 func (sink *capturedSink) Float64(name string, _ metric.Float64Observable, value float64) {
 	sink.floats[name] = value
 }
 
+// TestAdapterMapsOnlyFixedAggregateMeasurements checks expected metric values and stops observation after adapter closure.
 func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 	source := &fakeSource{ok: true, sample: representativeSample()}
 	adapter, err := New(source, Options{MeterProvider: noop.NewMeterProvider(), InstrumentationVersion: "test"})
@@ -128,6 +139,7 @@ func TestAdapterMapsOnlyFixedAggregateMeasurements(t *testing.T) {
 	}
 }
 
+// TestAdapterMissingSampleAndUint64SaturationAreFailSafe checks that missing samples report downtime and oversized counters saturate at the signed integer limit.
 func TestAdapterMissingSampleAndUint64SaturationAreFailSafe(t *testing.T) {
 	source := &fakeSource{}
 	adapter, err := New(source, Options{MeterProvider: noop.NewMeterProvider()})
@@ -150,6 +162,7 @@ func TestAdapterMissingSampleAndUint64SaturationAreFailSafe(t *testing.T) {
 	}
 }
 
+// TestAdapterContractHasUniqueSafeNamesAndNoDynamicIdentity checks metric names and metadata for duplicates, forbidden identities, and caller mutation.
 func TestAdapterContractHasUniqueSafeNamesAndNoDynamicIdentity(t *testing.T) {
 	namePattern := regexp.MustCompile(`^meldbase\.[a-z][a-z0-9_.]*$`)
 	seen := map[string]struct{}{"meldbase.up": {}}
@@ -188,6 +201,7 @@ func TestAdapterContractHasUniqueSafeNamesAndNoDynamicIdentity(t *testing.T) {
 	}
 }
 
+// TestAdapterRequiresExplicitSourceAndMeterProvider checks that adapter creation requires both a sample source and a meter provider.
 func TestAdapterRequiresExplicitSourceAndMeterProvider(t *testing.T) {
 	if _, err := New(nil, Options{MeterProvider: noop.NewMeterProvider()}); err == nil {
 		t.Fatal("nil source accepted")
@@ -197,6 +211,7 @@ func TestAdapterRequiresExplicitSourceAndMeterProvider(t *testing.T) {
 	}
 }
 
+// representativeSample creates fixed database and server measurements for adapter tests and benchmarks.
 func representativeSample() admin.Sample {
 	return admin.Sample{
 		Stats: meldbase.DBStats{
@@ -253,6 +268,7 @@ func representativeSample() admin.Sample {
 	}
 }
 
+// BenchmarkAdapterObserve measures observation time and allocations while discarding emitted metrics.
 func BenchmarkAdapterObserve(b *testing.B) {
 	adapter, err := New(&fakeSource{ok: true, sample: representativeSample()}, Options{MeterProvider: noop.NewMeterProvider()})
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"testing"
 )
 
+// branchPageGolden records the identity and expected hash of one retained branch page.
 type branchPageGolden struct {
 	TreeKind TreeKind `json:"treeKind"`
 	PageType PageType `json:"pageType"`
@@ -21,6 +22,7 @@ type branchPageGolden struct {
 	SHA256   string   `json:"sha256"`
 }
 
+// branchCorpusGoldenFixture stores compressed branch-page samples and their expected format metadata and hashes.
 type branchCorpusGoldenFixture struct {
 	FormatRevision     uint16             `json:"formatRevision"`
 	Generation         uint64             `json:"generation"`
@@ -32,6 +34,7 @@ type branchCorpusGoldenFixture struct {
 	GzipBase64         string             `json:"gzipBase64"`
 }
 
+// TestRevision3BranchCorpusDecodesEveryTreeKind checks retained branch-page bytes and decoded structure for every supported tree kind.
 func TestRevision3BranchCorpusDecodesEveryTreeKind(t *testing.T) {
 	fixture := loadBranchCorpusGoldenFixture(t)
 	pages := decodeBranchCorpus(t, fixture)
@@ -71,6 +74,7 @@ func TestRevision3BranchCorpusDecodesEveryTreeKind(t *testing.T) {
 	}
 }
 
+// TestRevision3BranchCorpusWriterMatchesGoldenFixture checks that generated branch pages reproduce the retained compressed bytes and metadata.
 func TestRevision3BranchCorpusWriterMatchesGoldenFixture(t *testing.T) {
 	want := loadBranchCorpusGoldenFixture(t)
 	got := buildBranchCorpusGoldenFixture(t)
@@ -92,6 +96,7 @@ func TestRevision3BranchCorpusWriterMatchesGoldenFixture(t *testing.T) {
 	}
 }
 
+// TestGenerateRevision3BranchCorpus prints a generated branch-page fixture when explicitly enabled by the maintainer.
 func TestGenerateRevision3BranchCorpus(t *testing.T) {
 	if os.Getenv("MELDBASE_GENERATE_BRANCH_FIXTURE") != "1" {
 		t.Skip("fixture generation is an explicit maintainer action")
@@ -103,6 +108,7 @@ func TestGenerateRevision3BranchCorpus(t *testing.T) {
 	fmt.Println(string(encoded))
 }
 
+// buildBranchCorpusGoldenFixture builds repeatable branch pages for each tree kind and packages their bytes and hashes.
 func buildBranchCorpusGoldenFixture(t *testing.T) branchCorpusGoldenFixture {
 	t.Helper()
 	file, _, err := Open(filepath.Join(t.TempDir(), "branch-corpus.meld2"))
@@ -176,6 +182,7 @@ func buildBranchCorpusGoldenFixture(t *testing.T) branchCorpusGoldenFixture {
 	}
 }
 
+// decodeBranchCorpus decompresses a branch-page fixture while checking its hashes and page count.
 func decodeBranchCorpus(t *testing.T, fixture branchCorpusGoldenFixture) []byte {
 	t.Helper()
 	compressed, err := base64.StdEncoding.DecodeString(fixture.GzipBase64)
@@ -196,6 +203,7 @@ func decodeBranchCorpus(t *testing.T, fixture branchCorpusGoldenFixture) []byte 
 	return raw
 }
 
+// loadBranchCorpusGoldenFixture loads the retained branch-page fixture or fails the test.
 func loadBranchCorpusGoldenFixture(t *testing.T) branchCorpusGoldenFixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "branch-pages-revision-3.json"))

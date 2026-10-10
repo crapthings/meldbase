@@ -10,8 +10,10 @@ import { LocalCollection } from "@meldbase/client/local";
 import type { Document } from "@meldbase/client/types";
 import { useLiveQuery } from "./index.js";
 
+/** Defines ranked documents used to check query ordering in React tests. */
 type Item = Document & { readonly rank: bigint; readonly title: string };
 
+/** Records outgoing frames and emits controlled socket events for React subscription tests. */
 class FakeRemoteSocket implements WebSocketLike {
   readyState = 0;
   readonly sent: string[] = [];
@@ -57,6 +59,7 @@ class FakeRemoteSocket implements WebSocketLike {
   }
 }
 
+/** Waits one timer turn for pending subscription work in tests. */
 async function settle(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }

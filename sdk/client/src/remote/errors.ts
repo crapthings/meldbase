@@ -1,5 +1,6 @@
 import type { Value } from "../types.js";
 
+/** Holds application error details as typed document values. */
 export type MeldbaseErrorData = Readonly<Record<string, Value>>;
 
 /** An expected, application-owned RPC outcome. */
@@ -35,7 +36,7 @@ export class MeldbaseInternalError extends Error {
   }
 }
 
-/** The client has been closed permanently. Create a new client to reconnect. */
+/** Reports a permanently closed client that must be replaced to reconnect. */
 export class MeldbaseClientClosedError extends Error {
   constructor() {
     super("Meldbase client is closed; create a new client to reconnect");

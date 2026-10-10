@@ -14,9 +14,13 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// workspaceTestJWTIssuer identifies the issuer accepted by workspace authentication tests.
 const workspaceTestJWTIssuer = "https://identity.example.test"
+
+// workspaceTestJWTAudience identifies the audience accepted by workspace authentication tests.
 const workspaceTestJWTAudience = "meldbase-api"
 
+// newWorkspaceTestAuthenticator creates a JWT authenticator with the supplied secret and fixed test clock.
 func newWorkspaceTestAuthenticator(t *testing.T, secret []byte, now time.Time) *HS256JWTAuthenticator {
 	t.Helper()
 	authenticator, err := NewHS256JWTAuthenticator(HS256JWTAuthenticatorConfig{
@@ -28,6 +32,7 @@ func newWorkspaceTestAuthenticator(t *testing.T, secret []byte, now time.Time) *
 	return authenticator
 }
 
+// signedWorkspaceJWT signs a short-lived test token identifying an actor and workspace.
 func signedWorkspaceJWT(t *testing.T, secret []byte, actorID, workspaceID string, now time.Time) string {
 	t.Helper()
 	return signedHS256JWT(t, secret, map[string]any{
@@ -35,6 +40,7 @@ func signedWorkspaceJWT(t *testing.T, secret []byte, actorID, workspaceID string
 	})
 }
 
+// TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites checks that HTTP reads and writes stay within the authenticated workspace.
 func TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -115,6 +121,7 @@ func TestWorkspaceAuthorizerEnforcesIsolationAcrossHTTPReadsAndWrites(t *testing
 	}
 }
 
+// TestCollectionAccessModesEnforceOwnerReadOnlyAndRPCOnlyBoundaries checks owner and field restrictions alongside read-only and RPC-only collection access.
 func TestCollectionAccessModesEnforceOwnerReadOnlyAndRPCOnlyBoundaries(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -257,6 +264,7 @@ func TestCollectionAccessModesEnforceOwnerReadOnlyAndRPCOnlyBoundaries(t *testin
 	}
 }
 
+// TestCollectionAccessManifestIsStrictAndValidatesModes checks manifest validation and the resulting field permissions and RPC allowlist.
 func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 	manifest, err := ParseCollectionAccessManifestJSON([]byte(`{
 		"$schema": "https://crapthings.github.io/meldbase/schemas/collection-access-manifest-v1.schema.json",
@@ -328,6 +336,7 @@ func TestCollectionAccessManifestIsStrictAndValidatesModes(t *testing.T) {
 	}
 }
 
+// TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket checks that subscriptions use the token workspace and cannot resume across workspaces.
 func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -430,8 +439,10 @@ func TestWorkspaceAuthorizerScopesRealtimeSubscriptionFromJWTTicket(t *testing.T
 	}
 }
 
+// workspaceRPCAllowlist permits one test actor and workspace to call the echo method.
 type workspaceRPCAllowlist struct{}
 
+// AuthorizeRPC rejects calls outside the test actor, workspace, and method allowlist.
 func (workspaceRPCAllowlist) AuthorizeRPC(_ context.Context, actor Actor, method string) error {
 	if actor.ID != "user-a" || actor.WorkspaceID != "team-a" || method != "workspace.echo" {
 		return ErrForbidden
@@ -439,6 +450,7 @@ func (workspaceRPCAllowlist) AuthorizeRPC(_ context.Context, actor Actor, method
 	return nil
 }
 
+// TestJWTWorkspaceActorIsForwardedToTrustedWorkerRPC checks that workers receive the authenticated actor and unauthorized workspaces are rejected.
 func TestJWTWorkspaceActorIsForwardedToTrustedWorkerRPC(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -503,6 +515,7 @@ func TestJWTWorkspaceActorIsForwardedToTrustedWorkerRPC(t *testing.T) {
 	}
 }
 
+// insertWorkspaceDocument inserts a test document with a workspace and title.
 func insertWorkspaceDocument(t *testing.T, collection *meldbase.Collection, workspace, title string) {
 	t.Helper()
 	if _, err := collection.InsertOne(context.Background(), meldbase.Document{"workspaceId": meldbase.String(workspace), "title": meldbase.String(title)}); err != nil {
@@ -510,6 +523,7 @@ func insertWorkspaceDocument(t *testing.T, collection *meldbase.Collection, work
 	}
 }
 
+// insertWorkspaceOwnedDocument inserts a test document with a workspace, owner, and title.
 func insertWorkspaceOwnedDocument(t *testing.T, collection *meldbase.Collection, workspace, owner, title string) {
 	t.Helper()
 	if _, err := collection.InsertOne(context.Background(), meldbase.Document{
@@ -519,6 +533,7 @@ func insertWorkspaceOwnedDocument(t *testing.T, collection *meldbase.Collection,
 	}
 }
 
+// postWorkspaceRequest sends an authenticated JSON request and fails the test if transport fails.
 func postWorkspaceRequest(t *testing.T, url, token, body string) *http.Response {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))

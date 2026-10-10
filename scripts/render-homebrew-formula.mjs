@@ -1,14 +1,17 @@
 import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 
+// Throws a command validation error.
 function fail(message) {
   throw new Error(message);
 }
 
+// Returns the formula generator command syntax.
 function usage() {
   return "Usage: node scripts/render-homebrew-formula.mjs --version X.Y.Z-alpha.N --arm64-sha256 HEX --amd64-sha256 HEX --out NEW_FORMULA_PATH";
 }
 
+// Validates alpha release arguments and resolves the output file path.
 function readArguments(args) {
   const values = new Map();
   while (args.length > 0) {
@@ -32,6 +35,7 @@ function readArguments(args) {
   return { version, arm64, amd64, output: resolve(output) };
 }
 
+// Creates a new Homebrew formula with release archive URLs and supplied checksums.
 async function main() {
   const { version, arm64, amd64, output } = readArguments(process.argv.slice(2));
   const tag = `v${version}`;

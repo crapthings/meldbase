@@ -2,11 +2,10 @@ package database
 
 import "context"
 
-// openStorageCollectionStreamLocked returns a lazy insertion-order COLLSCAN
-// only when the shared planner has no indexed access plan. When it does select
-// one, the immutable plan is returned for FindQuery to reuse against its next
-// snapshot instead of analyzing the same query twice. db.mu must be read- or
-// write-locked by the caller.
+// openStorageCollectionStreamLocked opens a lazy collection scan when no index plan applies.
+//
+// It returns the selected plan for FindQuery to reuse when an index applies.
+// The caller must hold db.mu for reading or writing.
 func (c *Collection) openStorageCollectionStreamLocked(ctx context.Context, query QuerySpec) (_ queryStorageDocumentIterator, access *queryAccessPlan, streamed bool, resultErr error) {
 	if c == nil || c.db == nil || c.db.querySource == nil || len(query.sort) != 0 {
 		return nil, nil, false, nil

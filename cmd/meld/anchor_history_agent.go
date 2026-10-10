@@ -34,18 +34,24 @@ import (
 )
 
 const (
+	// anchorHistoryAgentProtocolSchema identifies the history agent request and response format.
 	anchorHistoryAgentProtocolSchema uint32 = 2
-	anchorHistoryRunPlanSchema       uint32 = 2
-	anchorHistoryAgentBodyMaximum           = 64 << 10
-	anchorHistoryAgentMaximumLease          = 2 * time.Minute
+	// anchorHistoryRunPlanSchema identifies the history run plan format.
+	anchorHistoryRunPlanSchema uint32 = 2
+	// anchorHistoryAgentBodyMaximum limits the size of history agent request and response bodies.
+	anchorHistoryAgentBodyMaximum = 64 << 10
+	// anchorHistoryAgentMaximumLease limits how long an agent request can remain valid.
+	anchorHistoryAgentMaximumLease = 2 * time.Minute
 )
 
+// anchorHistoryAgentIdentity identifies an agent by its name, endpoint hash, and signing key.
 type anchorHistoryAgentIdentity struct {
 	AgentID          string `json:"agentId"`
 	EndpointSHA256   string `json:"endpointSha256"`
 	SigningPublicKey string `json:"signingPublicKey"`
 }
 
+// anchorHistoryAgentRequest describes one time-limited anchor operation requested by a controller.
 type anchorHistoryAgentRequest struct {
 	SchemaVersion   uint32                 `json:"schemaVersion"`
 	RunID           string                 `json:"runId"`
@@ -60,6 +66,7 @@ type anchorHistoryAgentRequest struct {
 	ExpiresAt       time.Time              `json:"expiresAt"`
 }
 
+// anchorHistoryAgentFragment records an agent's signed operation result and build identity.
 type anchorHistoryAgentFragment struct {
 	SchemaVersion    uint32                    `json:"schemaVersion"`
 	Request          anchorHistoryAgentRequest `json:"request"`
@@ -78,6 +85,7 @@ type anchorHistoryAgentFragment struct {
 	Signature        string                    `json:"signature"`
 }
 
+// anchorHistoryRunPlanOperation assigns one anchor operation to a planned agent.
 type anchorHistoryRunPlanOperation struct {
 	ID      string                 `json:"id"`
 	AgentID string                 `json:"agentId"`
@@ -85,10 +93,12 @@ type anchorHistoryRunPlanOperation struct {
 	Target  anchorHistoryWireValue `json:"target"`
 }
 
+// anchorHistoryRunPlanWave groups operations that the controller dispatches together.
 type anchorHistoryRunPlanWave struct {
 	Operations []anchorHistoryRunPlanOperation `json:"operations"`
 }
 
+// anchorHistoryRunPlan defines the agents and operation waves for one history qualification run.
 type anchorHistoryRunPlan struct {
 	SchemaVersion  uint32                      `json:"schemaVersion"`
 	RunID          string                      `json:"runId"`
@@ -97,18 +107,21 @@ type anchorHistoryRunPlan struct {
 	Waves          []anchorHistoryRunPlanWave  `json:"waves"`
 }
 
+// anchorHistoryRunPlanAgent holds a planned agent's identity, HTTPS endpoint, and signing key.
 type anchorHistoryRunPlanAgent struct {
 	AgentID          string `json:"agentId"`
 	Endpoint         string `json:"endpoint"`
 	SigningPublicKey string `json:"signingPublicKey"`
 }
 
+// anchorHistoryAgentExecutor provides the anchor configuration and operations executed by an agent.
 type anchorHistoryAgentExecutor interface {
 	ConfigurationID() string
 	Load(context.Context) (meldbase.RollbackAnchor, bool, error)
 	Advance(context.Context, meldbase.RollbackAnchor) error
 }
 
+// anchorHistoryAgentOptions configures the history agent's identity, TLS, journal, and execution limits.
 type anchorHistoryAgentOptions struct {
 	address              string
 	agentID              string
@@ -129,6 +142,7 @@ type anchorHistoryAgentOptions struct {
 	ready                chan<- net.Addr
 }
 
+// anchorHistoryAgentHandler handles controller requests and tracks durable operation results for one run.
 type anchorHistoryAgentHandler struct {
 	agentID              string
 	stateDirectory       string
@@ -149,6 +163,7 @@ type anchorHistoryAgentHandler struct {
 	inFlight             map[string]chan struct{}
 }
 
+// anchorHistoryAgentJournalIdentity binds an agent journal to its run, configuration, build, and signing key.
 type anchorHistoryAgentJournalIdentity struct {
 	SchemaVersion    uint32 `json:"schemaVersion"`
 	RunID            string `json:"runId"`
@@ -160,12 +175,14 @@ type anchorHistoryAgentJournalIdentity struct {
 	SigningPublicKey string `json:"signingPublicKey"`
 }
 
+// runAnchorHistoryAgent runs the history agent until an interrupt or termination signal requests shutdown.
 func runAnchorHistoryAgent(args []string, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return runAnchorHistoryAgentContext(ctx, args, stdout, stderr)
 }
 
+// runAnchorHistoryAgentContext parses history agent settings and starts the configured service.
 func runAnchorHistoryAgentContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("anchor-qualification history-agent", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -233,6 +250,7 @@ func runAnchorHistoryAgentContext(ctx context.Context, args []string, stdout, st
 	}, stdout)
 }
 
+// serveAnchorHistoryAgent serves authenticated history operations with a durable journal until shutdown.
 func serveAnchorHistoryAgent(ctx context.Context, options anchorHistoryAgentOptions, stdout io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -290,6 +308,7 @@ func serveAnchorHistoryAgent(ctx context.Context, options anchorHistoryAgentOpti
 	}
 }
 
+// ServeHTTP accepts a pinned controller's JSON operation request and returns its signed result.
 func (handler *anchorHistoryAgentHandler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
 	response.Header().Set("X-Content-Type-Options", "nosniff")
@@ -326,6 +345,7 @@ func (handler *anchorHistoryAgentHandler) ServeHTTP(response http.ResponseWriter
 	_ = json.NewEncoder(response).Encode(fragment)
 }
 
+// execute returns a signed anchor operation result while reusing completed results for identical requests.
 func (handler *anchorHistoryAgentHandler) execute(parent context.Context, request anchorHistoryAgentRequest, now time.Time) (anchorHistoryAgentFragment, error) {
 	requestDigest, err := validateAnchorHistoryAgentRequest(request, handler.agentID, handler.executor.ConfigurationID(), handler.sourceRevision, now)
 	if err != nil {
@@ -459,6 +479,7 @@ func (handler *anchorHistoryAgentHandler) execute(parent context.Context, reques
 	return fragment, nil
 }
 
+// persistRunIdentity durably records the run identity when a journal directory is configured.
 func (handler *anchorHistoryAgentHandler) persistRunIdentity(runID string) error {
 	if handler.stateDirectory == "" {
 		return nil
@@ -474,6 +495,7 @@ func (handler *anchorHistoryAgentHandler) persistRunIdentity(runID string) error
 	return nil
 }
 
+// persistRequest durably reserves an operation request when a journal directory is configured.
 func (handler *anchorHistoryAgentHandler) persistRequest(request anchorHistoryAgentRequest) error {
 	if handler.stateDirectory == "" {
 		return nil
@@ -485,6 +507,7 @@ func (handler *anchorHistoryAgentHandler) persistRequest(request anchorHistoryAg
 	return nil
 }
 
+// persistResult durably records a signed result when a journal directory is configured.
 func (handler *anchorHistoryAgentHandler) persistResult(fragment anchorHistoryAgentFragment) error {
 	if handler.stateDirectory == "" {
 		return nil
@@ -496,6 +519,7 @@ func (handler *anchorHistoryAgentHandler) persistResult(fragment anchorHistoryAg
 	return nil
 }
 
+// loadDurableState validates the agent journal and restores its reserved requests and signed results.
 func (handler *anchorHistoryAgentHandler) loadDurableState() error {
 	entries, err := os.ReadDir(handler.stateDirectory)
 	if err != nil {
@@ -574,10 +598,12 @@ func (handler *anchorHistoryAgentHandler) loadDurableState() error {
 	return nil
 }
 
+// anchorHistoryAgentJournalFilename derives a journal filename from the entry kind and a hash of the operation ID.
 func anchorHistoryAgentJournalFilename(kind, operationID string) string {
 	return kind + "-" + qualificationSHA256([]byte(operationID)) + ".json"
 }
 
+// validateAnchorHistoryAgentRequest checks a request's identity, contents, and current validity before returning its hash.
 func validateAnchorHistoryAgentRequest(request anchorHistoryAgentRequest, agentID, configurationID, sourceRevision string, now time.Time) (string, error) {
 	digest, err := validateAnchorHistoryAgentRequestStatic(request, agentID, configurationID, sourceRevision)
 	if err != nil {
@@ -589,6 +615,7 @@ func validateAnchorHistoryAgentRequest(request anchorHistoryAgentRequest, agentI
 	return digest, nil
 }
 
+// validateAnchorHistoryAgentRequestStatic checks request fields and identity bindings before returning the request's JSON hash.
 func validateAnchorHistoryAgentRequestStatic(request anchorHistoryAgentRequest, agentID, configurationID, sourceRevision string) (string, error) {
 	if request.SchemaVersion != anchorHistoryAgentProtocolSchema || request.AgentID != agentID || request.ConfigurationID != configurationID || request.SourceRevision != sourceRevision ||
 		!anchorQualificationHex(request.RunID, 16) || !qualificationHexDigest(request.ConfigurationID) ||
@@ -616,6 +643,7 @@ func validateAnchorHistoryAgentRequestStatic(request anchorHistoryAgentRequest, 
 	return qualificationSHA256(payload), nil
 }
 
+// signAnchorHistoryAgentFragment signs the fragment's JSON contents with an Ed25519 private key.
 func signAnchorHistoryAgentFragment(fragment *anchorHistoryAgentFragment, privateKey ed25519.PrivateKey) error {
 	fragment.Signature = ""
 	payload, err := json.Marshal(fragment)
@@ -626,6 +654,7 @@ func signAnchorHistoryAgentFragment(fragment *anchorHistoryAgentFragment, privat
 	return nil
 }
 
+// verifyAnchorHistoryAgentFragment checks a fragment's fields, request hash, agent identity, and Ed25519 signature.
 func verifyAnchorHistoryAgentFragment(fragment anchorHistoryAgentFragment, identity anchorHistoryAgentIdentity) error {
 	if fragment.SchemaVersion != anchorHistoryAgentProtocolSchema || fragment.Request.AgentID != identity.AgentID || fragment.SigningPublicKey != identity.SigningPublicKey ||
 		fragment.Outcome != string(qualification.AnchorHistorySucceeded) && fragment.Outcome != string(qualification.AnchorHistoryFailed) ||
@@ -653,6 +682,7 @@ func verifyAnchorHistoryAgentFragment(fragment anchorHistoryAgentFragment, ident
 	return nil
 }
 
+// validateAnchorHistoryAgentFragmentEvidence checks that a signed result matches its run, request, time window, and operation semantics.
 func validateAnchorHistoryAgentFragmentEvidence(fragment anchorHistoryAgentFragment, identity anchorHistoryAgentIdentity, runID, configurationID, sourceRevision string) error {
 	if fragment.Request.RunID != runID || fragment.Request.ConfigurationID != configurationID || fragment.SourceRevision != sourceRevision || fragment.Request.SourceRevision != sourceRevision {
 		return errors.New("history-agent fragment is not bound to its run and configuration")
@@ -682,6 +712,7 @@ func validateAnchorHistoryAgentFragmentEvidence(fragment anchorHistoryAgentFragm
 	return nil
 }
 
+// validateAnchorHistoryAgentEvidence checks that every controller operation matches a valid signed agent result.
 func validateAnchorHistoryAgentEvidence(controller anchorHistoryControllerRecord) error {
 	if len(controller.Agents) < 2 || len(controller.Agents) > 16 || len(controller.Fragments) != len(controller.Operations) {
 		return errors.New("controller history lacks complete signed agent evidence")
@@ -724,6 +755,7 @@ func validateAnchorHistoryAgentEvidence(controller anchorHistoryControllerRecord
 	return nil
 }
 
+// runAnchorHistoryQualificationRun executes a planned history campaign and publishes its signed evidence and linearizability result.
 func runAnchorHistoryQualificationRun(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("anchor-qualification history-run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -874,6 +906,7 @@ func runAnchorHistoryQualificationRun(args []string, stdout, stderr io.Writer) e
 	}{1, plan.RunID, len(operations), len(identities), true})
 }
 
+// validateAnchorHistoryRunPlan checks that a run plan has valid agents, unique operations, and nonempty execution waves.
 func validateAnchorHistoryRunPlan(plan anchorHistoryRunPlan) error {
 	if plan.SchemaVersion != anchorHistoryRunPlanSchema || !anchorQualificationHex(plan.RunID, 16) || !validDurabilitySourceRevision(plan.SourceRevision) || len(plan.Agents) < 2 || len(plan.Agents) > 16 || len(plan.Waves) < 1 {
 		return errors.New("history run plan identity, agents or waves are invalid")
@@ -931,6 +964,7 @@ func validateAnchorHistoryRunPlan(plan anchorHistoryRunPlan) error {
 	return nil
 }
 
+// newAnchorHistoryAgentTransport creates a TLS 1.3 client transport with mutual authentication and bounded timeouts.
 func newAnchorHistoryAgentTransport(caPath, certificatePath, keyPath string, timeout time.Duration, agents int) (*http.Transport, error) {
 	certificate, err := loadAnchorClientCertificate(certificatePath, keyPath)
 	if err != nil {
@@ -948,6 +982,7 @@ func newAnchorHistoryAgentTransport(caPath, certificatePath, keyPath string, tim
 	}, nil
 }
 
+// executeAnchorHistoryAgent requests an agent operation with at most one retry before the request expires.
 func executeAnchorHistoryAgent(client *http.Client, endpoint string, request anchorHistoryAgentRequest, publicKey string, timeout time.Duration) (anchorHistoryAgentFragment, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -971,6 +1006,7 @@ func executeAnchorHistoryAgent(client *http.Client, endpoint string, request anc
 	return anchorHistoryAgentFragment{}, errors.Join(lastErr, errors.New("history-agent response unavailable after idempotent retry"))
 }
 
+// executeAnchorHistoryAgentOnce sends one agent request and verifies the signed response while reporting whether failure permits retry.
 func executeAnchorHistoryAgentOnce(client *http.Client, endpoint string, request anchorHistoryAgentRequest, publicKey string, body []byte, timeout time.Duration) (anchorHistoryAgentFragment, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -1008,6 +1044,7 @@ func executeAnchorHistoryAgentOnce(client *http.Client, endpoint string, request
 	return fragment, false, nil
 }
 
+// anchorHistoryAnchorFromWire converts a valid existing wire value into a rollback anchor.
 func anchorHistoryAnchorFromWire(value anchorHistoryWireValue) (meldbase.RollbackAnchor, error) {
 	converted, err := anchorHistoryValueFromWire(value)
 	if err != nil || !converted.Exists {
@@ -1016,6 +1053,7 @@ func anchorHistoryAnchorFromWire(value anchorHistoryWireValue) (meldbase.Rollbac
 	return meldbase.RollbackAnchor{DatabaseID: converted.DatabaseID, MinimumCommitSequence: converted.CommitSequence, MinimumGeneration: converted.Generation}, nil
 }
 
+// anchorHistoryNonce generates a random 16-byte nonce encoded as hexadecimal.
 func anchorHistoryNonce() (string, error) {
 	var nonce [16]byte
 	if _, err := io.ReadFull(rand.Reader, nonce[:]); err != nil {
@@ -1024,6 +1062,7 @@ func anchorHistoryNonce() (string, error) {
 	return hex.EncodeToString(nonce[:]), nil
 }
 
+// anchorHistoryCertificateSPKI returns the SHA-256 hash of a certificate's public key information.
 func anchorHistoryCertificateSPKI(certificate *x509.Certificate) string {
 	digest := sha256.Sum256(certificate.RawSubjectPublicKeyInfo)
 	return hex.EncodeToString(digest[:])

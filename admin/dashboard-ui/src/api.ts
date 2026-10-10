@@ -1,5 +1,6 @@
 import type { AdminSample, DiagnosticResponse, HistoryResponse, IndexCatalogResponse } from "./types";
 
+/** Fetches an admin endpoint with a bearer token and caching disabled. */
 async function authorized(path: string, token: string, signal?: AbortSignal): Promise<Response> {
   return fetch(path, {
     headers: { Authorization: `Bearer ${token}` },
@@ -8,6 +9,7 @@ async function authorized(path: string, token: string, signal?: AbortSignal): Pr
   });
 }
 
+/** Loads admin sample history and checks that the response contains a sample list. */
 export async function loadHistory(token: string, signal?: AbortSignal): Promise<HistoryResponse> {
   const response = await authorized("/v1/stats/history", token, signal);
   if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? "Invalid admin token" : `Admin API returned ${response.status}`);
@@ -16,6 +18,7 @@ export async function loadHistory(token: string, signal?: AbortSignal): Promise<
   return history;
 }
 
+/** Loads diagnostics after a sequence or reports that the endpoint is unavailable. */
 export async function loadDiagnostics(token: string, after: number, signal?: AbortSignal): Promise<DiagnosticResponse | null> {
   const response = await authorized(`/v1/diagnostics?after=${after}&limit=64`, token, signal);
   if (response.status === 404) return null;
@@ -25,6 +28,7 @@ export async function loadDiagnostics(token: string, after: number, signal?: Abo
   return snapshot;
 }
 
+/** Loads and checks index definitions or reports that the catalog endpoint is unavailable. */
 export async function loadIndexCatalog(token: string, signal?: AbortSignal): Promise<IndexCatalogResponse | null> {
   const response = await authorized("/v1/indexes", token, signal);
   if (response.status === 404) return null;
@@ -37,6 +41,7 @@ export async function loadIndexCatalog(token: string, signal?: AbortSignal): Pro
   return catalog;
 }
 
+/** Waits for a timer or an abort event before continuing. */
 function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timeout = window.setTimeout(done, milliseconds);
@@ -49,6 +54,7 @@ function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** Decodes complete event blocks and delivers their admin samples. */
 function consumeEvents(chunk: string, onSample: (sample: AdminSample) => void): void {
   for (const block of chunk.split("\n\n")) {
     const line = block.split("\n").find((item) => item.startsWith("data: "));
@@ -58,6 +64,7 @@ function consumeEvents(chunk: string, onSample: (sample: AdminSample) => void): 
   }
 }
 
+/** Streams authenticated admin samples and retries connection failures until cancellation. */
 export async function streamStats(
   token: string,
   signal: AbortSignal,

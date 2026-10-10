@@ -6,6 +6,7 @@ import (
 	"reflect"
 )
 
+// qualificationDestructiveRecomputeInputs holds the receipts, environment, and artifact index needed to rebuild a destructive test manifest.
 type qualificationDestructiveRecomputeInputs struct {
 	Record          qualificationDestructiveRecord
 	Artifacts       verifiedQualificationArtifactIndex
@@ -18,6 +19,7 @@ type qualificationDestructiveRecomputeInputs struct {
 	Revision        string
 }
 
+// verifyQualificationDestructiveOriginalEvidence checks that rebuilding the manifest from original evidence produces the recorded manifest.
 var verifyQualificationDestructiveOriginalEvidence = func(inputs qualificationDestructiveRecomputeInputs) error {
 	recomputed, err := recomputeQualificationDestructiveRecord(inputs)
 	if err != nil {
@@ -29,6 +31,7 @@ var verifyQualificationDestructiveOriginalEvidence = func(inputs qualificationDe
 	return nil
 }
 
+// recomputeQualificationDestructiveRecord rebuilds a destructive test manifest from verified receipts and their secured artifacts.
 func recomputeQualificationDestructiveRecord(inputs qualificationDestructiveRecomputeInputs) (qualificationDestructiveRecord, error) {
 	record, artifacts, durability := inputs.Record, inputs.Artifacts, inputs.Durability
 	if qualificationSHA256(inputs.DurabilityRaw) != record.DurabilityReceiptSHA256 || qualificationSHA256(inputs.SoakRaw) != record.SoakReceiptSHA256 {

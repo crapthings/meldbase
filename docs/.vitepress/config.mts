@@ -1,7 +1,9 @@
 import { defineConfig } from "vitepress";
 
+/** Detects CI builds that need the GitHub Pages URL prefix. */
 const isGitHubPagesBuild = process.env.GITHUB_ACTIONS === "true";
 
+/** Configures documentation branding, navigation, and deployment paths. */
 export default defineConfig({
   title: "Meldbase",
   description: "A durable embedded document database.",

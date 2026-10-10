@@ -20,13 +20,18 @@ import (
 )
 
 const (
-	destructivePowerMarkerSchema  uint32 = 1
-	destructivePowerEventSchema   uint32 = 1
+	// destructivePowerMarkerSchema identifies the pre-cut marker format.
+	destructivePowerMarkerSchema uint32 = 1
+	// destructivePowerEventSchema identifies the QEMU controller-event format.
+	destructivePowerEventSchema uint32 = 1
+	// destructivePowerReceiptSchema identifies the power-recovery receipt format.
 	destructivePowerReceiptSchema uint32 = 1
 )
 
+// destructiveBootIDFn supplies the current boot identity for power-recovery checks.
 var destructiveBootIDFn = destructiveBootID
 
+// destructivePowerMarker records the write boundary and expected states before an external power cut.
 type destructivePowerMarker struct {
 	SchemaVersion     uint32    `json:"schemaVersion"`
 	TrialID           string    `json:"trialId"`
@@ -50,6 +55,7 @@ type destructivePowerMarker struct {
 	NewStateSHA256    string    `json:"newStateSha256"`
 }
 
+// destructivePowerControllerEvent records the external controller action and its link to the trial marker.
 type destructivePowerControllerEvent struct {
 	SchemaVersion         uint32    `json:"schemaVersion"`
 	TrialID               string    `json:"trialId"`
@@ -65,6 +71,7 @@ type destructivePowerControllerEvent struct {
 	Signature             string    `json:"signature,omitempty"`
 }
 
+// destructivePowerEvidence links retained power-test artifacts to boot identities and recovered storage facts.
 type destructivePowerEvidence struct {
 	TrialID                        string `json:"trialId"`
 	Boundary                       string `json:"boundary"`
@@ -88,6 +95,7 @@ type destructivePowerEvidence struct {
 	FreeSpaceValid                 bool   `json:"freeSpaceValid"`
 }
 
+// destructivePowerReceipt records one power-recovery trial and its environment and evidence.
 type destructivePowerReceipt struct {
 	SchemaVersion  uint32                        `json:"schemaVersion"`
 	SourceRevision string                        `json:"sourceRevision,omitempty"`
@@ -104,6 +112,7 @@ type destructivePowerReceipt struct {
 	Evidence       destructivePowerEvidence      `json:"powerEvidence"`
 }
 
+// destructivePowerCheckResult reports the outcome of checking one retained power-recovery receipt.
 type destructivePowerCheckResult struct {
 	SchemaVersion uint32 `json:"schemaVersion"`
 	ReceiptSHA256 string `json:"receiptSha256"`
@@ -113,6 +122,7 @@ type destructivePowerCheckResult struct {
 	Passed        bool   `json:"passed"`
 }
 
+// destructivePowerMatrixResult summarizes receipt coverage and recovery outcomes across write boundaries.
 type destructivePowerMatrixResult struct {
 	SchemaVersion    uint32         `json:"schemaVersion"`
 	ControllerMethod string         `json:"controllerMethod"`
@@ -134,6 +144,7 @@ type destructivePowerMatrixResult struct {
 	Passed           bool           `json:"passed"`
 }
 
+// runDestructivePowerReceiptCheck rechecks a power-recovery receipt against its retained artifacts and prints the result.
 func runDestructivePowerReceiptCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-power-receipt-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -160,6 +171,7 @@ func runDestructivePowerReceiptCheck(args []string, stdout, stderr io.Writer) er
 	return encoder.Encode(result)
 }
 
+// runDestructivePowerMatrixCheck checks that independent power-recovery receipts cover every required write boundary in one environment.
 func runDestructivePowerMatrixCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-power-matrix-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -237,6 +249,7 @@ func runDestructivePowerMatrixCheck(args []string, stdout, stderr io.Writer) err
 	return encoder.Encode(result)
 }
 
+// runDestructivePowerPrepare writes a durable marker at the selected write boundary and waits for an external power cut.
 func runDestructivePowerPrepare(args []string, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-power-prepare", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -337,6 +350,7 @@ func runDestructivePowerPrepare(args []string, stderr io.Writer) error {
 	return errors.New("power qualification worker resumed without an external reset")
 }
 
+// runDestructivePowerRecover checks the database after a power cut and publishes a receipt with retained recovery evidence.
 func runDestructivePowerRecover(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-power-recover", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -510,6 +524,7 @@ func runDestructivePowerRecover(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(receipt)
 }
 
+// validateDestructivePowerRecoveryPaths requires distinct input artifacts and a new receipt directly inside the control directory.
 func validateDestructivePowerRecoveryPaths(controlDirectory, markerPath, controllerPath, proofPath, outputPath string) (string, string, string, string, error) {
 	inputs := make([]string, 3)
 	for index, path := range []string{markerPath, controllerPath, proofPath} {
@@ -533,6 +548,7 @@ func validateDestructivePowerRecoveryPaths(controlDirectory, markerPath, control
 	return inputs[0], inputs[1], inputs[2], output, nil
 }
 
+// validateDestructivePowerInputs checks the recovered environment and the controller event against the pre-cut marker.
 func validateDestructivePowerInputs(marker destructivePowerMarker, markerRaw []byte, event destructivePowerControllerEvent, facts destructiveVolumeFacts, currentBootID string) error {
 	buildRevision, buildModified := durabilityBuildIdentity()
 	if marker.SchemaVersion != destructivePowerMarkerSchema || !qualificationSafeName(marker.TrialID, 64) ||
@@ -567,6 +583,7 @@ func validateDestructivePowerInputs(marker destructivePowerMarker, markerRaw []b
 	return nil
 }
 
+// qualificationPowerMethod reports whether a power-test controller method is accepted.
 func qualificationPowerMethod(value string) bool {
 	switch value {
 	case "qemu-system-reset", "qemu-host-sigkill", "hypervisor-hard-reset", "ipmi-chassis-power-cycle", "pdu-power-cycle", "redfish-computer-system-power-cycle":
@@ -576,11 +593,13 @@ func qualificationPowerMethod(value string) bool {
 	}
 }
 
+// validPowerDatabaseRelative checks that a database path uses the expected trial directory and filename.
 func validPowerDatabaseRelative(value, trialID string) bool {
 	want := filepath.Join(".meldbase-power-"+trialID, "power.meld")
 	return value == want && !filepath.IsAbs(value) && !strings.Contains(value, "..")
 }
 
+// validatePowerTargetEntries rejects target entries other than the trial directory and lost+found.
 func validatePowerTargetEntries(target, expectedDirectory string) error {
 	entries, err := os.ReadDir(target)
 	if err != nil {

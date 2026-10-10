@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestPersistentFreeSpaceRestoresAndFiltersLaterReuse checks that persisted free space survives reopening and excludes pages reused by later commits.
 func TestPersistentFreeSpaceRestoresAndFiltersLaterReuse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "persistent-free-space.meld2")
 	file, _, err := Open(path)
@@ -105,6 +106,7 @@ func TestPersistentFreeSpaceRestoresAndFiltersLaterReuse(t *testing.T) {
 	}
 }
 
+// TestEmptyDatabaseFreeSpacePersistenceIsNoop checks that persisting free space leaves an empty database unchanged.
 func TestEmptyDatabaseFreeSpacePersistenceIsNoop(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "empty-free-space.meld2"))
 	if err != nil {
@@ -123,6 +125,7 @@ func TestEmptyDatabaseFreeSpacePersistenceIsNoop(t *testing.T) {
 	}
 }
 
+// TestFreeSpaceMaintenanceDoesNotEmitLogicalCommit checks that reclaiming and persisting free space does not publish a logical change.
 func TestFreeSpaceMaintenanceDoesNotEmitLogicalCommit(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "free-space-live.meld2"))
 	if err != nil {
@@ -189,6 +192,7 @@ func TestFreeSpaceMaintenanceDoesNotEmitLogicalCommit(t *testing.T) {
 	}
 }
 
+// TestCorruptPersistentFreeSpaceDegradesToEmptyPool checks that corrupt free-space metadata requires recovery and can be rebuilt without losing documents.
 func TestCorruptPersistentFreeSpaceDegradesToEmptyPool(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "corrupt-free-space.meld2")
 	file, _, err := Open(path)
@@ -272,6 +276,7 @@ func TestCorruptPersistentFreeSpaceDegradesToEmptyPool(t *testing.T) {
 	}
 }
 
+// TestReachabilityRejectsReusableCandidateThatBecomesProtected checks that reachability and reclamation reject a protected root page listed as reusable.
 func TestReachabilityRejectsReusableCandidateThatBecomesProtected(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "free-space-authority.meld2"))
 	if err != nil {

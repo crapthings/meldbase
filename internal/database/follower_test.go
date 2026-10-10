@@ -8,21 +8,26 @@ import (
 	"time"
 )
 
+// testPromotionAuthority records a promotion request and returns a configured fence or error.
 type testPromotionAuthority struct {
 	fence FollowerPromotionFence
 	err   error
 	seen  FollowerPromotionRequest
 }
 
+// nonBindingPrimaryWriteFence allows writes without supporting follower promotion binding.
 type nonBindingPrimaryWriteFence struct{}
 
+// ValidatePrimaryWrite allows every primary write request.
 func (nonBindingPrimaryWriteFence) ValidatePrimaryWrite(PrimaryWriteFenceRequest) error { return nil }
 
+// AuthorizeFollowerPromotion records the request and returns the configured promotion decision.
 func (authority *testPromotionAuthority) AuthorizeFollowerPromotion(_ context.Context, request FollowerPromotionRequest) (FollowerPromotionFence, error) {
 	authority.seen = request
 	return authority.fence, authority.err
 }
 
+// TestFollowerAppliesArchiveTailInOrderAndRejectsWrites checks that a read-only follower applies sequential changes and rejects duplicate or skipped commit positions.
 func TestFollowerAppliesArchiveTailInOrderAndRejectsWrites(t *testing.T) {
 	directory := t.TempDir()
 	source, err := Open(filepath.Join(directory, "source.meld2"))
@@ -114,6 +119,7 @@ func TestFollowerAppliesArchiveTailInOrderAndRejectsWrites(t *testing.T) {
 	}
 }
 
+// TestFollowerAppliesAtomicIndexReplacement checks that a replicated index replacement becomes available to follower queries.
 func TestFollowerAppliesAtomicIndexReplacement(t *testing.T) {
 	directory := t.TempDir()
 	source, err := Open(filepath.Join(directory, "source.meld2"))
@@ -167,6 +173,7 @@ func TestFollowerAppliesAtomicIndexReplacement(t *testing.T) {
 	}
 }
 
+// TestFollowerPromotionRequiresMatchingExternalFence checks that promotion enables guarded writes only after matching external approval is bound locally.
 func TestFollowerPromotionRequiresMatchingExternalFence(t *testing.T) {
 	directory := t.TempDir()
 	source, err := Open(filepath.Join(directory, "source.meld2"))

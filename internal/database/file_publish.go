@@ -9,18 +9,22 @@ import (
 )
 
 const (
+	// snapshotDocumentBatchCount limits documents in one snapshot copy batch.
 	snapshotDocumentBatchCount = 1024
+	// snapshotDocumentBatchBytes limits encoded bytes in one snapshot copy batch.
 	snapshotDocumentBatchBytes = 8 * 1024 * 1024
 )
 
+// publishFileOps supplies filesystem operations for publishing a new file.
 type publishFileOps struct {
 	link          func(string, string) error
 	remove        func(string) error
 	syncDirectory func(string) error
 }
 
-// publishNewFile has one commit point: a successful directory sync after the
-// no-overwrite link. It is shared by backups, restores, and compaction.
+// publishNewFile durably publishes a temporary file without overwriting an existing destination.
+//
+// Publication commits when the directory sync succeeds after the link.
 func publishNewFile(temporary, destination string, ops publishFileOps) error {
 	if ops.link == nil || ops.remove == nil || ops.syncDirectory == nil {
 		return ErrCorrupt
@@ -42,12 +46,14 @@ func publishNewFile(temporary, destination string, ops publishFileOps) error {
 	return nil
 }
 
+// newSnapshotTransactionID creates a random identifier for a snapshot write transaction.
 func newSnapshotTransactionID() ([16]byte, error) {
 	var id [16]byte
 	_, err := rand.Read(id[:])
 	return id, err
 }
 
+// sameFile reports whether two existing paths refer to the same file.
 func sameFile(left, right string) bool {
 	leftInfo, leftErr := os.Stat(left)
 	rightInfo, rightErr := os.Stat(right)

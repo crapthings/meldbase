@@ -16,6 +16,7 @@ import (
 	"time"
 )
 
+// businessGoldenFixture stores compressed database bytes with metadata and checksums.
 type businessGoldenFixture struct {
 	FormatRevision     uint16 `json:"formatRevision"`
 	DatabaseIDHex      string `json:"databaseIdHex"`
@@ -27,8 +28,10 @@ type businessGoldenFixture struct {
 	GzipBase64         string `json:"gzipBase64"`
 }
 
+// businessFixtureDatabaseID gives the business database fixture a fixed identity.
 var businessFixtureDatabaseID = [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
 
+// TestBusinessRevision3GoldenFixtureOpensAuditsAndAdvances checks that the saved database can be read, audited, updated, and reopened.
 func TestBusinessRevision3GoldenFixtureOpensAuditsAndAdvances(t *testing.T) {
 	fixture := loadBusinessGoldenFixture(t)
 	if fixture.FormatRevision != FormatVersion {
@@ -99,6 +102,7 @@ func TestBusinessRevision3GoldenFixtureOpensAuditsAndAdvances(t *testing.T) {
 	}
 }
 
+// TestBusinessRevision3WriterMatchesGoldenFixture checks that current writes reproduce the saved database bytes and metadata.
 func TestBusinessRevision3WriterMatchesGoldenFixture(t *testing.T) {
 	fixture := loadBusinessGoldenFixture(t)
 	raw, meta := buildDeterministicBusinessFixture(t)
@@ -109,6 +113,7 @@ func TestBusinessRevision3WriterMatchesGoldenFixture(t *testing.T) {
 	}
 }
 
+// TestGenerateBusinessRevision3GoldenFixture prints a compressed business database fixture when generation is explicitly enabled.
 func TestGenerateBusinessRevision3GoldenFixture(t *testing.T) {
 	if os.Getenv("MELDBASE_GENERATE_BUSINESS_FIXTURE") != "1" {
 		t.Skip("fixture generation is an explicit maintainer action")
@@ -135,6 +140,7 @@ func TestGenerateBusinessRevision3GoldenFixture(t *testing.T) {
 	fmt.Println(string(encoded))
 }
 
+// buildDeterministicBusinessFixture creates fixed document, index, history, system-record, and free-space data for format compatibility tests.
 func buildDeterministicBusinessFixture(t *testing.T) ([]byte, Meta) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "build-business-revision-3.meld2")
@@ -245,6 +251,7 @@ func buildDeterministicBusinessFixture(t *testing.T) ([]byte, Meta) {
 	return raw, meta
 }
 
+// assertBusinessFixture checks the expected documents, index entries, system record, and persisted reusable pages.
 func assertBusinessFixture(t *testing.T, file *File) {
 	t.Helper()
 	first, second := fixtureDocumentID(1), fixtureDocumentID(2)
@@ -274,6 +281,7 @@ func assertBusinessFixture(t *testing.T, file *File) {
 	}
 }
 
+// assertBusinessFixturePageFamilies checks that the saved file contains the expected leaf and overflow page types.
 func assertBusinessFixturePageFamilies(t *testing.T, raw []byte) {
 	t.Helper()
 	if len(raw)%PageSize != 0 || len(raw) < 2*PageSize {
@@ -299,6 +307,7 @@ func assertBusinessFixturePageFamilies(t *testing.T, raw []byte) {
 	}
 }
 
+// loadBusinessGoldenFixture reads the saved business database fixture from its JSON file.
 func loadBusinessGoldenFixture(t *testing.T) businessGoldenFixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "business-revision-3.json"))
@@ -312,15 +321,18 @@ func loadBusinessGoldenFixture(t *testing.T) businessGoldenFixture {
 	return fixture
 }
 
+// digestHex returns the hexadecimal SHA-256 checksum of the supplied bytes.
 func digestHex(value []byte) string {
 	digest := sha256.Sum256(value)
 	return hex.EncodeToString(digest[:])
 }
 
+// fixtureDocumentID creates a fixed document identifier from a one-byte ordinal.
 func fixtureDocumentID(ordinal byte) [16]byte {
 	return [16]byte{0xf1, 15: ordinal}
 }
 
+// fixtureTransactionID creates a fixed transaction identifier from an ordinal.
 func fixtureTransactionID(ordinal uint64) [16]byte {
 	var id [16]byte
 	id[0] = 0xf2

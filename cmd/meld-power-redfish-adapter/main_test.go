@@ -16,6 +16,7 @@ import (
 	"time"
 )
 
+// TestExecutePowerCycleObservesOffBeforeRestoringOn checks that a power cycle observes shutdown before restoring power and retains matching hardware evidence.
 func TestExecutePowerCycleObservesOffBeforeRestoringOn(t *testing.T) {
 	const systemURI = "/redfish/v1/Systems/Node-1"
 	var mutex sync.Mutex
@@ -96,6 +97,7 @@ func TestExecutePowerCycleObservesOffBeforeRestoringOn(t *testing.T) {
 	}
 }
 
+// TestExecutePowerCycleRejectsTargetBeforeForceOff checks that a mismatched target identity prevents reset requests and leaves failure evidence.
 func TestExecutePowerCycleRejectsTargetBeforeForceOff(t *testing.T) {
 	const systemURI = "/redfish/v1/Systems/Node-1"
 	posts := 0
@@ -122,6 +124,7 @@ func TestExecutePowerCycleRejectsTargetBeforeForceOff(t *testing.T) {
 	}
 }
 
+// TestExecutePowerCycleRestoresOnAfterPostOffFailure checks that failed power restoration triggers another restoration attempt while preserving the original error.
 func TestExecutePowerCycleRestoresOnAfterPostOffFailure(t *testing.T) {
 	const systemURI = "/redfish/v1/Systems/Node-1"
 	powerState, onCalls := "On", 0
@@ -170,6 +173,7 @@ func TestExecutePowerCycleRestoresOnAfterPostOffFailure(t *testing.T) {
 	}
 }
 
+// TestExecutePowerCyclePreflightsEvidenceBeforeAnyRequest checks that an existing evidence file prevents all controller requests.
 func TestExecutePowerCyclePreflightsEvidenceBeforeAnyRequest(t *testing.T) {
 	directory := t.TempDir()
 	request := validTestRequest(strings.Repeat("f", 64))
@@ -189,6 +193,7 @@ func TestExecutePowerCyclePreflightsEvidenceBeforeAnyRequest(t *testing.T) {
 	}
 }
 
+// TestLoadConfigRequiresTLSAndBoundedDurations checks that configuration rejects plain HTTP and an operation timeout below the allowed minimum.
 func TestLoadConfigRequiresTLSAndBoundedDurations(t *testing.T) {
 	t.Setenv("MELDBASE_REDFISH_BASE_URL", "http://bmc.example")
 	t.Setenv("MELDBASE_REDFISH_SYSTEM_URI", "/redfish/v1/Systems/1")
@@ -205,6 +210,7 @@ func TestLoadConfigRequiresTLSAndBoundedDurations(t *testing.T) {
 	}
 }
 
+// TestSystemURIIsOneCanonicalComputerSystem checks that system paths identify one computer without traversal, nested resources, or encoded separators.
 func TestSystemURIIsOneCanonicalComputerSystem(t *testing.T) {
 	if !validSystemURI("/redfish/v1/Systems/System.Embedded.1") {
 		t.Fatal("valid system URI rejected")
@@ -216,6 +222,7 @@ func TestSystemURIIsOneCanonicalComputerSystem(t *testing.T) {
 	}
 }
 
+// TestEvidenceLocationRedactsAbsoluteOrTokenizedValues checks that evidence preserves a local task path but hashes an external URL containing a token.
 func TestEvidenceLocationRedactsAbsoluteOrTokenizedValues(t *testing.T) {
 	response := &http.Response{Header: make(http.Header)}
 	response.Header.Set("Location", "/redfish/v1/TaskService/Tasks/1")
@@ -228,6 +235,7 @@ func TestEvidenceLocationRedactsAbsoluteOrTokenizedValues(t *testing.T) {
 	}
 }
 
+// validTestRequest creates a valid test power-cycle request for the supplied target identity.
 func validTestRequest(target string) adapterRequest {
 	return adapterRequest{SchemaVersion: 1, ControllerRunID: strings.Repeat("a", 32), TrialID: "power-01-01", Method: "redfish-computer-system-power-cycle", MarkerSHA256: strings.Repeat("b", 64), BootIDBefore: "boot-1", TargetIdentitySHA256: target, RequestedAt: time.Now().UTC().Add(-time.Second)}
 }

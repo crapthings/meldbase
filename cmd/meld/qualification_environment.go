@@ -16,8 +16,10 @@ import (
 	"unicode/utf8"
 )
 
+// qualificationEnvironmentSchema identifies the environment evidence format.
 const qualificationEnvironmentSchema uint32 = 2
 
+// qualificationEnvironmentEvidence records the build, storage, controller, and operator facts for a qualification campaign.
 type qualificationEnvironmentEvidence struct {
 	SchemaVersion  uint32                            `json:"schemaVersion"`
 	SourceRevision string                            `json:"sourceRevision"`
@@ -34,6 +36,7 @@ type qualificationEnvironmentEvidence struct {
 	HostOperator   qualificationHostOperatorEvidence `json:"hostOperator"`
 }
 
+// qualificationKernelEvidence records kernel details and hashes of boot and operating system information.
 type qualificationKernelEvidence struct {
 	Sysname           string `json:"sysname"`
 	Release           string `json:"release"`
@@ -44,6 +47,7 @@ type qualificationKernelEvidence struct {
 	OSReleaseSHA256   string `json:"osReleaseSha256"`
 }
 
+// qualificationMountEvidence records the target volume's mount identity and options.
 type qualificationMountEvidence struct {
 	MountID      uint64   `json:"mountId"`
 	ParentID     uint64   `json:"parentId"`
@@ -56,6 +60,7 @@ type qualificationMountEvidence struct {
 	SuperOptions []string `json:"superOptions"`
 }
 
+// qualificationControllerEvidence records the campaign controller identity and its storage device chain.
 type qualificationControllerEvidence struct {
 	Method                     string                             `json:"method"`
 	SysfsRoot                  string                             `json:"sysfsRoot"`
@@ -64,6 +69,7 @@ type qualificationControllerEvidence struct {
 	BlockDevices               []qualificationBlockDeviceEvidence `json:"blockDevices"`
 }
 
+// qualificationBlockDeviceEvidence records one storage device's geometry, cache settings, and identity hashes.
 type qualificationBlockDeviceEvidence struct {
 	MajorMinor         string `json:"majorMinor"`
 	SysfsPath          string `json:"sysfsPath"`
@@ -80,6 +86,7 @@ type qualificationBlockDeviceEvidence struct {
 	DMUUIDSHA256       string `json:"dmUuidSha256"`
 }
 
+// qualificationHostOperatorEvidence records the host identity and the operator authorization document's hash and size.
 type qualificationHostOperatorEvidence struct {
 	EffectiveUID           int    `json:"effectiveUid"`
 	HostIdentitySHA256     string `json:"hostIdentitySha256"`
@@ -88,6 +95,7 @@ type qualificationHostOperatorEvidence struct {
 	OperatorEvidenceSHA256 string `json:"operatorEvidenceSha256"`
 }
 
+// runQualificationEnvironmentCapture captures and publishes environment evidence for a storage qualification campaign.
 func runQualificationEnvironmentCapture(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-environment-capture", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -164,6 +172,7 @@ func runQualificationEnvironmentCapture(args []string, stdout, stderr io.Writer)
 	return encoder.Encode(evidence)
 }
 
+// validateQualificationEnvironmentEvidence checks that environment evidence contains consistent identities and required facts.
 func validateQualificationEnvironmentEvidence(evidence qualificationEnvironmentEvidence, revision, controllerMethod string) error {
 	if evidence.SchemaVersion != qualificationEnvironmentSchema || evidence.SourceRevision != revision || evidence.BuildRevision != revision || evidence.BuildModified ||
 		evidence.CapturedAt.IsZero() || evidence.GOOS != "linux" || evidence.GOARCH == "" || evidence.GoVersion == "" ||
@@ -241,6 +250,7 @@ func validateQualificationEnvironmentEvidence(evidence qualificationEnvironmentE
 	return nil
 }
 
+// validateQualificationEnvironmentAgainstDurability checks that environment evidence matches the durability probe and predates the campaign.
 func validateQualificationEnvironmentAgainstDurability(evidence qualificationEnvironmentEvidence, durability durabilityCheckResult, revision, controllerMethod string, startedAt time.Time) error {
 	if err := validateQualificationEnvironmentEvidence(evidence, revision, controllerMethod); err != nil {
 		return err
@@ -254,6 +264,7 @@ func validateQualificationEnvironmentAgainstDurability(evidence qualificationEnv
 	return nil
 }
 
+// validateQualificationEnvironmentBinding checks that environment evidence and its section hashes match the campaign artifacts.
 func validateQualificationEnvironmentBinding(evidence qualificationEnvironmentEvidence, raw []byte, artifacts verifiedQualificationArtifactIndex,
 	durability durabilityCheckResult, destructive qualificationDestructiveRecord, revision, environmentPath string) error {
 	if err := validateQualificationEnvironmentAgainstDurability(evidence, durability, revision, destructive.Infrastructure.ControllerMethod, destructive.StartedAt); err != nil {
@@ -291,6 +302,7 @@ func validateQualificationEnvironmentBinding(evidence qualificationEnvironmentEv
 	return nil
 }
 
+// qualificationEnvironmentSectionSHA256 hashes the JSON encoding of an environment evidence section.
 func qualificationEnvironmentSectionSHA256(value any) (string, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -299,6 +311,7 @@ func qualificationEnvironmentSectionSHA256(value any) (string, error) {
 	return qualificationSHA256(raw), nil
 }
 
+// qualificationEvidenceText accepts bounded, nonempty UTF-8 text without null bytes or line breaks.
 func qualificationEvidenceText(value string, maximum int) bool {
 	if value == "" || len(value) > maximum || !utf8.ValidString(value) {
 		return false
@@ -311,6 +324,7 @@ func qualificationEvidenceText(value string, maximum int) bool {
 	return true
 }
 
+// qualificationSortedEvidenceStrings checks that an evidence list is bounded, sorted, unique, and contains valid text.
 func qualificationSortedEvidenceStrings(values []string, maximum int) bool {
 	if len(values) == 0 || len(values) > maximum || !sort.StringsAreSorted(values) {
 		return false
@@ -325,6 +339,7 @@ func qualificationSortedEvidenceStrings(values []string, maximum int) bool {
 	return true
 }
 
+// qualificationMajorMinor checks that a device identity contains two decimal numbers separated by a colon.
 func qualificationMajorMinor(value string) bool {
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
@@ -343,6 +358,7 @@ func qualificationMajorMinor(value string) bool {
 	return true
 }
 
+// qualificationLinuxDeviceNumber converts a decimal major:minor identity to a Linux device number.
 func qualificationLinuxDeviceNumber(value string) (uint64, error) {
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
@@ -359,6 +375,7 @@ func qualificationLinuxDeviceNumber(value string) (uint64, error) {
 	return (minor & 0xff) | ((major & 0xfff) << 8) | ((minor & ^uint64(0xff)) << 12) | ((major & ^uint64(0xfff)) << 32), nil
 }
 
+// qualificationMountFilesystemName maps supported Linux filesystem names to their qualification names.
 func qualificationMountFilesystemName(value string) string {
 	switch value {
 	case "ext2", "ext3", "ext4":
@@ -370,6 +387,7 @@ func qualificationMountFilesystemName(value string) string {
 	}
 }
 
+// qualificationEnvironmentBase assembles initial environment evidence from volume, build, and operator facts.
 func qualificationEnvironmentBase(facts destructiveVolumeFacts, revision, method, operatorPath string, operatorBytes uint64, operatorSHA string) qualificationEnvironmentEvidence {
 	buildRevision, buildModified := durabilityBuildIdentity()
 	return qualificationEnvironmentEvidence{

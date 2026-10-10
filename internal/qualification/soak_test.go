@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
+// soakTestRevision supplies a fixed source revision for storage soak tests.
 const soakTestRevision = "0123456789abcdef0123456789abcdef01234567"
 
+// TestValidateSoakOptionsProfilesAndProvenance checks workload limits and the build identity required for release soak runs.
 func TestValidateSoakOptionsProfilesAndProvenance(t *testing.T) {
 	base := SoakOptions{
 		TargetDirectory: t.TempDir(), Profile: "custom", Seconds: 1, Documents: 100, Reopens: 1,
@@ -65,6 +67,7 @@ func TestValidateSoakOptionsProfilesAndProvenance(t *testing.T) {
 	}
 }
 
+// TestRunStorageSoakExercisesAndCleansTarget checks that a soak run verifies its workload, reports ordered progress, and removes temporary files.
 func TestRunStorageSoakExercisesAndCleansTarget(t *testing.T) {
 	target := t.TempDir()
 	progressEvents := make([]SoakProgress, 0, 16)
@@ -132,6 +135,7 @@ func TestRunStorageSoakExercisesAndCleansTarget(t *testing.T) {
 	assertNoSoakDirectory(t, target)
 }
 
+// TestRunWithProgressHeartbeatReportsLongOperationAndResult checks that a slow operation reports heartbeats and preserves its error.
 func TestRunWithProgressHeartbeatReportsLongOperationAndResult(t *testing.T) {
 	heartbeats := 0
 	err := runWithProgressHeartbeat(10*time.Millisecond, func() {
@@ -148,6 +152,7 @@ func TestRunWithProgressHeartbeatReportsLongOperationAndResult(t *testing.T) {
 	}
 }
 
+// TestRunStorageSoakCancellationCleansTarget checks that a canceled soak returns the deadline error and removes temporary files.
 func TestRunStorageSoakCancellationCleansTarget(t *testing.T) {
 	target := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -162,6 +167,7 @@ func TestRunStorageSoakCancellationCleansTarget(t *testing.T) {
 	assertNoSoakDirectory(t, target)
 }
 
+// assertNoSoakDirectory fails the test if any temporary soak directory remains.
 func assertNoSoakDirectory(t *testing.T, target string) {
 	t.Helper()
 	leftovers, err := filepath.Glob(filepath.Join(target, ".meldbase-storage-soak-*"))

@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestVerifyPathContextAuditsAndHashesWithoutTruncatingTail checks that verification reports file structure and a full-file checksum without removing trailing bytes.
 func TestVerifyPathContextAuditsAndHashesWithoutTruncatingTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "verify.meld2")
 	file, _, err := Open(path)
@@ -55,6 +56,7 @@ func TestVerifyPathContextAuditsAndHashesWithoutTruncatingTail(t *testing.T) {
 	}
 }
 
+// TestVerifyPathContextFailsClosedWithoutRepairingCorruptRoots checks that verification rejects corrupt database roots without repairing the file.
 func TestVerifyPathContextFailsClosedWithoutRepairingCorruptRoots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "corrupt.meld2")
 	file, _, err := Open(path)
@@ -95,6 +97,7 @@ func TestVerifyPathContextFailsClosedWithoutRepairingCorruptRoots(t *testing.T) 
 	}
 }
 
+// TestVerifyPathContextHonorsCancellationAndWriterLock checks that verification respects cancellation and refuses files owned by a writer.
 func TestVerifyPathContextHonorsCancellationAndWriterLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "locked.meld2")
 	file, _, err := Open(path)
@@ -114,6 +117,7 @@ func TestVerifyPathContextHonorsCancellationAndWriterLock(t *testing.T) {
 	}
 }
 
+// TestVerifyPathContextWithIndexAuditDetectsMissingSecondaryWithConsistentCount checks that document-based index auditing finds an omitted entry even when stored counts agree.
 func TestVerifyPathContextWithIndexAuditDetectsMissingSecondaryWithConsistentCount(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing-secondary.meld2")
 	file, _, err := Open(path)
@@ -228,6 +232,7 @@ func TestVerifyPathContextWithIndexAuditDetectsMissingSecondaryWithConsistentCou
 	}
 }
 
+// TestVerifyPathContextRejectsDuplicateKeysInUniqueIndex checks that structural verification rejects duplicate keys in an index marked unique.
 func TestVerifyPathContextRejectsDuplicateKeysInUniqueIndex(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "duplicate-unique.meld2")
 	file, _, err := Open(path)
@@ -269,6 +274,7 @@ func TestVerifyPathContextRejectsDuplicateKeysInUniqueIndex(t *testing.T) {
 	}
 }
 
+// TestVerifyPathContextWithIndexAuditDetectsCountConsistentMissingShadowEntry checks that document-based auditing finds an omitted shadow index entry even when its counts and byte totals agree.
 func TestVerifyPathContextWithIndexAuditDetectsCountConsistentMissingShadowEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing-shadow.meld2")
 	file, _, err := Open(path)
@@ -342,6 +348,7 @@ func TestVerifyPathContextWithIndexAuditDetectsCountConsistentMissingShadowEntry
 	}
 }
 
+// TestVerifyPathContextAuditsEachPublishedAndShadowDocumentOnce checks that each index audits documents once per protected version and stops promptly on cancellation.
 func TestVerifyPathContextAuditsEachPublishedAndShadowDocumentOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "single-pass-semantics.meld2")
 	file, _, err := Open(path)
@@ -434,6 +441,7 @@ func TestVerifyPathContextAuditsEachPublishedAndShadowDocumentOnce(t *testing.T)
 	}
 }
 
+// TestVerifyPathContextReportsLegacyCaughtUpShadowAsUnproven checks that a legacy caught-up index build without an applied catalog root is reported as unverified.
 func TestVerifyPathContextReportsLegacyCaughtUpShadowAsUnproven(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy-caught-up-shadow.meld2")
 	file, _, err := Open(path)
@@ -510,6 +518,7 @@ func TestVerifyPathContextReportsLegacyCaughtUpShadowAsUnproven(t *testing.T) {
 	}
 }
 
+// rewriteVerificationIndexMeta rewrites an index definition and its enclosing catalog roots to prepare verification test data.
 func rewriteVerificationIndexMeta(tx *WriteTxn, base DatabaseRoot, collectionName, indexName string, mutate func(*IndexMeta) error) (DatabaseRoot, error) {
 	catalog, err := tx.OpenTree(base.CatalogRoot, TreeCatalog)
 	if err != nil {
@@ -560,6 +569,7 @@ func rewriteVerificationIndexMeta(tx *WriteTxn, base DatabaseRoot, collectionNam
 	return base, err
 }
 
+// rewriteVerificationIndexBuild rewrites an index-build record and its catalog root to prepare verification test data.
 func rewriteVerificationIndexBuild(tx *WriteTxn, base DatabaseRoot, buildID [16]byte, mutate func(*IndexBuildMeta) error) (DatabaseRoot, error) {
 	builds, err := tx.OpenTree(base.IndexBuildCatalogRoot, TreeIndexBuildCatalog)
 	if err != nil {

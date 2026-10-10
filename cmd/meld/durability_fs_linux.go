@@ -7,6 +7,7 @@ import (
 	"syscall"
 )
 
+// durabilityFilesystemName maps a Linux filesystem type code to a display name.
 func durabilityFilesystemName(filesystem syscall.Statfs_t) string {
 	switch uint64(filesystem.Type) {
 	case 0xef53:

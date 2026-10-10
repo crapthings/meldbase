@@ -6,12 +6,15 @@ import (
 	"math"
 )
 
+// numericMagnitudeBytes reserves enough bytes for every finite float magnitude.
 const numericMagnitudeBytes = 263
 
+// encodeIndexKey encodes a scalar value so byte order matches index order.
 func encodeIndexKey(value Value) ([]byte, error) {
 	return appendIndexKey(nil, value)
 }
 
+// appendIndexKey appends an order-preserving scalar key to the destination.
 func appendIndexKey(destination []byte, value Value) ([]byte, error) {
 	switch value.kind {
 	case NullKind:
@@ -43,6 +46,7 @@ func appendIndexKey(destination []byte, value Value) ([]byte, error) {
 	}
 }
 
+// indexKeyCapacity returns the encoded scalar key size or zero for unsupported types.
 func indexKeyCapacity(value Value) int {
 	switch value.kind {
 	case NullKind, BoolKind:
@@ -62,6 +66,7 @@ func indexKeyCapacity(value Value) int {
 	}
 }
 
+// escapedIndexBytesLength counts the bytes needed to escape zeros and add a terminator.
 func escapedIndexBytesLength(value []byte) int {
 	length := len(value) + 2
 	for _, item := range value {
@@ -72,10 +77,12 @@ func escapedIndexBytesLength(value []byte) int {
 	return length
 }
 
+// encodeNumericIndexKey encodes an integer or float in a shared numeric order.
 func encodeNumericIndexKey(value Value) ([]byte, error) {
 	return appendNumericIndexKey(nil, value)
 }
 
+// appendNumericIndexKey appends an exact, order-preserving integer or float key.
 func appendNumericIndexKey(destination []byte, value Value) ([]byte, error) {
 	start := len(destination)
 	destination = append(destination, make([]byte, 2+numericMagnitudeBytes)...)
@@ -124,6 +131,7 @@ func appendNumericIndexKey(destination []byte, value Value) ([]byte, error) {
 	return destination, nil
 }
 
+// writeShiftedIndexMagnitude writes a shifted unsigned magnitude and reports whether it fits.
 func writeShiftedIndexMagnitude(destination []byte, magnitude uint64, shift uint) bool {
 	if len(destination) == 0 || magnitude == 0 {
 		return magnitude == 0
@@ -146,10 +154,12 @@ func writeShiftedIndexMagnitude(destination []byte, magnitude uint64, shift uint
 	return true
 }
 
+// escapeIndexBytes escapes zero bytes and adds an unambiguous terminator.
 func escapeIndexBytes(value []byte) []byte {
 	return appendEscapedIndexBytes(make([]byte, 0, len(value)+2), value)
 }
 
+// appendEscapedIndexBytes appends escaped bytes and a terminator to the destination.
 func appendEscapedIndexBytes(result, value []byte) []byte {
 	for _, item := range value {
 		if item == 0 {

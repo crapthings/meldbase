@@ -10,8 +10,9 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// DurableChangeBatch is one globally ordered Commit Log position projected to
-// one collection. Changes is empty when another collection or private catalog
+// DurableChangeBatch contains one collection's document changes at a commit token.
+//
+// Changes is empty when another collection or private catalog
 // change advanced the durable position; callers must still Ack that Token after
 // processing it so the checkpoint can advance without pinning history forever.
 //
@@ -23,8 +24,9 @@ type DurableChangeBatch struct {
 	Changes []Change
 }
 
-// DurableChangeSubscription is a pull/acknowledge bridge over a  durable
-// checkpoint. Batches remain ordered. Ack must be called only after the
+// DurableChangeSubscription delivers ordered collection changes with a saved acknowledgement.
+//
+// Ack must be called only after the
 // consumer's external side effect for that token is durable.
 type DurableChangeSubscription struct {
 	Batches <-chan DurableChangeBatch
@@ -36,6 +38,7 @@ type DurableChangeSubscription struct {
 	once   sync.Once
 }
 
+// Ack saves the last processed commit token in the durable checkpoint.
 func (subscription *DurableChangeSubscription) Ack(token uint64) error {
 	if subscription == nil || subscription.ack == nil {
 		return ErrClosed
@@ -43,6 +46,7 @@ func (subscription *DurableChangeSubscription) Ack(token uint64) error {
 	return subscription.ack(token)
 }
 
+// Close cancels delivery and waits for the collection subscription to stop.
 func (subscription *DurableChangeSubscription) Close() {
 	if subscription != nil {
 		subscription.once.Do(func() {
@@ -56,8 +60,9 @@ func (subscription *DurableChangeSubscription) Close() {
 	}
 }
 
-// CreateDurableCollectionChanges creates a durable, collection-scoped document
-// feed at afterToken. The requested position must still be retained. A logical
+// CreateDurableCollectionChanges creates a named collection change feed starting after a commit token.
+//
+// The requested position must still be retained. A logical
 // name may be reused for a different collection without collision; the storage
 // checkpoint identity is derived from both values.
 func (db *DB) CreateDurableCollectionChanges(ctx context.Context, name, collection string, afterToken uint64, buffer int) (*DurableChangeSubscription, error) {
@@ -104,8 +109,9 @@ func (db *DB) CreateDurableCollectionChanges(ctx context.Context, name, collecti
 	return newDurableCollectionSubscription(ctx, store, consumer, collection, buffer)
 }
 
-// OpenDurableCollectionChanges reopens an existing durable collection feed at
-// its stored checkpoint. If retention cannot satisfy that position it returns
+// OpenDurableCollectionChanges resumes a named collection change feed from its saved checkpoint.
+//
+// If retention cannot satisfy that position it returns
 // ErrHistoryLost; it never silently starts from a newer token.
 func (db *DB) OpenDurableCollectionChanges(ctx context.Context, name, collection string, buffer int) (*DurableChangeSubscription, error) {
 	if err := validateDurableCollectionConsumer(name, collection, buffer); err != nil {
@@ -136,6 +142,7 @@ func (db *DB) OpenDurableCollectionChanges(ctx context.Context, name, collection
 }
 
 // DeleteDurableCollectionChanges explicitly removes one retained checkpoint.
+//
 // Callers should stop every owner of that logical consumer first; an already
 // open stream retains only its temporary process-local pin until it closes.
 func (db *DB) DeleteDurableCollectionChanges(ctx context.Context, name, collection string) error {
@@ -160,6 +167,7 @@ func (db *DB) DeleteDurableCollectionChanges(ctx context.Context, name, collecti
 	return mapDurableConsumerError(store.file.DeleteDurableCommitConsumer(durableCollectionConsumerKey(name, collection)))
 }
 
+// newDurableCollectionSubscription starts collection change delivery from a durable consumer.
 func newDurableCollectionSubscription(ctx context.Context, store *durableStore, consumer *storage.DurableCommitConsumer, collection string, buffer int) (*DurableChangeSubscription, error) {
 	if store == nil || store.file == nil || consumer == nil || !collectionNamePattern.MatchString(collection) || buffer <= 0 || buffer > 1024 {
 		if consumer != nil {
@@ -211,6 +219,7 @@ func newDurableCollectionSubscription(ctx context.Context, store *durableStore, 
 	return subscription, nil
 }
 
+// convertDurableCollectionBatch resolves document changes belonging to one collection at a commit.
 func convertDurableCollectionBatch(consumer *storage.DurableCommitConsumer, batch storage.CommitBatch, collection string, collectionID uint32) (DurableChangeBatch, uint32, error) {
 	if consumer == nil || batch.Sequence == 0 || !collectionNamePattern.MatchString(collection) {
 		return DurableChangeBatch{}, 0, ErrCorrupt
@@ -248,6 +257,7 @@ func convertDurableCollectionBatch(consumer *storage.DurableCommitConsumer, batc
 	return result, collectionID, nil
 }
 
+// durableCollectionID looks up a collection's stored numeric identity.
 func durableCollectionID(file *storage.File, collection string) (uint32, error) {
 	if file == nil || !collectionNamePattern.MatchString(collection) {
 		return 0, ErrCorrupt
@@ -264,6 +274,7 @@ func durableCollectionID(file *storage.File, collection string) (uint32, error) 
 	return meta.ID, nil
 }
 
+// validateDurableCollectionConsumer checks the consumer name, collection, and delivery buffer size.
 func validateDurableCollectionConsumer(name, collection string, buffer int) error {
 	if !validPublicDurableConsumerName(name) || !collectionNamePattern.MatchString(collection) || buffer <= 0 || buffer > 1024 {
 		return ErrInvalidDocument
@@ -271,6 +282,7 @@ func validateDurableCollectionConsumer(name, collection string, buffer int) erro
 	return nil
 }
 
+// validPublicDurableConsumerName checks the public consumer name length and characters.
 func validPublicDurableConsumerName(name string) bool {
 	if len(name) == 0 || len(name) > 128 {
 		return false
@@ -285,11 +297,13 @@ func validPublicDurableConsumerName(name string) bool {
 	return true
 }
 
+// durableCollectionConsumerKey derives a checkpoint identity from a consumer name and collection.
 func durableCollectionConsumerKey(name, collection string) string {
 	digest := sha256.Sum256([]byte(name + "\x00" + collection))
 	return "c_" + hex.EncodeToString(digest[:20])
 }
 
+// mapDurableConsumerError translates storage consumer errors to database errors.
 func mapDurableConsumerError(err error) error {
 	if err == nil {
 		return nil

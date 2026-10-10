@@ -1,6 +1,7 @@
-// Package leasehttp exposes one authenticated primarylease.LeaseStore member
-// over strict HTTPS/mTLS JSON. It is a member adapter, not a leader-election
-// API: certificate signing and Authority.Grant remain outside the handler.
+// Package leasehttp provides authenticated HTTPS access to one controller member's lease records.
+//
+// It uses strict JSON and mTLS. Certificate signing, Authority.Grant, and leader
+// election remain outside the handler.
 package leasehttp
 
 import (
@@ -25,23 +26,36 @@ import (
 )
 
 const (
-	protocolVersion   uint32 = 1
-	leasePath                = "/v1/lease/"
-	maximumBodyBytes  int64  = 4096
-	maximumServerPins        = 4
+	// protocolVersion identifies the lease member JSON protocol.
+	protocolVersion uint32 = 1
+	// leasePath prefixes routes for database lease records.
+	leasePath = "/v1/lease/"
+	// maximumBodyBytes bounds the JSON data read from requests and responses.
+	maximumBodyBytes int64 = 4096
+	// maximumServerPins limits certificate fingerprints accepted for one member.
+	maximumServerPins = 4
 )
 
 var (
+	// ErrHTTPSRequired reports invalid HTTPS configuration or an untrusted server connection.
 	ErrHTTPSRequired = errors.New("meldbase lease HTTP: verified HTTPS is required")
-	ErrProtocol      = errors.New("meldbase lease HTTP: invalid protocol response")
+	// ErrProtocol reports invalid lease protocol data or responses.
+	ErrProtocol = errors.New("meldbase lease HTTP: invalid protocol response")
 )
 
+// fatalQuorumError marks an error that a quorum must not ignore.
 type fatalQuorumError struct{ err error }
 
-func (err fatalQuorumError) Error() string             { return err.err.Error() }
-func (err fatalQuorumError) Unwrap() error             { return err.err }
+// Error returns the wrapped error message.
+func (err fatalQuorumError) Error() string { return err.err.Error() }
+
+// Unwrap exposes the underlying error.
+func (err fatalQuorumError) Unwrap() error { return err.err }
+
+// PrimaryLeaseQuorumFatal tells the quorum to stop on this error.
 func (fatalQuorumError) PrimaryLeaseQuorumFatal() bool { return true }
 
+// fatal wraps a nonnil error so it stops a quorum operation.
 func fatal(err error) error {
 	if err == nil {
 		return nil
@@ -49,16 +63,22 @@ func fatal(err error) error {
 	return fatalQuorumError{err: err}
 }
 
-// Authorize authenticates a verified mTLS peer. Its returned stable identity
-// is deliberately not supplied by a lease frame or URL.
+// Authorize maps a verified peer certificate to a trusted controller identity.
+//
+// The identity must not come from a lease frame or URL.
 type Authorize = replicationauth.Authorize
+
+// MTLSConfig maps verified peer certificate fingerprints to trusted identities.
 type MTLSConfig = replicationauth.MTLSConfig
 
+// NewMTLSAuthorizer creates an authorizer for verified and configured client certificates.
 func NewMTLSAuthorizer(config MTLSConfig) (Authorize, error) {
 	return replicationauth.NewMTLSAuthorizer(config)
 }
 
-// MemberConfig configures one controller member handler. The enclosing server
+// MemberConfig sets one controller member's lease store and peer authorization rules.
+//
+// The enclosing server
 // must require and verify client certificates; Authorize maps the verified leaf
 // certificate to a configured controller identity.
 type MemberConfig struct {
@@ -66,12 +86,13 @@ type MemberConfig struct {
 	Authorize Authorize
 }
 
-// Member is an HTTP handler for exact Load/CAS LeaseStore operations.
+// Member serves authenticated lease record reads and conditional writes over HTTP.
 type Member struct {
 	store     primarylease.LeaseStore
 	authorize Authorize
 }
 
+// NewMember creates a lease member handler with a store and peer authorizer.
 func NewMember(config MemberConfig) (*Member, error) {
 	if config.Store == nil || config.Authorize == nil {
 		return nil, errors.New("meldbase lease HTTP: incomplete member configuration")
@@ -79,6 +100,7 @@ func NewMember(config MemberConfig) (*Member, error) {
 	return &Member{store: config.Store, authorize: config.Authorize}, nil
 }
 
+// ServeHTTP authenticates a peer and routes its lease read or conditional write.
 func (member *Member) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
@@ -115,6 +137,7 @@ func (member *Member) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	member.compareAndSwap(writer, request, databaseID)
 }
 
+// load returns a stored lease as JSON or reports its absence or a store failure.
 func (member *Member) load(writer http.ResponseWriter, request *http.Request, databaseID [16]byte) {
 	record, exists, err := member.store.LoadPrimaryLease(request.Context(), databaseID)
 	if err != nil {
@@ -129,6 +152,7 @@ func (member *Member) load(writer http.ResponseWriter, request *http.Request, da
 	_ = json.NewEncoder(writer).Encode(wireLoad{Version: protocolVersion, Record: encodeRecord(record)})
 }
 
+// compareAndSwap validates a conditional lease write and reports whether the store accepted it.
 func (member *Member) compareAndSwap(writer http.ResponseWriter, request *http.Request, databaseID [16]byte) {
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
@@ -168,8 +192,9 @@ func (member *Member) compareAndSwap(writer http.ResponseWriter, request *http.R
 	writer.WriteHeader(http.StatusNoContent)
 }
 
-// ClientOptions creates one HTTPS LeaseStore client for a configured quorum
-// member. HTTPClient should carry the caller's mTLS certificate and trusted
+// ClientOptions sets one controller member's endpoint, expected certificates, and HTTP client.
+//
+// HTTPClient should carry the caller's mTLS certificate and trusted
 // server roots. The endpoint cannot include a path, query, userinfo or
 // fragment, preventing URL-controlled routing ambiguity.
 type ClientOptions struct {
@@ -186,8 +211,10 @@ type ClientOptions struct {
 	HTTPClient                 *http.Client
 }
 
-// Client implements primarylease.LeaseStore over a single verified HTTPS
-// member endpoint. QuorumStore owns majority behavior across several clients.
+// Client reads and conditionally updates one controller member's lease records over verified HTTPS.
+//
+// It implements primarylease.LeaseStore. QuorumStore handles majority decisions
+// across several clients.
 type Client struct {
 	endpoint     string
 	fingerprints map[[sha256.Size]byte]struct{}
@@ -195,6 +222,7 @@ type Client struct {
 	client       *http.Client
 }
 
+// NewClient creates a client with validated server pins and HTTP redirects disabled.
 func NewClient(options ClientOptions) (*Client, error) {
 	parsed, err := url.Parse(options.Endpoint)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
@@ -213,6 +241,7 @@ func NewClient(options ClientOptions) (*Client, error) {
 	return &Client{endpoint: strings.TrimSuffix(parsed.String(), "/"), fingerprints: fingerprints, identities: identities, client: &copy}, nil
 }
 
+// configuredFingerprints validates server pins and returns their sorted member identities.
 func configuredFingerprints(options ClientOptions) (map[[sha256.Size]byte]struct{}, []string, error) {
 	if options.ExpectedServerFingerprint != "" && len(options.ExpectedServerFingerprints) != 0 {
 		return nil, nil, ErrHTTPSRequired
@@ -246,6 +275,7 @@ func configuredFingerprints(options ClientOptions) (map[[sha256.Size]byte]struct
 	return fingerprints, identities, nil
 }
 
+// LoadPrimaryLease fetches and validates a member's lease record.
 func (client *Client) LoadPrimaryLease(ctx context.Context, databaseID [16]byte) (primarylease.LeaseRecord, bool, error) {
 	if client == nil || client.client == nil || ctx == nil || databaseID == [16]byte{} {
 		return primarylease.LeaseRecord{}, false, fatal(ErrProtocol)
@@ -272,6 +302,7 @@ func (client *Client) LoadPrimaryLease(ctx context.Context, databaseID [16]byte)
 	return record, true, nil
 }
 
+// CompareAndSwapPrimaryLease asks a member to replace a lease matching the expected state.
 func (client *Client) CompareAndSwapPrimaryLease(ctx context.Context, databaseID [16]byte, previous *primarylease.LeaseRecord, next primarylease.LeaseRecord) (bool, error) {
 	if client == nil || client.client == nil || ctx == nil || databaseID == [16]byte{} || primarylease.ValidateLeaseRecord(next, databaseID) != nil || (previous != nil && primarylease.ValidateLeaseRecord(*previous, databaseID) != nil) {
 		return false, fatal(ErrProtocol)
@@ -300,6 +331,7 @@ func (client *Client) CompareAndSwapPrimaryLease(ctx context.Context, databaseID
 	}
 }
 
+// request sends a lease operation and checks the server's verified certificate against configured pins.
 func (client *Client) request(ctx context.Context, method string, databaseID [16]byte, body []byte) (*http.Response, error) {
 	path := leasePath + hex.EncodeToString(databaseID[:])
 	request, err := http.NewRequestWithContext(ctx, method, client.endpoint+path, bytes.NewReader(body))
@@ -329,7 +361,9 @@ func (client *Client) request(ctx context.Context, method string, databaseID [16
 	return response, nil
 }
 
-// PrimaryLeaseMemberIdentity retains the legacy single-identity method. New
+// PrimaryLeaseMemberIdentity retains the legacy single-identity method.
+//
+// New
 // callers must use PrimaryLeaseMemberIdentities so certificate rotation cannot
 // hide an overlapping member identity.
 func (client *Client) PrimaryLeaseMemberIdentity() string {
@@ -340,7 +374,9 @@ func (client *Client) PrimaryLeaseMemberIdentity() string {
 }
 
 // PrimaryLeaseMemberIdentities exposes every expected, verified server leaf
-// fingerprint to primarylease.QuorumStore. The returned copy is canonical and
+// fingerprint to primarylease.QuorumStore.
+//
+// The returned copy is canonical and
 // cannot mutate the client's identity configuration.
 func (client *Client) PrimaryLeaseMemberIdentities() []string {
 	if client == nil || len(client.identities) == 0 {
@@ -349,6 +385,7 @@ func (client *Client) PrimaryLeaseMemberIdentities() []string {
 	return append([]string(nil), client.identities...)
 }
 
+// statusError classifies HTTP failures as temporary member outages or fatal quorum errors.
 func (client *Client) statusError(response *http.Response) error {
 	if response == nil {
 		return fatal(ErrProtocol)
@@ -366,6 +403,7 @@ func (client *Client) statusError(response *http.Response) error {
 	}
 }
 
+// wireRecord represents a lease record in JSON.
 type wireRecord struct {
 	DatabaseID     string `json:"databaseId"`
 	Owner          string `json:"owner"`
@@ -375,21 +413,25 @@ type wireRecord struct {
 	Revoked        bool   `json:"revoked"`
 }
 
+// wireLoad carries a protocol version and a lease read result.
 type wireLoad struct {
 	Version uint32     `json:"v"`
 	Record  wireRecord `json:"record"`
 }
 
+// wireCAS carries the expected and replacement lease records for a conditional write.
 type wireCAS struct {
 	Version  uint32      `json:"v"`
 	Previous *wireRecord `json:"previous"`
 	Next     *wireRecord `json:"next"`
 }
 
+// encodeRecord converts a lease into its JSON fields.
 func encodeRecord(record primarylease.LeaseRecord) wireRecord {
 	return wireRecord{DatabaseID: hex.EncodeToString(record.DatabaseID[:]), Owner: record.Owner, Epoch: record.Epoch, CommitSequence: record.CommitSequence, NotAfterMS: record.NotAfter.UTC().UnixMilli(), Revoked: record.Revoked}
 }
 
+// decodeRecord decodes the database identity and converts JSON fields into a lease.
 func decodeRecord(wire wireRecord) (primarylease.LeaseRecord, error) {
 	if len(wire.DatabaseID) != 32 || wire.DatabaseID != strings.ToLower(wire.DatabaseID) {
 		return primarylease.LeaseRecord{}, ErrProtocol
@@ -405,6 +447,7 @@ func decodeRecord(wire wireRecord) (primarylease.LeaseRecord, error) {
 	return record, nil
 }
 
+// databaseIDFromPath extracts a nonzero database identity from an unescaped lease route.
 func databaseIDFromPath(endpoint *url.URL) ([16]byte, bool) {
 	var databaseID [16]byte
 	if endpoint == nil || endpoint.RawQuery != "" || endpoint.EscapedPath() != endpoint.Path || !strings.HasPrefix(endpoint.Path, leasePath) {
@@ -422,13 +465,16 @@ func databaseIDFromPath(endpoint *url.URL) ([16]byte, bool) {
 	return databaseID, databaseID != [16]byte{}
 }
 
+// pointerRecord returns a pointer to a copy of a wire record.
 func pointerRecord(record wireRecord) *wireRecord { return &record }
 
+// decoderEOF checks that no JSON value follows the decoded message.
 func decoderEOF(decoder *json.Decoder) bool {
 	var trailing any
 	return errors.Is(decoder.Decode(&trailing), io.EOF)
 }
 
+// decodeBoundedJSON reads one JSON message with a read limit and rejects unknown fields.
 func decodeBoundedJSON(reader io.Reader, target any) error {
 	decoder := json.NewDecoder(io.LimitReader(reader, maximumBodyBytes+1))
 	decoder.DisallowUnknownFields()
@@ -438,10 +484,12 @@ func decodeBoundedJSON(reader io.Reader, target any) error {
 	return nil
 }
 
+// writeError sends a JSON error code with the supplied HTTP status.
 func writeError(writer http.ResponseWriter, status int, code string) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
 	_, _ = io.WriteString(writer, `{"error":"`+code+`"}`+"\n")
 }
 
+// Verify at compile time that Client implements the lease store interface.
 var _ primarylease.LeaseStore = (*Client)(nil)

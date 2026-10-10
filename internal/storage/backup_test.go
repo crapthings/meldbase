@@ -9,11 +9,13 @@ import (
 	"testing"
 )
 
+// cancelAfterFirstWrite cancels a context after accepting the first backup chunk.
 type cancelAfterFirstWrite struct {
 	cancel context.CancelFunc
 	writes int
 }
 
+// Write counts accepted chunks and cancels the context on the first write.
 func (writer *cancelAfterFirstWrite) Write(value []byte) (int, error) {
 	writer.writes++
 	if writer.writes == 1 {
@@ -22,10 +24,13 @@ func (writer *cancelAfterFirstWrite) Write(value []byte) (int, error) {
 	return len(value), nil
 }
 
+// shortBackupWriter simulates a destination that accepts fewer bytes than requested.
 type shortBackupWriter struct{}
 
+// Write reports one fewer accepted byte than the supplied chunk contains.
 func (shortBackupWriter) Write(value []byte) (int, error) { return len(value) - 1, nil }
 
+// TestCopyPhysicalToContextCancelsBetweenBoundedChunksAndRejectsShortWrite checks that backup copying stops after cancellation and rejects incomplete writes.
 func TestCopyPhysicalToContextCancelsBetweenBoundedChunksAndRejectsShortWrite(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "copy-source.meld2"))
 	if err != nil {

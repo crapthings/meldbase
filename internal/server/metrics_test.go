@@ -8,6 +8,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestServerStatsSnapshotIsAllocationFreeAndContainsNoDynamicDimensions checks that server statistics report stored counters without allocating memory.
 func TestServerStatsSnapshotIsAllocationFreeAndContainsNoDynamicDimensions(t *testing.T) {
 	handler := &Handler{startedAt: time.Now()}
 	handler.metrics.connectionsAccepted.Store(3)
@@ -25,6 +26,7 @@ func TestServerStatsSnapshotIsAllocationFreeAndContainsNoDynamicDimensions(t *te
 	}
 }
 
+// BenchmarkServerStatsSnapshot measures the cost of reading server statistics.
 func BenchmarkServerStatsSnapshot(b *testing.B) {
 	handler := &Handler{startedAt: time.Now()}
 	handler.metrics.rpcRequests.Store(1_000_000)
@@ -35,6 +37,7 @@ func BenchmarkServerStatsSnapshot(b *testing.B) {
 	}
 }
 
+// BenchmarkRPCMetricSpan measures invoking a simple RPC method with request metric tracking.
 func BenchmarkRPCMetricSpan(b *testing.B) {
 	handler := &Handler{startedAt: time.Now()}
 	method := RPCMethod(func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {

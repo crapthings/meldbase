@@ -21,8 +21,9 @@ type ArchiveBootstrap struct {
 	SnapshotToken   uint64
 }
 
-// BeginArchive creates a durable database-wide checkpoint and a verified
-// physical snapshot. The checkpoint is established first, so Commit Log
+// BeginArchive creates a verified backup with a durable change stream for subsequent commits.
+//
+// The checkpoint is established first, so Commit Log
 // retention preserves every token needed to bridge from CheckpointToken to the
 // returned SnapshotToken, even while writes continue before the snapshot's
 // short read barrier begins.

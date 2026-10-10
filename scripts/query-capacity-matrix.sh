@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 
+# Prints the query capacity measurement options.
 usage() {
   cat <<'EOF'
 Usage:
@@ -14,12 +15,19 @@ resource-budget outcomes; it is platform evidence, not an SLA.
 EOF
 }
 
+# Holds the new directory where query reports will be saved.
 out_dir=""
+# Lists the document counts to measure.
 documents="1024,8192,65536"
+# Sets the number of measured queries for each scenario.
 iterations=200
+# Sets the number of warmup queries before measurement.
 warmup=20
+# Selects the query observer workload profile.
 profile=standard
+# Selects the query scenarios to measure.
 scenarios=all
+# Sets the time limit for each query observer run.
 timeout=10m
 while (($#)); do
   case "$1" in
@@ -42,6 +50,7 @@ for document_count in ${documents//,/ }; do
 done
 mkdir -m 700 "$out_dir"
 
+# Splits the requested document counts into individual measurement sizes.
 IFS=, read -r -a sizes <<<"$documents"
 for size in "${sizes[@]}"; do
   printf 'query capacity matrix: documents=%s\n' "$size"

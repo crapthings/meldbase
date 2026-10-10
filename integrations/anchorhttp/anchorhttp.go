@@ -1,5 +1,6 @@
-// Package anchorhttp provides an authenticated HTTPS quorum implementation of
-// meldbase.RollbackAnchorStore. It is a reference trust-plane building block,
+// Package anchorhttp reads and advances rollback anchors through authenticated HTTPS members.
+//
+// It implements meldbase.RollbackAnchorStore using a majority of members and is a reference trust-plane building block,
 // not a replacement for independently operated failure domains.
 package anchorhttp
 
@@ -29,27 +30,43 @@ import (
 
 const (
 	// ProtocolVersion identifies the strict HTTP/JSON and signing contract.
-	ProtocolVersion      uint32 = 2
-	anchorPathPrefix            = "/store/anchors/"
-	defaultMaxClockSkew         = 30 * time.Second
-	maximumBodyBytes     int64  = 4096
-	endpointAttempts            = 2
-	endpointRetryDelay          = 5 * time.Millisecond
-	nodeManifestName            = ".meldbase-anchor-node.json"
-	nodeManifestLockName        = ".meldbase-anchor-node.lock"
-	nodeManifestVersion  uint32 = 1
+	ProtocolVersion uint32 = 2
+	// anchorPathPrefix prefixes routes for named rollback anchors.
+	anchorPathPrefix = "/store/anchors/"
+	// defaultMaxClockSkew sets the default timestamp tolerance for signed requests.
+	defaultMaxClockSkew = 30 * time.Second
+	// maximumBodyBytes limits the JSON body size accepted by the protocol.
+	maximumBodyBytes int64 = 4096
+	// endpointAttempts limits attempts to contact one member during an operation.
+	endpointAttempts = 2
+	// endpointRetryDelay sets the wait before retrying a member request.
+	endpointRetryDelay = 5 * time.Millisecond
+	// nodeManifestName names the file binding a directory to a cluster member.
+	nodeManifestName = ".meldbase-anchor-node.json"
+	// nodeManifestLockName names the lock protecting directory identity binding.
+	nodeManifestLockName = ".meldbase-anchor-node.lock"
+	// nodeManifestVersion identifies the directory identity manifest format.
+	nodeManifestVersion uint32 = 1
 )
 
 var (
-	ErrAuthentication      = errors.New("meldbase anchor HTTP: authentication failed")
-	ErrConfiguration       = errors.New("meldbase anchor HTTP: configuration or member mismatch")
-	ErrConflict            = errors.New("meldbase anchor HTTP: monotonic anchor conflict")
-	ErrInsecureTransport   = errors.New("meldbase anchor HTTP: HTTPS is required")
-	ErrProtocol            = errors.New("meldbase anchor HTTP: invalid protocol response")
-	ErrQuorum              = errors.New("meldbase anchor HTTP: quorum unavailable")
+	// ErrAuthentication reports rejected request credentials or signatures.
+	ErrAuthentication = errors.New("meldbase anchor HTTP: authentication failed")
+	// ErrConfiguration reports a cluster configuration or member identity mismatch.
+	ErrConfiguration = errors.New("meldbase anchor HTTP: configuration or member mismatch")
+	// ErrConflict reports an anchor update that conflicts with retained history.
+	ErrConflict = errors.New("meldbase anchor HTTP: monotonic anchor conflict")
+	// ErrInsecureTransport reports an endpoint that does not use HTTPS.
+	ErrInsecureTransport = errors.New("meldbase anchor HTTP: HTTPS is required")
+	// ErrProtocol reports an invalid anchor protocol response.
+	ErrProtocol = errors.New("meldbase anchor HTTP: invalid protocol response")
+	// ErrQuorum reports that too few members completed an operation.
+	ErrQuorum = errors.New("meldbase anchor HTTP: quorum unavailable")
+	// errEndpointUnavailable marks a temporary member outage.
 	errEndpointUnavailable = errors.New("meldbase anchor HTTP: endpoint unavailable")
 )
 
+// wireAnchor represents a database identity and its minimum recoverable history in JSON.
 type wireAnchor struct {
 	Version               uint32 `json:"version"`
 	DatabaseID            string `json:"databaseId"`
@@ -57,6 +74,7 @@ type wireAnchor struct {
 	MinimumGeneration     uint64 `json:"minimumGeneration"`
 }
 
+// HandlerOptions supplies the member identity, storage directory, and request signing keys.
 type HandlerOptions struct {
 	Directory    string
 	ClusterID    string
@@ -66,6 +84,7 @@ type HandlerOptions struct {
 	MaxClockSkew time.Duration
 }
 
+// Handler serves authenticated reads and advances of file-backed rollback anchors.
 type Handler struct {
 	directory       string
 	configurationID string
@@ -76,8 +95,9 @@ type Handler struct {
 	now             func() time.Time
 }
 
-// NewHandler creates a multi-anchor HTTP handler backed by an existing trusted
-// directory. Deploy it behind TLS; request authentication does not encrypt
+// NewHandler creates an authenticated anchor handler using an existing trusted directory.
+//
+// Deploy it behind TLS; request authentication does not encrypt
 // traffic or authenticate the server to the client.
 func NewHandler(options HandlerOptions) (*Handler, error) {
 	configurationID, err := configurationDigest(options.ClusterID, options.Members, options.MemberID)
@@ -116,6 +136,7 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 	return &Handler{directory: directory, configurationID: configurationID, memberID: options.MemberID, keys: keys, dummyKey: dummyKey[:], clockSkew: skew, now: time.Now}, nil
 }
 
+// ServeHTTP validates a signed request and routes a named anchor read or advance.
 func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
 	response.Header().Set("Content-Type", "application/json")
@@ -157,6 +178,7 @@ func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Re
 	handler.advance(response, request, store, body)
 }
 
+// authenticate checks the request signature, timestamp, and configured cluster member identity.
 func (handler *Handler) authenticate(request *http.Request, body []byte) error {
 	if len(request.Header.Values("Meldbase-Anchor-Configuration-ID")) != 1 || len(request.Header.Values("Meldbase-Anchor-Member-ID")) != 1 || len(request.Header.Values("Meldbase-Anchor-Key-ID")) != 1 || len(request.Header.Values("Meldbase-Anchor-Timestamp")) != 1 || len(request.Header.Values("Meldbase-Anchor-Signature")) != 1 {
 		return ErrAuthentication
@@ -196,6 +218,7 @@ func (handler *Handler) authenticate(request *http.Request, body []byte) error {
 	return nil
 }
 
+// load sends the retained anchor or reports its absence or a storage failure.
 func (handler *Handler) load(response http.ResponseWriter, request *http.Request, store meldbase.RollbackAnchorStore) {
 	anchor, exists, err := store.Load(request.Context())
 	if err != nil {
@@ -210,6 +233,7 @@ func (handler *Handler) load(response http.ResponseWriter, request *http.Request
 	_ = json.NewEncoder(response).Encode(encodeAnchor(anchor))
 }
 
+// advance validates and saves an anchor while rejecting conflicts with retained history.
 func (handler *Handler) advance(response http.ResponseWriter, request *http.Request, store meldbase.RollbackAnchorStore, body []byte) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
@@ -244,28 +268,37 @@ func (handler *Handler) advance(response http.ResponseWriter, request *http.Requ
 	response.WriteHeader(http.StatusNoContent)
 }
 
-// Replica binds one endpoint URL to the unique static member expected behind
-// it. Distinct URLs with the same MemberID cannot manufacture a quorum.
+// Replica pairs an endpoint with the configured member expected to serve it.
+//
+// Distinct URLs with the same MemberID cannot manufacture a quorum.
 type Replica struct {
 	Endpoint string
 	MemberID string
 }
 
-// ReplicaCheckState is a fixed qualification classification for one configured
-// static member. It contains no endpoint or database identity.
+// ReplicaCheckState identifies the result of checking one configured member.
+//
+// It contains no endpoint or database identity.
 type ReplicaCheckState string
 
 const (
-	ReplicaAvailable      ReplicaCheckState = "available"
-	ReplicaMissing        ReplicaCheckState = "missing"
-	ReplicaUnavailable    ReplicaCheckState = "unavailable"
+	// ReplicaAvailable marks a member that returned a valid anchor.
+	ReplicaAvailable ReplicaCheckState = "available"
+	// ReplicaMissing marks a member with no stored anchor.
+	ReplicaMissing ReplicaCheckState = "missing"
+	// ReplicaUnavailable marks a member whose probe failed for other reasons.
+	ReplicaUnavailable ReplicaCheckState = "unavailable"
+	// ReplicaAuthentication marks a member that rejected request authentication.
 	ReplicaAuthentication ReplicaCheckState = "authentication-failure"
-	ReplicaConfiguration  ReplicaCheckState = "configuration-failure"
-	ReplicaProtocol       ReplicaCheckState = "protocol-failure"
+	// ReplicaConfiguration marks a member with a different cluster configuration.
+	ReplicaConfiguration ReplicaCheckState = "configuration-failure"
+	// ReplicaProtocol marks a member that returned invalid protocol data.
+	ReplicaProtocol ReplicaCheckState = "protocol-failure"
 )
 
-// ReplicaCheck reports one full-membership qualification probe. Anchor is set
-// only when State is ReplicaAvailable and Exists is true.
+// ReplicaCheck reports one member's availability and any verified anchor.
+//
+// Anchor is set only when State is ReplicaAvailable and Exists is true.
 type ReplicaCheck struct {
 	MemberID string
 	State    ReplicaCheckState
@@ -273,6 +306,7 @@ type ReplicaCheck struct {
 	Anchor   meldbase.RollbackAnchor
 }
 
+// QuorumOptions supplies static members, an anchor name, and signed request settings.
 type QuorumOptions struct {
 	ClusterID         string
 	Replicas          []Replica
@@ -283,6 +317,7 @@ type QuorumOptions struct {
 	AllowInsecureHTTP bool
 }
 
+// QuorumStore reads and advances a rollback anchor through a majority of configured members.
 type QuorumStore struct {
 	replicas        []Replica
 	configurationID string
@@ -294,6 +329,7 @@ type QuorumStore struct {
 	metrics         quorumMetrics
 }
 
+// quorumMetrics counts anchor operations and member, quorum, and validation failures.
 type quorumMetrics struct {
 	loads                  atomic.Uint64
 	advances               atomic.Uint64
@@ -305,8 +341,9 @@ type quorumMetrics struct {
 	configurationFailures  atomic.Uint64
 }
 
-// NewQuorumStore creates a majority-read/majority-write anchor store. Endpoint
-// count must be one or an odd number of at least three, and duplicate endpoints
+// NewQuorumStore validates members and creates a majority-based rollback anchor store.
+//
+// Endpoint count must be one or an odd number of at least three, and duplicate endpoints
 // are rejected so they cannot manufacture a quorum.
 func NewQuorumStore(options QuorumOptions) (*QuorumStore, error) {
 	if !validAnchorName(options.AnchorName) {
@@ -362,6 +399,7 @@ func NewQuorumStore(options QuorumOptions) (*QuorumStore, error) {
 	return &QuorumStore{replicas: replicas, configurationID: configurationID, anchorName: options.AnchorName, keyID: options.KeyID, key: append([]byte(nil), options.SharedKey...), client: &clientCopy, now: time.Now}, nil
 }
 
+// Load selects an observed anchor covering a successful majority or returns a majority-confirmed absence.
 func (store *QuorumStore) Load(ctx context.Context) (meldbase.RollbackAnchor, bool, error) {
 	if store == nil || ctx == nil {
 		return meldbase.RollbackAnchor{}, false, ErrQuorum
@@ -415,6 +453,7 @@ func (store *QuorumStore) Load(ctx context.Context) (meldbase.RollbackAnchor, bo
 	return meldbase.RollbackAnchor{}, false, ErrQuorum
 }
 
+// Advance returns success after a majority accepts the requested anchor.
 func (store *QuorumStore) Advance(ctx context.Context, anchor meldbase.RollbackAnchor) error {
 	if store == nil || ctx == nil {
 		return ErrQuorum
@@ -480,8 +519,9 @@ func (store *QuorumStore) Advance(ctx context.Context, anchor meldbase.RollbackA
 	return ErrQuorum
 }
 
-// RollbackAnchorStatus returns a lock-free, identity-free process-session
-// snapshot suitable for Meldbase admin telemetry.
+// RollbackAnchorStatus returns aggregate anchor operations and failures without taking locks.
+//
+// The process-session snapshot omits identities and is suitable for admin telemetry.
 func (store *QuorumStore) RollbackAnchorStatus() meldbase.RollbackAnchorStoreStatus {
 	if store == nil {
 		return meldbase.RollbackAnchorStoreStatus{}
@@ -505,8 +545,9 @@ func (store *QuorumStore) ConfigurationID() string {
 	return store.configurationID
 }
 
-// CheckReplicas waits for a signed GET result from every configured member.
-// It is intended for qualification and operator diagnostics, not commit paths.
+// CheckReplicas reports the anchor read result from every configured member.
+//
+// It waits for all signed GET results and is intended for qualification and operator diagnostics, not commit paths.
 func (store *QuorumStore) CheckReplicas(ctx context.Context) ([]ReplicaCheck, error) {
 	if store == nil || ctx == nil {
 		return nil, ErrQuorum
@@ -547,12 +588,14 @@ func (store *QuorumStore) CheckReplicas(ctx context.Context) ([]ReplicaCheck, er
 	return checks, nil
 }
 
+// loadResult holds one member's anchor, absence, or read error.
 type loadResult struct {
 	anchor meldbase.RollbackAnchor
 	exists bool
 	err    error
 }
 
+// loadOne reads a member's anchor with bounded retries for temporary outages.
 func (store *QuorumStore) loadOne(ctx context.Context, replica Replica) loadResult {
 	result, err := retryEndpoint(ctx, func() (loadResult, error) {
 		result := store.loadOneAttempt(ctx, replica)
@@ -564,6 +607,7 @@ func (store *QuorumStore) loadOne(ctx context.Context, replica Replica) loadResu
 	return result
 }
 
+// loadOneAttempt sends one signed anchor read and validates the member response.
 func (store *QuorumStore) loadOneAttempt(ctx context.Context, replica Replica) loadResult {
 	request, err := store.request(ctx, http.MethodGet, replica, nil)
 	if err != nil {
@@ -598,6 +642,7 @@ func (store *QuorumStore) loadOneAttempt(ctx context.Context, replica Replica) l
 	return loadResult{anchor: anchor, exists: err == nil, err: err}
 }
 
+// advanceOne requests an anchor advance with retries only for eligible member outages.
 func (store *QuorumStore) advanceOne(ctx context.Context, replica Replica, body []byte) error {
 	_, err := retryEndpoint(ctx, func() (struct{}, error) {
 		return struct{}{}, store.advanceOneAttempt(ctx, replica, body)
@@ -605,6 +650,7 @@ func (store *QuorumStore) advanceOne(ctx context.Context, replica Replica, body 
 	return err
 }
 
+// advanceOneAttempt sends one signed anchor advance and classifies the response.
 func (store *QuorumStore) advanceOneAttempt(ctx context.Context, replica Replica, body []byte) error {
 	request, err := store.request(ctx, http.MethodPut, replica, body)
 	if err != nil {
@@ -637,8 +683,9 @@ func (store *QuorumStore) advanceOneAttempt(ctx context.Context, replica Replica
 	}
 }
 
-// retryEndpoint gives each member one bounded recovery attempt after an
-// eligible transient failure. The write path deliberately leaves ambiguous
+// retryEndpoint retries eligible temporary endpoint failures within the caller's time budget.
+//
+// Each member gets one recovery attempt. The write path deliberately leaves ambiguous
 // transport failures ineligible, because that peer may have advanced durably
 // before losing its response. The caller context remains the complete
 // operation budget, so a timeout or cancellation can never be extended by
@@ -671,6 +718,7 @@ func retryEndpoint[T any](ctx context.Context, attempt func() (T, error)) (T, er
 	return zero, last
 }
 
+// request builds an anchor request signed for the configured cluster and target member.
 func (store *QuorumStore) request(ctx context.Context, method string, replica Replica, body []byte) (*http.Request, error) {
 	path := anchorPathPrefix + store.anchorName
 	request, err := http.NewRequestWithContext(ctx, method, replica.Endpoint+path, bytes.NewReader(body))
@@ -689,6 +737,7 @@ func (store *QuorumStore) request(ctx context.Context, method string, replica Re
 	return request, nil
 }
 
+// mergeLoadQuorum selects an observed anchor covering all supplied results or reports a conflict.
 func mergeLoadQuorum(results []loadResult) (meldbase.RollbackAnchor, bool, error) {
 	if selected, exists, ready := selectLoadQuorum(results, len(results)); ready {
 		return selected, exists, nil
@@ -696,7 +745,9 @@ func mergeLoadQuorum(results []loadResult) (meldbase.RollbackAnchor, bool, error
 	return meldbase.RollbackAnchor{}, false, ErrConflict
 }
 
-// selectLoadQuorum finds a successful subset with an observed maximum. Lower
+// selectLoadQuorum selects an observed anchor covering a majority or confirms majority absence.
+//
+// Conflicting qualified anchors are rejected. Lower
 // members need not be mutually comparable when the maximum dominates them all.
 // This lets a clean majority make progress past a crossed minority without ever
 // inventing a coordinate or accepting a sub-majority floor.
@@ -746,16 +797,19 @@ func selectLoadQuorum(results []loadResult, quorum int) (meldbase.RollbackAnchor
 	return meldbase.RollbackAnchor{}, false, false
 }
 
+// anchorBeforeOrEqual checks whether one anchor is no newer than another for the same database.
 func anchorBeforeOrEqual(left, right meldbase.RollbackAnchor) bool {
 	return left.DatabaseID == right.DatabaseID &&
 		left.MinimumCommitSequence <= right.MinimumCommitSequence &&
 		left.MinimumGeneration <= right.MinimumGeneration
 }
 
+// encodeAnchor converts a rollback anchor into versioned JSON fields.
 func encodeAnchor(anchor meldbase.RollbackAnchor) wireAnchor {
 	return wireAnchor{Version: ProtocolVersion, DatabaseID: hex.EncodeToString(anchor.DatabaseID[:]), MinimumCommitSequence: anchor.MinimumCommitSequence, MinimumGeneration: anchor.MinimumGeneration}
 }
 
+// decodeAnchor validates versioned JSON fields and reconstructs a rollback anchor.
 func decodeAnchor(record wireAnchor) (meldbase.RollbackAnchor, error) {
 	if record.Version != ProtocolVersion || len(record.DatabaseID) != 32 || record.DatabaseID != strings.ToLower(record.DatabaseID) || record.MinimumGeneration == 0 {
 		return meldbase.RollbackAnchor{}, ErrProtocol
@@ -774,6 +828,7 @@ func decodeAnchor(record wireAnchor) (meldbase.RollbackAnchor, error) {
 	return anchor, nil
 }
 
+// requestSignature signs the request routing, identity, timestamp, and body digest.
 func requestSignature(key []byte, method, escapedPath, configurationID, memberID, keyID, timestamp string, body []byte) []byte {
 	digest := sha256.Sum256(body)
 	canonical := method + "\n" + escapedPath + "\n" + configurationID + "\n" + memberID + "\n" + keyID + "\n" + timestamp + "\n" + hex.EncodeToString(digest[:]) + "\n"
@@ -782,6 +837,7 @@ func requestSignature(key []byte, method, escapedPath, configurationID, memberID
 	return mac.Sum(nil)
 }
 
+// anchorNameFromPath extracts a valid anchor name from the expected route.
 func anchorNameFromPath(path string) (string, bool) {
 	if !strings.HasPrefix(path, anchorPathPrefix) {
 		return "", false
@@ -790,6 +846,7 @@ func anchorNameFromPath(path string) (string, bool) {
 	return name, validAnchorName(name)
 }
 
+// validAnchorName accepts bounded ASCII names while excluding dot and dot-dot path entries.
 func validAnchorName(name string) bool {
 	if len(name) < 1 || len(name) > 128 {
 		return false
@@ -804,14 +861,17 @@ func validAnchorName(name string) bool {
 	return name != "." && name != ".."
 }
 
+// validKeyID accepts an anchor-style identifier of at most 64 bytes.
 func validKeyID(value string) bool {
 	return len(value) <= 64 && validAnchorName(value)
 }
 
+// validIdentifier checks anchor-style syntax and the supplied byte limit.
 func validIdentifier(value string, maximum int) bool {
 	return len(value) <= maximum && validAnchorName(value)
 }
 
+// configurationDigest validates static membership and hashes the cluster identity and sorted member list.
 func configurationDigest(clusterID string, members []string, requiredMember string) (string, error) {
 	if !validIdentifier(clusterID, 128) || (len(members) != 1 && (len(members) < 3 || len(members)%2 == 0)) {
 		return "", errors.New("meldbase anchor HTTP: ClusterID and a one-or-odd static member list are required")
@@ -840,6 +900,7 @@ func configurationDigest(clusterID string, members []string, requiredMember stri
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// nodeManifest records the cluster configuration and member identity assigned to a directory.
 type nodeManifest struct {
 	Version         uint32 `json:"version"`
 	ConfigurationID string `json:"configurationId"`
@@ -847,6 +908,7 @@ type nodeManifest struct {
 	Checksum        string `json:"checksum"`
 }
 
+// bindNodeDirectory verifies or durably creates a directory manifest for the configured cluster member.
 func bindNodeDirectory(directory, configurationID, memberID string) error {
 	lock, err := os.OpenFile(filepath.Join(directory, nodeManifestLockName), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -939,6 +1001,7 @@ func bindNodeDirectory(directory, configurationID, memberID string) error {
 	return nil
 }
 
+// nodeManifestChecksum hashes the configuration and member identity in a fixed order.
 func nodeManifestChecksum(configurationID, memberID string) string {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("meldbase-anchor-http-node-manifest-v1\x00"))
@@ -948,11 +1011,13 @@ func nodeManifestChecksum(configurationID, memberID string) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+// decoderAtEOF checks that no JSON value follows the decoded message.
 func decoderAtEOF(decoder *json.Decoder) bool {
 	var trailing any
 	return errors.Is(decoder.Decode(&trailing), io.EOF)
 }
 
+// decodeBoundedJSON reads one size-limited JSON message and rejects unknown fields or trailing values.
 func decodeBoundedJSON(reader io.Reader, target any) error {
 	raw, err := io.ReadAll(io.LimitReader(reader, maximumBodyBytes+1))
 	if err != nil || int64(len(raw)) > maximumBodyBytes {
@@ -969,6 +1034,7 @@ func decodeBoundedJSON(reader io.Reader, target any) error {
 	return nil
 }
 
+// writeError sends a versioned JSON error code with the supplied HTTP status.
 func writeError(response http.ResponseWriter, status int, code string) {
 	response.WriteHeader(status)
 	_ = json.NewEncoder(response).Encode(struct {
@@ -977,9 +1043,13 @@ func writeError(response http.ResponseWriter, status int, code string) {
 	}{ProtocolVersion, code})
 }
 
+// Verify at compile time that QuorumStore implements the rollback anchor store interface.
 var _ meldbase.RollbackAnchorStore = (*QuorumStore)(nil)
+
+// Verify at compile time that QuorumStore supplies rollback anchor status.
 var _ meldbase.RollbackAnchorStatusProvider = (*QuorumStore)(nil)
 
+// String describes the replica count and majority size without exposing member identities.
 func (store *QuorumStore) String() string {
 	if store == nil {
 		return "anchorhttp.QuorumStore<nil>"

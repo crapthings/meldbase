@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+# Reports an unexpected guest exit and powers off the test machine.
 qualification_failure() {
 	status=$?
 	trap - EXIT
@@ -10,7 +11,9 @@ qualification_failure() {
 }
 trap qualification_failure EXIT
 
+# Selects the guest directories used to find system commands.
 export PATH=/usr/bin:/usr/sbin:/bin:/sbin
+# Locates BusyBox so its commands can be installed in the guest.
 busybox=/bin/busybox
 [ -x "$busybox" ] || busybox=/usr/bin/busybox
 "$busybox" --install -s /bin
@@ -23,6 +26,7 @@ mdev -s
 modprobe virtio_blk
 mdev -s
 
+# Holds the trial name read from the guest boot arguments.
 trial=
 for argument in $(cat /proc/cmdline); do
 	case "$argument" in
@@ -44,8 +48,11 @@ mount -t ext4 -o rw /dev/vda /target
 mount -t 9p -o trans=virtio,version=9p2000.L,msize=1048576 control /control
 
 chmod 0777 /control
+# Names the worker result shared with the host controller.
 result="/control/${trial}-result.json"
+# Names the recovered database retained as test evidence.
 artifact="/control/${trial}-recovered.meld"
+# Names the host acknowledgement required before the guest shuts down.
 ack="/control/${trial}-ack.json"
 
 su nobody -s /bin/sh -c "/control/meld destructive-eio-worker \

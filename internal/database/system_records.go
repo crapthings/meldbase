@@ -10,11 +10,12 @@ import (
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
+// dbSystemRecordBackend connects built-in services to durable private system records.
 type dbSystemRecordBackend struct{ db *DB }
 
-// MeldbaseSystemRecordBackend is internal plumbing for first-party packages
-// such as server. Its return type lives under internal/, so it is deliberately
-// unavailable as an application-facing generic key/value API.
+// MeldbaseSystemRecordBackend returns the private durable-record bridge for built-in services.
+//
+// Its internal return type is not an application-facing key/value API.
 func (db *DB) MeldbaseSystemRecordBackend() systemrecord.Backend {
 	if db == nil {
 		return nil
@@ -27,6 +28,7 @@ func (db *DB) MeldbaseSystemRecordBackend() systemrecord.Backend {
 	return &dbSystemRecordBackend{db: db}
 }
 
+// CompareAndSwap atomically changes a private record when its expected state matches.
 func (backend *dbSystemRecordBackend) CompareAndSwap(ctx context.Context, mutation systemrecord.Mutation) (systemrecord.Result, error) {
 	if backend == nil || backend.db == nil || ctx == nil {
 		return systemrecord.Result{}, ErrClosed
@@ -102,6 +104,7 @@ func (backend *dbSystemRecordBackend) CompareAndSwap(ctx context.Context, mutati
 	return systemrecord.Result{Applied: true}, nil
 }
 
+// Scan reads a bounded range of private records from one storage snapshot.
 func (backend *dbSystemRecordBackend) Scan(ctx context.Context, start, end []byte, limit int) ([]systemrecord.KeyValue, error) {
 	if backend == nil || backend.db == nil || ctx == nil {
 		return nil, ErrClosed

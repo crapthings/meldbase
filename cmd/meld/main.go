@@ -21,10 +21,13 @@ import (
 )
 
 var (
+	// buildVersion holds the release version supplied when building the CLI.
 	buildVersion = "devel"
-	buildCommit  = "unknown"
+	// buildCommit holds the source revision supplied when building the CLI.
+	buildCommit = "unknown"
 )
 
+// main runs the CLI and exits with a failure status when a command fails.
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "meld:", err)
@@ -32,6 +35,7 @@ func main() {
 	}
 }
 
+// run handles help and version requests or dispatches arguments to the selected command.
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("usage: meld <command>; run 'meld help' for the stable operational command set")
@@ -201,6 +205,7 @@ See docs/cli-contract.md for output and compatibility rules.`)
 	}
 }
 
+// runDemo demonstrates document operations, indexes, live query updates, and reopening a durable database.
 func runDemo(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("demo", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -318,6 +323,7 @@ func runDemo(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// nextSnapshot waits for the next query snapshot, a subscription error, or context cancellation.
 func nextSnapshot(ctx context.Context, subscription *meldbase.QuerySubscription) (meldbase.QuerySnapshot, error) {
 	select {
 	case snapshot, ok := <-subscription.Snapshots:
@@ -335,6 +341,7 @@ func nextSnapshot(ctx context.Context, subscription *meldbase.QuerySubscription)
 	}
 }
 
+// runServe runs the configured database service and manages its listeners and background tasks through shutdown.
 func runServe(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -774,6 +781,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	return errors.Join(serveErr, adminErr, workerErr, closeErr)
 }
 
+// isLoopbackAddress reports whether a host-and-port address uses localhost or a loopback IP.
 func isLoopbackAddress(address string) bool {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil || host == "" {
@@ -786,6 +794,7 @@ func isLoopbackAddress(address string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// splitCommaList splits comma-separated values and trims spaces around each value.
 func splitCommaList(raw string) []string {
 	if raw == "" {
 		return nil
@@ -797,6 +806,7 @@ func splitCommaList(raw string) []string {
 	return values
 }
 
+// configuredOriginList returns configured origins or a copy of the defaults when no origins are supplied.
 func configuredOriginList(raw string, defaults []string) []string {
 	configured := splitCommaList(raw)
 	if len(configured) != 0 {
@@ -805,16 +815,19 @@ func configuredOriginList(raw string, defaults []string) []string {
 	return append([]string(nil), defaults...)
 }
 
+// defaultHTTPOrigins returns the local development origins allowed for HTTP requests.
 func defaultHTTPOrigins() []string {
 	return []string{"http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"}
 }
 
+// defaultRealtimeOriginPatterns returns loopback host patterns for realtime connections on any port.
 func defaultRealtimeOriginPatterns() []string {
 	// path.Match treats '[' as syntax. A literal IPv6 host bracket must therefore
 	// use its escaped character-class form.
 	return []string{"localhost:*", "127.0.0.1:*", "[[]::1]:*"}
 }
 
+// defaultRealtimeURL builds a realtime URL using localhost for wildcard listener addresses.
 func defaultRealtimeURL(address string) string {
 	host := address
 	if strings.HasPrefix(host, ":") {
@@ -829,26 +842,39 @@ func defaultRealtimeURL(address string) string {
 	return "ws://" + host + "/v1/realtime"
 }
 
+// usesEphemeralPort reports whether an address requests an automatically assigned port.
 func usesEphemeralPort(address string) bool {
 	_, port, err := net.SplitHostPort(address)
 	return err == nil && port == "0"
 }
 
+// devAccess grants local development access without checking authentication credentials.
 type devAccess struct{}
 
+// AuthenticateHTTP returns the fixed development actor and workspace.
 func (devAccess) AuthenticateHTTP(*http.Request) (meldserver.Actor, error) {
 	return meldserver.Actor{ID: "development", WorkspaceID: "development"}, nil
 }
+
+// AuthorizeQuery permits all query and result fields within the default result limit.
 func (devAccess) AuthorizeQuery(context.Context, meldserver.Actor, string, meldbase.QuerySpec) (meldserver.QueryPolicy, error) {
 	return meldserver.QueryPolicy{PolicyVersion: "development-v1", MaxResults: meldbase.DefaultQueryLimits.MaxLimit, AllowAllQueryPaths: true, AllowAllAggregateFields: true, AllowAllResultFields: true}, nil
 }
+
+// AuthorizeInsert permits all input and result fields for development inserts.
 func (devAccess) AuthorizeInsert(context.Context, meldserver.Actor, string, meldbase.Document) (meldserver.InsertPolicy, error) {
 	return meldserver.InsertPolicy{AllowAllInputFields: true, AllowAllResultFields: true}, nil
 }
+
+// AuthorizeUpdate permits all query and update paths within the default affected-document limit.
 func (devAccess) AuthorizeUpdate(context.Context, meldserver.Actor, string, meldbase.QuerySpec, meldbase.MutationSpec) (meldserver.UpdatePolicy, error) {
 	return meldserver.UpdatePolicy{QueryPolicy: meldserver.QueryPolicy{PolicyVersion: "development-v1", AllowAllQueryPaths: true}, AllowAllUpdatePaths: true, MaxAffected: meldbase.DefaultQueryLimits.MaxLimit}, nil
 }
+
+// AuthorizeDelete permits all query paths within the default affected-document limit.
 func (devAccess) AuthorizeDelete(context.Context, meldserver.Actor, string, meldbase.QuerySpec) (meldserver.DeletePolicy, error) {
 	return meldserver.DeletePolicy{QueryPolicy: meldserver.QueryPolicy{PolicyVersion: "development-v1", AllowAllQueryPaths: true}, MaxAffected: meldbase.DefaultQueryLimits.MaxLimit}, nil
 }
+
+// AuthorizeRPC permits every development RPC call.
 func (devAccess) AuthorizeRPC(context.Context, meldserver.Actor, string) error { return nil }

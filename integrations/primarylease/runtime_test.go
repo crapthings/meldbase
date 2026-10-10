@@ -13,12 +13,15 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// unrelatedRuntimeFence allows writes without using the runtime lease guard.
 type unrelatedRuntimeFence struct{}
 
+// ValidatePrimaryWrite allows every write request.
 func (unrelatedRuntimeFence) ValidatePrimaryWrite(meldbase.PrimaryWriteFenceRequest) error {
 	return nil
 }
 
+// TestOpenPrimaryWiresOnlyTheRenewedGuard checks that runtime writes require a renewed lease installed in its own guard.
 func TestOpenPrimaryWiresOnlyTheRenewedGuard(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -60,6 +63,7 @@ func TestOpenPrimaryWiresOnlyTheRenewedGuard(t *testing.T) {
 	}
 }
 
+// TestOpenPrimaryRejectsConflictingFenceOrFollower checks that primary runtimes reject conflicting fences, follower mode, and missing renewal clients.
 func TestOpenPrimaryRejectsConflictingFenceOrFollower(t *testing.T) {
 	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

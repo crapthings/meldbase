@@ -11,23 +11,33 @@ import (
 )
 
 const (
+	// CommitInsert marks a document insertion.
 	CommitInsert CommitOperation = 1 + iota
+	// CommitUpdate marks a document update.
 	CommitUpdate
+	// CommitDelete marks a document deletion.
 	CommitDelete
+	// CommitCatalog marks a catalog change.
 	CommitCatalog
 )
 
 const (
+	// inlineCommitValueLimit bounds bytes stored directly in a commit value descriptor.
 	inlineCommitValueLimit = 8 * 1024
-	maxCommitValueBytes    = 64 * 1024 * 1024
+	// maxCommitValueBytes bounds the encoded size of one commit value.
+	maxCommitValueBytes = 64 * 1024 * 1024
 )
 
+// commitMagic identifies encoded commit batch headers.
 var commitMagic = [8]byte{'M', 'E', 'L', 'D', 'C', 'M', 'T', '2'}
 
+// commitHeaderBytes is the byte size of an encoded commit batch header.
 const commitHeaderBytes = 96
 
+// CommitOperation identifies a document or catalog change in the commit log.
 type CommitOperation uint8
 
+// CommitChange records one change and its before and after document versions.
 type CommitChange struct {
 	CollectionID uint32
 	// CollectionName is present only for named catalog changes. Ordinary
@@ -42,11 +52,13 @@ type CommitChange struct {
 	AfterRef       *DocumentVersionRef
 }
 
+// DocumentVersionRef locates a document in a particular immutable primary tree.
 type DocumentVersionRef struct {
 	PrimaryRoot uint64
 	DocumentID  [16]byte
 }
 
+// CommitBatch groups changes under one commit sequence and transaction identity.
 type CommitBatch struct {
 	Sequence      uint64
 	TransactionID [16]byte
@@ -57,8 +69,9 @@ type CommitBatch struct {
 	Changes     []CommitChange
 }
 
-// AppendCommit writes one complete logical batch into the Commit Log tree. It
-// must be called inside the File.Update callback for the same sequence.
+// AppendCommit stores one complete batch of changes in the commit log.
+//
+// It must be called inside the File.Update callback for the same sequence.
 func (tx *WriteTxn) AppendCommit(rootPage uint64, batch CommitBatch) (uint64, error) {
 	if tx == nil {
 		return 0, ErrCorrupt
@@ -79,9 +92,10 @@ func (tx *WriteTxn) AppendCommit(rootPage uint64, batch CommitBatch) (uint64, er
 	return tree.Flush()
 }
 
-// AppendCommitRetained appends a business commit and advances the logical
-// retention watermark in the same COW publication. Active replay pins cap the
-// watermark; they never lose history to satisfy the configured window.
+// AppendCommitRetained stores a commit and removes expired history in the same database update.
+//
+// Active replay pins limit how much history can expire; the configured window
+// never removes commits still needed by a reader.
 func (tx *WriteTxn) AppendCommitRetained(rootPage, oldest uint64, batch CommitBatch) (uint64, uint64, error) {
 	if tx == nil || tx.file == nil {
 		return 0, 0, ErrCorrupt
@@ -112,6 +126,7 @@ func (tx *WriteTxn) AppendCommitRetained(rootPage, oldest uint64, batch CommitBa
 	return root, keepFrom, err
 }
 
+// pruneCommitTree removes history beyond retention limits while respecting replay and index build pins.
 func (tx *WriteTxn) pruneCommitTree(tree *MutableTree, oldest, latest uint64) (uint64, error) {
 	if tx == nil || tx.file == nil || tree == nil || oldest == 0 || oldest > latest {
 		return 0, ErrCorrupt
@@ -207,6 +222,7 @@ func (tx *WriteTxn) pruneCommitTree(tree *MutableTree, oldest, latest uint64) (u
 	return keepFrom, nil
 }
 
+// appendCommitToTree stores a batch header and its changes and returns their logical byte count.
 func (tx *WriteTxn) appendCommitToTree(tree *MutableTree, batch CommitBatch) (uint64, error) {
 	if tx == nil || tree == nil || batch.Sequence != tx.Sequence() || batch.Sequence == 0 || allZero(batch.TransactionID[:]) || len(batch.Changes) == 0 || len(batch.Changes) > math.MaxUint32-1 {
 		return 0, ErrCorrupt
@@ -265,6 +281,7 @@ func (tx *WriteTxn) appendCommitToTree(tree *MutableTree, batch CommitBatch) (ui
 	return logicalBytes, nil
 }
 
+// commitBatchLogicalBytes calculates the logical byte count of a decoded commit batch.
 func commitBatchLogicalBytes(batch CommitBatch) (uint64, error) {
 	total := uint64(commitHeaderBytes)
 	for _, change := range batch.Changes {
@@ -283,6 +300,7 @@ func commitBatchLogicalBytes(batch CommitBatch) (uint64, error) {
 	return total, nil
 }
 
+// storedCommitLogicalBytes reads a commit value's logical size from its storage descriptor.
 func storedCommitLogicalBytes(stored []byte) (uint64, error) {
 	if len(stored) == 0 {
 		return 0, ErrCorrupt
@@ -300,6 +318,7 @@ func storedCommitLogicalBytes(stored []byte) (uint64, error) {
 	return total, nil
 }
 
+// calculateRetainedCommitBytes totals the logical bytes in a stored commit log tree.
 func (f *File) calculateRetainedCommitBytes(rootPage uint64) (uint64, error) {
 	iterator, err := newTreeIterator(f, rootPage, TreeCommitLog, nil, nil, 0)
 	if err != nil {
@@ -320,6 +339,7 @@ func (f *File) calculateRetainedCommitBytes(rootPage uint64) (uint64, error) {
 	return total, nil
 }
 
+// ReadCommit reads a batch at the requested sequence from a stored commit log root.
 func (f *File) ReadCommit(rootPage, sequence uint64) (CommitBatch, error) {
 	if f == nil || sequence == 0 {
 		return CommitBatch{}, ErrCorrupt
@@ -332,6 +352,7 @@ func (f *File) ReadCommit(rootPage, sequence uint64) (CommitBatch, error) {
 	return f.readCommitUnlocked(rootPage, sequence)
 }
 
+// readCommitUnlocked reads a stored commit batch while the caller holds the file lock.
 func (f *File) readCommitUnlocked(rootPage, sequence uint64) (CommitBatch, error) {
 	tx := &WriteTxn{file: f, generation: f.meta.Generation, sequence: f.meta.CommitSequence, nextPage: f.nextPage, byID: make(map[uint64][]byte)}
 	batch, err := tx.readCommitUsing(sequence, func(key []byte) ([]byte, bool, error) {
@@ -346,6 +367,7 @@ func (f *File) readCommitUnlocked(rootPage, sequence uint64) (CommitBatch, error
 	return batch, nil
 }
 
+// readCommitFromTree reads a commit batch from a tree within a write transaction.
 func (tx *WriteTxn) readCommitFromTree(tree *MutableTree, sequence uint64) (CommitBatch, error) {
 	if tx == nil || tree == nil || sequence == 0 {
 		return CommitBatch{}, ErrCorrupt
@@ -353,6 +375,7 @@ func (tx *WriteTxn) readCommitFromTree(tree *MutableTree, sequence uint64) (Comm
 	return tx.readCommitUsing(sequence, tree.Get)
 }
 
+// readCommitUsing validates and reconstructs a commit batch using the supplied key lookup.
 func (tx *WriteTxn) readCommitUsing(sequence uint64, get func([]byte) ([]byte, bool, error)) (CommitBatch, error) {
 	if tx == nil || sequence == 0 || get == nil {
 		return CommitBatch{}, ErrCorrupt
@@ -411,6 +434,7 @@ func (tx *WriteTxn) readCommitUsing(sequence uint64, get func([]byte) ([]byte, b
 	return batch, nil
 }
 
+// encodeCommitChange validates and encodes one commit change.
 func encodeCommitChange(change CommitChange) ([]byte, error) {
 	if change.CollectionID == 0 || change.Operation < CommitInsert || change.Operation > CommitCatalog ||
 		len(change.Before) > maxCommitValueBytes || len(change.After) > maxCommitValueBytes {
@@ -479,6 +503,7 @@ func encodeCommitChange(change CommitChange) ([]byte, error) {
 	return result, nil
 }
 
+// normalizeChangedPaths validates, sorts, and removes duplicate changed paths.
 func normalizeChangedPaths(paths []string) ([]string, error) {
 	if len(paths) > math.MaxUint16 {
 		return nil, ErrCorrupt
@@ -506,6 +531,7 @@ func normalizeChangedPaths(paths []string) ([]string, error) {
 	return result[:write], nil
 }
 
+// decodeCommitChange validates and reads one encoded commit change.
 func decodeCommitChange(encoded []byte) (CommitChange, error) {
 	if len(encoded) < 52 || len(encoded) > maxCommitValueBytes || encoded[5]&0xf0 != 0 || !allZero(encoded[50:52]) {
 		return CommitChange{}, ErrCorrupt
@@ -575,6 +601,7 @@ func decodeCommitChange(encoded []byte) (CommitChange, error) {
 	return change, nil
 }
 
+// storeCommitValue stores commit bytes inline or in linked overflow pages.
 func (tx *WriteTxn) storeCommitValue(value []byte) ([]byte, error) {
 	if len(value) > maxCommitValueBytes {
 		return nil, ErrCorrupt
@@ -618,6 +645,7 @@ func (tx *WriteTxn) storeCommitValue(value []byte) ([]byte, error) {
 	return descriptor, nil
 }
 
+// loadCommitValue reads commit bytes from an inline value or verified overflow pages.
 func (tx *WriteTxn) loadCommitValue(stored []byte) ([]byte, error) {
 	if len(stored) == 0 {
 		return nil, ErrCorrupt
@@ -677,6 +705,7 @@ func (tx *WriteTxn) loadCommitValue(stored []byte) ([]byte, error) {
 	return result, nil
 }
 
+// commitKey encodes a commit sequence and change ordinal in sortable byte order.
 func commitKey(sequence uint64, ordinal uint32) []byte {
 	key := make([]byte, 12)
 	binary.BigEndian.PutUint64(key[:8], sequence)

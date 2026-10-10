@@ -17,9 +17,13 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// physicalRestoreArtifact identifies an uncompressed physical backup receipt.
 const physicalRestoreArtifact = "physical-restore"
+
+// gzipPhysicalRestoreArtifact identifies a gzip-compressed physical backup receipt.
 const gzipPhysicalRestoreArtifact = "physical-restore-gzip"
 
+// backupCommandResult combines the physical backup receipt with optional compressed artifact metadata.
 type backupCommandResult struct {
 	SchemaVersion  int    `json:"schemaVersion"`
 	ArtifactKind   string `json:"artifactKind"`
@@ -29,6 +33,7 @@ type backupCommandResult struct {
 	meldbase.BackupResult
 }
 
+// runBackup creates a physical backup with optional gzip compression and prints its receipt.
 func runBackup(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -97,9 +102,9 @@ func runBackup(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(output)
 }
 
-// backupGzip keeps the durable backup contract intact: the database first
-// creates and verifies an ordinary physical artifact, then this command writes
-// one compressed, no-overwrite representation of that exact file. Compression
+// backupGzip creates a verified physical backup and publishes a gzip-compressed copy without replacing an existing file.
+//
+// Compression
 // reduces backup storage/transfer cost but does not weaken the restore-side
 // physical digest and graph verification.
 func backupGzip(ctx context.Context, db *meldbase.DB, destination string) (meldbase.BackupResult, uint64, string, error) {
@@ -166,6 +171,7 @@ func backupGzip(ctx context.Context, db *meldbase.DB, destination string) (meldb
 	return result, artifactBytes, artifactDigest, nil
 }
 
+// backupArtifactDigest reads an artifact and returns its byte count and SHA-256 digest.
 func backupArtifactDigest(path string) (uint64, string, error) {
 	input, err := os.Open(path)
 	if err != nil {
@@ -180,8 +186,9 @@ func backupArtifactDigest(path string) (uint64, string, error) {
 	return uint64(bytes), fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
-// publishBackupArtifact gives compressed artifacts the same no-overwrite
-// publication point as the physical backup implementation. os.Link is used
+// publishBackupArtifact links a temporary artifact to a new destination without replacing an existing file.
+//
+// os.Link is used
 // instead of rename so a raced destination cannot be replaced.
 func publishBackupArtifact(temporary, destination string) error {
 	if err := os.Link(temporary, destination); err != nil {

@@ -22,6 +22,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// Config sets the database, security policies, transport limits, and optional RPC services for a handler.
 type Config struct {
 	DB                             *meldbase.DB
 	Authenticator                  Authenticator
@@ -58,6 +59,7 @@ type Config struct {
 	TrustedProxyCIDRs              []string
 }
 
+// Handler serves authorized database operations and manages realtime connection services.
 type Handler struct {
 	config           Config
 	mux              *http.ServeMux
@@ -72,6 +74,7 @@ type Handler struct {
 	audit            *httpAuditLogger
 }
 
+// New validates and normalizes server settings and registers the HTTP routes.
 func New(config Config) (*Handler, error) {
 	if config.DB == nil || config.Authenticator == nil || config.Authorizer == nil {
 		return nil, errors.New("database, authenticator, and authorizer are required")
@@ -285,6 +288,7 @@ func New(config Config) (*Handler, error) {
 	return h, nil
 }
 
+// unrestrictedRealtimeOriginPattern detects empty or fully wildcard origin patterns.
 func unrestrictedRealtimeOriginPattern(pattern string) bool {
 	if pattern == "" {
 		return true
@@ -295,6 +299,7 @@ func unrestrictedRealtimeOriginPattern(pattern string) bool {
 	return pattern == "*" || pattern == "*:*"
 }
 
+// ServeHTTP enforces request limits and HTTP origin rules before routing and recording the response.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	observed := &responseStatusWriter{ResponseWriter: w}
 	defer func() {
@@ -337,11 +342,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
 }
 
+// responseStatusWriter wraps an HTTP response writer and records its first response status.
 type responseStatusWriter struct {
 	http.ResponseWriter
 	status int
 }
 
+// WriteHeader records the first status and forwards the header write to the wrapped writer.
 func (writer *responseStatusWriter) WriteHeader(status int) {
 	if writer.status == 0 {
 		writer.status = status
@@ -349,6 +356,7 @@ func (writer *responseStatusWriter) WriteHeader(status int) {
 	writer.ResponseWriter.WriteHeader(status)
 }
 
+// Write records an implicit successful status and forwards response bytes to the wrapped writer.
 func (writer *responseStatusWriter) Write(data []byte) (int, error) {
 	if writer.status == 0 {
 		writer.status = http.StatusOK
@@ -356,8 +364,10 @@ func (writer *responseStatusWriter) Write(data []byte) (int, error) {
 	return writer.ResponseWriter.Write(data)
 }
 
+// Unwrap returns the underlying response writer for HTTP response controllers.
 func (writer *responseStatusWriter) Unwrap() http.ResponseWriter { return writer.ResponseWriter }
 
+// observeHTTPStatus counts authentication, authorization, and rate-limit rejections.
 func (h *Handler) observeHTTPStatus(writer *responseStatusWriter) {
 	switch writer.status {
 	case http.StatusUnauthorized:
@@ -369,6 +379,7 @@ func (h *Handler) observeHTTPStatus(writer *responseStatusWriter) {
 	}
 }
 
+// probeResponse carries a health status and optional database read and write availability.
 type probeResponse struct {
 	Version  int    `json:"version"`
 	Status   string `json:"status"`
@@ -376,15 +387,18 @@ type probeResponse struct {
 	Writable *bool  `json:"writable,omitempty"`
 }
 
+// liveness reports that the HTTP handler can respond.
 func (h *Handler) liveness(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("cache-control", "no-store")
 	writeJSON(w, http.StatusOK, probeResponse{Version: 1, Status: "live"})
 }
 
+// health serves the database readiness response at the compatibility health endpoint.
 func (h *Handler) health(w http.ResponseWriter, request *http.Request) {
 	h.readiness(w, request)
 }
 
+// readiness reports success only when the database is both readable and writable.
 func (h *Handler) readiness(w http.ResponseWriter, _ *http.Request) {
 	state := meldbase.OperationalState{}
 	if h.operationalState != nil {
@@ -400,6 +414,7 @@ func (h *Handler) readiness(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// socketSession owns one realtime connection, its outgoing queue, subscriptions, and active RPC calls.
 type socketSession struct {
 	handler       *Handler
 	actor         Actor
@@ -415,12 +430,16 @@ type socketSession struct {
 	rpcCalls      map[string]context.CancelFunc
 }
 
+// socketOutbound carries one encoded realtime message waiting for transport delivery.
 type socketOutbound struct{ data []byte }
+
+// socketSubscription pairs caller and server subscription IDs with a cancellation function.
 type socketSubscription struct {
 	requestID, serverID string
 	cancel              context.CancelFunc
 }
 
+// realtime authenticates a WebSocket connection with a one-use ticket and runs its message loop.
 func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
 	if !configuredRealtimeOriginAllowed(r, h.config.OriginPatterns) {
 		writeError(w, http.StatusForbidden, "origin_forbidden")
@@ -485,8 +504,9 @@ func (h *Handler) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// configuredRealtimeOriginAllowed makes a configured OriginPatterns list a
-// strict browser allowlist. coder/websocket deliberately accepts a request
+// configuredRealtimeOriginAllowed checks a browser origin against the configured connection allowlist.
+//
+// coder/websocket deliberately accepts a request
 // whose Origin host equals the request host before consulting patterns; that is
 // useful as its default, but would defeat a scheme+host pattern such as
 // "https://app.example". An empty list keeps the library's default same-host
@@ -513,6 +533,7 @@ func configuredRealtimeOriginAllowed(request *http.Request, patterns []string) b
 	return false
 }
 
+// handleMessage validates a realtime envelope and dispatches its connection, subscription, or RPC operation.
 func (s *socketSession) handleMessage(raw []byte) error {
 	if err := meldbase.ValidateStrictJSON(raw, s.handler.config.MaxBodyBytes); err != nil {
 		return err
@@ -596,6 +617,7 @@ func (s *socketSession) handleMessage(raw []byte) error {
 	}
 }
 
+// subscribe authorizes a query and starts snapshot, delta, or resumed delivery within the session limits.
 func (s *socketSession) subscribe(requestID, collection string, rawQuery []byte, resumeToken, mode string) error {
 	query, err := meldbase.DecodeQuerySpecJSON(rawQuery, s.handler.config.QueryLimits)
 	if err != nil {
@@ -637,6 +659,7 @@ func (s *socketSession) subscribe(requestID, collection string, rawQuery []byte,
 	return s.startSnapshotSubscription(requestID, collection, query, policy)
 }
 
+// startResumedDeltaSubscription replays authorized visible query changes from a validated saved position.
 func (s *socketSession) startResumedDeltaSubscription(requestID, collection string, query meldbase.QuerySpec, policy QueryPolicy, clientToken string, position uint64) error {
 	ctx, cancel := context.WithCancel(s.ctx)
 	replay, err := s.handler.config.ReplaySource.OpenQueryReplay(ctx, collection, query, position, 8)
@@ -754,6 +777,7 @@ func (s *socketSession) startResumedDeltaSubscription(requestID, collection stri
 	return nil
 }
 
+// startSnapshotSubscription registers a live query and sends its authorized projected snapshots.
 func (s *socketSession) startSnapshotSubscription(requestID, collection string, query meldbase.QuerySpec, policy QueryPolicy) error {
 	ctx, cancel := context.WithCancel(s.ctx)
 	live, err := s.handler.config.DB.Collection(collection).SubscribeQuery(ctx, query, 2)
@@ -821,6 +845,7 @@ func (s *socketSession) startSnapshotSubscription(requestID, collection string, 
 	return nil
 }
 
+// startDeltaSubscription sends an authorized initial snapshot followed by visible query deltas.
 func (s *socketSession) startDeltaSubscription(requestID, collection string, query meldbase.QuerySpec, policy QueryPolicy) error {
 	ctx, cancel := context.WithCancel(s.ctx)
 	live, err := s.handler.config.DB.Collection(collection).SubscribeQueryDeltas(ctx, query, 8)
@@ -936,6 +961,7 @@ func (s *socketSession) startDeltaSubscription(requestID, collection string, que
 	return nil
 }
 
+// writeLoop sends queued frames with a write timeout and releases their accounted bytes.
 func (s *socketSession) writeLoop(done chan<- error) {
 	for {
 		select {
@@ -955,6 +981,8 @@ func (s *socketSession) writeLoop(done chan<- error) {
 		}
 	}
 }
+
+// enqueue queues an encoded message within frame and queue limits or cancels the session on failure.
 func (s *socketSession) enqueue(message any) bool {
 	if s == nil || s.handler == nil {
 		return false
@@ -985,6 +1013,7 @@ func (s *socketSession) enqueue(message any) bool {
 	}
 }
 
+// releaseOutgoing removes sent frame bytes from the outgoing queue accounting.
 func (s *socketSession) releaseOutgoing(bytes uint64) {
 	if s == nil || bytes == 0 {
 		return
@@ -997,10 +1026,13 @@ func (s *socketSession) releaseOutgoing(bytes uint64) {
 	}
 	s.outgoingMu.Unlock()
 }
+
+// subscriptionError queues an error message for a caller subscription request.
 func (s *socketSession) subscriptionError(requestID, code string) {
 	s.enqueue(rpcErrorMessage(requestID, code))
 }
 
+// policyResync cancels and removes a subscription before asking the client to establish it again.
 func (s *socketSession) policyResync(subscription *socketSubscription) {
 	if subscription == nil {
 		return
@@ -1011,6 +1043,7 @@ func (s *socketSession) policyResync(subscription *socketSubscription) {
 	s.enqueue(map[string]any{"v": protocolVersion, "type": "resync_required", "requestId": subscription.requestID})
 }
 
+// unsubscribe cancels a subscription identified by its server-issued ID.
 func (s *socketSession) unsubscribe(serverID string) {
 	s.mu.Lock()
 	subscription := s.byServer[serverID]
@@ -1019,12 +1052,16 @@ func (s *socketSession) unsubscribe(serverID string) {
 		subscription.cancel()
 	}
 }
+
+// remove deletes a subscription from both session lookup maps.
 func (s *socketSession) remove(subscription *socketSubscription) {
 	s.mu.Lock()
 	delete(s.byRequest, subscription.requestID)
 	delete(s.byServer, subscription.serverID)
 	s.mu.Unlock()
 }
+
+// shutdown cancels session work, clears active requests, and closes the realtime connection.
 func (s *socketSession) shutdown() {
 	s.cancel()
 	s.mu.Lock()
@@ -1041,6 +1078,7 @@ func (s *socketSession) shutdown() {
 	s.connection.Close(websocket.StatusNormalClosure, "")
 }
 
+// readSocketJSON reads a bounded text frame and rejects invalid or ambiguous JSON.
 func readSocketJSON(ctx context.Context, connection *websocket.Conn, max int) ([]byte, error) {
 	kind, data, err := connection.Read(ctx)
 	if err != nil {
@@ -1054,6 +1092,8 @@ func readSocketJSON(ctx context.Context, connection *websocket.Conn, max int) ([
 	}
 	return data, nil
 }
+
+// writeSocketJSON encodes a value and sends it as a WebSocket text frame.
 func writeSocketJSON(ctx context.Context, connection *websocket.Conn, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -1061,12 +1101,16 @@ func writeSocketJSON(ctx context.Context, connection *websocket.Conn, value any)
 	}
 	return connection.Write(ctx, websocket.MessageText, data)
 }
+
+// enqueueError converts a failed outgoing enqueue into an error.
 func enqueueError(ok bool) error {
 	if !ok {
 		return errors.New("outbound queue full")
 	}
 	return nil
 }
+
+// randomID generates a cryptographically random hexadecimal subscription identifier.
 func randomID() (string, error) {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
@@ -1074,11 +1118,15 @@ func randomID() (string, error) {
 	}
 	return hex.EncodeToString(bytes), nil
 }
+
+// readBounded reads and closes an HTTP request body with an enforced byte limit.
 func readBounded(w http.ResponseWriter, r *http.Request, max int) ([]byte, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, int64(max))
 	defer r.Body.Close()
 	return io.ReadAll(r.Body)
 }
+
+// decodeStrict decodes one JSON value while rejecting unknown fields and trailing values.
 func decodeStrict(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -1090,15 +1138,21 @@ func decodeStrict(data []byte, target any) error {
 	}
 	return nil
 }
+
+// writeJSON sends a JSON response with the supplied HTTP status and content-type protections.
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("content-type", "application/json")
 	w.Header().Set("x-content-type-options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
+
+// writeError sends a server-owned error code as an HTTP JSON response.
 func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]any{"error": map[string]any{"kind": "internal", "code": code}})
 }
+
+// writeReadError distinguishes oversized request bodies from other request read failures.
 func writeReadError(w http.ResponseWriter, err error) {
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
@@ -1108,6 +1162,7 @@ func writeReadError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusBadRequest, "invalid_request")
 }
 
+// containsString checks whether a slice contains an exact string.
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -1117,6 +1172,7 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
+// validPreflight accepts only GET or POST requests with supported CORS request headers.
 func validPreflight(request *http.Request) bool {
 	method := request.Header.Get("access-control-request-method")
 	if method != http.MethodGet && method != http.MethodPost {
@@ -1130,11 +1186,14 @@ func validPreflight(request *http.Request) bool {
 	}
 	return true
 }
+
+// writeEngineError sends a database error using its safe HTTP status and protocol code.
 func writeEngineError(w http.ResponseWriter, err error) {
 	status, code := engineErrorStatusCode(err)
 	writeError(w, status, code)
 }
 
+// engineErrorStatusCode maps database errors to safe HTTP statuses and protocol codes.
 func engineErrorStatusCode(err error) (int, string) {
 	status, code := http.StatusInternalServerError, "internal"
 	// Admission cancellation can race a durable  final-Meta acknowledgement.
@@ -1174,6 +1233,7 @@ func engineErrorStatusCode(err error) (int, string) {
 	return status, code
 }
 
+// engineErrorCode returns the database error's protocol code or the supplied fallback for an unclassified error.
 func engineErrorCode(err error, fallback string) string {
 	_, code := engineErrorStatusCode(err)
 	if code == "internal" {

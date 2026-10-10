@@ -7,12 +7,17 @@ import (
 )
 
 const (
+	// modelOperationActive marks a modeled request still waiting for a final outcome.
 	modelOperationActive uint8 = iota
+	// modelOperationSucceeded marks a modeled update acknowledged by a majority.
 	modelOperationSucceeded
+	// modelOperationConflicted marks an update unable to reach a majority after a conflict.
 	modelOperationConflicted
+	// modelOperationQuorumFailed marks an update unable to reach a majority without a reported conflict.
 	modelOperationQuorumFailed
 )
 
+// concurrentModelState tracks replica values, delivered requests, responses, and outcomes for two writers.
 type concurrentModelState struct {
 	replicas  [5]uint8
 	delivered [2]uint8
@@ -22,6 +27,7 @@ type concurrentModelState struct {
 	status    [2]uint8
 }
 
+// concurrentModelScenario defines replica count and the competing anchor coordinates to explore.
 type concurrentModelScenario struct {
 	name        string
 	replicas    int
@@ -29,6 +35,7 @@ type concurrentModelScenario struct {
 	crossed     bool
 }
 
+// concurrentModelCounts records explored states and terminal outcome coverage.
 type concurrentModelCounts struct {
 	visited          int
 	terminal         int
@@ -36,6 +43,7 @@ type concurrentModelCounts struct {
 	ambiguousDurable int
 }
 
+// TestStaticQuorumExhaustiveConcurrentWriters checks all modeled schedules for comparable and conflicting writers with three or five replicas.
 func TestStaticQuorumExhaustiveConcurrentWriters(t *testing.T) {
 	scenarios := []concurrentModelScenario{}
 	for _, replicas := range []int{3, 5} {
@@ -61,10 +69,12 @@ func TestStaticQuorumExhaustiveConcurrentWriters(t *testing.T) {
 	}
 }
 
+// replicasName names a test scenario using its replica count and suffix.
 func replicasName(replicas int, suffix string) string {
 	return fmt.Sprintf("replicas-%d-%s", replicas, suffix)
 }
 
+// exploreConcurrentModel visits reachable states under request ordering, cancellation, and lost responses while checking safety.
 func exploreConcurrentModel(t *testing.T, scenario concurrentModelScenario) concurrentModelCounts {
 	t.Helper()
 	seen := make(map[concurrentModelState]struct{})
@@ -129,6 +139,7 @@ func exploreConcurrentModel(t *testing.T, scenario concurrentModelScenario) conc
 	return counts
 }
 
+// applyConcurrentModelRequest applies an update to one replica and optionally records its response.
 func applyConcurrentModelRequest(scenario concurrentModelScenario, state *concurrentModelState, operation, member int, countResponse bool) {
 	current := scenario.coordinates[state.replicas[member]]
 	targetIndex := uint8(operation + 1)
@@ -148,6 +159,7 @@ func applyConcurrentModelRequest(scenario concurrentModelScenario, state *concur
 	updateConcurrentModelStatus(scenario, state, operation)
 }
 
+// updateConcurrentModelStatus determines whether observed responses establish success or make a majority impossible.
 func updateConcurrentModelStatus(scenario concurrentModelScenario, state *concurrentModelState, operation int) {
 	if state.status[operation] != modelOperationActive {
 		return
@@ -167,6 +179,7 @@ func updateConcurrentModelStatus(scenario concurrentModelScenario, state *concur
 	}
 }
 
+// concurrentModelDurableCount counts replicas whose stored coordinate includes the modeled update.
 func concurrentModelDurableCount(scenario concurrentModelScenario, state concurrentModelState, operation int) int {
 	target := scenario.coordinates[operation+1]
 	count := 0
@@ -178,6 +191,7 @@ func concurrentModelDurableCount(scenario concurrentModelScenario, state concurr
 	return count
 }
 
+// assertConcurrentModelSafety checks that conflicting writers cannot both succeed and successful majority reads cannot fall behind acknowledged updates.
 func assertConcurrentModelSafety(t *testing.T, scenario concurrentModelScenario, state concurrentModelState) {
 	t.Helper()
 	if scenario.crossed && state.status[0] == modelOperationSucceeded && state.status[1] == modelOperationSucceeded {
@@ -204,6 +218,7 @@ func assertConcurrentModelSafety(t *testing.T, scenario concurrentModelScenario,
 	}
 }
 
+// concurrentModelReadFloor finds a selected replica coordinate that is at least as advanced as every other selected coordinate.
 func concurrentModelReadFloor(scenario concurrentModelScenario, state concurrentModelState, mask int) (modelCoordinate, bool) {
 	for candidateMember := 0; candidateMember < scenario.replicas; candidateMember++ {
 		if mask&(1<<candidateMember) == 0 {

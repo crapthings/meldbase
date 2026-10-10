@@ -15,12 +15,17 @@ import (
 )
 
 const (
-	destructiveVolumeSchema    uint32 = 1
-	destructiveVolumeMinBytes         = uint64(64 << 20)
-	destructiveVolumeMaxBytes         = uint64(16 << 30)
-	destructiveControlMinBytes        = uint64(64 << 20)
+	// destructiveVolumeSchema identifies the test volume receipt format.
+	destructiveVolumeSchema uint32 = 1
+	// destructiveVolumeMinBytes sets the smallest supported disposable test volume.
+	destructiveVolumeMinBytes = uint64(64 << 20)
+	// destructiveVolumeMaxBytes sets the largest supported disposable test volume.
+	destructiveVolumeMaxBytes = uint64(16 << 30)
+	// destructiveControlMinBytes sets the required free space for the separate evidence volume.
+	destructiveControlMinBytes = uint64(64 << 20)
 )
 
+// destructiveVolumeReceipt records an eligible test volume's identity, capacity, and confirmation token.
 type destructiveVolumeReceipt struct {
 	SchemaVersion         uint32 `json:"schemaVersion"`
 	Eligible              bool   `json:"eligible"`
@@ -37,6 +42,7 @@ type destructiveVolumeReceipt struct {
 	DestructiveToken      string `json:"destructiveToken"`
 }
 
+// destructiveVolumeFacts holds filesystem and isolation facts used to validate a disposable test volume.
 type destructiveVolumeFacts struct {
 	directory, controlDirectory      string
 	filesystemType, filesystemName   string
@@ -48,6 +54,7 @@ type destructiveVolumeFacts struct {
 	mountRoot, empty                 bool
 }
 
+// runDestructiveVolumeCheck checks a disposable test volume's eligibility and prints its receipt.
 func runDestructiveVolumeCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-volume-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -78,6 +85,7 @@ func runDestructiveVolumeCheck(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(receipt)
 }
 
+// inspectDestructiveVolume collects Linux target and control volume facts without changing their contents.
 func inspectDestructiveVolume(directory, controlDirectory string) (destructiveVolumeFacts, error) {
 	if runtime.GOOS != "linux" {
 		return destructiveVolumeFacts{}, errors.New("destructive volume qualification is supported only on Linux")
@@ -151,6 +159,7 @@ func inspectDestructiveVolume(directory, controlDirectory string) (destructiveVo
 	}, nil
 }
 
+// resolvedDirectory resolves directory links and returns the absolute directory path and file information.
 func resolvedDirectory(path string) (string, os.FileInfo, error) {
 	absolute, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -170,6 +179,7 @@ func resolvedDirectory(path string) (string, os.FileInfo, error) {
 	return filepath.Clean(resolved), info, nil
 }
 
+// destructiveTargetIsEmpty checks that a target directory contains only an optional lost+found directory.
 func destructiveTargetIsEmpty(path string) (bool, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -184,6 +194,7 @@ func destructiveTargetIsEmpty(path string) (bool, error) {
 	return true, nil
 }
 
+// validateDestructiveVolumeFacts checks that a test volume meets the required isolation, capacity, and filesystem conditions.
 func validateDestructiveVolumeFacts(facts destructiveVolumeFacts) error {
 	if facts.directory == "" || facts.controlDirectory == "" || !filepath.IsAbs(facts.directory) || !filepath.IsAbs(facts.controlDirectory) || facts.device == 0 || facts.controlDevice == 0 ||
 		facts.blockSize == 0 || facts.totalBytes == 0 || facts.availableBytes > facts.totalBytes {
@@ -216,6 +227,7 @@ func validateDestructiveVolumeFacts(facts destructiveVolumeFacts) error {
 	return nil
 }
 
+// destructiveVolumeToken derives a confirmation token from the target volume's identity and geometry.
 func destructiveVolumeToken(facts destructiveVolumeFacts) string {
 	payload := fmt.Sprintf("meldbase-real-enospc-v1\n%s\n%d\n%s\n%s\n%d\n%d\n",
 		facts.directory, facts.device, facts.filesystemType, facts.filesystemName, facts.blockSize, facts.totalBytes)

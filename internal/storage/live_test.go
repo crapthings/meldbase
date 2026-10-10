@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestSnapshotAndLiveStreamHaveNoCommitGap checks that a fixed snapshot and its live stream cover consecutive commits without a gap.
 func TestSnapshotAndLiveStreamHaveNoCommitGap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "live.meld2")
 	file, _, err := Open(path)
@@ -52,6 +53,7 @@ func TestSnapshotAndLiveStreamHaveNoCommitGap(t *testing.T) {
 	}
 }
 
+// TestLiveStreamWaitCancellationCloseAndHistoryLoss checks that a live stream reports cancellation and rejects reads after closing.
 func TestLiveStreamWaitCancellationCloseAndHistoryLoss(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "live-cancel.meld2")
 	file, _, err := Open(path)
@@ -82,6 +84,7 @@ func TestLiveStreamWaitCancellationCloseAndHistoryLoss(t *testing.T) {
 	}
 }
 
+// TestOneCommitWakesAllLiveStreams checks that every waiting stream receives the next commit.
 func TestOneCommitWakesAllLiveStreams(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "live-fanout.meld2")
 	file, _, err := Open(path)
@@ -135,6 +138,7 @@ func TestOneCommitWakesAllLiveStreams(t *testing.T) {
 	}
 }
 
+// TestHistoricalSnapshotAndStreamReconstructExactSequence checks that historical snapshots and replayed document changes remain exact after reopening.
 func TestHistoricalSnapshotAndStreamReconstructExactSequence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "historical-live.meld2")
 	file, _, err := Open(path)
@@ -223,6 +227,7 @@ func TestHistoricalSnapshotAndStreamReconstructExactSequence(t *testing.T) {
 	}
 }
 
+// TestLiveReplayPinPreventsRetentionFromOvertakingConsumer checks that pruning preserves unread commits until a live stream advances.
 func TestLiveReplayPinPreventsRetentionFromOvertakingConsumer(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "live-retention-pin.meld2")
 	file, _, err := Open(path)

@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// TestRevision3FixturePageCoverage checks that retained revision-three fixtures cover every supported page type.
 func TestRevision3FixturePageCoverage(t *testing.T) {
 	artifacts := map[string][]byte{
 		"business":            decodeBusinessGoldenFixtureBytes(t),

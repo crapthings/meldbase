@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TestLogicalArchiveRoundTripPreservesSchemaAndTypedDocuments checks that logical export and import preserve empty collections, indexes, and typed documents under a new database identity.
 func TestLogicalArchiveRoundTripPreservesSchemaAndTypedDocuments(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld")
@@ -109,6 +110,7 @@ func TestLogicalArchiveRoundTripPreservesSchemaAndTypedDocuments(t *testing.T) {
 	}
 }
 
+// TestLogicalArchiveRejectsAlteredInputWithoutPublishingDestination checks that corrupt archives publish no database and existing destinations remain untouched.
 func TestLogicalArchiveRejectsAlteredInputWithoutPublishingDestination(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld")

@@ -5,8 +5,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Locates the repository used for SDK release checks and packaging.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Creates a temporary directory for the SDK archives to publish.
 const staging = mkdtempSync(join(tmpdir(), "meldbase-sdk-beta-"));
+// Lists SDK packages published together under the beta tag.
 const packages = [
   { directory: "sdk/client", name: "@meldbase/client" },
   { directory: "sdk/worker", name: "@meldbase/worker" },
@@ -50,6 +53,7 @@ try {
   rmSync(staging, { recursive: true, force: true });
 }
 
+// Rejects SDK publishing when the repository worktree has changes.
 function assertCleanGit() {
   const status = execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim();
   assert.equal(status, "", "SDK publishing requires a clean Git worktree");

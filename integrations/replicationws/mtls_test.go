@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestMTLSAuthorizerBindsVerifiedLeafFingerprint checks that verified certificate fingerprints select their configured replica consumer and unknown fingerprints are rejected.
 func TestMTLSAuthorizerBindsVerifiedLeafFingerprint(t *testing.T) {
 	raw := []byte("verified-leaf-certificate")
 	fingerprint := sha256.Sum256(raw)
@@ -28,6 +29,7 @@ func TestMTLSAuthorizerBindsVerifiedLeafFingerprint(t *testing.T) {
 	}
 }
 
+// TestMTLSAuthorizerRejectsUnsafeConfigurationAndUnverifiedRequest checks that malformed fingerprints, unsafe consumer names, and unverified requests are rejected.
 func TestMTLSAuthorizerRejectsUnsafeConfigurationAndUnverifiedRequest(t *testing.T) {
 	if _, err := NewMTLSAuthorizer(MTLSConfig{PeerConsumers: map[string]string{"ABC": "peer"}}); err == nil {
 		t.Fatal("accepted malformed fingerprint")

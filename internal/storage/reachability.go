@@ -12,10 +12,13 @@ import (
 	"syscall"
 )
 
+// ErrReclamationConflict reports that a concurrent commit invalidated a reclamation scan.
 var ErrReclamationConflict = errors.New("meldbase storage: online reclamation conflicted with a commit")
 
+// maxSemanticAuditTreeViews bounds the decoded node views retained during semantic verification.
 const maxSemanticAuditTreeViews = 1024
 
+// ReachabilityStats counts stored, protected, and reusable pages and active snapshots.
 type ReachabilityStats struct {
 	PhysicalPages    uint64
 	ReachablePages   uint64
@@ -23,11 +26,13 @@ type ReachabilityStats struct {
 	PinnedSnapshots  uint64
 }
 
-// IndexAuditFunc recomputes one logical Secondary key from the canonical stored
-// document. It is used only by the offline verifier; normal open, reachability,
-// reclamation and commit paths never invoke it.
+// IndexAuditFunc derives the expected index key from a stored document.
+//
+// Only the offline verifier uses it; normal open, reachability, reclamation,
+// and commit paths never invoke it.
 type IndexAuditFunc func(IndexMeta, [16]byte, []byte) (key []byte, indexed bool, err error)
 
+// reclamationAuditToken records the file state that must remain unchanged before installing scan results.
 type reclamationAuditToken struct {
 	generation      uint64
 	nextPage        uint64
@@ -37,6 +42,7 @@ type reclamationAuditToken struct {
 	freePoolVersion uint64
 }
 
+// reachabilityWalker audits protected page graphs and optionally checks index contents.
 type reachabilityWalker struct {
 	file                        *File
 	ctx                         context.Context
@@ -49,18 +55,20 @@ type reachabilityWalker struct {
 	treeViewHits                uint64
 }
 
+// semanticAuditTreeView pairs a cached node view with its expected tree kind.
 type semanticAuditTreeView struct {
 	kind TreeKind
 	view treeNodeView
 }
 
-// Reachability audits all pages protected by both fallback metas and active
-// snapshot pins. It is intentionally explicit and potentially expensive; the
-// commit hot path never runs it.
+// Reachability checks all pages retained by recoverable database versions and active snapshots.
+//
+// This explicit scan can be expensive and never runs on the commit path.
 func (f *File) Reachability() (ReachabilityStats, error) {
 	return f.ReachabilityContext(context.Background())
 }
 
+// ReachabilityContext audits protected pages with cancellation support.
 func (f *File) ReachabilityContext(ctx context.Context) (ReachabilityStats, error) {
 	if f == nil {
 		return ReachabilityStats{}, ErrCorrupt
@@ -74,10 +82,12 @@ func (f *File) ReachabilityContext(ctx context.Context) (ReachabilityStats, erro
 	return stats, err
 }
 
+// reachabilityUnlocked audits protected pages while the caller holds the file lock.
 func (f *File) reachabilityUnlocked(ctx context.Context) (ReachabilityStats, *reachabilityWalker, error) {
 	return f.reachabilityUnlockedWithIndexAudit(ctx, nil)
 }
 
+// reachabilityUnlockedWithIndexAudit audits protected pages and optionally verifies index values under the file lock.
 func (f *File) reachabilityUnlockedWithIndexAudit(ctx context.Context, indexAudit IndexAuditFunc) (ReachabilityStats, *reachabilityWalker, error) {
 	if err := contextErr(ctx); err != nil {
 		return ReachabilityStats{}, nil, err
@@ -128,13 +138,15 @@ func (f *File) reachabilityUnlockedWithIndexAudit(ctx context.Context, indexAudi
 	}, walker, nil
 }
 
-// ReclaimPages performs an explicit protected-root audit and makes every page
-// unreachable from both valid Meta roots and all active readers available to
-// subsequent copy-on-write transactions. It does not mutate disk by itself.
+// ReclaimPages makes unused pages available for future writes after checking all protected versions.
+//
+// Pages retained by either valid metadata root or an active reader remain
+// protected; this operation does not change the file on disk.
 func (f *File) ReclaimPages() (ReachabilityStats, error) {
 	return f.ReclaimPagesContext(context.Background())
 }
 
+// ReclaimPagesContext audits protected roots and marks unreachable pages reusable with cancellation support.
 func (f *File) ReclaimPagesContext(ctx context.Context) (ReachabilityStats, error) {
 	if f == nil {
 		return ReachabilityStats{}, ErrCorrupt
@@ -171,8 +183,9 @@ func (f *File) ReclaimPagesContext(ctx context.Context) (ReachabilityStats, erro
 	return stats, nil
 }
 
-// ReclaimPagesOptimisticContext scans a duplicate read handle without holding
-// the writer mutex. Installation takes the mutex only long enough to prove that
+// ReclaimPagesOptimisticContext finds reusable pages without blocking writes during the scan.
+//
+// Installation takes the writer mutex only long enough to prove that
 // Meta generation, physical high-water mark and the previous free pool are
 // unchanged. A concurrent commit causes a bounded retry rather than extending
 // the commit pause across the full graph walk.
@@ -216,6 +229,7 @@ func (f *File) ReclaimPagesOptimisticContext(ctx context.Context, maxAttempts in
 	return ReachabilityStats{}, maxAttempts, ErrReclamationConflict
 }
 
+// captureReclamationAudit copies the protected file state and opens a duplicate handle for a background scan.
 func (f *File) captureReclamationAudit() (*File, reclamationAuditToken, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -256,6 +270,7 @@ func (f *File) captureReclamationAudit() (*File, reclamationAuditToken, error) {
 	return audit, token, nil
 }
 
+// installReclamationAudit installs reusable pages only if the captured file state is still current.
 func (f *File) installReclamationAudit(token reclamationAuditToken, free []uint64, persistFreeSpace bool) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -279,6 +294,7 @@ func (f *File) installReclamationAudit(token reclamationAuditToken, free []uint6
 	return true
 }
 
+// contextErr rejects a missing context or returns its cancellation error.
 func contextErr(ctx context.Context) error {
 	if ctx == nil {
 		return ErrCorrupt
@@ -291,6 +307,7 @@ func contextErr(ctx context.Context) error {
 	}
 }
 
+// checkContext runs the scan test hook and checks cancellation.
 func (walker *reachabilityWalker) checkContext() error {
 	if walker == nil {
 		return ErrCorrupt
@@ -301,6 +318,7 @@ func (walker *reachabilityWalker) checkContext() error {
 	return contextErr(walker.ctx)
 }
 
+// databaseRoot audits the stored trees referenced by a database root page.
 func (walker *reachabilityWalker) databaseRoot(pageID uint64) error {
 	if err := walker.checkContext(); err != nil {
 		return err
@@ -339,6 +357,7 @@ func (walker *reachabilityWalker) databaseRoot(pageID uint64) error {
 	return nil
 }
 
+// tree audits a stored tree and the records or pages reachable from its entries.
 func (walker *reachabilityWalker) tree(pageID uint64, kind TreeKind) error {
 	if err := walker.checkContext(); err != nil {
 		return err
@@ -525,9 +544,11 @@ func (walker *reachabilityWalker) tree(pageID uint64, kind TreeKind) error {
 	return nil
 }
 
-// auditCollection proves the bidirectional Primary↔Order mapping and validates
-// every Secondary suffix against the same durable document position. It runs
-// only as part of explicit Reachability, never on open or a commit hot path.
+// auditCollection checks that collection trees agree on document IDs and insertion positions.
+//
+// It checks the Primary-to-Order mapping in both directions and validates every
+// Secondary suffix against the same stored document position. It runs only
+// during explicit Reachability checks, never during open or commit.
 func (walker *reachabilityWalker) auditCollection(meta CollectionMeta) error {
 	if walker == nil || walker.file == nil {
 		return ErrCorrupt
@@ -665,8 +686,9 @@ func (walker *reachabilityWalker) auditCollection(meta CollectionMeta) error {
 	return nil
 }
 
-// auditPublishedIndexSemantics decodes each Primary document once and proves
-// all published Secondary indexes against it. Structural scans have already
+// auditPublishedIndexSemantics checks that published indexes contain exactly the entries their documents require.
+//
+// Each Primary document is decoded once. Structural scans have already
 // established each Secondary's count, uniqueness and one-entry-per-document
 // invariants. Therefore every expected complete key existing plus an equal
 // expected/stored count also proves that no extra or semantically wrong entry
@@ -727,8 +749,9 @@ func (walker *reachabilityWalker) auditPublishedIndexSemantics(collection Collec
 	return nil
 }
 
-// treeGetUnlocked keeps a small verifier-lifetime cache of immutable decoded
-// tree views. Offline semantic verification performs many exact lookups after
+// treeGetUnlocked finds a stored tree value using the verifier's bounded cache when available.
+//
+// Offline semantic verification performs many exact lookups after
 // the structural walk; reusing those views avoids repeatedly taking the shared
 // page-cache lock and validating the same node envelope. The fixed cap bounds
 // retained page bytes to at most maxSemanticAuditTreeViews*PageSize, and normal
@@ -807,8 +830,9 @@ func (walker *reachabilityWalker) treeGetUnlocked(rootPage uint64, kind TreeKind
 	}
 }
 
-// auditIndexBuild proves the portion of a private shadow tree that its durable
-// state machine claims. Scan/scan-failed records are complete through ScanAfter
+// auditIndexBuild checks a pending index against the progress recorded in its stored build state.
+//
+// Scan/scan-failed records are complete through ScanAfter
 // in SourceCatalogRoot. Catch-up and ready records are complete at the exact
 // AppliedCatalogRoot watermark. Legacy catch-up records without that root remain
 // structurally readable but are explicitly reported as not semantically proven.
@@ -938,6 +962,7 @@ func (walker *reachabilityWalker) auditIndexBuild(build IndexBuildMeta) error {
 	return nil
 }
 
+// overflowValue validates and reads inline bytes or a linked overflow page chain.
 func (walker *reachabilityWalker) overflowValue(stored []byte, pageType PageType, inlineLimit, maximum int) ([]byte, error) {
 	if len(stored) == 0 {
 		return nil, ErrCorrupt
@@ -995,10 +1020,12 @@ func (walker *reachabilityWalker) overflowValue(stored []byte, pageType PageType
 	return result, nil
 }
 
+// page validates and records a newly visited page of the expected type.
 func (walker *reachabilityWalker) page(pageID uint64, expected PageType) ([]byte, Page, bool, error) {
 	return walker.pageEither(pageID, expected, expected)
 }
 
+// pageEither validates and records a page of either accepted type without rereading visited pages.
 func (walker *reachabilityWalker) pageEither(pageID uint64, first, second PageType) ([]byte, Page, bool, error) {
 	if pageID < 2 || pageID >= walker.file.nextPage {
 		return nil, Page{}, false, ErrCorrupt
@@ -1021,6 +1048,7 @@ func (walker *reachabilityWalker) pageEither(pageID uint64, first, second PageTy
 	return raw, page, true, nil
 }
 
+// treePageTypes returns the leaf and branch page types for a tree kind.
 func treePageTypes(kind TreeKind) (PageType, PageType) {
 	switch kind {
 	case TreeCatalog:

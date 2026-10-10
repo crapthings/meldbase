@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-// auditLogger writes safe, line-delimited records suitable for a system journal.
+// auditLogger writes operator request outcomes as line-delimited JSON records.
+//
 // It deliberately excludes query strings, headers, credentials, bodies, remote
 // addresses, and response content.
 type auditLogger struct {
@@ -16,6 +17,7 @@ type auditLogger struct {
 	mu     sync.Mutex
 }
 
+// newAuditLogger creates an audit logger when an output writer is supplied.
 func newAuditLogger(writer io.Writer) *auditLogger {
 	if writer == nil {
 		return nil
@@ -23,6 +25,7 @@ func newAuditLogger(writer io.Writer) *auditLogger {
 	return &auditLogger{writer: writer}
 }
 
+// record writes a serialized request outcome while excluding credentials and response content.
 func (logger *auditLogger) record(request *http.Request, response *adminResponseStatusWriter) {
 	if logger == nil || request == nil || response == nil {
 		return

@@ -11,6 +11,7 @@ import (
 	"github.com/crapthings/meldbase/internal/qualification"
 )
 
+// TestStorageSoakCommandPublishesExclusiveSchemaFourReceipt checks that storage soak publishes a private receipt with progress logs, cleans temporary files, and refuses overwrite.
 func TestStorageSoakCommandPublishesExclusiveSchemaFourReceipt(t *testing.T) {
 	target := t.TempDir()
 	receiptPath := filepath.Join(t.TempDir(), "storage-soak.json")
@@ -69,6 +70,7 @@ func TestStorageSoakCommandPublishesExclusiveSchemaFourReceipt(t *testing.T) {
 	}
 }
 
+// TestStorageSoakReleaseRequiresCleanStampedRaceBinaryBeforeWork checks that the release soak rejects unverified clean source before publishing a receipt.
 func TestStorageSoakReleaseRequiresCleanStampedRaceBinaryBeforeWork(t *testing.T) {
 	target := t.TempDir()
 	receiptPath := filepath.Join(t.TempDir(), "release.json")

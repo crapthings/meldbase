@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestStoredDocumentCodecIsCanonicalTypedAndIsolated checks that stored encoding preserves typed values, ignores map insertion order, and returns an independent document.
 func TestStoredDocumentCodecIsCanonicalTypedAndIsolated(t *testing.T) {
 	id := DocumentID{1, 2, 3}
 	document := Document{
@@ -39,6 +40,7 @@ func TestStoredDocumentCodecIsCanonicalTypedAndIsolated(t *testing.T) {
 	}
 }
 
+// TestStoredDocumentCodecRejectsEnvelopeAndCanonicalBodyCorruption checks that decoding rejects damaged headers, trailing bytes, and unordered document keys.
 func TestStoredDocumentCodecRejectsEnvelopeAndCanonicalBodyCorruption(t *testing.T) {
 	encoded, err := encodeStoredDocument(Document{"value": String("ok")})
 	if err != nil {
@@ -66,6 +68,7 @@ func TestStoredDocumentCodecRejectsEnvelopeAndCanonicalBodyCorruption(t *testing
 	}
 }
 
+// TestStoredDocumentCodecRejectsInvalidUTF8AndAllocationCounts checks that encoding rejects invalid text and decoding rejects impossible object and array counts.
 func TestStoredDocumentCodecRejectsInvalidUTF8AndAllocationCounts(t *testing.T) {
 	invalid := string([]byte{0xff})
 	for _, document := range []Document{
@@ -91,6 +94,7 @@ func TestStoredDocumentCodecRejectsInvalidUTF8AndAllocationCounts(t *testing.T) 
 	}
 }
 
+// TestStoredDocumentProjectionValidatesWholeDocumentAndMaterializesOnlyPath checks that scalar projection reads the requested path while rejecting identifier mismatches and corruption elsewhere.
 func TestStoredDocumentProjectionValidatesWholeDocumentAndMaterializesOnlyPath(t *testing.T) {
 	id := DocumentID{7}
 	document := Document{
@@ -133,6 +137,7 @@ func TestStoredDocumentProjectionValidatesWholeDocumentAndMaterializesOnlyPath(t
 	}
 }
 
+// TestStoredDocumentProjectionPreservesEveryScalarKind checks that scalar projection preserves every supported scalar value type.
 func TestStoredDocumentProjectionPreservesEveryScalarKind(t *testing.T) {
 	id := DocumentID{9}
 	document := Document{
@@ -152,6 +157,7 @@ func TestStoredDocumentProjectionPreservesEveryScalarKind(t *testing.T) {
 	}
 }
 
+// FuzzStoredDocumentDecoderNeverPanics checks that document decoding and scalar projection handle arbitrary bytes without panicking.
 func FuzzStoredDocumentDecoderNeverPanics(f *testing.F) {
 	seed, _ := encodeStoredDocument(Document{"value": String("seed")})
 	f.Add(seed)
@@ -162,6 +168,7 @@ func FuzzStoredDocumentDecoderNeverPanics(f *testing.F) {
 	})
 }
 
+// BenchmarkStoredDocumentIndexProjection compares full document decoding with direct scalar projection for an indexed field.
 func BenchmarkStoredDocumentIndexProjection(b *testing.B) {
 	id := DocumentID{1}
 	encoded, err := encodeStoredDocument(Document{
@@ -194,4 +201,5 @@ func BenchmarkStoredDocumentIndexProjection(b *testing.B) {
 	})
 }
 
+// benchmarkValue retains decoded benchmark results so their computation remains observable.
 var benchmarkValue Value

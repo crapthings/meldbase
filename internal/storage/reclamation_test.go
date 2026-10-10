@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestOptimisticReclamationDoesNotHoldWriterLockAndRetriesConflict checks that reclamation allows writes during its scan and retries when a commit changes the database.
 func TestOptimisticReclamationDoesNotHoldWriterLockAndRetriesConflict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online-reclaim.meld2")
 	file, _, err := Open(path)
@@ -83,6 +84,7 @@ func TestOptimisticReclamationDoesNotHoldWriterLockAndRetriesConflict(t *testing
 	}
 }
 
+// TestOptimisticReclamationConcurrentWriteReadAndReopen checks that concurrent reads, writes, and reclamation preserve the latest document through reopening.
 func TestOptimisticReclamationConcurrentWriteReadAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "online-reclaim-stress.meld2")
 	file, _, err := Open(path)
@@ -188,6 +190,7 @@ func TestOptimisticReclamationConcurrentWriteReadAndReopen(t *testing.T) {
 	}
 }
 
+// TestReclaimPagesProtectsSnapshotsInvalidatesCacheAndReusesPhysicalPages checks that page reuse preserves open snapshots and returns fresh data after old snapshots close.
 func TestReclaimPagesProtectsSnapshotsInvalidatesCacheAndReusesPhysicalPages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reclaim.meld2")
 	file, _, err := Open(path)
@@ -268,6 +271,7 @@ func TestReclaimPagesProtectsSnapshotsInvalidatesCacheAndReusesPhysicalPages(t *
 	}
 }
 
+// TestReusedPagesBeforeMetaPublicationCannotCorruptFallback checks that reused pages in an unpublished commit leave the previous database version readable.
 func TestReusedPagesBeforeMetaPublicationCannotCorruptFallback(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reclaim-fallback.meld2")
 	file, _, err := Open(path)

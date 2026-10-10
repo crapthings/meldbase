@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestMaintenanceRunsOnlineAndStops checks that background maintenance reclaims pages, records a completed run, and stops cleanly.
 func TestMaintenanceRunsOnlineAndStops(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "maintenance.meld2"))
 	if err != nil {
@@ -48,6 +49,7 @@ func TestMaintenanceRunsOnlineAndStops(t *testing.T) {
 	}
 }
 
+// TestMaintenanceValidationAndDBCloseLifecycle checks maintenance option validation, cancellation, and automatic shutdown when the database closes.
 func TestMaintenanceValidationAndDBCloseLifecycle(t *testing.T) {
 	memory := New()
 	defer memory.Close()

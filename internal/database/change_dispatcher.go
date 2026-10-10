@@ -3,24 +3,34 @@ package database
 import "sync"
 
 const (
+	// maxPendingChangeDispatchBatches limits the number of queued committed batches.
 	maxPendingChangeDispatchBatches = 1024
+	// maxPendingChangeDispatchChanges limits the number of queued document changes.
+	//
 	// A dispatcher batch contains already-admitted document images. Keep this
 	// lower than the downstream reactive-view limit so a stalled dispatcher
 	// cannot retain many large write transactions before consumers get a
 	// resync/slow-consumer boundary.
 	maxPendingChangeDispatchChanges = 8 * 1024
+	// maxPendingChangeDispatchBytes limits retained payload bytes in the dispatcher.
+	//
 	// Count bounds alone do not cap retained document images: a valid mutation
 	// may contain a large document or a high-byte transaction. This independent
 	// canonical-image budget is deliberately fixed rather than inherited from
 	// configurable transaction admission, so changing a write limit cannot make
 	// the asynchronous realtime boundary unbounded.
 	maxPendingChangeDispatchBytes uint64 = 64 << 20
+	// maxPendingChangeWatcherBytes limits retained payload bytes for one direct watcher.
+	//
 	// Direct Go change watchers retain cloned images for application code. Their
 	// queue and the aggregate across every watcher are bounded independently of
 	// both dispatcher and reactive-view budgets.
-	maxPendingChangeWatcherBytes  uint64 = 64 << 20
+	maxPendingChangeWatcherBytes uint64 = 64 << 20
+	// maxPendingChangeWatchersBytes limits retained payload bytes across all direct watchers.
 	maxPendingChangeWatchersBytes uint64 = 128 << 20
 
+	// changeDispatchEnvelopeBytes charges a fixed byte allowance for each change envelope.
+	//
 	// A conservative fixed charge covers the Change envelope, ID, operation and
 	// slice/map references. Document images are charged at their exact canonical
 	// binary size below. This is a deterministic payload budget, not a promise
@@ -28,10 +38,10 @@ const (
 	changeDispatchEnvelopeBytes uint64 = 96
 )
 
-// changeDispatcher is the ordered boundary between an acknowledged database
-// commit and asynchronous consumers. In particular, it keeps direct Go change
-// watchers from making a database writer clone and enqueue one batch per
-// watcher. Reactive views retain their own bounded queue and resync contract.
+// changeDispatcher delivers committed changes to asynchronous consumers in order.
+//
+// Writers enqueue each batch once; reactive views and direct watchers then
+// receive it through their own bounded delivery paths.
 //
 // The dispatcher never makes a commit durable and never changes its token. A
 // full dispatcher queue is therefore a consumer failure, not a write failure:
@@ -59,6 +69,7 @@ type changeDispatcher struct {
 	testBeforeDispatch func()
 }
 
+// newChangeDispatcher creates a bounded queue for committed change batches.
 func newChangeDispatcher(db *DB) *changeDispatcher {
 	return &changeDispatcher{
 		db: db, maxBatches: maxPendingChangeDispatchBatches, maxChanges: maxPendingChangeDispatchChanges, maxBytes: maxPendingChangeDispatchBytes,
@@ -66,8 +77,7 @@ func newChangeDispatcher(db *DB) *changeDispatcher {
 	}
 }
 
-// enqueue transfers immutable ChangeBatch ownership from the commit path. It
-// is intentionally bounded and does no subscriber-specific work.
+// enqueue transfers an immutable committed batch into the bounded delivery queue.
 func (dispatcher *changeDispatcher) enqueue(batch ChangeBatch) {
 	if dispatcher == nil || len(batch.Changes) == 0 {
 		return
@@ -101,6 +111,7 @@ func (dispatcher *changeDispatcher) enqueue(batch ChangeBatch) {
 	dispatcher.changed = make(chan struct{})
 }
 
+// run delivers queued batches in order and handles queue overflow.
 func (dispatcher *changeDispatcher) run() {
 	defer close(dispatcher.stopped)
 	for {
@@ -139,11 +150,13 @@ func (dispatcher *changeDispatcher) run() {
 	}
 }
 
+// changeDispatcherStats records queued work and its configured limits.
 type changeDispatcherStats struct {
 	pendingBatches, pendingChanges, pendingBytes uint64
 	batchCapacity, changeCapacity, byteCapacity  uint64
 }
 
+// stats takes a synchronized snapshot of the dispatcher queue and its limits.
 func (dispatcher *changeDispatcher) stats() changeDispatcherStats {
 	if dispatcher == nil {
 		return changeDispatcherStats{}
@@ -156,8 +169,9 @@ func (dispatcher *changeDispatcher) stats() changeDispatcherStats {
 	}
 }
 
-// changeDispatchBaseBytes returns the non-document part of one retained change
-// image. It must stay fixed-cardinality: collection, changed-path and
+// changeDispatchBaseBytes measures retained change metadata without document images.
+//
+// It must stay fixed-cardinality: collection, changed-path and
 // index-definition text is charged by bytes, but no application value is used
 // as an observability label or retained outside the batch itself.
 func changeDispatchBaseBytes(change Change) (uint64, bool) {
@@ -194,8 +208,9 @@ func changeDispatchBaseBytes(change Change) (uint64, bool) {
 	return total + indexBytes, true
 }
 
-// changeBatchDispatchBytes is the total canonical payload retained while a
-// batch waits in the central dispatcher. Normal mutations reuse the image
+// changeBatchDispatchBytes measures the payload retained by a queued batch.
+//
+// Normal mutations reuse the image
 // sizes recorded during resource validation. The defensive fallback covers
 // internal catalog events and private test construction; an invalid or
 // unmeasurable image deliberately consumes the whole budget and takes the
@@ -229,6 +244,7 @@ func changeBatchDispatchBytes(batch ChangeBatch) uint64 {
 	return total
 }
 
+// dispatch sends a committed batch to reactive views and direct change watchers.
 func (dispatcher *changeDispatcher) dispatch(batch ChangeBatch) {
 	if dispatcher == nil || dispatcher.db == nil || len(batch.Changes) == 0 {
 		return
@@ -239,6 +255,7 @@ func (dispatcher *changeDispatcher) dispatch(batch ChangeBatch) {
 	dispatcher.db.deliverChangeWatchers(batch)
 }
 
+// handleOverflow closes direct watchers and rebuilds reactive views after changes are dropped.
 func (dispatcher *changeDispatcher) handleOverflow() {
 	if dispatcher == nil || dispatcher.db == nil {
 		return
@@ -255,6 +272,7 @@ func (dispatcher *changeDispatcher) handleOverflow() {
 	}
 }
 
+// close stops the dispatcher and waits for its delivery loop to exit.
 func (dispatcher *changeDispatcher) close() {
 	if dispatcher == nil {
 		return

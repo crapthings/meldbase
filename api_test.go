@@ -7,6 +7,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestPublicDatabaseAPI checks that the root package can insert and retrieve a document.
 func TestPublicDatabaseAPI(t *testing.T) {
 	database := meldbase.New()
 	t.Cleanup(func() { _ = database.Close() })

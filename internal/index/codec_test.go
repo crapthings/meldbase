@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestTreeNodeTopologyRoundTripsWithoutRebuild checks that an encoded tree preserves its entries and remains mutable after decoding.
 func TestTreeNodeTopologyRoundTripsWithoutRebuild(t *testing.T) {
 	tree := NewWithOrder(5)
 	for number := 0; number < 500; number++ {
@@ -34,6 +35,7 @@ func TestTreeNodeTopologyRoundTripsWithoutRebuild(t *testing.T) {
 	}
 }
 
+// TestTreeCodecRejectsCorruptTopology checks that decoding rejects a tree whose encoded topology was corrupted.
 func TestTreeCodecRejectsCorruptTopology(t *testing.T) {
 	tree := NewWithOrder(5)
 	for number := 0; number < 20; number++ {

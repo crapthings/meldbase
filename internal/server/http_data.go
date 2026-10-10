@@ -10,9 +10,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
-// insert, mutate, and query implement the generic data API. Their only
-// authorization surface is the server-owned policy types; they never accept a
-// client-selected workspace or projection.
+// insert stores an authorized input document and returns its permitted result fields.
 func (h *Handler) insert(w http.ResponseWriter, r *http.Request) {
 	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
@@ -83,6 +81,7 @@ func (h *Handler) insert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"version": 1, "document": json.RawMessage(raw)})
 }
 
+// mutate applies an authorized update or deletion and returns the affected-document counts.
 func (h *Handler) mutate(w http.ResponseWriter, r *http.Request) {
 	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
@@ -179,6 +178,7 @@ func (h *Handler) mutate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// query executes an authorized query and returns projected documents within the response byte limit.
 func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
 	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
@@ -258,7 +258,9 @@ func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "documents": encoded})
 }
 
-// count returns a policy-capped lower bound. It deliberately reuses the
+// count returns a policy-capped lower bound.
+//
+// It deliberately reuses the
 // regular query authorization path: a count must never reveal rows a caller
 // could not query, nor bypass a publication's result budget.
 func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
@@ -321,10 +323,7 @@ func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "count": count, "capped": count == policy.MaxResults})
 }
 
-// groupCount is a deliberately narrow aggregate: one permitted top-level
-// field and a count per distinct value. It shares query policy and result
-// budgets with document reads, so dashboard summaries cannot become a data
-// exfiltration side channel.
+// groupCount counts distinct values of one permitted top-level field within query and response limits.
 func (h *Handler) groupCount(w http.ResponseWriter, r *http.Request) {
 	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {
@@ -449,6 +448,7 @@ func (h *Handler) groupCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "groups": result, "capped": examined == policy.MaxResults})
 }
 
+// authorizeQuery validates the base query policy and intersects any additional resolved policy.
 func (h *Handler) authorizeQuery(ctx context.Context, actor Actor, collection string, query meldbase.QuerySpec) (QueryPolicy, error) {
 	base, err := h.config.Authorizer.AuthorizeQuery(ctx, actor, collection, query)
 	if err != nil {
@@ -474,6 +474,7 @@ func (h *Handler) authorizeQuery(ctx context.Context, actor Actor, collection st
 	return intersectQueryPolicies(base, freezeQueryPolicy(additional))
 }
 
+// issueTicket returns a one-use realtime connection ticket for the authenticated actor.
 func (h *Handler) issueTicket(w http.ResponseWriter, r *http.Request) {
 	actor, err := h.config.Authenticator.AuthenticateHTTP(r)
 	if err != nil {

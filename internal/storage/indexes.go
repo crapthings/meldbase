@@ -11,23 +11,35 @@ import (
 )
 
 const (
-	indexMetaHeaderBytes       = 64
-	indexKeyCodec              = 2
-	indexKeyCodecV3            = 3
-	maxIndexFields             = 4
-	maxIndexFieldBytes         = 1024
+	// indexMetaHeaderBytes is the byte size of a stored index definition header.
+	indexMetaHeaderBytes = 64
+	// indexKeyCodec identifies the ascending single-field index key format.
+	indexKeyCodec = 2
+	// indexKeyCodecV3 identifies the compound and descending index key format.
+	indexKeyCodecV3 = 3
+	// maxIndexFields bounds the number of ordered fields in one index.
+	maxIndexFields = 4
+	// maxIndexFieldBytes bounds the encoded byte length of an index field path.
+	maxIndexFieldBytes = 1024
+	// MaxSecondaryScalarKeyBytes bounds index value bytes before the position and document ID suffix.
 	MaxSecondaryScalarKeyBytes = 4096 - 24
 )
 
+// indexMetaMagic identifies encoded index catalog records.
 var indexMetaMagic = [8]byte{'M', 'E', 'L', 'D', 'I', 'D', 'X', '2'}
 
 var (
-	ErrIndexExists      = errors.New("meldbase storage: index name exists")
-	ErrIndexNotFound    = errors.New("meldbase storage: index name not found")
-	ErrUniqueConflict   = errors.New("meldbase storage: unique index conflict")
+	// ErrIndexExists reports an attempt to create an existing index name.
+	ErrIndexExists = errors.New("meldbase storage: index name exists")
+	// ErrIndexNotFound reports a missing index name.
+	ErrIndexNotFound = errors.New("meldbase storage: index name not found")
+	// ErrUniqueConflict reports duplicate values in a unique index.
+	ErrUniqueConflict = errors.New("meldbase storage: unique index conflict")
+	// ErrIndexKeyTooLarge reports an index value exceeding the stored key size limit.
 	ErrIndexKeyTooLarge = errors.New("meldbase storage: index key is too large")
 )
 
+// IndexMeta records an index definition, stored tree root, and commit versions.
 type IndexMeta struct {
 	Name            string
 	FieldPath       string
@@ -40,19 +52,22 @@ type IndexMeta struct {
 	KeyCodecVersion uint16
 }
 
-// IndexField is one ordered component of a Secondary key. FieldPath on the
-// surrounding metadata remains a compatibility mirror of Fields[0].Path.
+// IndexField describes a field path and its sort direction in an index key.
+//
+// FieldPath on the surrounding metadata mirrors Fields[0].Path for compatibility.
 type IndexField struct {
 	Path      string
 	Direction int8
 }
 
+// IndexEntry links an encoded index value to a document and its insertion position.
 type IndexEntry struct {
 	Key               []byte
 	InsertionPosition uint64
 	DocumentID        [16]byte
 }
 
+// CreateIndexTransaction describes an index to create or replace with supplied entries.
 type CreateIndexTransaction struct {
 	TransactionID   [16]byte
 	CommittedAt     time.Time
@@ -67,6 +82,7 @@ type CreateIndexTransaction struct {
 	Entries []IndexEntry
 }
 
+// normalizeIndexFields validates and copies ordered fields, using the legacy field path when needed.
 func normalizeIndexFields(fieldPath string, fields []IndexField) ([]IndexField, bool) {
 	if len(fields) == 0 {
 		if !validIndexFieldPath(fieldPath) {
@@ -91,10 +107,12 @@ func normalizeIndexFields(fieldPath string, fields []IndexField) ([]IndexField, 
 	return result, true
 }
 
+// compoundIndexFields reports whether fields require the compound or descending key format.
 func compoundIndexFields(fields []IndexField) bool {
 	return len(fields) != 1 || fields[0].Direction != 1
 }
 
+// validateIndexMetaFeatures checks that the database declares the feature required by an index codec.
 func validateIndexMetaFeatures(required uint64, meta IndexMeta) error {
 	if meta.KeyCodecVersion == indexKeyCodecV3 && required&RequiredFeatureCompoundIndexes == 0 {
 		return ErrCorrupt
@@ -102,12 +120,14 @@ func validateIndexMetaFeatures(required uint64, meta IndexMeta) error {
 	return nil
 }
 
+// IndexMutation describes the old and new index values for one document.
 type IndexMutation struct {
 	Name      string
 	BeforeKey []byte
 	AfterKey  []byte
 }
 
+// loadCollectionIndexes opens the defined indexes for a collection write.
 func (tx *WriteTxn) loadCollectionIndexes(state *collectionWriteState) error {
 	if tx == nil || state == nil {
 		return ErrCorrupt
@@ -140,6 +160,7 @@ func (tx *WriteTxn) loadCollectionIndexes(state *collectionWriteState) error {
 	return nil
 }
 
+// prepareIndexMutations validates and copies a document change for every defined index.
 func prepareIndexMutations(state *collectionWriteState, mutation DocumentMutation, position uint64) ([]pendingIndexMutation, error) {
 	if state == nil || position == 0 || len(mutation.Indexes) != len(state.indexes) {
 		return nil, ErrCorrupt
@@ -182,6 +203,7 @@ func prepareIndexMutations(state *collectionWriteState, mutation DocumentMutatio
 	return result, nil
 }
 
+// applyIndexMutations replaces index entries while allowing unique values to swap within a batch.
 func applyIndexMutations(pending []pendingIndexMutation) error {
 	// Remove every old key first so one atomic batch can swap unique values.
 	for _, mutation := range pending {
@@ -249,6 +271,7 @@ func applyIndexMutations(pending []pendingIndexMutation) error {
 	return nil
 }
 
+// uniqueIndexConflict checks whether a stored entry already uses an index value.
 func uniqueIndexConflict(tree *MutableTree, scalarKey []byte) (bool, error) {
 	start := append(append([]byte(nil), scalarKey...), make([]byte, 24)...)
 	end := lexicographicPrefixEnd(scalarKey)
@@ -263,6 +286,7 @@ func uniqueIndexConflict(tree *MutableTree, scalarKey []byte) (bool, error) {
 	return bytes.Equal(key, scalarKey), nil
 }
 
+// lexicographicPrefixEnd returns the exclusive upper bound for a byte prefix, or nil if unbounded.
 func lexicographicPrefixEnd(prefix []byte) []byte {
 	end := append([]byte(nil), prefix...)
 	for index := len(end) - 1; index >= 0; index-- {
@@ -274,8 +298,10 @@ func lexicographicPrefixEnd(prefix []byte) []byte {
 	return nil
 }
 
+// validIndexName checks an index name against the collection name rules.
 func validIndexName(name string) bool { return validCollectionName(name) }
 
+// validIndexFieldPath checks field path length, UTF-8 validity, and the absence of zero bytes.
 func validIndexFieldPath(path string) bool {
 	if len(path) == 0 || len(path) > maxIndexFieldBytes || !utf8.ValidString(path) {
 		return false
@@ -288,123 +314,7 @@ func validIndexFieldPath(path string) bool {
 	return true
 }
 
-func encodeIndexMeta(meta IndexMeta) ([]byte, error) {
-	fields, valid := normalizeIndexFields(meta.FieldPath, meta.Fields)
-	if !valid || !validIndexName(meta.Name) || meta.Root < 2 || meta.CreatedSequence == 0 || meta.UpdatedSequence < meta.CreatedSequence {
-		return nil, ErrCorrupt
-	}
-	codec := meta.KeyCodecVersion
-	if codec == 0 {
-		if compoundIndexFields(fields) {
-			codec = indexKeyCodecV3
-		} else {
-			codec = indexKeyCodec
-		}
-	}
-	if (codec == indexKeyCodec && compoundIndexFields(fields)) || (codec != indexKeyCodec && codec != indexKeyCodecV3) {
-		return nil, ErrCorrupt
-	}
-	payload := []byte(nil)
-	if codec == indexKeyCodec {
-		payload = append(payload, fields[0].Path...)
-	} else {
-		for _, field := range fields {
-			payload = append(payload, byte(field.Direction), 0, 0)
-			binary.LittleEndian.PutUint16(payload[len(payload)-2:], uint16(len(field.Path)))
-			payload = append(payload, field.Path...)
-		}
-	}
-	if len(payload) == 0 || len(payload) > math.MaxUint16 {
-		return nil, ErrCorrupt
-	}
-	encoded := make([]byte, indexMetaHeaderBytes+len(payload))
-	copy(encoded[:8], indexMetaMagic[:])
-	binary.LittleEndian.PutUint16(encoded[8:10], FormatVersion)
-	binary.LittleEndian.PutUint16(encoded[10:12], indexMetaHeaderBytes)
-	if meta.Unique {
-		encoded[12] = 1
-	}
-	binary.LittleEndian.PutUint64(encoded[16:24], meta.Root)
-	binary.LittleEndian.PutUint64(encoded[24:32], meta.EntryCount)
-	binary.LittleEndian.PutUint64(encoded[32:40], meta.CreatedSequence)
-	binary.LittleEndian.PutUint64(encoded[40:48], meta.UpdatedSequence)
-	binary.LittleEndian.PutUint16(encoded[48:50], uint16(len(payload)))
-	binary.LittleEndian.PutUint16(encoded[50:52], codec)
-	if codec == indexKeyCodecV3 {
-		binary.LittleEndian.PutUint16(encoded[52:54], uint16(len(fields)))
-	}
-	copy(encoded[indexMetaHeaderBytes:], payload)
-	return encoded, nil
-}
-
-func decodeIndexMeta(name string, encoded []byte) (IndexMeta, error) {
-	if !validIndexName(name) || len(encoded) < indexMetaHeaderBytes || string(encoded[:8]) != string(indexMetaMagic[:]) ||
-		binary.LittleEndian.Uint16(encoded[8:10]) != FormatVersion || binary.LittleEndian.Uint16(encoded[10:12]) != indexMetaHeaderBytes ||
-		encoded[12] > 1 || !allZero(encoded[13:16]) {
-		return IndexMeta{}, ErrCorrupt
-	}
-	payloadLength := int(binary.LittleEndian.Uint16(encoded[48:50]))
-	codec := binary.LittleEndian.Uint16(encoded[50:52])
-	if payloadLength == 0 || len(encoded) != indexMetaHeaderBytes+payloadLength {
-		return IndexMeta{}, ErrCorrupt
-	}
-	meta := IndexMeta{
-		Name: name, Unique: encoded[12] == 1,
-		Root: binary.LittleEndian.Uint64(encoded[16:24]), EntryCount: binary.LittleEndian.Uint64(encoded[24:32]),
-		CreatedSequence: binary.LittleEndian.Uint64(encoded[32:40]), UpdatedSequence: binary.LittleEndian.Uint64(encoded[40:48]),
-		KeyCodecVersion: codec,
-	}
-	payload := encoded[indexMetaHeaderBytes:]
-	switch codec {
-	case indexKeyCodec:
-		if !allZero(encoded[52:64]) || payloadLength > maxIndexFieldBytes {
-			return IndexMeta{}, ErrCorrupt
-		}
-		meta.FieldPath = string(payload)
-		meta.Fields = []IndexField{{Path: meta.FieldPath, Direction: 1}}
-	case indexKeyCodecV3:
-		fieldCount := int(binary.LittleEndian.Uint16(encoded[52:54]))
-		if fieldCount == 0 || fieldCount > maxIndexFields || !allZero(encoded[54:64]) {
-			return IndexMeta{}, ErrCorrupt
-		}
-		meta.Fields = make([]IndexField, 0, fieldCount)
-		for offset := 0; offset < len(payload); {
-			if len(payload)-offset < 3 {
-				return IndexMeta{}, ErrCorrupt
-			}
-			direction := int8(payload[offset])
-			length := int(binary.LittleEndian.Uint16(payload[offset+1 : offset+3]))
-			offset += 3
-			if length == 0 || length > maxIndexFieldBytes || offset+length > len(payload) {
-				return IndexMeta{}, ErrCorrupt
-			}
-			meta.Fields = append(meta.Fields, IndexField{Path: string(payload[offset : offset+length]), Direction: direction})
-			offset += length
-		}
-		if len(meta.Fields) != fieldCount {
-			return IndexMeta{}, ErrCorrupt
-		}
-		meta.FieldPath = meta.Fields[0].Path
-	default:
-		return IndexMeta{}, ErrCorrupt
-	}
-	fields, valid := normalizeIndexFields(meta.FieldPath, meta.Fields)
-	if !valid || (codec == indexKeyCodec && compoundIndexFields(fields)) || meta.Root < 2 || meta.CreatedSequence == 0 ||
-		meta.UpdatedSequence < meta.CreatedSequence {
-		return IndexMeta{}, ErrCorrupt
-	}
-	meta.Fields = fields
-	return meta, nil
-}
-
-// DecodeIndexMeta decodes an immutable index catalog value carried in a
-// Commit Log catalog event. It is intentionally a narrow export: callers get
-// semantic index metadata, never an invitation to depend on the physical
-// catalog layout.
-func DecodeIndexMeta(name string, encoded []byte) (IndexMeta, error) {
-	return decodeIndexMeta(name, encoded)
-}
-
+// secondaryKey appends insertion position and document identity to an encoded index value.
 func secondaryKey(key []byte, position uint64, documentID [16]byte) ([]byte, error) {
 	if len(key) > MaxSecondaryScalarKeyBytes {
 		return nil, ErrIndexKeyTooLarge
@@ -419,6 +329,7 @@ func secondaryKey(key []byte, position uint64, documentID [16]byte) ([]byte, err
 	return result, nil
 }
 
+// secondaryKeyParts splits a stored index key into its value, position, and document identity.
 func secondaryKeyParts(encoded []byte) ([]byte, uint64, [16]byte, error) {
 	var id [16]byte
 	if len(encoded) <= len(id)+8 || len(encoded) > 4096 {
@@ -433,6 +344,7 @@ func secondaryKeyParts(encoded []byte) ([]byte, uint64, [16]byte, error) {
 	return encoded[:positionOffset], position, id, nil
 }
 
+// normalizeIndexEntries validates and sorts index entries while enforcing requested uniqueness.
 func normalizeIndexEntries(entries []IndexEntry, unique bool) ([]IndexEntry, error) {
 	seenDocuments := make(map[[16]byte]struct{}, len(entries))
 	for _, entry := range entries {
@@ -673,6 +585,7 @@ func (f *File) ApplyCreateIndex(transaction CreateIndexTransaction) (uint64, err
 	return sequence, err
 }
 
+// IndexMeta reads one index definition from the pinned database version.
 func (snapshot *ReadSnapshot) IndexMeta(collection, name string) (IndexMeta, bool, error) {
 	if snapshot == nil || !validCollectionName(collection) || !validIndexName(name) {
 		return IndexMeta{}, false, ErrCorrupt
@@ -709,6 +622,7 @@ func (snapshot *ReadSnapshot) IndexMeta(collection, name string) (IndexMeta, boo
 	return meta, true, nil
 }
 
+// Indexes lists the index definitions for a collection in the pinned database version.
 func (snapshot *ReadSnapshot) Indexes(collection string) ([]IndexMeta, error) {
 	if snapshot == nil || !validCollectionName(collection) {
 		return nil, ErrCorrupt
@@ -753,7 +667,9 @@ func (snapshot *ReadSnapshot) Indexes(collection string) ([]IndexMeta, error) {
 	return result, nil
 }
 
-// ScanIndex returns entries whose encoded scalar key is in [start, end). Nil
+// ScanIndex returns entries whose encoded scalar key is in [start, end).
+//
+// Nil
 // bounds are open. DocumentID remains an implicit deterministic key suffix.
 func (snapshot *ReadSnapshot) ScanIndex(collection, name string, start, end []byte, limit int) ([]IndexEntry, error) {
 	iterator, err := snapshot.OpenIndexIterator(collection, name, start, end, limit)
@@ -771,7 +687,9 @@ func (snapshot *ReadSnapshot) ScanIndex(collection, name string, start, end []by
 }
 
 // OpenIndexIterator creates a bounded-memory Secondary scan over encoded scalar
-// keys in [start, end). The iterator owns a snapshot pin independently.
+// keys in [start, end).
+//
+// The iterator owns a snapshot pin independently.
 func (snapshot *ReadSnapshot) OpenIndexIterator(collection, name string, start, end []byte, limit int) (*IndexIterator, error) {
 	if snapshot == nil || !validCollectionName(collection) || !validIndexName(name) ||
 		len(start) > MaxSecondaryScalarKeyBytes || len(end) > MaxSecondaryScalarKeyBytes ||
@@ -841,6 +759,7 @@ func (snapshot *ReadSnapshot) OpenIndexIterator(collection, name string, start, 
 	return iterator, nil
 }
 
+// Next advances to the next index entry within the requested bounds.
 func (iterator *IndexIterator) Next() bool {
 	if iterator == nil || iterator.closed || iterator.err != nil || iterator.tree == nil || iterator.tree.done {
 		return false
@@ -877,6 +796,7 @@ func (iterator *IndexIterator) Next() bool {
 	return true
 }
 
+// Entry returns the current decoded index entry.
 func (iterator *IndexIterator) Entry() IndexEntry {
 	if iterator == nil {
 		return IndexEntry{}
@@ -884,6 +804,7 @@ func (iterator *IndexIterator) Entry() IndexEntry {
 	return iterator.entry
 }
 
+// Err returns the index iterator failure.
 func (iterator *IndexIterator) Err() error {
 	if iterator == nil {
 		return ErrCorrupt
@@ -891,6 +812,7 @@ func (iterator *IndexIterator) Err() error {
 	return iterator.err
 }
 
+// Close releases the index iterator and its snapshot pin.
 func (iterator *IndexIterator) Close() error {
 	if iterator == nil || iterator.closed {
 		return nil
@@ -904,6 +826,7 @@ func (iterator *IndexIterator) Close() error {
 	return nil
 }
 
+// releasePin removes the iterator's reader pin from the file.
 func (iterator *IndexIterator) releasePin() {
 	if iterator == nil || iterator.file == nil || iterator.pinID == 0 {
 		return

@@ -9,15 +9,18 @@ import (
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
+// PolicyGenerationStore reads a collection's persisted policy generation.
 type PolicyGenerationStore interface {
 	LoadPolicyGeneration(context.Context, string) ([16]byte, bool, error)
 }
 
+// DurablePolicyGenerationStore reads policy generations from database system records.
 type DurablePolicyGenerationStore struct {
 	backend systemrecord.Backend
 	db      *meldbase.DB
 }
 
+// NewDurablePolicyGenerationStore creates a policy generation reader backed by an open database.
 func NewDurablePolicyGenerationStore(db *meldbase.DB) (*DurablePolicyGenerationStore, error) {
 	if db == nil {
 		return nil, errors.New("meldbase server: policy generation database is required")
@@ -29,6 +32,7 @@ func NewDurablePolicyGenerationStore(db *meldbase.DB) (*DurablePolicyGenerationS
 	return &DurablePolicyGenerationStore{backend: backend, db: db}, nil
 }
 
+// LoadPolicyGeneration reads and validates the system record for a collection's policy generation.
 func (store *DurablePolicyGenerationStore) LoadPolicyGeneration(ctx context.Context, collection string) ([16]byte, bool, error) {
 	var zero [16]byte
 	if store == nil || store.backend == nil || ctx == nil {

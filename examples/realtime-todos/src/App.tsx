@@ -3,18 +3,25 @@ import { MeldbaseClient } from "@meldbase/client";
 import type { Document } from "@meldbase/client/types";
 import { useLiveQuery } from "@meldbase/react";
 
+/** Describes a task with its completion state and creation time. */
 interface Todo extends Document {
   readonly title: string;
   readonly completed: boolean;
   readonly createdAt: Date;
 }
 
+/** Selects the server address for the task example. */
 const baseUrl = import.meta.env.VITE_MELDBASE_URL ?? "http://localhost:8080";
+/** Reads the optional access token for the task example. */
 const accessToken = import.meta.env.VITE_MELDBASE_TOKEN;
+/** Connects the task example to the server with optional authentication. */
 const client = new MeldbaseClient({ baseUrl, ...(accessToken ? { accessToken } : {}) });
+/** Provides access to task documents on the server. */
 const todos = client.collection<Todo>("todos");
+/** Selects unfinished tasks in creation order. */
 const openTodos = todos.find({ completed: false }, { sort: [{ path: "createdAt", direction: 1 }] });
 
+/** Displays a live task list with controls to add, complete, and delete tasks. */
 export function App() {
   const { documents, status, error } = useLiveQuery(openTodos);
   const [title, setTitle] = useState("");
@@ -181,6 +188,7 @@ export function App() {
   );
 }
 
+/** Turns a live query state into a readable connection message. */
 function statusLabel(status: string): string {
   switch (status) {
     case "live":
@@ -198,10 +206,12 @@ function statusLabel(status: string): string {
   }
 }
 
+/** Formats a task creation time using the browser locale. */
 function formatTime(value: Date): string {
   return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(value);
 }
 
+/** Converts a caught value into an error for display. */
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }

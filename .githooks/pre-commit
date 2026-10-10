@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+# Lists staged SDK files that need formatting before commit.
 files=$(git diff --cached --name-only --diff-filter=ACMR -- \
   'sdk/**/*.ts' 'sdk/**/*.tsx' 'sdk/**/*.md' 'sdk/**/*.json' || true)
 

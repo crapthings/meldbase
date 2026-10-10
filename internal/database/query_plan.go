@@ -7,13 +7,16 @@ import (
 )
 
 const (
+	// primaryAccessScore ranks direct document ID lookups above secondary scans.
 	primaryAccessScore = 1 << 20
-	emptyAccessScore   = 1 << 21
+	// emptyAccessScore ranks proven empty plans above plans that need reads.
+	emptyAccessScore = 1 << 21
 )
 
-// queryAccessPlan is a storage-independent candidate admission plan. Every
-// source is a complete candidate source for one disjunct; the executor always
-// rechecks the full predicate after the sources have been unioned.
+// queryAccessPlan describes the candidate sources and ranking for a query.
+//
+// Each source covers its logical branch; execution rechecks the full predicate
+// after combining candidates.
 type queryAccessPlan struct {
 	usable         bool
 	empty          bool
@@ -30,6 +33,7 @@ type queryAccessPlan struct {
 	compoundIndexOpportunity bool
 }
 
+// queryPlanSource describes document IDs or index intervals that produce query candidates.
 type queryPlanSource struct {
 	primary    bool
 	definition IndexDefinition
@@ -38,6 +42,7 @@ type queryPlanSource struct {
 	bounds     []ExplainBound
 }
 
+// selectQueryAccessPlan chooses a deterministic candidate plan and explains any collection-scan fallback.
 func selectQueryAccessPlan(expression expr, definitions []IndexDefinition, query QuerySpec) queryAccessPlan {
 	cloned := make([]IndexDefinition, len(definitions))
 	for index := range definitions {
@@ -51,6 +56,7 @@ func selectQueryAccessPlan(expression expr, definitions []IndexDefinition, query
 	return selected
 }
 
+// bestQueryAccessPlan chooses a candidate plan across direct predicates and logical branches.
 func bestQueryAccessPlan(expression expr, definitions []IndexDefinition, query QuerySpec) queryAccessPlan {
 	best := directQueryAccessPlan(expression, definitions, query)
 	logical, ok := expression.(logicalExpr)
@@ -98,6 +104,7 @@ func bestQueryAccessPlan(expression expr, definitions []IndexDefinition, query Q
 	return best
 }
 
+// directQueryAccessPlan chooses the best direct ID lookup or secondary index plan.
 func directQueryAccessPlan(expression expr, definitions []IndexDefinition, query QuerySpec) queryAccessPlan {
 	best := primaryQueryAccessPlan(expression)
 	for _, definition := range definitions {
@@ -106,6 +113,7 @@ func directQueryAccessPlan(expression expr, definitions []IndexDefinition, query
 	return best
 }
 
+// primaryQueryAccessPlan builds an ID lookup plan from allowed _id values.
 func primaryQueryAccessPlan(expression expr) queryAccessPlan {
 	values, ok := indexValuesCandidate(expression, "_id")
 	if !ok {
@@ -130,6 +138,7 @@ func primaryQueryAccessPlan(expression expr) queryAccessPlan {
 	}
 }
 
+// indexQueryAccessPlan derives candidate scan intervals for one secondary index.
 func indexQueryAccessPlan(expression expr, definition IndexDefinition, query QuerySpec) queryAccessPlan {
 	if usesCompoundIndexCodec(definition) {
 		score := indexQueryScore(definition, expression)
@@ -196,6 +205,7 @@ func indexQueryAccessPlan(expression expr, definition IndexDefinition, query Que
 	return plan
 }
 
+// normalizedSingleSourcePlan builds a single-source plan with emptiness and sort compatibility flags.
 func normalizedSingleSourcePlan(source queryPlanSource, score int, query QuerySpec) queryAccessPlan {
 	plan := queryAccessPlan{
 		usable:  true,
@@ -210,6 +220,7 @@ func normalizedSingleSourcePlan(source queryPlanSource, score int, query QuerySp
 	return plan
 }
 
+// normalizeQueryAccessPlan merges candidate sources by index and removes redundant IDs and intervals.
 func normalizeQueryAccessPlan(plan queryAccessPlan, query QuerySpec) queryAccessPlan {
 	if !plan.usable {
 		return queryAccessPlan{}
@@ -267,6 +278,7 @@ func normalizeQueryAccessPlan(plan queryAccessPlan, query QuerySpec) queryAccess
 	return plan
 }
 
+// directPlanFullyCoversOr reports whether a direct plan can safely replace separate OR branch planning.
 func directPlanFullyCoversOr(plan queryAccessPlan, definitions []IndexDefinition) bool {
 	if !plan.usable || plan.empty || len(plan.sources) != 1 {
 		return plan.usable && plan.empty
@@ -294,6 +306,7 @@ func directPlanFullyCoversOr(plan queryAccessPlan, definitions []IndexDefinition
 	return true
 }
 
+// betterQueryAccessPlan compares candidate plans by score, sort compatibility, work, and deterministic ties.
 func betterQueryAccessPlan(current, candidate queryAccessPlan) queryAccessPlan {
 	if !candidate.usable {
 		return current
@@ -338,6 +351,7 @@ func betterQueryAccessPlan(current, candidate queryAccessPlan) queryAccessPlan {
 	return current
 }
 
+// queryPlanHasNoCandidates reports whether every plan source has no IDs or scan intervals.
 func queryPlanHasNoCandidates(plan queryAccessPlan) bool {
 	if len(plan.sources) == 0 {
 		return true
@@ -350,6 +364,7 @@ func queryPlanHasNoCandidates(plan queryAccessPlan) bool {
 	return true
 }
 
+// queryPlanWork counts planned ID lookups and scan intervals for tie-breaking.
 func queryPlanWork(plan queryAccessPlan) int {
 	work := 0
 	for _, source := range plan.sources {
@@ -358,6 +373,7 @@ func queryPlanWork(plan queryAccessPlan) int {
 	return work
 }
 
+// queryPlanSignature joins source names to break otherwise equal plan ties deterministically.
 func queryPlanSignature(plan queryAccessPlan) string {
 	parts := make([]string, 0, len(plan.sources))
 	for _, source := range plan.sources {
@@ -366,11 +382,10 @@ func queryPlanSignature(plan queryAccessPlan) string {
 	return strings.Join(parts, "\x00")
 }
 
-// annotateQueryAccessPlan records a narrow structural fact for detailed
-// Explain: multiple distinct AND predicates each have a usable index path, but
-// the selected non-unique source does not constrain all of them. It does not
-// build or cost an intersection; observed residual amplification determines
-// later whether Explain emits compound-index advice.
+// annotateQueryAccessPlan records opportunities for a compound index in detailed diagnostics.
+//
+// It detects independently indexed AND predicates left unconstrained by the
+// selected non-unique source, without planning an index intersection.
 func annotateQueryAccessPlan(plan *queryAccessPlan, expression expr, definitions []IndexDefinition, query QuerySpec) {
 	if plan == nil || !plan.usable || plan.empty {
 		return
@@ -396,6 +411,7 @@ func annotateQueryAccessPlan(plan *queryAccessPlan, expression expr, definitions
 	}
 }
 
+// independentlyIndexableConjunctPaths lists AND predicate paths that each have a usable index plan.
 func independentlyIndexableConjunctPaths(expression expr, definitions []IndexDefinition, query QuerySpec) []string {
 	conjuncts := make([]expr, 0)
 	flattenConjuncts(expression, &conjuncts)
@@ -419,6 +435,7 @@ func independentlyIndexableConjunctPaths(expression expr, definitions []IndexDef
 	return result
 }
 
+// flattenConjuncts collects nested AND conditions as a flat list.
 func flattenConjuncts(expression expr, result *[]expr) {
 	if logical, ok := expression.(logicalExpr); ok && logical.op == "and" {
 		for _, child := range logical.args {
@@ -429,6 +446,7 @@ func flattenConjuncts(expression expr, result *[]expr) {
 	*result = append(*result, expression)
 }
 
+// directIndexablePredicatePath returns the field path of a supported equality, range, or membership predicate.
 func directIndexablePredicatePath(expression expr) (string, bool) {
 	switch value := expression.(type) {
 	case compareExpr:
@@ -444,6 +462,7 @@ func directIndexablePredicatePath(expression expr) (string, bool) {
 	return "", false
 }
 
+// selectedSourceConstrainedPaths lists leading index fields constrained by the selected source.
 func selectedSourceConstrainedPaths(source queryPlanSource, expression expr) map[string]struct{} {
 	result := make(map[string]struct{})
 	if source.primary {
@@ -466,6 +485,7 @@ func selectedSourceConstrainedPaths(source queryPlanSource, expression expr) map
 	return result
 }
 
+// classifyQueryPlanFallback identifies why no index plan applies and which useful leading index fields are missing.
 func classifyQueryPlanFallback(expression expr, definitions []IndexDefinition, query QuerySpec) (string, []string) {
 	if _, unfiltered := expression.(trueExpr); unfiltered {
 		return "unfiltered", nil
@@ -480,6 +500,7 @@ func classifyQueryPlanFallback(expression expr, definitions []IndexDefinition, q
 	return "no_usable_index", paths
 }
 
+// unindexedOrBranchPaths finds the first OR expression with a branch that lacks a usable candidate plan.
 func unindexedOrBranchPaths(expression expr, definitions []IndexDefinition, query QuerySpec) ([]string, bool) {
 	logical, ok := expression.(logicalExpr)
 	if !ok {
@@ -507,12 +528,14 @@ func unindexedOrBranchPaths(expression expr, definitions []IndexDefinition, quer
 	return nil, false
 }
 
+// missingPotentialIndexPaths lists potentially useful query fields without a leading index component.
 func missingPotentialIndexPaths(expression expr, definitions []IndexDefinition) []string {
 	paths := map[string]struct{}{}
 	collectPotentialIndexPaths(expression, paths, false)
 	return filterMissingLeadingIndexPaths(paths, definitions)
 }
 
+// collectPotentialIndexPaths collects non-negated secondary fields used by supported index predicates.
 func collectPotentialIndexPaths(expression expr, paths map[string]struct{}, negated bool) {
 	switch value := expression.(type) {
 	case logicalExpr:
@@ -533,6 +556,7 @@ func collectPotentialIndexPaths(expression expr, paths map[string]struct{}, nega
 	}
 }
 
+// filterMissingLeadingIndexPaths removes indexed leading fields and returns the remaining paths in sorted order.
 func filterMissingLeadingIndexPaths(paths map[string]struct{}, definitions []IndexDefinition) []string {
 	for _, definition := range definitions {
 		fields := indexDefinitionFields(definition)
@@ -548,89 +572,7 @@ func filterMissingLeadingIndexPaths(paths map[string]struct{}, definitions []Ind
 	return result
 }
 
-func explainQueryAccessPlan(plan queryAccessPlan, query QuerySpec, detailed bool) ExplainResult {
-	if !plan.usable {
-		return explainCollectionPlan(query, plan)
-	}
-	names := make([]string, 0, len(plan.sources))
-	bounds := make([]ExplainBound, 0, len(plan.sources))
-	onlyPrimary := len(plan.sources) > 0
-	for _, source := range plan.sources {
-		names = append(names, source.definition.Name)
-		bounds = append(bounds, cloneExplainBounds(source.bounds)...)
-		if !source.primary {
-			onlyPrimary = false
-		}
-	}
-	sort.Strings(names)
-	names = compactStrings(names)
-	stage := "IXSCAN"
-	if onlyPrimary {
-		stage = "ID_LOOKUP"
-	}
-	explain := ExplainResult{
-		Stage:                    stage,
-		IndexNames:               append([]string(nil), names...),
-		Bounds:                   coalesceExplainBounds(bounds),
-		ResidualPredicate:        true,
-		SortRequired:             len(query.sort) > 0,
-		SortIndexCompatible:      plan.sortCompatible,
-		PlanReason:               queryAccessPlanReason(plan),
-		IndexableConjunctPaths:   append([]string(nil), plan.indexableConjunctPaths...),
-		CompoundIndexOpportunity: plan.compoundIndexOpportunity,
-	}
-	if detailed {
-		explain.Sources = explainAccessSources(plan)
-	}
-	if len(names) == 1 {
-		explain.IndexName = names[0]
-	}
-	return explain
-}
-
-func queryAccessPlanReason(plan queryAccessPlan) string {
-	if plan.empty {
-		return "empty_index_result"
-	}
-	if len(plan.sources) > 1 {
-		return "multi_index_union"
-	}
-	if len(plan.sources) == 0 {
-		return "empty_index_result"
-	}
-	source := plan.sources[0]
-	if source.primary {
-		if len(source.ids) > 1 {
-			return "primary_union"
-		}
-		return "primary_lookup"
-	}
-	if len(source.spans) > 1 {
-		return "index_union"
-	}
-	return "secondary_index"
-}
-
-func explainAccessSources(plan queryAccessPlan) []ExplainAccessSource {
-	sources := make([]ExplainAccessSource, len(plan.sources))
-	for index, source := range plan.sources {
-		exact := 0
-		for _, span := range source.spans {
-			if span.exact {
-				exact++
-			}
-		}
-		sources[index] = ExplainAccessSource{
-			IndexName:  source.definition.Name,
-			Primary:    source.primary,
-			Bounds:     cloneExplainBounds(source.bounds),
-			Spans:      len(source.spans) + len(source.ids),
-			ExactSpans: exact + len(source.ids),
-		}
-	}
-	return sources
-}
-
+// compactStrings removes adjacent duplicates from a string slice in place.
 func compactStrings(values []string) []string {
 	if len(values) < 2 {
 		return values
@@ -644,6 +586,7 @@ func compactStrings(values []string) []string {
 	return result
 }
 
+// normalizeIndexScanSpans sorts scan intervals and merges duplicate or overlapping ranges.
 func normalizeIndexScanSpans(spans []indexScanSpan) []indexScanSpan {
 	if len(spans) == 0 {
 		return nil
@@ -677,6 +620,7 @@ func normalizeIndexScanSpans(spans []indexScanSpan) []indexScanSpan {
 	return result
 }
 
+// compareLowerBounds compares lower bounds with an empty bound treated as negative infinity.
 func compareLowerBounds(left, right []byte) int {
 	if len(left) == 0 {
 		if len(right) == 0 {
@@ -690,6 +634,7 @@ func compareLowerBounds(left, right []byte) int {
 	return bytes.Compare(left, right)
 }
 
+// compareUpperBounds compares upper bounds with an empty bound treated as positive infinity.
 func compareUpperBounds(left, right []byte) int {
 	if len(left) == 0 {
 		if len(right) == 0 {
@@ -703,6 +648,7 @@ func compareUpperBounds(left, right []byte) int {
 	return bytes.Compare(left, right)
 }
 
+// chooseAccessScore assigns the empty-result score or keeps the supplied score.
 func chooseAccessScore(empty bool, score int) int {
 	if empty {
 		return emptyAccessScore
@@ -710,83 +656,7 @@ func chooseAccessScore(empty bool, score int) int {
 	return score
 }
 
-func explainRangeBound(path string, lower, upper *indexBound) ExplainBound {
-	bound := ExplainBound{Path: path}
-	if lower != nil {
-		value := lower.value.Clone()
-		bound.Lower, bound.LowerInclusive = &value, lower.inclusive
-	}
-	if upper != nil {
-		value := upper.value.Clone()
-		bound.Upper, bound.UpperInclusive = &value, upper.inclusive
-	}
-	return bound
-}
-
-func cloneExplainValues(values []Value) []Value {
-	result := make([]Value, len(values))
-	for index := range values {
-		result[index] = values[index].Clone()
-	}
-	return result
-}
-
-func cloneExplainBounds(bounds []ExplainBound) []ExplainBound {
-	result := make([]ExplainBound, len(bounds))
-	for index, bound := range bounds {
-		result[index] = ExplainBound{
-			Path:           bound.Path,
-			Values:         cloneExplainValues(bound.Values),
-			LowerInclusive: bound.LowerInclusive,
-			UpperInclusive: bound.UpperInclusive,
-		}
-		if bound.Lower != nil {
-			value := bound.Lower.Clone()
-			result[index].Lower = &value
-		}
-		if bound.Upper != nil {
-			value := bound.Upper.Clone()
-			result[index].Upper = &value
-		}
-	}
-	return result
-}
-
-func coalesceExplainBounds(bounds []ExplainBound) []ExplainBound {
-	if len(bounds) < 2 {
-		return cloneExplainBounds(bounds)
-	}
-	result := make([]ExplainBound, 0, len(bounds))
-	valueBounds := map[string]int{}
-	valueKeys := map[string]map[string]struct{}{}
-	for _, bound := range bounds {
-		if bound.Lower != nil || bound.Upper != nil || len(bound.Values) == 0 {
-			result = append(result, cloneExplainBounds([]ExplainBound{bound})[0])
-			continue
-		}
-		position, exists := valueBounds[bound.Path]
-		if !exists {
-			position = len(result)
-			valueBounds[bound.Path] = position
-			valueKeys[bound.Path] = map[string]struct{}{}
-			result = append(result, ExplainBound{Path: bound.Path})
-		}
-		for _, value := range bound.Values {
-			key, err := encodeIndexKey(value)
-			if err != nil {
-				continue
-			}
-			canonical := string(key)
-			if _, duplicate := valueKeys[bound.Path][canonical]; duplicate {
-				continue
-			}
-			valueKeys[bound.Path][canonical] = struct{}{}
-			result[position].Values = append(result[position].Values, value.Clone())
-		}
-	}
-	return result
-}
-
+// cloneBytes copies a byte slice.
 func cloneBytes(value []byte) []byte {
 	return append([]byte(nil), value...)
 }

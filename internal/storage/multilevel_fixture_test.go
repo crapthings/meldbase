@@ -18,8 +18,10 @@ import (
 	"time"
 )
 
+// multilevelFixtureDatabaseID gives the multilevel database fixture a fixed identity.
 var multilevelFixtureDatabaseID = [16]byte{0x6d, 0x65, 0x6c, 0x64, 0x62, 0x61, 0x73, 0x65, 0x2d, 0x6d, 0x75, 0x6c, 0x74, 0x69, 0x2d, 0x31}
 
+// multilevelGoldenFixture stores database metadata, checksums, and compressed file chunks.
 type multilevelGoldenFixture struct {
 	FormatRevision     uint16   `json:"formatRevision"`
 	DatabaseIDHex      string   `json:"databaseIdHex"`
@@ -31,6 +33,7 @@ type multilevelGoldenFixture struct {
 	GzipBase64Chunks   []string `json:"gzipBase64Chunks"`
 }
 
+// TestBuildDeterministicMultilevelRevision3Graph checks that the generated database covers all branch page types and passes storage audits.
 func TestBuildDeterministicMultilevelRevision3Graph(t *testing.T) {
 	raw, meta := buildDeterministicMultilevelFixture(t)
 	if meta.DatabaseID != multilevelFixtureDatabaseID || meta.CommitSequence != 1 || len(raw)%PageSize != 0 {
@@ -75,6 +78,7 @@ func TestBuildDeterministicMultilevelRevision3Graph(t *testing.T) {
 	}
 }
 
+// TestMultilevelRevision3GoldenFixtureOpensAuditsAndAdvances checks that the saved database supports verified updates and historical reads after reopening.
 func TestMultilevelRevision3GoldenFixtureOpensAuditsAndAdvances(t *testing.T) {
 	fixture := loadMultilevelGoldenFixture(t)
 	raw := decodeMultilevelGoldenFixture(t, fixture)
@@ -136,6 +140,7 @@ func TestMultilevelRevision3GoldenFixtureOpensAuditsAndAdvances(t *testing.T) {
 	}
 }
 
+// multilevelFixtureIndexAudit derives the expected index key from a numbered fixture document.
 func multilevelFixtureIndexAudit(meta IndexMeta, _ [16]byte, document []byte) ([]byte, bool, error) {
 	if meta.Name != "by_value" {
 		return nil, false, ErrCorrupt
@@ -147,6 +152,7 @@ func multilevelFixtureIndexAudit(meta IndexMeta, _ [16]byte, document []byte) ([
 	return []byte(fmt.Sprintf("value-%04d", ordinal)), true, nil
 }
 
+// TestMultilevelRevision3WriterMatchesGoldenFixture checks that current writes reproduce the saved metadata and compressed file chunks.
 func TestMultilevelRevision3WriterMatchesGoldenFixture(t *testing.T) {
 	want := loadMultilevelGoldenFixture(t)
 	raw, meta := buildDeterministicMultilevelFixture(t)
@@ -161,6 +167,7 @@ func TestMultilevelRevision3WriterMatchesGoldenFixture(t *testing.T) {
 	}
 }
 
+// assertMultilevelFixture checks the multilevel database trees, stored records, index builds, and reusable pages.
 func assertMultilevelFixture(t *testing.T, file *File) {
 	t.Helper()
 	root, err := file.DatabaseRoot()
@@ -235,6 +242,7 @@ func assertMultilevelFixture(t *testing.T, file *File) {
 	}
 }
 
+// assertFixtureBranchRoot checks that a tree root points to a branch page of the expected type.
 func assertFixtureBranchRoot(t *testing.T, file *File, name string, root uint64, kind TreeKind) {
 	t.Helper()
 	raw := make([]byte, PageSize)
@@ -251,6 +259,7 @@ func assertFixtureBranchRoot(t *testing.T, file *File, name string, root uint64,
 	}
 }
 
+// buildDeterministicMultilevelFixture creates a fixed database containing branch pages for every stored tree kind.
 func buildDeterministicMultilevelFixture(t *testing.T) ([]byte, Meta) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "build-multilevel-revision-3.meld2")
@@ -510,6 +519,7 @@ func buildDeterministicMultilevelFixture(t *testing.T) ([]byte, Meta) {
 	return raw, meta
 }
 
+// buildFixtureTree writes sorted fixture entries into a new tree and returns its root.
 func buildFixtureTree(tx *WriteTxn, kind TreeKind, entries []KeyValue) (uint64, error) {
 	builder, err := tx.NewSortedTreeBuilder(kind)
 	if err != nil {
@@ -523,12 +533,14 @@ func buildFixtureTree(tx *WriteTxn, kind TreeKind, entries []KeyValue) (uint64, 
 	return builder.Finish()
 }
 
+// multilevelFixtureDocumentID encodes a document ordinal into a fixed-width identifier.
 func multilevelFixtureDocumentID(ordinal int) [16]byte {
 	var id [16]byte
 	binary.BigEndian.PutUint64(id[8:], uint64(ordinal))
 	return id
 }
 
+// TestGenerateMultilevelRevision3Fixture prints the multilevel database fixture when generation is explicitly enabled.
 func TestGenerateMultilevelRevision3Fixture(t *testing.T) {
 	if os.Getenv("MELDBASE_GENERATE_MULTILEVEL_FIXTURE") != "1" {
 		t.Skip("fixture generation is an explicit maintainer action")
@@ -542,6 +554,7 @@ func TestGenerateMultilevelRevision3Fixture(t *testing.T) {
 	fmt.Println(string(encoded))
 }
 
+// makeMultilevelGoldenFixture packages database bytes as compressed chunks with metadata and checksums.
 func makeMultilevelGoldenFixture(t *testing.T, raw []byte, meta Meta) multilevelGoldenFixture {
 	t.Helper()
 	var compressed bytes.Buffer
@@ -567,6 +580,7 @@ func makeMultilevelGoldenFixture(t *testing.T, raw []byte, meta Meta) multilevel
 	}
 }
 
+// decodeMultilevelGoldenFixture decompresses the saved file chunks and verifies their size and checksums.
 func decodeMultilevelGoldenFixture(t *testing.T, fixture multilevelGoldenFixture) []byte {
 	t.Helper()
 	if fixture.FormatRevision != FormatVersion || len(fixture.GzipBase64Chunks) == 0 {
@@ -590,6 +604,7 @@ func decodeMultilevelGoldenFixture(t *testing.T, fixture multilevelGoldenFixture
 	return raw
 }
 
+// loadMultilevelGoldenFixture reads the saved multilevel database fixture from its JSON file.
 func loadMultilevelGoldenFixture(t *testing.T) multilevelGoldenFixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "multilevel-business-revision-3.json"))

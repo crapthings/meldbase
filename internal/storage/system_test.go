@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestSystemRecordsCompareAndSwapPersistOutsideUserCatalog checks conditional system-record updates, persistence, and exclusion from the user collection catalog.
 func TestSystemRecordsCompareAndSwapPersistOutsideUserCatalog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "system.meld2")
 	file, _, err := Open(path)
@@ -85,6 +86,7 @@ func TestSystemRecordsCompareAndSwapPersistOutsideUserCatalog(t *testing.T) {
 	}
 }
 
+// TestDocumentAndSystemRecordPublishInOneAtomicGeneration checks that document and system-record changes commit together or all remain unchanged on a condition mismatch.
 func TestDocumentAndSystemRecordPublishInOneAtomicGeneration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "document-system.meld2")
 	file, _, err := Open(path)
@@ -164,6 +166,7 @@ func TestDocumentAndSystemRecordPublishInOneAtomicGeneration(t *testing.T) {
 	}
 }
 
+// TestSystemRecordValidationRejectsAmbiguousMutations checks that incomplete, conflicting, and oversized system-record mutations are rejected.
 func TestSystemRecordValidationRejectsAmbiguousMutations(t *testing.T) {
 	file, _, err := Open(filepath.Join(t.TempDir(), "invalid-system.meld2"))
 	if err != nil {

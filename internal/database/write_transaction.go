@@ -11,9 +11,9 @@ import (
 	"github.com/crapthings/meldbase/internal/systemrecord"
 )
 
-// WriteTransaction is a short-lived snapshot write view. It provides point
-// operations with optimistic serializable commit validation. Values returned
-// from it are isolated clones.
+// WriteTransaction stages reads and writes against a snapshot for an atomic commit.
+//
+// Commit validation detects conflicting changes, and returned values are independent copies.
 //
 // A transaction is active only during its handler callback. Handlers must not
 // retain it or call normal DB/Collection methods from inside the callback.
@@ -31,7 +31,8 @@ type WriteTransaction struct {
 	overlayBytes    uint64
 }
 
-// MeldbaseStageSystemMutation is first-party composite-transaction plumbing.
+// MeldbaseStageSystemMutation stages a private system record change alongside document writes.
+//
 // Its internal parameter type prevents external applications from accessing the
 // private System tree. onCommit runs synchronously after the durable root is
 // published and before the matching business ChangeBatch becomes visible; it
@@ -72,11 +73,13 @@ func (tx *WriteTransaction) MeldbaseStageSystemMutation(mutation systemrecord.Mu
 	return nil
 }
 
+// writeTransactionKey identifies a document within a transaction collection.
 type writeTransactionKey struct {
 	collection string
 	id         DocumentID
 }
 
+// writeTransactionEntry retains a document's original and staged values with their memory accounting.
 type writeTransactionEntry struct {
 	base         Document
 	current      Document
@@ -86,8 +89,9 @@ type writeTransactionEntry struct {
 	exists       bool
 }
 
-// Find evaluates query against the transaction's immutable snapshot plus
-// its own staged point writes. It installs a collection snapshot fence, so any
+// Find queries the transaction snapshot including its staged document changes.
+//
+// It installs a collection snapshot fence, so any
 // concurrent document or published-index change in that collection causes the
 // eventual commit to return ErrWriteConflict rather than admitting a phantom.
 //
@@ -202,8 +206,7 @@ func (tx *WriteTransaction) Find(collection string, query QuerySpec) (QuerySnaps
 	return QuerySnapshot{Token: tx.baseToken, Documents: query.executeMatched(candidates)}, nil
 }
 
-// GetOne returns one document by intrinsic ID from the transaction's current
-// view, including earlier point mutations in the same callback.
+// GetOne returns a document by ID, including changes staged earlier in the transaction.
 func (tx *WriteTransaction) GetOne(collection string, id DocumentID) (Document, error) {
 	entry, err := tx.load(collection, id)
 	if err != nil {
@@ -255,8 +258,9 @@ func (tx *WriteTransaction) InsertOne(collection string, document Document) (Doc
 	return id, nil
 }
 
-// ReplaceOne stages a full replacement for an existing document. The supplied
-// document may omit _id; if present it must equal id.
+// ReplaceOne stages a full replacement for an existing document.
+//
+// The supplied document may omit _id; if present it must equal id.
 func (tx *WriteTransaction) ReplaceOne(collection string, id DocumentID, document Document) error {
 	entry, err := tx.load(collection, id)
 	if err != nil {
@@ -283,9 +287,9 @@ func (tx *WriteTransaction) ReplaceOne(collection string, id DocumentID, documen
 	return tx.setCurrent(entry, copy)
 }
 
-// UpdateOne applies one already compiled, data-only mutation to the
-// transaction's current document view. Earlier writes in the same transaction
-// are visible and the intrinsic _id remains immutable.
+// UpdateOne stages a mutation of the transaction's current document.
+//
+// Earlier writes in the same transaction are visible, and _id cannot change.
 func (tx *WriteTransaction) UpdateOne(collection string, id DocumentID, mutation MutationSpec) error {
 	entry, err := tx.load(collection, id)
 	if err != nil {
@@ -305,8 +309,10 @@ func (tx *WriteTransaction) UpdateOne(collection string, id DocumentID, mutation
 	return tx.setCurrent(entry, after)
 }
 
-// DeleteOne stages a point delete. Deleting a document inserted earlier in the
-// same callback cancels that insert without producing a storage mutation.
+// DeleteOne stages the deletion of a document by ID.
+//
+// Deleting a document inserted earlier in the same callback cancels that insert
+// without producing a storage mutation.
 func (tx *WriteTransaction) DeleteOne(collection string, id DocumentID) error {
 	entry, err := tx.load(collection, id)
 	if err != nil {
@@ -318,6 +324,7 @@ func (tx *WriteTransaction) DeleteOne(collection string, id DocumentID) error {
 	return tx.setCurrent(entry, nil)
 }
 
+// validateCollection checks transaction health and collection name validity.
 func (tx *WriteTransaction) validateCollection(collection string) error {
 	if tx == nil || !tx.active || tx.db == nil {
 		return ErrClosed
@@ -331,6 +338,7 @@ func (tx *WriteTransaction) validateCollection(collection string) error {
 	return nil
 }
 
+// load retains a snapshot document for transaction reads and staged writes within resource limits.
 func (tx *WriteTransaction) load(collection string, id DocumentID) (*writeTransactionEntry, error) {
 	if err := tx.validateCollection(collection); err != nil {
 		return nil, err
@@ -378,6 +386,7 @@ func (tx *WriteTransaction) load(collection string, id DocumentID) (*writeTransa
 	return entry, nil
 }
 
+// recordCollectionRead saves the collection version that must still match at commit.
 func (tx *WriteTransaction) recordCollectionRead(collection string, exists bool, version queryStorageCollectionVersion) error {
 	if tx == nil || !tx.active || tx.collections == nil {
 		return ErrClosed
@@ -400,9 +409,11 @@ func (tx *WriteTransaction) recordCollectionRead(collection string, exists bool,
 	return nil
 }
 
-// setCurrent replaces one retained overlay value without cumulative accounting
-// across repeated updates. The immutable base copy remains charged until the
-// callback finishes because changes and point preconditions still need it.
+// setCurrent replaces a staged document and updates the transaction's retained byte count.
+//
+// Repeated updates replace the previous size charge rather than adding to it.
+// The original document remains charged until the callback finishes because
+// commit changes and read validation still need it.
 func (tx *WriteTransaction) setCurrent(entry *writeTransactionEntry, document Document) error {
 	if tx == nil || tx.db == nil || entry == nil || tx.overlayBytes < entry.currentBytes {
 		return ErrCorrupt
@@ -426,17 +437,9 @@ func (tx *WriteTransaction) setCurrent(entry *writeTransactionEntry, document Do
 	return nil
 }
 
+// preconditions returns ordered document read conditions for commit validation.
 func (tx *WriteTransaction) preconditions() []storage.DocumentPrecondition {
-	keys := make([]writeTransactionKey, 0, len(tx.entries))
-	for key := range tx.entries {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].collection != keys[j].collection {
-			return keys[i].collection < keys[j].collection
-		}
-		return string(keys[i].id[:]) < string(keys[j].id[:])
-	})
+	keys := tx.sortedEntryKeys()
 	result := make([]storage.DocumentPrecondition, len(keys))
 	for index, key := range keys {
 		entry := tx.entries[key]
@@ -448,6 +451,7 @@ func (tx *WriteTransaction) preconditions() []storage.DocumentPrecondition {
 	return result
 }
 
+// collectionPreconditions returns ordered collection read conditions for commit validation.
 func (tx *WriteTransaction) collectionPreconditions() []storage.CollectionPrecondition {
 	collections := make([]string, 0, len(tx.collections))
 	for collection := range tx.collections {
@@ -461,17 +465,9 @@ func (tx *WriteTransaction) collectionPreconditions() []storage.CollectionPrecon
 	return result
 }
 
+// changes returns ordered effective document changes from the staged transaction values.
 func (tx *WriteTransaction) changes() []Change {
-	keys := make([]writeTransactionKey, 0, len(tx.entries))
-	for key := range tx.entries {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].collection != keys[j].collection {
-			return keys[i].collection < keys[j].collection
-		}
-		return string(keys[i].id[:]) < string(keys[j].id[:])
-	})
+	keys := tx.sortedEntryKeys()
 	changes := make([]Change, 0, len(keys))
 	for _, key := range keys {
 		entry := tx.entries[key]
@@ -490,6 +486,7 @@ func (tx *WriteTransaction) changes() []Change {
 	return changes
 }
 
+// beginWriteTransaction opens a pinned database snapshot and an empty transaction write view.
 func (db *DB) beginWriteTransaction(ctx context.Context) (*WriteTransaction, *durableStore, error) {
 	if db == nil || ctx == nil {
 		return nil, nil, ErrClosed
@@ -528,6 +525,7 @@ func (db *DB) beginWriteTransaction(ctx context.Context) (*WriteTransaction, *du
 	return tx, store, nil
 }
 
+// finish invalidates the transaction and closes its pinned snapshot.
 func (tx *WriteTransaction) finish() error {
 	if tx == nil {
 		return nil
@@ -541,8 +539,9 @@ func (tx *WriteTransaction) finish() error {
 	return err
 }
 
-// commitWriteTransaction is the single  business/System publication path
-// shared by public transactions and first-party transactional RPC. The bool is
+// commitWriteTransaction validates and publishes staged document and system record changes.
+//
+// Public transactions and internal transactional RPC share this path. The bool is
 // false when optimistic validation failed before storage publication began.
 func (db *DB) commitWriteTransaction(
 	ctx context.Context,
@@ -566,8 +565,9 @@ func (db *DB) commitWriteTransaction(
 	return db.commitPreparedWriteTransactionLocked(ctx, store, changes, systemMutations, tx.preconditions(), tx.collectionPreconditions(), tx.commitHooks)
 }
 
-// commitPreparedWriteTransactionLocked publishes already-frozen  point
-// writes while db.mu is held. It is shared by the direct transaction path and
+// commitPreparedWriteTransactionLocked publishes prepared writes while the database lock is held.
+//
+// It is shared by the direct transaction path and
 // the CommitCoordinator's conflict fallback: neither path reevaluates a user
 // callback after its snapshot has closed.
 func (db *DB) commitPreparedWriteTransactionLocked(
@@ -617,6 +617,7 @@ func (db *DB) commitPreparedWriteTransactionLocked(
 	return result, true, nil
 }
 
+// validateWriteTransactionSnapshot checks that the transaction's recorded reads still match storage.
 func (db *DB) validateWriteTransactionSnapshot(tx *WriteTransaction, store *durableStore) error {
 	if db == nil || tx == nil || store == nil {
 		return ErrClosed
@@ -644,9 +645,9 @@ func (db *DB) validateWriteTransactionSnapshot(tx *WriteTransaction, store *dura
 	return mapStorageError(store.file.ValidateDocumentPreconditions(preconditions))
 }
 
-// RunWriteTransaction executes build against one immutable Storage
-// snapshot and atomically publishes all staged point mutations if every
-// document read by the callback still matches. The callback runs without
+// RunWriteTransaction runs a callback and commits its staged writes if the snapshot remains valid.
+//
+// The callback runs without
 // the database writer lock. A conflicting point write returns ErrWriteConflict;
 // callbacks are never retried because they may contain application side effects.
 //
@@ -726,23 +727,29 @@ func (db *DB) RunWriteTransaction(ctx context.Context, build func(*WriteTransact
 	return err
 }
 
+// writeTransactionOutcome classifies how a write transaction finished.
 type writeTransactionOutcome uint8
 
 const (
+	// writeTransactionAborted marks a transaction that stopped before a successful commit.
 	writeTransactionAborted writeTransactionOutcome = iota
+	// writeTransactionCommitted marks a transaction whose changes committed.
 	writeTransactionCommitted
+	// writeTransactionNoop marks a successful transaction with no effective changes.
 	writeTransactionNoop
+	// writeTransactionConflict marks a transaction rejected because its reads became stale.
 	writeTransactionConflict
 )
 
-// MeldbaseSystemWrite runs build against one immutable snapshot without
-// holding the database writer lock. If build succeeds and its point read set is
-// still valid, its business changes and systemMutation commit in one  generation.
+// MeldbaseSystemWrite commits a callback's document changes together with a private system record.
+//
+// The callback runs against an immutable snapshot without the writer lock;
+// publication requires its recorded reads to remain valid.
 // The bool reports whether a composite commit was attempted; false means build
 // produced no business change or lost optimistic validation.
 //
-// This method is first-party plumbing: the systemrecord parameter is internal,
-// preventing external applications from using the private keyspace.
+// Only repository packages can use this method because its systemrecord parameter
+// is internal; external applications cannot access the private system records.
 func (db *DB) MeldbaseSystemWrite(ctx context.Context, systemMutation systemrecord.Mutation, build func(*WriteTransaction) ([]byte, error)) (systemrecord.Result, bool, error) {
 	if build == nil {
 		return systemrecord.Result{}, false, ErrClosed
@@ -794,4 +801,19 @@ func (db *DB) MeldbaseSystemWrite(ctx context.Context, systemMutation systemreco
 		systemMutations = append(systemMutations, mutation)
 	}
 	return db.commitWriteTransaction(ctx, tx, store, changes, systemMutations)
+}
+
+// sortedEntryKeys orders transaction entries by collection and document ID.
+func (tx *WriteTransaction) sortedEntryKeys() []writeTransactionKey {
+	keys := make([]writeTransactionKey, 0, len(tx.entries))
+	for key := range tx.entries {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].collection != keys[j].collection {
+			return keys[i].collection < keys[j].collection
+		}
+		return string(keys[i].id[:]) < string(keys[j].id[:])
+	})
+	return keys
 }

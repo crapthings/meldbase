@@ -11,17 +11,21 @@ import {
 } from "./safe-value.js";
 import { decodeValue, encodeValue, type WireValue } from "./wire.js";
 
+/** Represents one encoded field update or removal. */
 export type WireMutationOperation =
   | { readonly op: "set" | "inc" | "push" | "pull"; readonly path: string; readonly value: WireValue }
   | { readonly op: "unset"; readonly path: string };
 
+/** Groups encoded update operations under a mutation format version. */
 export interface WireMutationSpec {
   readonly version: 1;
   readonly operations: readonly WireMutationOperation[];
 }
 
+/** Defines the deterministic order used to compile update operators. */
 const operatorOrder = ["$inc", "$pull", "$push", "$set", "$unset"] as const;
 
+/** Validates an update and compiles its fields into ordered mutation operations. */
 export function compileUpdate(update: Update, overrides: Partial<QueryLimits> = {}): MutationSpec {
   if (!plainObject(update)) throw new QueryValidationError("Update must be an object");
   const limits = { ...DEFAULT_QUERY_LIMITS, ...overrides };
@@ -66,6 +70,7 @@ export function compileUpdate(update: Update, overrides: Partial<QueryLimits> = 
   return { version: 1, operations };
 }
 
+/** Encodes mutation operands as typed wire values. */
 export function encodeMutationSpec(spec: MutationSpec): WireMutationSpec {
   return {
     version: 1,
@@ -75,6 +80,7 @@ export function encodeMutationSpec(spec: MutationSpec): WireMutationSpec {
   };
 }
 
+/** Validates a wire mutation envelope and decodes its ordered operations. */
 export function decodeMutationSpec(input: unknown, overrides: Partial<QueryLimits> = {}): MutationSpec {
   const limits = { ...DEFAULT_QUERY_LIMITS, ...overrides };
   if (!plainObject(input)) throw new QueryValidationError("Wire mutation must be an object");
@@ -107,6 +113,7 @@ export function decodeMutationSpec(input: unknown, overrides: Partial<QueryLimit
   return { version: 1, operations };
 }
 
+/** Applies ordered mutation operations to a copied document and returns the updated copy. */
 export function applyMutation<T extends Document>(document: T, spec: MutationSpec): T {
   const output = cloneDocument(document) as T & Record<string, Value>;
   for (const operation of spec.operations) {
@@ -146,6 +153,7 @@ export function applyMutation<T extends Document>(document: T, spec: MutationSpe
   return cloneDocument(output) as T;
 }
 
+/** Rejects invalid paths, ID changes, and overlapping update paths before recording the path. */
 function validateMutationPath(path: string, previous: string[]): void {
   assertPath(path);
   if (path === "_id" || path.startsWith("_id.")) throw new QueryValidationError("_id is immutable");
@@ -155,6 +163,7 @@ function validateMutationPath(path: string, previous: string[]): void {
   previous.push(path);
 }
 
+/** Writes a copied value at a dotted path, creating missing objects and rejecting non-object parents. */
 function setPath(document: Record<string, Value>, path: string, raw: Value): void {
   const parts = path.split(".");
   let current = document;
@@ -180,6 +189,7 @@ function setPath(document: Record<string, Value>, path: string, raw: Value): voi
   current[parts.at(-1) as string] = cloneValue(raw);
 }
 
+/** Removes a dotted field when its parent objects exist. */
 function unsetPath(document: Record<string, Value>, path: string): void {
   const parts = path.split(".");
   let current = document;
@@ -200,6 +210,7 @@ function unsetPath(document: Record<string, Value>, path: string): void {
   delete current[parts.at(-1) as string];
 }
 
+/** Adds numeric values while rejecting overflow and unsafe mixed-type conversions. */
 function addNumbers(left: Value, right: Value): number | bigint {
   if (
     (typeof left !== "number" && typeof left !== "bigint") ||
@@ -218,6 +229,7 @@ function addNumbers(left: Value, right: Value): number | bigint {
   return result;
 }
 
+/** Converts a bigint to a safe integer number without losing precision. */
 function exactNumber(value: bigint): number {
   const converted = Number(value);
   if (!Number.isSafeInteger(converted) || BigInt(converted) !== value)
@@ -225,6 +237,7 @@ function exactNumber(value: bigint): number {
   return converted;
 }
 
+/** Checks for an ordinary object or an object with no prototype. */
 function plainObject(value: unknown): value is Record<string, unknown> {
   if (
     value === null ||
@@ -237,11 +250,13 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
+/** Rejects mutation fields outside the allowed names. */
 function onlyKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
   const set = new Set(allowed);
   for (const key of Object.keys(value))
     if (!set.has(key)) throw new QueryValidationError(`Unexpected mutation field: ${key}`);
 }
+/** Throws a query validation error with the supplied message. */
 function fail(message: string): never {
   throw new QueryValidationError(message);
 }

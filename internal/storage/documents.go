@@ -2,7 +2,6 @@ package storage
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -11,31 +10,45 @@ import (
 )
 
 const (
+	// DocumentInsert identifies a document insertion.
 	DocumentInsert CommitOperation = CommitInsert
+	// DocumentUpdate identifies a document replacement.
 	DocumentUpdate CommitOperation = CommitUpdate
+	// DocumentDelete identifies a document deletion.
 	DocumentDelete CommitOperation = CommitDelete
 )
 
 const (
+	// inlineDocumentLimit bounds the bytes stored directly in a document descriptor.
 	inlineDocumentLimit = 8 * 1024
-	maxDocumentBytes    = 64 * 1024 * 1024
+	// maxDocumentBytes bounds the encoded size of a stored document.
+	maxDocumentBytes = 64 * 1024 * 1024
 )
 
+// catalogValueMagic identifies encoded collection catalog records.
 var catalogValueMagic = [8]byte{'M', 'E', 'L', 'D', 'C', 'O', 'L', '2'}
+
+// documentRecordMagic identifies stored document record headers.
 var documentRecordMagic = [8]byte{'M', 'E', 'L', 'D', 'R', 'E', 'C', '2'}
 
 // ErrDocumentConflict reports that an optimistic point precondition no longer
-// matches the current root. It is a safe logical rejection, not corruption or
+// matches the current root.
+//
+// It is a safe logical rejection, not corruption or
 // a durability failure.
 var ErrDocumentConflict = errors.New("meldbase storage: document precondition conflicted")
 
 // ErrDocumentExists distinguishes an insert collision from an optimistic
-// update/delete precondition conflict. The public DB maps it to ErrDuplicateID
+// update/delete precondition conflict.
+//
+// The public DB maps it to ErrDuplicateID
 // so a grouped candidate can fall back to ordinary per-request semantics.
 var ErrDocumentExists = errors.New("meldbase storage: document already exists")
 
+// documentRecordHeaderBytes is the byte size of a document record header.
 const documentRecordHeaderBytes = 24
 
+// CollectionMeta records a collection's tree roots, document counts, and commit versions.
 type CollectionMeta struct {
 	ID               uint32
 	PrimaryRoot      uint64
@@ -50,6 +63,7 @@ type CollectionMeta struct {
 	NextDocumentPosition uint64
 }
 
+// DocumentMutation describes one document change and its index key changes.
 type DocumentMutation struct {
 	Collection   string
 	DocumentID   [16]byte
@@ -63,7 +77,9 @@ type DocumentMutation struct {
 }
 
 // DocumentPrecondition binds an optimistic transaction to the canonical
-// document bytes it actually read. ExpectedHash is SHA-256 over the decoded
+// document bytes it actually read.
+//
+// ExpectedHash is SHA-256 over the decoded
 // storage document body when ExpectedExists is true and must otherwise be zero.
 type DocumentPrecondition struct {
 	Collection     string
@@ -72,11 +88,11 @@ type DocumentPrecondition struct {
 	ExpectedHash   [32]byte
 }
 
-// CollectionPrecondition binds a predicate or range read to the exact
-// collection generation observed by a transaction snapshot. It is deliberately
-// broader than a future index-range fence: any document or published-index
-// change to the collection invalidates it, which prevents phantoms without
-// trusting a process-local query plan.
+// CollectionPrecondition records the collection version that a transaction requires at commit.
+//
+// Any document or published-index change to the collection invalidates it.
+// Checking the whole collection prevents new matching documents from appearing
+// between a range read and commit without relying on an in-memory query plan.
 //
 // ExpectedID and ExpectedUpdatedSequence are required only when ExpectedExists
 // is true. A missing collection is a valid read state and conflicts if another
@@ -88,6 +104,7 @@ type CollectionPrecondition struct {
 	ExpectedUpdatedSequence uint64
 }
 
+// DocumentTransaction groups document changes with the read conditions required to commit them.
 type DocumentTransaction struct {
 	TransactionID           [16]byte
 	CommittedAt             time.Time
@@ -97,13 +114,16 @@ type DocumentTransaction struct {
 }
 
 // DocumentSystemTransaction atomically publishes document mutations and a
-// bounded set of private system-record changes. Every CAS must match or no
+// bounded set of private system-record changes.
+//
+// Every CAS must match or no
 // document/system mutation is published.
 type DocumentSystemTransaction struct {
 	DocumentTransaction DocumentTransaction
 	SystemRecords       []SystemRecordMutation
 }
 
+// collectionWriteState holds the mutable trees and metadata for a collection being changed.
 type collectionWriteState struct {
 	name         string
 	meta         CollectionMeta
@@ -115,12 +135,14 @@ type collectionWriteState struct {
 	created      bool
 }
 
+// indexWriteState tracks one mutable index and whether its contents changed.
 type indexWriteState struct {
 	meta    IndexMeta
 	tree    *MutableTree
 	changed bool
 }
 
+// pendingIndexMutation records the index keys to replace for a document.
 type pendingIndexMutation struct {
 	state      *indexWriteState
 	documentID [16]byte
@@ -129,13 +151,16 @@ type pendingIndexMutation struct {
 	afterKey   []byte
 }
 
+// pendingDocumentChange links a commit event to its collection write state.
 type pendingDocumentChange struct {
 	change CommitChange
 	state  *collectionWriteState
 }
 
 // ApplyDocumentTransaction atomically publishes document roots, catalog roots,
-// and one matching durable CommitBatch. Duplicate document mutations inside one
+// and one matching durable CommitBatch.
+//
+// Duplicate document mutations inside one
 // transaction are rejected so each logical change has unambiguous before/after
 // version roots.
 func (f *File) ApplyDocumentTransaction(transaction DocumentTransaction) (uint64, error) {
@@ -143,10 +168,10 @@ func (f *File) ApplyDocumentTransaction(transaction DocumentTransaction) (uint64
 	return result.Sequence, err
 }
 
-// ApplyDocumentTransactionGroup builds several ordered logical document
-// commits in one physical copy-on-write generation. It is an internal storage
-// primitive for the future CommitCoordinator; callers receive one sequence per
-// logical member, while recovery observes either the whole group or none of it.
+// ApplyDocumentTransactionGroup commits ordered document transactions in one physical generation.
+//
+// Callers receive one sequence per logical member, while recovery observes
+// either the whole group or none of it.
 // System-record CAS is intentionally excluded until its separate idempotency
 // and rollback-anchor matrix has group evidence.
 func (f *File) ApplyDocumentTransactionGroup(transactions []DocumentTransaction) ([]uint64, error) {
@@ -206,7 +231,9 @@ func (f *File) ApplyDocumentTransactionGroup(transactions []DocumentTransaction)
 }
 
 // ApplyDocumentSystemTransaction applies all document mutations only if every
-// system-record precondition matches. A mismatch returns Applied=false and the
+// system-record precondition matches.
+//
+// A mismatch returns Applied=false and the
 // isolated current value of the first mismatch without publishing any change.
 func (f *File) ApplyDocumentSystemTransaction(transaction DocumentSystemTransaction) (SystemRecordResult, error) {
 	if len(transaction.SystemRecords) == 0 || len(transaction.SystemRecords) > 256 {
@@ -226,6 +253,7 @@ func (f *File) ApplyDocumentSystemTransaction(transaction DocumentSystemTransact
 	return f.applyDocumentSystemTransaction(transaction.DocumentTransaction, transaction.SystemRecords)
 }
 
+// applyDocumentSystemTransaction commits one document transaction with optional system record changes.
 func (f *File) applyDocumentSystemTransaction(transaction DocumentTransaction, systemRecords []SystemRecordMutation) (SystemRecordResult, error) {
 	if f == nil || allZero(transaction.TransactionID[:]) || len(transaction.Mutations) == 0 {
 		return SystemRecordResult{}, ErrCorrupt
@@ -243,12 +271,10 @@ func (f *File) applyDocumentSystemTransaction(transaction DocumentTransaction, s
 	return result, err
 }
 
-// applyDocumentSystemTransactionInWriteTxn applies one logical document
-// transaction to base using a caller-owned COW WriteTxn. Keeping this operation
-// independent of File.Update is the foundation for a future group publisher:
-// multiple logical CommitBatch records can then be built in sequence and made
-// visible by one final Meta publication. The current public path still invokes
-// it exactly once per File.Update.
+// applyDocumentSystemTransactionInWriteTxn builds one logical document commit in a caller-owned write transaction.
+//
+// The caller can build several logical commits before publishing the resulting
+// physical generation, as the group commit path does.
 func applyDocumentSystemTransactionInWriteTxn(
 	tx *WriteTxn,
 	base DatabaseRoot,
@@ -522,162 +548,14 @@ func applyDocumentSystemTransactionInWriteTxn(
 	}, nil
 }
 
-func validateDocumentPreconditions(tx *WriteTxn, catalog *MutableTree, preconditions []DocumentPrecondition) error {
-	if tx == nil || catalog == nil {
-		return ErrCorrupt
-	}
-	seen := make(map[string]struct{}, len(preconditions))
-	primary := make(map[string]*MutableTree)
-	for _, precondition := range preconditions {
-		if !validCollectionName(precondition.Collection) || allZero(precondition.DocumentID[:]) ||
-			(!precondition.ExpectedExists && !allZero(precondition.ExpectedHash[:])) {
-			return ErrCorrupt
-		}
-		identity := precondition.Collection + "\x00" + string(precondition.DocumentID[:])
-		if _, duplicate := seen[identity]; duplicate {
-			return ErrCorrupt
-		}
-		seen[identity] = struct{}{}
-		tree := primary[precondition.Collection]
-		if tree == nil {
-			encoded, collectionExists, err := catalog.Get([]byte(precondition.Collection))
-			if err != nil {
-				return err
-			}
-			if !collectionExists {
-				if precondition.ExpectedExists {
-					return ErrDocumentConflict
-				}
-				continue
-			}
-			meta, err := decodeCollectionMeta(encoded)
-			if err != nil {
-				return err
-			}
-			tree, err = tx.OpenTree(meta.PrimaryRoot, TreePrimary)
-			if err != nil {
-				return err
-			}
-			primary[precondition.Collection] = tree
-		}
-		stored, exists, err := tree.Get(precondition.DocumentID[:])
-		if err != nil {
-			return err
-		}
-		if exists != precondition.ExpectedExists {
-			return ErrDocumentConflict
-		}
-		if !exists {
-			continue
-		}
-		_, document, err := tx.loadDocumentRecord(stored)
-		if err != nil {
-			return err
-		}
-		actual := sha256.Sum256(document)
-		if !equalBytes(actual[:], precondition.ExpectedHash[:]) {
-			return ErrDocumentConflict
-		}
-	}
-	return nil
-}
-
-func validateCollectionPreconditions(catalog *MutableTree, preconditions []CollectionPrecondition) error {
-	if catalog == nil {
-		return ErrCorrupt
-	}
-	seen := make(map[string]struct{}, len(preconditions))
-	for _, precondition := range preconditions {
-		if !validCollectionName(precondition.Collection) ||
-			(precondition.ExpectedExists && (precondition.ExpectedID == 0 || precondition.ExpectedUpdatedSequence == 0)) ||
-			(!precondition.ExpectedExists && (precondition.ExpectedID != 0 || precondition.ExpectedUpdatedSequence != 0)) {
-			return ErrCorrupt
-		}
-		if _, duplicate := seen[precondition.Collection]; duplicate {
-			return ErrCorrupt
-		}
-		seen[precondition.Collection] = struct{}{}
-		encoded, exists, err := catalog.Get([]byte(precondition.Collection))
-		if err != nil {
-			return err
-		}
-		if exists != precondition.ExpectedExists {
-			return ErrDocumentConflict
-		}
-		if !exists {
-			continue
-		}
-		meta, err := decodeCollectionMeta(encoded)
-		if err != nil {
-			return err
-		}
-		if meta.ID != precondition.ExpectedID || meta.UpdatedSequence != precondition.ExpectedUpdatedSequence {
-			return ErrDocumentConflict
-		}
-	}
-	return nil
-}
-
-// ValidateDocumentPreconditions checks one point read set against the current
-// immutable root under the file read lock without publishing a generation.
-func (f *File) ValidateDocumentPreconditions(preconditions []DocumentPrecondition) error {
-	if f == nil {
-		return ErrCorrupt
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.file == nil {
-		return errors.New("meldbase storage: file is closed")
-	}
-	root, err := f.databaseRootUnlocked()
-	if err != nil {
-		return err
-	}
-	tx := &WriteTxn{
-		file: f, generation: f.meta.Generation, sequence: f.meta.CommitSequence,
-		nextPage: f.nextPage, byID: make(map[uint64][]byte),
-	}
-	catalog, err := tx.OpenTree(root.CatalogRoot, TreeCatalog)
-	if err != nil {
-		return err
-	}
-	return validateDocumentPreconditions(tx, catalog, preconditions)
-}
-
-// ValidateCollectionPreconditions checks broad collection snapshot fences
-// without publishing a generation. ApplyDocumentTransaction performs the same
-// validation inside its atomic write transaction, which is the required commit
-// path for phantom-safe callers.
-func (f *File) ValidateCollectionPreconditions(preconditions []CollectionPrecondition) error {
-	if f == nil {
-		return ErrCorrupt
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.file == nil {
-		return errors.New("meldbase storage: file is closed")
-	}
-	root, err := f.databaseRootUnlocked()
-	if err != nil {
-		return err
-	}
-	tx := &WriteTxn{
-		file: f, generation: f.meta.Generation, sequence: f.meta.CommitSequence,
-		nextPage: f.nextPage, byID: make(map[uint64][]byte),
-	}
-	catalog, err := tx.OpenTree(root.CatalogRoot, TreeCatalog)
-	if err != nil {
-		return err
-	}
-	return validateCollectionPreconditions(catalog, preconditions)
-}
-
+// insertionPositionKey encodes a document position in sortable byte order.
 func insertionPositionKey(position uint64) []byte {
 	key := make([]byte, 8)
 	binary.BigEndian.PutUint64(key, position)
 	return key
 }
 
+// GetDocument reads a document from the current committed collection.
 func (f *File) GetDocument(collection string, documentID [16]byte) ([]byte, bool, error) {
 	if f == nil || !validCollectionName(collection) || allZero(documentID[:]) {
 		return nil, false, ErrCorrupt
@@ -702,6 +580,7 @@ func (f *File) GetDocument(collection string, documentID [16]byte) ([]byte, bool
 	return f.readDocumentUnlocked(meta.PrimaryRoot, documentID)
 }
 
+// ReadDocumentVersion reads a document from the stored tree named by its version reference.
 func (f *File) ReadDocumentVersion(reference DocumentVersionRef) ([]byte, error) {
 	if f == nil || reference.PrimaryRoot < 2 || allZero(reference.DocumentID[:]) {
 		return nil, ErrCorrupt
@@ -721,6 +600,7 @@ func (f *File) ReadDocumentVersion(reference DocumentVersionRef) ([]byte, error)
 	return value, nil
 }
 
+// readDocumentUnlocked reads document bytes from a stored tree while the caller holds the file lock.
 func (f *File) readDocumentUnlocked(primaryRoot uint64, documentID [16]byte) ([]byte, bool, error) {
 	stored, exists, err := f.treeGetUnlocked(primaryRoot, TreePrimary, documentID[:])
 	if err != nil || !exists {
@@ -731,6 +611,7 @@ func (f *File) readDocumentUnlocked(primaryRoot uint64, documentID [16]byte) ([]
 	return value, err == nil, err
 }
 
+// readDocument reads document bytes from a tree within a write transaction.
 func (tx *WriteTxn) readDocument(primaryRoot uint64, documentID [16]byte) ([]byte, bool, error) {
 	tree, err := tx.OpenTree(primaryRoot, TreePrimary)
 	if err != nil {
@@ -744,191 +625,7 @@ func (tx *WriteTxn) readDocument(primaryRoot uint64, documentID [16]byte) ([]byt
 	return value, err == nil, err
 }
 
-func encodeCollectionMeta(meta CollectionMeta) ([]byte, error) {
-	if meta.ID == 0 || meta.PrimaryRoot < 2 || meta.OrderRoot < 2 || meta.CreatedSequence == 0 || meta.UpdatedSequence < meta.CreatedSequence ||
-		meta.NextDocumentPosition < meta.DocumentCount || (meta.IndexCatalogRoot != 0 && meta.IndexCatalogRoot < 2) {
-		return nil, ErrCorrupt
-	}
-	value := make([]byte, 72)
-	copy(value[:8], catalogValueMagic[:])
-	binary.LittleEndian.PutUint16(value[8:10], FormatVersion)
-	binary.LittleEndian.PutUint32(value[12:16], meta.ID)
-	binary.LittleEndian.PutUint64(value[16:24], meta.PrimaryRoot)
-	binary.LittleEndian.PutUint64(value[24:32], meta.IndexCatalogRoot)
-	binary.LittleEndian.PutUint64(value[32:40], meta.DocumentCount)
-	binary.LittleEndian.PutUint64(value[40:48], meta.CreatedSequence)
-	binary.LittleEndian.PutUint64(value[48:56], meta.UpdatedSequence)
-	binary.LittleEndian.PutUint64(value[56:64], meta.NextDocumentPosition)
-	binary.LittleEndian.PutUint64(value[64:72], meta.OrderRoot)
-	return value, nil
-}
-
-func decodeCollectionMeta(value []byte) (CollectionMeta, error) {
-	if len(value) != 72 || string(value[:8]) != string(catalogValueMagic[:]) || binary.LittleEndian.Uint16(value[8:10]) != FormatVersion ||
-		binary.LittleEndian.Uint16(value[10:12]) != 0 {
-		return CollectionMeta{}, ErrCorrupt
-	}
-	meta := CollectionMeta{
-		ID:                   binary.LittleEndian.Uint32(value[12:16]),
-		PrimaryRoot:          binary.LittleEndian.Uint64(value[16:24]),
-		IndexCatalogRoot:     binary.LittleEndian.Uint64(value[24:32]),
-		DocumentCount:        binary.LittleEndian.Uint64(value[32:40]),
-		CreatedSequence:      binary.LittleEndian.Uint64(value[40:48]),
-		UpdatedSequence:      binary.LittleEndian.Uint64(value[48:56]),
-		NextDocumentPosition: binary.LittleEndian.Uint64(value[56:64]),
-		OrderRoot:            binary.LittleEndian.Uint64(value[64:72]),
-	}
-	if meta.ID == 0 || meta.PrimaryRoot < 2 || meta.OrderRoot < 2 || meta.CreatedSequence == 0 || meta.UpdatedSequence < meta.CreatedSequence ||
-		meta.NextDocumentPosition < meta.DocumentCount || (meta.IndexCatalogRoot != 0 && meta.IndexCatalogRoot < 2) {
-		return CollectionMeta{}, ErrCorrupt
-	}
-	return meta, nil
-}
-
-func (tx *WriteTxn) storeDocumentRecord(position uint64, value []byte) ([]byte, error) {
-	if position == 0 {
-		return nil, ErrCorrupt
-	}
-	descriptor, err := tx.storeDocumentValue(value)
-	if err != nil {
-		return nil, err
-	}
-	stored := make([]byte, documentRecordHeaderBytes+len(descriptor))
-	copy(stored[:8], documentRecordMagic[:])
-	binary.LittleEndian.PutUint16(stored[8:10], FormatVersion)
-	binary.LittleEndian.PutUint16(stored[10:12], documentRecordHeaderBytes)
-	binary.LittleEndian.PutUint64(stored[16:24], position)
-	copy(stored[documentRecordHeaderBytes:], descriptor)
-	return stored, nil
-}
-
-func decodeDocumentRecordDescriptor(stored []byte) (uint64, []byte, error) {
-	if len(stored) <= documentRecordHeaderBytes || string(stored[:8]) != string(documentRecordMagic[:]) ||
-		binary.LittleEndian.Uint16(stored[8:10]) != FormatVersion ||
-		binary.LittleEndian.Uint16(stored[10:12]) != documentRecordHeaderBytes || !allZero(stored[12:16]) {
-		return 0, nil, ErrCorrupt
-	}
-	position := binary.LittleEndian.Uint64(stored[16:24])
-	if position == 0 {
-		return 0, nil, ErrCorrupt
-	}
-	return position, stored[documentRecordHeaderBytes:], nil
-}
-
-func (tx *WriteTxn) loadDocumentRecord(stored []byte) (uint64, []byte, error) {
-	position, descriptor, err := decodeDocumentRecordDescriptor(stored)
-	if err != nil {
-		return 0, nil, err
-	}
-	value, err := tx.loadDocumentValue(descriptor)
-	if err != nil {
-		return 0, nil, err
-	}
-	return position, value, nil
-}
-
-func (tx *WriteTxn) storeDocumentValue(value []byte) ([]byte, error) {
-	if len(value) == 0 || len(value) > maxDocumentBytes {
-		return nil, ErrCorrupt
-	}
-	if len(value)+1 <= inlineDocumentLimit {
-		return append([]byte{0}, value...), nil
-	}
-	const overflowHeader = 16
-	chunkBytes := PageSize - PageHeaderSize - overflowHeader
-	chunks := (len(value) + chunkBytes - 1) / chunkBytes
-	pageIDs, err := tx.allocatePageIDs(chunks)
-	if err != nil {
-		return nil, err
-	}
-	firstPage := pageIDs[0]
-	for index := 0; index < chunks; index++ {
-		start := index * chunkBytes
-		end := start + chunkBytes
-		if end > len(value) {
-			end = len(value)
-		}
-		payload := make([]byte, overflowHeader+end-start)
-		binary.LittleEndian.PutUint64(payload[0:8], uint64(len(value)))
-		binary.LittleEndian.PutUint32(payload[8:12], uint32(index))
-		binary.LittleEndian.PutUint32(payload[12:16], uint32(chunks))
-		copy(payload[16:], value[start:end])
-		link := uint64(0)
-		if index+1 < chunks {
-			link = pageIDs[index+1]
-		}
-		if err := tx.appendPageAt(pageIDs[index], PageDocumentOverflow, 0, 1, link, payload); err != nil {
-			return nil, err
-		}
-	}
-	descriptor := make([]byte, 49)
-	descriptor[0] = 1
-	binary.LittleEndian.PutUint64(descriptor[1:9], uint64(len(value)))
-	binary.LittleEndian.PutUint64(descriptor[9:17], firstPage)
-	checksum := sha256.Sum256(value)
-	copy(descriptor[17:], checksum[:])
-	return descriptor, nil
-}
-
-func (tx *WriteTxn) loadDocumentValue(stored []byte) ([]byte, error) {
-	if len(stored) == 0 {
-		return nil, ErrCorrupt
-	}
-	if stored[0] == 0 {
-		if len(stored) == 1 {
-			return nil, ErrCorrupt
-		}
-		return append([]byte(nil), stored[1:]...), nil
-	}
-	if stored[0] != 1 || len(stored) != 49 {
-		return nil, ErrCorrupt
-	}
-	total := binary.LittleEndian.Uint64(stored[1:9])
-	pageID := binary.LittleEndian.Uint64(stored[9:17])
-	if total < inlineDocumentLimit || total > maxDocumentBytes || pageID < 2 {
-		return nil, ErrCorrupt
-	}
-	result := make([]byte, 0, int(total))
-	seen := map[uint64]struct{}{}
-	var expectedChunks uint32
-	for index := uint32(0); uint64(len(result)) < total; index++ {
-		if _, duplicate := seen[pageID]; duplicate {
-			return nil, ErrCorrupt
-		}
-		seen[pageID] = struct{}{}
-		raw, err := tx.readPage(pageID)
-		if err != nil {
-			return nil, err
-		}
-		page, err := DecodePage(raw, pageID)
-		if err != nil || page.Type != PageDocumentOverflow || page.Flags != 0 || page.ItemCount != 1 || len(page.Payload) < 16 ||
-			binary.LittleEndian.Uint64(page.Payload[0:8]) != total || binary.LittleEndian.Uint32(page.Payload[8:12]) != index {
-			return nil, ErrCorrupt
-		}
-		chunks := binary.LittleEndian.Uint32(page.Payload[12:16])
-		if chunks == 0 || (index > 0 && chunks != expectedChunks) || index >= chunks || uint64(len(result)+len(page.Payload)-16) > total {
-			return nil, ErrCorrupt
-		}
-		expectedChunks = chunks
-		result = append(result, page.Payload[16:]...)
-		if index+1 == chunks {
-			if page.Link != 0 || uint64(len(result)) != total {
-				return nil, ErrCorrupt
-			}
-			break
-		}
-		if page.Link < 2 {
-			return nil, ErrCorrupt
-		}
-		pageID = page.Link
-	}
-	checksum := sha256.Sum256(result)
-	if !equalBytes(stored[17:], checksum[:]) {
-		return nil, ErrCorrupt
-	}
-	return result, nil
-}
-
+// validCollectionName checks the supported collection name length and characters.
 func validCollectionName(name string) bool {
 	if len(name) == 0 || len(name) > 128 || !((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z')) {
 		return false

@@ -13,6 +13,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// protocolV1Contract holds the shared version-one protocol fixture used by compatibility tests.
 type protocolV1Contract struct {
 	FormatVersion        int    `json:"formatVersion"`
 	ProtocolVersion      int    `json:"protocolVersion"`
@@ -35,18 +36,21 @@ type protocolV1Contract struct {
 	NestedShapes    []protocolShapeContract `json:"nestedShapes"`
 }
 
+// protocolFrameContract describes a message type and its required and optional fields.
 type protocolFrameContract struct {
 	Type     string   `json:"type"`
 	Required []string `json:"required"`
 	Optional []string `json:"optional"`
 }
 
+// protocolShapeContract describes a named nested object and its required and optional fields.
 type protocolShapeContract struct {
 	Name     string   `json:"name"`
 	Required []string `json:"required"`
 	Optional []string `json:"optional"`
 }
 
+// TestProtocolDescriptorsAreCanonicalAndConfigurationHonest checks that advertised capabilities are sorted and match the configured features.
 func TestProtocolDescriptorsAreCanonicalAndConfigurationHonest(t *testing.T) {
 	contract := loadProtocolV1Contract(t)
 	base := realtimeProtocolDescriptor(Config{})
@@ -74,6 +78,7 @@ func TestProtocolDescriptorsAreCanonicalAndConfigurationHonest(t *testing.T) {
 	}
 }
 
+// TestRealtimeProtocolV1FrameVocabularyMatchesSharedContract checks that realtime message fields match the shared protocol fixture.
 func TestRealtimeProtocolV1FrameVocabularyMatchesSharedContract(t *testing.T) {
 	contract := loadProtocolV1Contract(t)
 	wantClient := []protocolFrameContract{
@@ -103,6 +108,7 @@ func TestRealtimeProtocolV1FrameVocabularyMatchesSharedContract(t *testing.T) {
 	}
 }
 
+// TestWorkerProtocolV1ContractIsCanonical checks worker message fields, capabilities, and ordering against the shared fixture.
 func TestWorkerProtocolV1ContractIsCanonical(t *testing.T) {
 	contract := loadProtocolV1Contract(t)
 	workerContract := contract.WorkerProtocol
@@ -146,6 +152,7 @@ func TestWorkerProtocolV1ContractIsCanonical(t *testing.T) {
 	}
 }
 
+// equalProtocolFrames compares ordered message contracts and their field lists.
 func equalProtocolFrames(left, right []protocolFrameContract) bool {
 	if len(left) != len(right) {
 		return false
@@ -158,6 +165,7 @@ func equalProtocolFrames(left, right []protocolFrameContract) bool {
 	return true
 }
 
+// equalProtocolShapes compares ordered nested object contracts and their field lists.
 func equalProtocolShapes(left, right []protocolShapeContract) bool {
 	if len(left) != len(right) {
 		return false
@@ -170,6 +178,7 @@ func equalProtocolShapes(left, right []protocolShapeContract) bool {
 	return true
 }
 
+// loadProtocolV1Contract loads the shared fixture and checks its metadata, error codes, and realtime message ordering.
 func loadProtocolV1Contract(t *testing.T) protocolV1Contract {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "protocol-v1-contract.json"))
@@ -195,6 +204,7 @@ func loadProtocolV1Contract(t *testing.T) protocolV1Contract {
 	return contract
 }
 
+// assertCanonicalFrames checks that message types and field lists are sorted and unique with no field both required and optional.
 func assertCanonicalFrames(t *testing.T, name string, frames []protocolFrameContract) {
 	t.Helper()
 	frameTypes := make([]string, len(frames))
@@ -211,6 +221,7 @@ func assertCanonicalFrames(t *testing.T, name string, frames []protocolFrameCont
 	assertCanonicalStrings(t, name+" frame types", frameTypes)
 }
 
+// assertCanonicalStrings fails the test unless strings are nonempty, sorted, and unique.
 func assertCanonicalStrings(t *testing.T, name string, values []string) {
 	t.Helper()
 	for index, value := range values {

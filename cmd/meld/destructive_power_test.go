@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestValidateDestructivePowerInputsRequiresNewBootAndBoundHardReset checks that power recovery requires a new boot and a hard-reset event tied to the correct marker.
 func TestValidateDestructivePowerInputsRequiresNewBootAndBoundHardReset(t *testing.T) {
 	buildRevision, buildModified := durabilityBuildIdentity()
 	started := time.Now().UTC().Add(-2 * time.Minute)
@@ -53,6 +54,7 @@ func TestValidateDestructivePowerInputsRequiresNewBootAndBoundHardReset(t *testi
 	}
 }
 
+// TestValidatePowerTargetEntriesAllowsOnlyExpectedTrial checks that the target volume contains only the expected trial and lost+found.
 func TestValidatePowerTargetEntriesAllowsOnlyExpectedTrial(t *testing.T) {
 	target := t.TempDir()
 	if err := os.Mkdir(filepath.Join(target, "lost+found"), 0o700); err != nil {
@@ -72,6 +74,7 @@ func TestValidatePowerTargetEntriesAllowsOnlyExpectedTrial(t *testing.T) {
 	}
 }
 
+// TestPowerDatabaseRelativeFailsClosed checks that database paths stay inside the matching power-test directory.
 func TestPowerDatabaseRelativeFailsClosed(t *testing.T) {
 	if !validPowerDatabaseRelative(filepath.Join(".meldbase-power-safe", "power.meld"), "safe") {
 		t.Fatal("valid power database path rejected")
@@ -83,6 +86,7 @@ func TestPowerDatabaseRelativeFailsClosed(t *testing.T) {
 	}
 }
 
+// TestDestructivePowerRecoveryPathsFailBeforeRecoveryMutation checks that recovery paths reject duplicate evidence, symlinks, existing outputs, and outputs outside the control directory.
 func TestDestructivePowerRecoveryPathsFailBeforeRecoveryMutation(t *testing.T) {
 	control := t.TempDir()
 	paths := []string{filepath.Join(control, "marker.json"), filepath.Join(control, "controller.json"), filepath.Join(control, "proof.json")}

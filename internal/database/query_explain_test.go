@@ -2,6 +2,7 @@ package database
 
 import "testing"
 
+// TestCompoundIndexAdviceRequiresConservativeEvidence checks that compound index advice requires enough examined documents and excess work without query modifiers.
 func TestCompoundIndexAdviceRequiresConservativeEvidence(t *testing.T) {
 	unmodified, err := CompileQuery(Filter{"a": int64(1), "b": int64(2)}, QueryOptions{})
 	if err != nil {

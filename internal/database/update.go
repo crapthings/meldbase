@@ -9,18 +9,28 @@ import (
 	"strings"
 )
 
+// Update maps update operators to their requested field changes.
 type Update map[string]any
+
+// UpdateResult reports how many documents matched and changed.
 type UpdateResult struct{ MatchedCount, ModifiedCount int64 }
+
+// updateOperation holds one compiled field edit.
 type updateOperation struct {
 	kind, path string
 	value      Value
 }
+
+// MutationSpec holds a compiled document update.
 type MutationSpec struct{ operations []updateOperation }
+
+// pendingUpdate pairs a document ID with its old and new contents.
 type pendingUpdate struct {
 	id            DocumentID
 	before, after Document
 }
 
+// UpdateOne applies an update to the first document matching the filter.
 func (c *Collection) UpdateOne(ctx context.Context, filter Filter, update Update) (UpdateResult, error) {
 	query, err := CompileQuery(filter, QueryOptions{})
 	if err != nil {
@@ -32,6 +42,8 @@ func (c *Collection) UpdateOne(ctx context.Context, filter Filter, update Update
 	}
 	return c.UpdateOneQuery(ctx, query, mutation)
 }
+
+// UpdateMany atomically applies an update to all documents matching the filter.
 func (c *Collection) UpdateMany(ctx context.Context, filter Filter, update Update) (UpdateResult, error) {
 	query, err := CompileQuery(filter, QueryOptions{})
 	if err != nil {
@@ -43,22 +55,28 @@ func (c *Collection) UpdateMany(ctx context.Context, filter Filter, update Updat
 	}
 	return c.UpdateManyQuery(ctx, query, mutation)
 }
+
+// UpdateOneQuery applies a compiled mutation to the first document matching the query.
 func (c *Collection) UpdateOneQuery(ctx context.Context, query QuerySpec, mutation MutationSpec) (UpdateResult, error) {
 	return c.updateQuery(ctx, query, mutation, true, 1)
 }
+
+// UpdateManyQuery atomically applies a compiled mutation to all matching documents.
 func (c *Collection) UpdateManyQuery(ctx context.Context, query QuerySpec, mutation MutationSpec) (UpdateResult, error) {
 	return c.updateQuery(ctx, query, mutation, false, 0)
 }
 
-// UpdateManyQueryLimited atomically rejects the whole mutation when more than
-// maxAffected documents match. A non-positive limit is invalid here so callers
-// cannot accidentally disable a server-owned safety bound.
+// UpdateManyQueryLimited updates matching documents only if their count stays within maxAffected.
+//
+// A non-positive limit is invalid, and exceeding it rejects the whole mutation.
 func (c *Collection) UpdateManyQueryLimited(ctx context.Context, query QuerySpec, mutation MutationSpec, maxAffected int) (UpdateResult, error) {
 	if maxAffected <= 0 {
 		return UpdateResult{}, fmt.Errorf("%w: maxAffected must be positive", ErrMutationLimit)
 	}
 	return c.updateQuery(ctx, query, mutation, false, maxAffected)
 }
+
+// updateQuery validates an update request and sends it to the active commit path.
 func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (UpdateResult, error) {
 	if err := query.Validate(); err != nil {
 		return UpdateResult{}, err
@@ -84,10 +102,10 @@ func (c *Collection) updateQuery(ctx context.Context, query QuerySpec, mutation 
 	return result, err
 }
 
-// updateQueryLocked preserves the original filter-selection and publication
-// semantics for one request. The  coordinator uses it for single requests
-// and logical-conflict fallback after a speculative group has been rejected.
-// The caller holds db.mu.
+// updateQueryLocked selects, prepares, and atomically commits one update request.
+//
+// The caller holds db.mu; the coordinator also uses this path when a grouped
+// request must retry after a conflict.
 func (c *Collection) updateQueryLocked(ctx context.Context, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (UpdateResult, error) {
 	if c.db.closed {
 		return UpdateResult{}, ErrClosed
@@ -108,27 +126,11 @@ func (c *Collection) updateQueryLocked(ctx context.Context, query QuerySpec, mut
 	if len(selected) > 0 && data == nil {
 		return UpdateResult{}, ErrCorrupt
 	}
-	changes := []pendingUpdate{}
-	result := UpdateResult{MatchedCount: int64(len(selected))}
-	for _, document := range selected {
-		id, exists := document.ID()
-		if !exists {
-			return UpdateResult{}, ErrCorrupt
-		}
-		after := document.Clone()
-		for _, operation := range mutation.operations {
-			if err := applyUpdateOperation(after, operation); err != nil {
-				return UpdateResult{}, err
-			}
-		}
-		if err := after.Validate(); err != nil {
-			return UpdateResult{}, err
-		}
-		if !after.Equal(document) {
-			result.ModifiedCount++
-			changes = append(changes, pendingUpdate{id: id, before: document.Clone(), after: after})
-		}
+	changes, result, err := prepareDocumentUpdates(selected, mutation)
+	if err != nil {
+		return UpdateResult{}, err
 	}
+
 	events := make([]Change, len(changes))
 	changedPaths := mutation.Paths()
 	var token uint64
@@ -168,6 +170,28 @@ func (c *Collection) updateQueryLocked(ctx context.Context, query QuerySpec, mut
 	return result, nil
 }
 
+// prepareDocumentUpdates computes changed document copies and match counts without committing them.
+func prepareDocumentUpdates(selected []Document, mutation MutationSpec) ([]pendingUpdate, UpdateResult, error) {
+	changes := []pendingUpdate{}
+	result := UpdateResult{MatchedCount: int64(len(selected))}
+	for _, document := range selected {
+		id, exists := document.ID()
+		if !exists {
+			return nil, UpdateResult{}, ErrCorrupt
+		}
+		after, err := mutation.Apply(document)
+		if err != nil {
+			return nil, UpdateResult{}, err
+		}
+		if !after.Equal(document) {
+			result.ModifiedCount++
+			changes = append(changes, pendingUpdate{id: id, before: document.Clone(), after: after})
+		}
+	}
+	return changes, result, nil
+}
+
+// CompileUpdate validates update operators and produces a reusable mutation.
 func CompileUpdate(update Update) (MutationSpec, error) {
 	if len(update) == 0 {
 		return MutationSpec{}, fmt.Errorf("%w: empty update", ErrInvalidUpdate)
@@ -222,6 +246,7 @@ func CompileUpdate(update Update) (MutationSpec, error) {
 	return MutationSpec{operations: result}, nil
 }
 
+// Paths returns the edited field paths in sorted order.
 func (m MutationSpec) Paths() []string {
 	paths := make([]string, len(m.operations))
 	for i, operation := range m.operations {
@@ -230,6 +255,8 @@ func (m MutationSpec) Paths() []string {
 	sort.Strings(paths)
 	return paths
 }
+
+// Apply runs the compiled edits on a copy of the document and validates the result.
 func (m MutationSpec) Apply(document Document) (Document, error) {
 	if len(m.operations) == 0 {
 		return nil, fmt.Errorf("%w: empty compiled update", ErrInvalidUpdate)
@@ -246,6 +273,7 @@ func (m MutationSpec) Apply(document Document) (Document, error) {
 	return result, nil
 }
 
+// applyUpdateOperation applies one compiled field edit to a document.
 func applyUpdateOperation(document Document, operation updateOperation) error {
 	switch operation.kind {
 	case "set":
@@ -294,6 +322,7 @@ func applyUpdateOperation(document Document, operation updateOperation) error {
 	}
 }
 
+// setPath writes a copied value at a dotted path and creates missing parent objects.
 func setPath(document Document, path string, value Value) error {
 	parts := strings.Split(path, ".")
 	current := document
@@ -315,6 +344,7 @@ func setPath(document Document, path string, value Value) error {
 	return nil
 }
 
+// unsetPath removes a field at a dotted path if its parent objects exist.
 func unsetPath(document Document, path string) {
 	parts := strings.Split(path, ".")
 	current := document
@@ -330,6 +360,7 @@ func unsetPath(document Document, path string) {
 	delete(current, parts[len(parts)-1])
 }
 
+// addNumbers adds numeric values while rejecting overflow and inexact integer conversions.
 func addNumbers(left, right Value) (Value, error) {
 	if left.kind == Int64Kind && right.kind == Int64Kind {
 		sum := left.i + right.i
@@ -366,6 +397,7 @@ func addNumbers(left, right Value) (Value, error) {
 	return Float(sum), nil
 }
 
+// exactFloat64 converts an integer to a float only when its value is preserved exactly.
 func exactFloat64(value int64) (float64, bool) {
 	converted := float64(value)
 	const two63 = float64(1 << 63)

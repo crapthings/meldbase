@@ -9,10 +9,11 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
-// coordinatorPreparedMutation is an immutable selection made at admission.
-// Its point read set pins every document whose before image will enter the
-// group. The original query remains on the request solely for conflict fallback
-// under db.mu; it is never evaluated by storage.
+// coordinatorPreparedMutation holds selected changes, read conditions, and results for a queued mutation.
+//
+// The selection is immutable after admission. Read conditions protect each
+// document whose original value enters the group. The request retains its query
+// only to repeat selection under db.mu after a conflict; storage never evaluates it.
 type coordinatorPreparedMutation struct {
 	changes []Change
 	readSet []storage.DocumentPrecondition
@@ -20,6 +21,7 @@ type coordinatorPreparedMutation struct {
 	delete  DeleteResult
 }
 
+// submitUpdate prepares an update and queues it with a fallback that repeats selection after a conflict.
 func (coordinator *commitCoordinator) submitUpdate(ctx context.Context, collection string, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (UpdateResult, error) {
 	if coordinator == nil || coordinator.db == nil {
 		return UpdateResult{}, ErrCorrupt
@@ -43,6 +45,7 @@ func (coordinator *commitCoordinator) submitUpdate(ctx context.Context, collecti
 	return result.update, err
 }
 
+// submitDelete prepares a deletion and queues it with a fallback that repeats selection after a conflict.
 func (coordinator *commitCoordinator) submitDelete(ctx context.Context, collection string, query QuerySpec, one bool, maxAffected int) (DeleteResult, error) {
 	if coordinator == nil || coordinator.db == nil {
 		return DeleteResult{}, ErrCorrupt
@@ -66,6 +69,7 @@ func (coordinator *commitCoordinator) submitDelete(ctx context.Context, collecti
 	return result.delete, err
 }
 
+// prepareCoordinatorUpdateLocked selects and validates update changes while the caller holds the database write lock.
 func (c *Collection) prepareCoordinatorUpdateLocked(ctx context.Context, query QuerySpec, mutation MutationSpec, one bool, maxAffected int) (coordinatorPreparedMutation, error) {
 	if c == nil || c.db == nil || c.db.closed {
 		return coordinatorPreparedMutation{}, ErrClosed
@@ -130,6 +134,7 @@ func (c *Collection) prepareCoordinatorUpdateLocked(ctx context.Context, query Q
 	return prepared, nil
 }
 
+// prepareCoordinatorDeleteLocked selects and validates deletion changes while the caller holds the database write lock.
 func (c *Collection) prepareCoordinatorDeleteLocked(ctx context.Context, query QuerySpec, one bool, maxAffected int) (coordinatorPreparedMutation, error) {
 	if c == nil || c.db == nil || c.db.closed {
 		return coordinatorPreparedMutation{}, ErrClosed
@@ -170,6 +175,7 @@ func (c *Collection) prepareCoordinatorDeleteLocked(ctx context.Context, query Q
 	return prepared, nil
 }
 
+// coordinatorReadSet creates existence and content-hash checks for the documents a mutation changes.
 func coordinatorReadSet(changes []Change) ([]storage.DocumentPrecondition, error) {
 	readSet := make([]storage.DocumentPrecondition, 0, len(changes))
 	for _, change := range changes {

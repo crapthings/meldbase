@@ -10,6 +10,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestLogicalArchiveCommandsExportAndImport checks that CLI export and import preserve archive counts and stored documents.
 func TestLogicalArchiveCommandsExportAndImport(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld")

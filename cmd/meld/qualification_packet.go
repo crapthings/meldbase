@@ -15,10 +15,13 @@ import (
 	"time"
 )
 
+// qualificationReleasePacketSchema identifies the signed release packet format.
 const qualificationReleasePacketSchema uint32 = 1
 
+// qualificationPacketBuildIdentity reads verifier build metadata and can be replaced by tests.
 var qualificationPacketBuildIdentity = durabilityBuildIdentity
 
+// qualificationReleasePacket holds a signed qualification result and the verifier's build identity.
 type qualificationReleasePacket struct {
 	SchemaVersion           uint32                       `json:"schemaVersion"`
 	Qualification           qualificationCheckResult     `json:"qualification"`
@@ -28,6 +31,7 @@ type qualificationReleasePacket struct {
 	Signature               string                       `json:"signature"`
 }
 
+// qualificationReleaseVerifier records the build and runtime identity of the release packet verifier.
 type qualificationReleaseVerifier struct {
 	BuildRevision string `json:"buildRevision"`
 	BuildModified bool   `json:"buildModified"`
@@ -36,6 +40,7 @@ type qualificationReleaseVerifier struct {
 	GoVersion     string `json:"goVersion"`
 }
 
+// runQualificationPacketKeygen creates independent Ed25519 keys for release packet signing and verification.
 func runQualificationPacketKeygen(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-packet-keygen", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -64,6 +69,7 @@ func runQualificationPacketKeygen(args []string, stdout, stderr io.Writer) error
 	return err
 }
 
+// newQualificationReleasePacket creates a signed Level 5 packet using a clean verifier build and an independent release key.
 func newQualificationReleasePacket(result qualificationCheckResult, privateKeyPath string) (qualificationReleasePacket, error) {
 	if err := validateQualificationReleaseResult(result); err != nil {
 		return qualificationReleasePacket{}, err
@@ -98,6 +104,7 @@ func newQualificationReleasePacket(result qualificationCheckResult, privateKeyPa
 	return packet, nil
 }
 
+// signQualificationReleasePacket signs the release packet's JSON contents with an Ed25519 private key.
 func signQualificationReleasePacket(packet *qualificationReleasePacket, privateKey ed25519.PrivateKey) error {
 	packet.Signature = ""
 	payload, err := json.Marshal(packet)
@@ -108,6 +115,7 @@ func signQualificationReleasePacket(packet *qualificationReleasePacket, privateK
 	return nil
 }
 
+// verifyQualificationReleasePacket validates a release packet and verifies its signature against the trusted public key.
 func verifyQualificationReleasePacket(packet qualificationReleasePacket, publicKey ed25519.PublicKey) error {
 	if err := validateQualificationReleasePacket(packet); err != nil {
 		return err
@@ -128,6 +136,7 @@ func verifyQualificationReleasePacket(packet qualificationReleasePacket, publicK
 	return nil
 }
 
+// validateQualificationReleasePacket checks packet identity, verifier provenance, and release key independence.
 func validateQualificationReleasePacket(packet qualificationReleasePacket) error {
 	if packet.SchemaVersion != qualificationReleasePacketSchema || packet.Verifier.BuildRevision != packet.Qualification.SourceRevision || packet.Verifier.BuildModified ||
 		packet.Verifier.GOOS == "" || packet.Verifier.GOARCH == "" || packet.Verifier.GoVersion == "" || packet.SignedAt.IsZero() ||
@@ -144,6 +153,7 @@ func validateQualificationReleasePacket(packet qualificationReleasePacket) error
 	return nil
 }
 
+// validateQualificationReleaseResult checks that a result contains complete Level 5 qualification identities and evidence hashes.
 func validateQualificationReleaseResult(result qualificationCheckResult) error {
 	if result.SchemaVersion != 2 || !validDurabilitySourceRevision(result.SourceRevision) || result.EvidenceLevel != 5 ||
 		!result.StorageQualified || !result.RollbackProtectionQualified || !result.ProductionQualified || !result.Passed ||
@@ -168,6 +178,7 @@ func validateQualificationReleaseResult(result qualificationCheckResult) error {
 	return nil
 }
 
+// runQualificationPacketVerify verifies a release packet's signature and compares its qualification result with the original evidence.
 func runQualificationPacketVerify(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-packet-verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)

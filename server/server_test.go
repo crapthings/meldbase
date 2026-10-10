@@ -11,26 +11,38 @@ import (
 	"github.com/crapthings/meldbase/server"
 )
 
+// authenticator assigns the test user to every HTTP request.
 type authenticator struct{}
 
+// AuthenticateHTTP returns the fixed test actor.
 func (authenticator) AuthenticateHTTP(*http.Request) (server.Actor, error) {
 	return server.Actor{ID: "user"}, nil
 }
 
+// authorizer denies document operations and allows only the test user to call echo.
 type authorizer struct{}
 
+// AuthorizeQuery denies every document query.
 func (authorizer) AuthorizeQuery(context.Context, server.Actor, string, meldbase.QuerySpec) (server.QueryPolicy, error) {
 	return server.QueryPolicy{}, server.ErrForbidden
 }
+
+// AuthorizeInsert denies every document insertion.
 func (authorizer) AuthorizeInsert(context.Context, server.Actor, string, meldbase.Document) (server.InsertPolicy, error) {
 	return server.InsertPolicy{}, server.ErrForbidden
 }
+
+// AuthorizeUpdate denies every document update.
 func (authorizer) AuthorizeUpdate(context.Context, server.Actor, string, meldbase.QuerySpec, meldbase.MutationSpec) (server.UpdatePolicy, error) {
 	return server.UpdatePolicy{}, server.ErrForbidden
 }
+
+// AuthorizeDelete denies every document deletion.
 func (authorizer) AuthorizeDelete(context.Context, server.Actor, string, meldbase.QuerySpec) (server.DeletePolicy, error) {
 	return server.DeletePolicy{}, server.ErrForbidden
 }
+
+// AuthorizeRPC allows only the test user to call the echo method.
 func (authorizer) AuthorizeRPC(_ context.Context, actor server.Actor, method string) error {
 	if actor.ID != "user" || method != "echo" {
 		return server.ErrForbidden
@@ -38,6 +50,7 @@ func (authorizer) AuthorizeRPC(_ context.Context, actor server.Actor, method str
 	return nil
 }
 
+// TestPublicServerFacadeCanRegisterAndCallRPC checks that the public server API can serve a registered RPC method over HTTP.
 func TestPublicServerFacadeCanRegisterAndCallRPC(t *testing.T) {
 	if server.ProtocolVersion != 1 {
 		t.Fatalf("public protocol version=%d", server.ProtocolVersion)

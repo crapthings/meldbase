@@ -14,21 +14,32 @@ import (
 )
 
 const (
+	// rpcIdempotencyRecordVersion identifies the binary record layout written by this implementation.
 	rpcIdempotencyRecordVersion = 2
-	rpcIdempotencyHeaderBytes   = 128
+	// rpcIdempotencyHeaderBytes is the fixed byte size of an idempotency record header.
+	rpcIdempotencyHeaderBytes = 128
+	// rpcIdempotencyClaimAttempts limits retries after competing changes to a request record.
 	rpcIdempotencyClaimAttempts = 16
 )
 
 const (
+	// idempotencyRecordPending marks a request claimed before application execution.
 	idempotencyRecordPending uint8 = iota + 1
+	// idempotencyRecordResult marks a recorded successful result.
 	idempotencyRecordResult
+	// idempotencyRecordError marks a recorded error result.
 	idempotencyRecordError
+	// idempotencyRecordUnknown marks a request whose outcome cannot safely be replayed or retried.
 	idempotencyRecordUnknown
 )
 
+// rpcIdempotencyRecordMagic identifies binary RPC idempotency records.
 var rpcIdempotencyRecordMagic = [8]byte{'M', 'E', 'L', 'D', 'R', 'P', 'C', '1'}
+
+// rpcIdempotencyKeyPrefix reserves the system-record namespace for RPC request outcomes.
 var rpcIdempotencyKeyPrefix = []byte("rpc.idempotency.v1\x00")
 
+// durableRPCIdempotencyStore persists request ownership and outcomes in database system records.
 type durableRPCIdempotencyStore struct {
 	backend systemrecord.Backend
 	db      *meldbase.DB
@@ -37,6 +48,7 @@ type durableRPCIdempotencyStore struct {
 	pruneStart []byte
 }
 
+// rpcIdempotencyRecord holds a request's ownership, expiration, and optional terminal outcome.
 type rpcIdempotencyRecord struct {
 	state       uint8
 	fingerprint [32]byte
@@ -50,9 +62,7 @@ type rpcIdempotencyRecord struct {
 	errorStatus int
 }
 
-// NewDurableRPCIdempotencyStore creates the built-in -backed store. Memory
-// databases and V1 files are rejected rather than receiving a non-durable
-// fallback.
+// NewDurableRPCIdempotencyStore creates an idempotency store backed by database system records.
 func NewDurableRPCIdempotencyStore(db *meldbase.DB) (DurableRPCIdempotencyStore, error) {
 	if db == nil {
 		return nil, errors.New("meldbase server: idempotency database is required")
@@ -64,6 +74,7 @@ func NewDurableRPCIdempotencyStore(db *meldbase.DB) (DurableRPCIdempotencyStore,
 	return &durableRPCIdempotencyStore{backend: backend, db: db}, nil
 }
 
+// PruneExpired removes a bounded number of expired terminal records while preserving pending requests.
 func (store *durableRPCIdempotencyStore) PruneExpired(ctx context.Context, limit int) (int, error) {
 	if store == nil || store.backend == nil || ctx == nil || limit <= 0 || limit > 256 {
 		return 0, errors.New("RPC idempotency prune limit must be between 1 and 256")
@@ -129,6 +140,7 @@ func (store *durableRPCIdempotencyStore) PruneExpired(ctx context.Context, limit
 	return pruned, nil
 }
 
+// Claim reserves an unused or expired terminal request key or returns the existing request's decision.
 func (store *durableRPCIdempotencyStore) Claim(ctx context.Context, claim RPCIdempotencyClaim) (RPCIdempotencyDecision, error) {
 	if store == nil || store.backend == nil || ctx == nil || allZero16(claim.SessionID) || allZero16(claim.ClaimID) || claim.ExpiresAt.IsZero() {
 		return RPCIdempotencyDecision{}, errors.New("invalid durable idempotency claim")
@@ -223,6 +235,7 @@ func (store *durableRPCIdempotencyStore) Claim(ctx context.Context, claim RPCIde
 	return RPCIdempotencyDecision{}, errors.New("durable idempotency claim contention exceeded retry budget")
 }
 
+// Complete validates and persists a terminal outcome only while the caller still owns the pending request.
 func (store *durableRPCIdempotencyStore) Complete(ctx context.Context, completion RPCIdempotencyCompletion) error {
 	if store == nil || store.backend == nil || ctx == nil {
 		return errors.New("invalid durable idempotency completion")
@@ -234,6 +247,7 @@ func (store *durableRPCIdempotencyStore) Complete(ctx context.Context, completio
 	return store.transition(ctx, completion.Claim, record)
 }
 
+// rpcIdempotencyCompletionRecord validates a completion and constructs its terminal record.
 func rpcIdempotencyCompletionRecord(completion RPCIdempotencyCompletion) (rpcIdempotencyRecord, error) {
 	if completion.ErrorCode != "" && completion.ErrorKind == "" {
 		completion.ErrorKind = "internal"
@@ -258,6 +272,7 @@ func rpcIdempotencyCompletionRecord(completion RPCIdempotencyCompletion) (rpcIde
 	return record, nil
 }
 
+// atomicCompletion builds a conditional system-record mutation that replaces an owned pending claim with its outcome.
 func (store *durableRPCIdempotencyStore) atomicCompletion(completion RPCIdempotencyCompletion) (systemrecord.Mutation, error) {
 	if store == nil || store.db == nil {
 		return systemrecord.Mutation{}, errors.New("invalid durable idempotency atomic completion")
@@ -278,6 +293,7 @@ func (store *durableRPCIdempotencyStore) atomicCompletion(completion RPCIdempote
 	return mutation, nil
 }
 
+// atomicClaimMutation builds an existence and hash precondition for an owned pending request.
 func (store *durableRPCIdempotencyStore) atomicClaimMutation(claim RPCIdempotencyClaim) (systemrecord.Mutation, error) {
 	if store == nil || store.db == nil {
 		return systemrecord.Mutation{}, errors.New("invalid durable idempotency atomic claim")
@@ -295,12 +311,14 @@ func (store *durableRPCIdempotencyStore) atomicClaimMutation(claim RPCIdempotenc
 	}, nil
 }
 
+// MarkUnknown replaces an owned pending request with an uncertain-outcome record.
 func (store *durableRPCIdempotencyStore) MarkUnknown(ctx context.Context, claim RPCIdempotencyClaim) error {
 	return store.transition(ctx, claim, rpcIdempotencyRecord{
 		state: idempotencyRecordUnknown, fingerprint: claim.Fingerprint, sessionID: claim.SessionID, claimID: claim.ClaimID, expiresAt: claim.ExpiresAt,
 	})
 }
 
+// transition persists a new record only if the exact owned pending claim still exists.
 func (store *durableRPCIdempotencyStore) transition(ctx context.Context, claim RPCIdempotencyClaim, next rpcIdempotencyRecord) error {
 	pending, err := encodeRPCIdempotencyRecord(rpcIdempotencyRecord{
 		state: idempotencyRecordPending, fingerprint: claim.Fingerprint, sessionID: claim.SessionID, claimID: claim.ClaimID, expiresAt: claim.ExpiresAt,
@@ -329,6 +347,7 @@ func (store *durableRPCIdempotencyStore) transition(ctx context.Context, claim R
 	return nil
 }
 
+// rpcIdempotencyStorageKey combines the reserved prefix with hashed actor scope and caller key.
 func rpcIdempotencyStorageKey(claim RPCIdempotencyClaim) []byte {
 	key := make([]byte, len(rpcIdempotencyKeyPrefix)+64)
 	copy(key, rpcIdempotencyKeyPrefix)
@@ -337,6 +356,7 @@ func rpcIdempotencyStorageKey(claim RPCIdempotencyClaim) []byte {
 	return key
 }
 
+// encodeRPCIdempotencyRecord validates a request record and writes its current binary format.
 func encodeRPCIdempotencyRecord(record rpcIdempotencyRecord) ([]byte, error) {
 	if record.state < idempotencyRecordPending || record.state > idempotencyRecordUnknown || record.expiresAt.IsZero() ||
 		allZero16(record.sessionID) || allZero16(record.claimID) {
@@ -381,6 +401,7 @@ func encodeRPCIdempotencyRecord(record rpcIdempotencyRecord) ([]byte, error) {
 	return encoded, nil
 }
 
+// decodeRPCIdempotencyRecord reads a supported binary record and validates its reconstructed contents.
 func decodeRPCIdempotencyRecord(encoded []byte) (rpcIdempotencyRecord, error) {
 	if len(encoded) < rpcIdempotencyHeaderBytes || string(encoded[:8]) != string(rpcIdempotencyRecordMagic[:]) || encoded[11] != 0 ||
 		binary.LittleEndian.Uint32(encoded[12:16]) != rpcIdempotencyHeaderBytes {
@@ -440,6 +461,7 @@ func decodeRPCIdempotencyRecord(encoded []byte) (rpcIdempotencyRecord, error) {
 	return record, nil
 }
 
+// allZeroBytes reports whether every byte in a slice is zero.
 func allZeroBytes(value []byte) bool {
 	var found byte
 	for _, item := range value {

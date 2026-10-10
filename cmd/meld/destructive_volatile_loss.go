@@ -14,10 +14,13 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// destructiveVolatileLossSchema identifies the acknowledged-write marker format.
 const destructiveVolatileLossSchema uint32 = 1
 
+// destructiveVolatileLossDocumentID identifies the document used to detect lost acknowledged writes.
 var destructiveVolatileLossDocumentID = [16]byte{15: 0xa1}
 
+// destructiveVolatileLossSeed records the verified durable state before the volatile-write test.
 type destructiveVolatileLossSeed struct {
 	SchemaVersion  uint32 `json:"schemaVersion"`
 	BuildRevision  string `json:"buildRevision,omitempty"`
@@ -31,6 +34,7 @@ type destructiveVolatileLossSeed struct {
 	Passed         bool   `json:"passed"`
 }
 
+// destructiveVolatileLossMarker records the acknowledged update and its previous durable state.
 type destructiveVolatileLossMarker struct {
 	SchemaVersion              uint32    `json:"schemaVersion"`
 	BuildRevision              string    `json:"buildRevision,omitempty"`
@@ -49,6 +53,7 @@ type destructiveVolatileLossMarker struct {
 	AcknowledgedStateSHA256    string    `json:"acknowledgedStateSha256"`
 }
 
+// destructiveVolatileLossResult records whether recovery exposed a lost acknowledged write and rejected the expected sequence floor.
 type destructiveVolatileLossResult struct {
 	SchemaVersion              uint32    `json:"schemaVersion"`
 	BuildRevision              string    `json:"buildRevision,omitempty"`
@@ -73,6 +78,7 @@ type destructiveVolatileLossResult struct {
 	NegativeControlPassed      bool      `json:"negativeControlPassed"`
 }
 
+// destructiveVolatileLossRecoveryReady links a replacement boot to the acknowledged-write marker.
 type destructiveVolatileLossRecoveryReady struct {
 	SchemaVersion uint32    `json:"schemaVersion"`
 	BuildRevision string    `json:"buildRevision,omitempty"`
@@ -86,6 +92,7 @@ type destructiveVolatileLossRecoveryReady struct {
 	MarkerSHA256  string    `json:"markerSha256"`
 }
 
+// runDestructiveVolatileLossSeed creates and verifies the durable starting state for a lost-write test.
 func runDestructiveVolatileLossSeed(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-volatile-loss-seed", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -123,6 +130,7 @@ func runDestructiveVolatileLossSeed(args []string, stdout, stderr io.Writer) err
 	return encoder.Encode(result)
 }
 
+// runDestructiveVolatileLossUpdate records an acknowledged update in a durable marker and waits for the controller to terminate it.
 func runDestructiveVolatileLossUpdate(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-volatile-loss-update", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -187,6 +195,7 @@ func runDestructiveVolatileLossUpdate(args []string, stdout, stderr io.Writer) e
 	return errors.New("volatile-loss worker resumed without SIGKILL")
 }
 
+// runDestructiveVolatileLossRecover proves that recovery lost the acknowledged update and that the minimum commit sequence rejects the old state.
 func runDestructiveVolatileLossRecover(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-volatile-loss-recover", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -289,6 +298,7 @@ func runDestructiveVolatileLossRecover(args []string, stdout, stderr io.Writer) 
 	return encoder.Encode(result)
 }
 
+// runDestructiveVolatileLossRecoveryReady publishes evidence that the replacement boot differs from the update boot.
 func runDestructiveVolatileLossRecoveryReady(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-volatile-loss-recovery-ready", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -332,12 +342,14 @@ func runDestructiveVolatileLossRecoveryReady(args []string, stdout, stderr io.Wr
 	return encoder.Encode(ready)
 }
 
+// verifyDestructiveVolatileLossDatabase verifies the test database while rejecting unexpected indexes.
 func verifyDestructiveVolatileLossDatabase(path string) (storage.VerificationResult, error) {
 	return storage.VerifyPathContextWithIndexAudit(context.Background(), path, func(storage.IndexMeta, [16]byte, []byte) ([]byte, bool, error) {
 		return nil, false, errors.New("volatile-loss fixture unexpectedly contains an index")
 	})
 }
 
+// validateDestructiveVolatileLossSeed requires a successful sequence-one seed with build, runtime, and state hashes.
 func validateDestructiveVolatileLossSeed(seed destructiveVolatileLossSeed) error {
 	if seed.SchemaVersion != 1 || (seed.BuildRevision != "" && !validDurabilitySourceRevision(seed.BuildRevision)) || seed.GOOS == "" || seed.GOARCH == "" || seed.GoVersion == "" || !qualificationHexDigest(seed.DatabaseSHA256) || seed.CommitSequence != 1 || !qualificationHexDigest(seed.StateSHA256) || !seed.Passed {
 		return errors.New("volatile-loss seed is incomplete")
@@ -345,6 +357,7 @@ func validateDestructiveVolatileLossSeed(seed destructiveVolatileLossSeed) error
 	return nil
 }
 
+// validateDestructiveVolatileLossMarker requires a timed sequence-one-to-two update with distinct database and state hashes.
 func validateDestructiveVolatileLossMarker(marker destructiveVolatileLossMarker) error {
 	if marker.SchemaVersion != destructiveVolatileLossSchema || (marker.BuildRevision != "" && !validDurabilitySourceRevision(marker.BuildRevision)) || marker.GOOS == "" || marker.GOARCH == "" || marker.GoVersion == "" || !qualificationSafeName(marker.BootID, 64) || marker.StartedAt.IsZero() || !marker.CommitAcknowledgedAt.After(marker.StartedAt) || !qualificationHexDigest(marker.BeforeSHA256) || !qualificationHexDigest(marker.AcknowledgedSHA256) || marker.BeforeSHA256 == marker.AcknowledgedSHA256 || marker.OldCommitSequence != 1 || marker.AcknowledgedCommitSequence != 2 || !qualificationHexDigest(marker.OldStateSHA256) || !qualificationHexDigest(marker.AcknowledgedStateSHA256) || marker.OldStateSHA256 == marker.AcknowledgedStateSHA256 {
 		return errors.New("volatile-loss marker is incomplete")
@@ -352,6 +365,7 @@ func validateDestructiveVolatileLossMarker(marker destructiveVolatileLossMarker)
 	return nil
 }
 
+// validateDestructiveVolatileLossResult requires evidence that an acknowledged sequence-two write was lost and the sequence floor was rejected.
 func validateDestructiveVolatileLossResult(result destructiveVolatileLossResult) error {
 	if result.SchemaVersion != 1 || (result.BuildRevision != "" && !validDurabilitySourceRevision(result.BuildRevision)) || result.GOOS == "" || result.GOARCH == "" || result.GoVersion == "" || !qualificationSafeName(result.BootIDBefore, 64) || !qualificationSafeName(result.BootIDAfter, 64) || result.BootIDBefore == result.BootIDAfter || result.RecoveredAt.IsZero() || !qualificationHexDigest(result.MarkerSHA256) || !qualificationHexDigest(result.ControllerSHA256) || !filepath.IsAbs(result.DatabaseArtifact) || !qualificationHexDigest(result.RecoveredSHA256) || result.AcknowledgedCommitSequence != 2 || result.RecoveredCommitSequence != 1 || !qualificationHexDigest(result.AcknowledgedStateSHA256) || !qualificationHexDigest(result.RecoveredStateSHA256) || result.AcknowledgedStateSHA256 == result.RecoveredStateSHA256 || !result.AcknowledgedCommitLost || !result.MonotonicFloorRejected || !result.UnsafeStorageDetected || !result.NegativeControlPassed {
 		return errors.New("volatile-loss result is incomplete")
@@ -359,6 +373,7 @@ func validateDestructiveVolatileLossResult(result destructiveVolatileLossResult)
 	return nil
 }
 
+// validateDestructiveVolatileLossRecoveryReady requires distinct boot identities and a timed link to the marker.
 func validateDestructiveVolatileLossRecoveryReady(ready destructiveVolatileLossRecoveryReady) error {
 	if ready.SchemaVersion != 1 || (ready.BuildRevision != "" && !validDurabilitySourceRevision(ready.BuildRevision)) || ready.GOOS == "" || ready.GOARCH == "" || ready.GoVersion == "" || !qualificationSafeName(ready.BootIDBefore, 64) || !qualificationSafeName(ready.BootIDAfter, 64) || ready.BootIDBefore == ready.BootIDAfter || ready.ReadyAt.IsZero() || !qualificationHexDigest(ready.MarkerSHA256) {
 		return errors.New("volatile-loss recovery-ready receipt is incomplete")

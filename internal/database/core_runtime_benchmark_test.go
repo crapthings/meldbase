@@ -11,8 +11,9 @@ import (
 	"time"
 )
 
-// BenchmarkConcurrentIndependentCommits is the storage baseline for the
-// future CommitCoordinator. It deliberately uses independent documents: any
+// BenchmarkConcurrentIndependentCommits measures concurrent inserts without commit grouping.
+//
+// It deliberately uses independent documents: any
 // contention it observes comes from the shared commit path rather than a
 // business-key conflict.
 func BenchmarkConcurrentIndependentCommits(b *testing.B) {
@@ -51,11 +52,12 @@ func BenchmarkConcurrentIndependentCommits(b *testing.B) {
 	}
 }
 
-// BenchmarkPublicInsertPair compares the established public synchronous
-// InsertOne path with the public coordinator path. The grouped case uses the
+// BenchmarkPublicInsertPair compares sequential inserts with inserts committed as a group.
+//
+// The grouped case uses the
 // package-test admission hook only to ensure both independent callers land in
 // one window; the measured operation still traverses document validation,
-// queue admission, the  COW group publisher and result delivery.
+// queue admission, the copy-on-write group publisher and result delivery.
 func BenchmarkPublicInsertPair(b *testing.B) {
 	for _, grouped := range []bool{false, true} {
 		name := "sequential"
@@ -146,8 +148,9 @@ func BenchmarkPublicInsertPair(b *testing.B) {
 	}
 }
 
-// BenchmarkPublicWriteTransactionPair measures the same physical-barrier
-// comparison for two independently built optimistic point transactions. The
+// BenchmarkPublicWriteTransactionPair compares sequential transaction commits with a grouped commit.
+//
+// Each transaction independently stages an insert. The
 // grouped path must never rerun either callback after a conflict or
 // cancellation boundary; this benchmark uses independent inserts so it exposes
 // only the coordinator's intended persistence saving.
@@ -238,7 +241,9 @@ func BenchmarkPublicWriteTransactionPair(b *testing.B) {
 }
 
 // BenchmarkSharedRealtimeFanout measures a durable write plus delivery to
-// many subscribers of one canonical query. It separates the cost of one shared
+// many subscribers of one canonical query.
+//
+// It separates the cost of one shared
 // view transition from per-subscriber delta cloning/delivery.
 func BenchmarkSharedRealtimeFanout(b *testing.B) {
 	for _, subscribers := range []int{1, 100} {
@@ -292,8 +297,9 @@ func BenchmarkSharedRealtimeFanout(b *testing.B) {
 	}
 }
 
-// BenchmarkReactiveViewRebuild measures one immutable  collection scan
-// shared by many canonical views. It is the cold/resync cost that must remain
+// BenchmarkReactiveViewRebuild measures rebuilding multiple query views from one collection snapshot.
+//
+// It measures the initial-build and resync cost, which must remain
 // bounded and independent of a writer; each document's canonical byte size is
 // intentionally charged once even when it matches every view.
 func BenchmarkReactiveViewRebuild(b *testing.B) {

@@ -7,6 +7,7 @@ import { QueryValidationError } from "./types.js";
 import { decodeQuerySpec, encodeQuerySpec } from "./wire.js";
 import type { Document } from "./index.js";
 
+/** Provides documents with nested fields and arrays for query tests. */
 const documents: Document[] = [
   { _id: "a", age: 17, profile: { city: "Shanghai" }, tags: ["new"] },
   { _id: "b", age: 24, profile: { city: "Hangzhou" }, tags: ["active", "new"] },

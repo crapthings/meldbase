@@ -17,8 +17,10 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// rpcTestAuthorizer controls whether the test user may invoke allowed RPC methods.
 type rpcTestAuthorizer struct{ allow bool }
 
+// AuthorizeRPC rejects disabled access, unexpected users, and the forbidden test method.
 func (authorizer rpcTestAuthorizer) AuthorizeRPC(_ context.Context, actor Actor, method string) error {
 	if !authorizer.allow || actor.ID != "user-1" || method == "forbidden" {
 		return ErrForbidden
@@ -26,6 +28,7 @@ func (authorizer rpcTestAuthorizer) AuthorizeRPC(_ context.Context, actor Actor,
 	return nil
 }
 
+// TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors checks typed RPC results, authorization, error redaction, and request counters.
 func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 	var calls atomic.Uint64
 	methods := map[string]RPCMethod{
@@ -118,6 +121,7 @@ func TestRPCUsesTypedValuesExplicitAuthorizationAndSafeErrors(t *testing.T) {
 	}
 }
 
+// TestHTTPRPCIngressRejectsDuplicateJSONKeysBeforeMethodExecution checks that duplicate JSON keys are rejected before RPC execution or request accounting.
 func TestHTTPRPCIngressRejectsDuplicateJSONKeysBeforeMethodExecution(t *testing.T) {
 	var calls atomic.Uint64
 	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
@@ -153,6 +157,7 @@ func TestHTTPRPCIngressRejectsDuplicateJSONKeysBeforeMethodExecution(t *testing.
 	}
 }
 
+// TestRPCCallEnvelopeRejectsLegacyArgumentsField checks that the obsolete arguments field is rejected in RPC calls.
 func TestRPCCallEnvelopeRejectsLegacyArgumentsField(t *testing.T) {
 	_, err := decodeRPCCallEnvelope([]byte(`{"v":1,"type":"call","requestId":"legacy","method":"safe","input":{"t":"null"},"arguments":[]}`))
 	if err == nil {
@@ -160,6 +165,7 @@ func TestRPCCallEnvelopeRejectsLegacyArgumentsField(t *testing.T) {
 	}
 }
 
+// TestRPCMapsDatabaseAvailabilityWithoutLeakingEngineErrors checks that durability failures return a database availability error without private details.
 func TestRPCMapsDatabaseAvailabilityWithoutLeakingEngineErrors(t *testing.T) {
 	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Value{}, errors.Join(errors.New("private disk detail"), meldbase.ErrDurability)
@@ -169,6 +175,7 @@ func TestRPCMapsDatabaseAvailabilityWithoutLeakingEngineErrors(t *testing.T) {
 	assertRPCError(t, response, http.StatusServiceUnavailable, "database_unavailable")
 }
 
+// TestRPCMapsCommitOutcomeUnknownWithoutInvitingRetry checks that an uncertain commit returns a conflict with the RPC outcome-unknown code.
 func TestRPCMapsCommitOutcomeUnknownWithoutInvitingRetry(t *testing.T) {
 	method := func(context.Context, Actor, meldbase.Value) (meldbase.Value, error) {
 		return meldbase.Value{}, errors.Join(meldbase.ErrCommitOutcomeUnknown, context.Canceled)
@@ -178,6 +185,7 @@ func TestRPCMapsCommitOutcomeUnknownWithoutInvitingRetry(t *testing.T) {
 	assertRPCError(t, response, http.StatusConflict, "rpc_outcome_unknown")
 }
 
+// TestRPCRegistryIsFrozenAndConcurrencyIsBounded checks that registry changes do not affect a running server and excess concurrent calls are rejected.
 func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	original := map[string]RPCMethod{
@@ -223,6 +231,7 @@ func TestRPCRegistryIsFrozenAndConcurrencyIsBounded(t *testing.T) {
 	}
 }
 
+// TestRPCClientCancellationPropagatesToMethodContext checks that canceling an HTTP call cancels the running RPC method.
 func TestRPCClientCancellationPropagatesToMethodContext(t *testing.T) {
 	started, canceled := make(chan struct{}), make(chan struct{})
 	methods := map[string]RPCMethod{
@@ -262,6 +271,7 @@ func TestRPCClientCancellationPropagatesToMethodContext(t *testing.T) {
 	}
 }
 
+// TestRPCConfigurationRequiresExplicitSafeBounds checks that RPC registration rejects missing authorization, invalid names, and nil methods.
 func TestRPCConfigurationRequiresExplicitSafeBounds(t *testing.T) {
 	db := meldbase.New()
 	defer db.Close()
@@ -286,6 +296,7 @@ func TestRPCConfigurationRequiresExplicitSafeBounds(t *testing.T) {
 	}
 }
 
+// TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors checks typed WebSocket results and verifies that application errors leave the connection usable.
 func TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors(t *testing.T) {
 	methods := map[string]RPCMethod{
 		"echo": func(_ context.Context, _ Actor, input meldbase.Value) (meldbase.Value, error) {
@@ -341,6 +352,7 @@ func TestWebSocketRPCUsesSameEnvelopeAndSurvivesApplicationErrors(t *testing.T) 
 	}
 }
 
+// TestWebSocketRPCCancelDuplicateLimitAndDisconnect checks WebSocket request limits, duplicate IDs, cancellation, disconnect cleanup, and counters.
 func TestWebSocketRPCCancelDuplicateLimitAndDisconnect(t *testing.T) {
 	started := make(chan string, 4)
 	canceled := make(chan string, 4)
@@ -428,6 +440,7 @@ func TestWebSocketRPCCancelDuplicateLimitAndDisconnect(t *testing.T) {
 	}
 }
 
+// newRPCServer starts a test RPC server with selected limits and arranges database and server cleanup.
 func newRPCServer(t *testing.T, methods map[string]RPCMethod, authorizer RPCAuthorizer, overrides Config) (*meldbase.DB, *Handler, *httptest.Server) {
 	t.Helper()
 	db := meldbase.New()
@@ -452,6 +465,7 @@ func newRPCServer(t *testing.T, methods map[string]RPCMethod, authorizer RPCAuth
 	return db, handler, server
 }
 
+// openAuthenticatedRPCSocket opens a test WebSocket and authenticates it with a realtime ticket.
 func openAuthenticatedRPCSocket(t *testing.T, serverURL string) (*websocket.Conn, context.Context) {
 	t.Helper()
 	ticket := obtainTicket(t, serverURL)
@@ -470,12 +484,14 @@ func openAuthenticatedRPCSocket(t *testing.T, serverURL string) (*websocket.Conn
 	return connection, ctx
 }
 
+// socketRPCErrorCode extracts the error code from a WebSocket RPC response.
 func socketRPCErrorCode(message map[string]any) string {
 	errorBody, _ := message["error"].(map[string]any)
 	code, _ := errorBody["code"].(string)
 	return code
 }
 
+// postRPC converts a test input into an HTTP RPC call with optional authentication.
 func postRPC(t *testing.T, serverURL, method, body string, authenticated bool) *http.Response {
 	t.Helper()
 	var legacy struct {

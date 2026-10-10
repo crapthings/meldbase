@@ -11,8 +11,10 @@ import (
 	"time"
 )
 
+// destructiveQMPFlushEIOProofSchema identifies the QMP flush failure proof format.
 const destructiveQMPFlushEIOProofSchema uint32 = 1
 
+// destructiveQMPFlushEIOProof records the QEMU flush failure rule, observed error, and bound guest receipts.
 type destructiveQMPFlushEIOProof struct {
 	SchemaVersion     uint32                   `json:"schemaVersion"`
 	TargetImage       string                   `json:"targetImage"`
@@ -31,6 +33,7 @@ type destructiveQMPFlushEIOProof struct {
 	Exchanges         []destructiveQMPExchange `json:"exchanges"`
 }
 
+// runDestructiveQEMUFlushEIO coordinates a QEMU flush failure trial and publishes its bound receipts and QMP proof.
 func runDestructiveQEMUFlushEIO(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-flush-eio", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -201,6 +204,7 @@ func runDestructiveQEMUFlushEIO(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(proof)
 }
 
+// qmpFlushQueryNodes queries QEMU’s named block nodes and checks the expected target and arm state.
 func qmpFlushQueryNodes(client *qmpRecordingClient, id, targetImage string, armed bool) error {
 	if err := client.send(map[string]string{"execute": "query-named-block-nodes", "id": id}); err != nil {
 		return err
@@ -210,6 +214,7 @@ func qmpFlushQueryNodes(client *qmpRecordingClient, id, targetImage string, arme
 	})
 }
 
+// validateQMPFlushNodeInventory checks that QEMU’s block graph uses the expected target, cache settings, and fault node.
 func validateQMPFlushNodeInventory(raw json.RawMessage, targetImage string, armed bool) error {
 	var nodes []struct {
 		NodeName string `json:"node-name"`
@@ -242,6 +247,7 @@ func validateQMPFlushNodeInventory(raw json.RawMessage, targetImage string, arme
 	return nil
 }
 
+// countQMPFlushIOErrors counts reported flush or write I/O errors that are not disk-full errors.
 func countQMPFlushIOErrors(exchanges []destructiveQMPExchange) int {
 	count := 0
 	for _, exchange := range exchanges {
@@ -265,6 +271,7 @@ func countQMPFlushIOErrors(exchanges []destructiveQMPExchange) int {
 	return count
 }
 
+// qmpFlushEIOOperation returns the first reported flush or write I/O error operation that is not a disk-full error.
 func qmpFlushEIOOperation(exchanges []destructiveQMPExchange) string {
 	for _, exchange := range exchanges {
 		if exchange.Direction != "receive" {
@@ -287,6 +294,7 @@ func qmpFlushEIOOperation(exchanges []destructiveQMPExchange) string {
 	return ""
 }
 
+// validateQMPFlushEIOProofStructure checks a flush failure proof's identity, chronology, fault rule, and ordered QMP evidence.
 func validateQMPFlushEIOProofStructure(proof destructiveQMPFlushEIOProof) error {
 	if proof.SchemaVersion != destructiveQMPFlushEIOProofSchema || !filepath.IsAbs(proof.TargetImage) || !qualificationHexDigest(proof.ReadySHA256) || !qualificationHexDigest(proof.ArmedSHA256) || !qualificationHexDigest(proof.FaultSHA256) || proof.StartedAt.IsZero() || proof.ReadyObservedAt.Before(proof.StartedAt) || proof.ArmedAt.Before(proof.ReadyObservedAt) || !proof.FinishedAt.After(proof.ArmedAt) || proof.RuleEvent != "flush_to_disk" || proof.RuleIOType != "flush" || proof.RuleErrno != 5 || !proof.RuleOnce || (proof.ObservedOperation != "flush" && proof.ObservedOperation != "write") || len(proof.Exchanges) < 14 || len(proof.Exchanges) > 256 {
 		return errors.New("QMP flush EIO proof identity, timing, rule or exchange count is invalid")
@@ -313,6 +321,7 @@ func validateQMPFlushEIOProofStructure(proof destructiveQMPFlushEIOProof) error 
 	})
 }
 
+// validateFlushArmCommandEvidence checks that recorded QMP commands install the exact one-shot flush failure rule and graph switch.
 func validateFlushArmCommandEvidence(exchanges []destructiveQMPExchange) error {
 	expected := map[string]json.RawMessage{
 		"flush-arm-add":    json.RawMessage(`{"execute":"blockdev-add","arguments":{"driver":"blkdebug","image":"meld-file","inject-error":[{"errno":5,"event":"flush_to_disk","iotype":"flush","once":true}],"node-name":"meld-flush-debug"},"id":"flush-arm-add"}`),
@@ -353,6 +362,7 @@ func validateFlushArmCommandEvidence(exchanges []destructiveQMPExchange) error {
 	return nil
 }
 
+// flushArmExchangeSHA hashes recorded QMP exchanges through the completed armed block graph query.
 func flushArmExchangeSHA(exchanges []destructiveQMPExchange) (string, error) {
 	for index, exchange := range exchanges {
 		if exchange.Direction != "receive" {
@@ -371,6 +381,7 @@ func flushArmExchangeSHA(exchanges []destructiveQMPExchange) (string, error) {
 	return "", errors.New("flush EIO proof lacks the completed armed graph query")
 }
 
+// runDestructiveQMPFlushEIOProofCheck checks that a QMP flush failure proof matches its ready, armed, and fault receipts.
 func runDestructiveQMPFlushEIOProofCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-flush-eio-proof-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -433,6 +444,7 @@ func runDestructiveQMPFlushEIOProofCheck(args []string, stdout, stderr io.Writer
 	}{1, qualificationSHA256(proofRaw), true})
 }
 
+// runDestructiveFlushEIOBundleCheck checks that all flush failure and recovery artifacts describe one verified database transition.
 func runDestructiveFlushEIOBundleCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-flush-eio-bundle-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -539,6 +551,7 @@ func runDestructiveFlushEIOBundleCheck(args []string, stdout, stderr io.Writer) 
 	}{1, qualificationSHA256(seedRaw), qualificationSHA256(readyRaw), qualificationSHA256(armedRaw), qualificationSHA256(faultRaw), qualificationSHA256(planRaw), qualificationSHA256(recoveryReadyRaw), qualificationSHA256(resultRaw), qualificationSHA256(proofRaw), true})
 }
 
+// runDestructiveQEMUFlushArmProbe arms a QEMU flush failure rule and prints the recorded QMP exchanges.
 func runDestructiveQEMUFlushArmProbe(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("destructive-qemu-flush-arm-probe", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -575,6 +588,7 @@ func runDestructiveQEMUFlushArmProbe(args []string, stdout, stderr io.Writer) er
 	return encoder.Encode(packet)
 }
 
+// armQEMUBlkdebugFlushEIO adds a one-shot flush failure node and switches the raw device to use it.
 func armQEMUBlkdebugFlushEIO(client *qmpRecordingClient, id string) error {
 	add := struct {
 		Execute   string         `json:"execute"`

@@ -6,13 +6,12 @@ import (
 	"fmt"
 )
 
+// maxOptimisticIndexBuildAttempts limits attempts to build and publish an index from an unchanged snapshot.
 const maxOptimisticIndexBuildAttempts = 3
 
-// createDurableIndexOptimistic performs the document decode/key extraction phase on
-// a pinned immutable snapshot without holding db.mu. Publication still takes
-// the writer lock and succeeds only if the source sequence remains current.
-// A later persisted shadow-build protocol can replace bounded retries without
-// changing ApplyCreateIndex's final atomic catalog publication.
+// createDurableIndexOptimistic builds index entries outside the database lock and commits them only if the source sequence is unchanged.
+//
+// Concurrent writes can cause a bounded retry or a write conflict.
 func (c *Collection) createDurableIndexOptimistic(ctx context.Context, definition IndexDefinition, store *durableStore, budget *indexBuildBudget) error {
 	reservation := c.name + "\x00" + definition.Name
 	c.db.mu.Lock()
@@ -103,6 +102,7 @@ func (c *Collection) createDurableIndexOptimistic(ctx context.Context, definitio
 	return fmt.Errorf("%w: index build overlapped concurrent writes", ErrWriteConflict)
 }
 
+// recordIndexBuildConflict counts a build conflict and records a retry when another attempt is allowed.
 func (db *DB) recordIndexBuildConflict(attempt int) {
 	db.metrics.indexBuildConflicts.Add(1)
 	if attempt+1 < maxOptimisticIndexBuildAttempts {

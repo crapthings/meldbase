@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TestIndexBuildLimitsRejectAtomically checks that an index entry limit rejects construction without publishing an index or changing committed data.
 func TestIndexBuildLimitsRejectAtomically(t *testing.T) {
 	constructors := map[string]func(*testing.T) (*DB, string){
 		"memory": func(t *testing.T) (*DB, string) {
@@ -64,6 +65,7 @@ func TestIndexBuildLimitsRejectAtomically(t *testing.T) {
 	}
 }
 
+// TestIndexBuildByteLimitUsesCanonicalSecondaryKeyBytes checks that encoded secondary key bytes count toward the index build limit.
 func TestIndexBuildByteLimitUsesCanonicalSecondaryKeyBytes(t *testing.T) {
 	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{MaxIndexBuildBytes: 24}})
 	if err != nil {
@@ -79,6 +81,7 @@ func TestIndexBuildByteLimitUsesCanonicalSecondaryKeyBytes(t *testing.T) {
 	}
 }
 
+// TestCanonicalDocumentSizeMatchesEncoder checks that document size measurement matches binary encoding without allocating memory.
 func TestCanonicalDocumentSizeMatchesEncoder(t *testing.T) {
 	document := Document{
 		"array":  Array(Int(1), Object(Document{"nested": String("value")})),
@@ -103,6 +106,7 @@ func TestCanonicalDocumentSizeMatchesEncoder(t *testing.T) {
 	}
 }
 
+// TestResourceLimitsRejectAtomicallyAndAreObservable checks that oversized writes leave committed data unchanged and increment rejection statistics.
 func TestResourceLimitsRejectAtomicallyAndAreObservable(t *testing.T) {
 	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{
 		MaxDocumentBytes: 64, MaxTransactionBytes: 128, MaxTransactionChanges: 2,
@@ -145,6 +149,7 @@ func TestResourceLimitsRejectAtomicallyAndAreObservable(t *testing.T) {
 	}
 }
 
+// TestQueryBudgetsApplyToReadsSnapshotsAndMutations checks that document examination limits apply to reads, snapshots, and mutation selection.
 func TestQueryBudgetsApplyToReadsSnapshotsAndMutations(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB {
@@ -194,6 +199,7 @@ func TestQueryBudgetsApplyToReadsSnapshotsAndMutations(t *testing.T) {
 	}
 }
 
+// TestPredicateWorkBudgetBoundsArrayResidualsAcrossExecutionPaths checks that array filter evaluation respects the predicate-step limit across query and mutation paths.
 func TestPredicateWorkBudgetBoundsArrayResidualsAcrossExecutionPaths(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB {
@@ -256,6 +262,7 @@ func TestPredicateWorkBudgetBoundsArrayResidualsAcrossExecutionPaths(t *testing.
 	}
 }
 
+// TestQueryBudgetsBoundIndexKeysSortBytesAndSkip checks that queries enforce limits on examined index keys, sorting bytes, and skipped results.
 func TestQueryBudgetsBoundIndexKeysSortBytesAndSkip(t *testing.T) {
 	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{
 		MaxQueryKeysExamined: 1, MaxQuerySortBytes: 32, MaxQuerySkip: 1,
@@ -282,6 +289,7 @@ func TestQueryBudgetsBoundIndexKeysSortBytesAndSkip(t *testing.T) {
 	}
 }
 
+// TestSortedLimitedQueryUsesBoundedTopKCandidates checks that sorted limited queries return the smallest values within a bounded candidate count.
 func TestSortedLimitedQueryUsesBoundedTopKCandidates(t *testing.T) {
 	constructors := map[string]func(*testing.T) *DB{
 		"memory": func(t *testing.T) *DB {
@@ -327,6 +335,7 @@ func TestSortedLimitedQueryUsesBoundedTopKCandidates(t *testing.T) {
 	}
 }
 
+// TestInvalidResourceLimitsFailBeforeOpen checks that inconsistent resource limits reject database construction.
 func TestInvalidResourceLimitsFailBeforeOpen(t *testing.T) {
 	invalid := ResourceLimits{MaxDocumentBytes: 128, MaxTransactionBytes: 64}
 	if _, err := NewWithOptions(DatabaseOptions{ResourceLimits: invalid}); !errors.Is(err, ErrInvalidResourceLimits) {
@@ -338,6 +347,7 @@ func TestInvalidResourceLimitsFailBeforeOpen(t *testing.T) {
 	}
 }
 
+// TestReactiveViewResourceLimitsRejectInitialAndIncrementalGrowth checks that live views reject an oversized initial result and terminate when later growth exceeds the limit.
 func TestReactiveViewResourceLimitsRejectInitialAndIncrementalGrowth(t *testing.T) {
 	limits := ResourceLimits{MaxReactiveViewDocuments: 1, MaxReactiveViewBytes: 1024}
 	initial, err := NewWithOptions(DatabaseOptions{ResourceLimits: limits})
@@ -393,6 +403,7 @@ func TestReactiveViewResourceLimitsRejectInitialAndIncrementalGrowth(t *testing.
 	}
 }
 
+// TestReactiveViewByteLimitUsesCanonicalDocumentBytes checks that encoded document bytes count toward live view admission limits.
 func TestReactiveViewByteLimitUsesCanonicalDocumentBytes(t *testing.T) {
 	db, err := NewWithOptions(DatabaseOptions{ResourceLimits: ResourceLimits{
 		MaxReactiveViewDocuments: 10, MaxReactiveViewBytes: 64,
@@ -413,6 +424,7 @@ func TestReactiveViewByteLimitUsesCanonicalDocumentBytes(t *testing.T) {
 	}
 }
 
+// TestReplayReactiveViewResourceLimitTerminatesAndReleasesLease checks that replay exceeding a view limit terminates and releases its retained-history lease.
 func TestReplayReactiveViewResourceLimitTerminatesAndReleasesLease(t *testing.T) {
 	db, err := OpenWithOptions(filepath.Join(t.TempDir(), "replay-view-limit.meld2"), OpenOptions{
 		ResourceLimits: ResourceLimits{MaxReactiveViewDocuments: 1, MaxReactiveViewBytes: 1024},
@@ -458,6 +470,7 @@ func TestReplayReactiveViewResourceLimitTerminatesAndReleasesLease(t *testing.T)
 	}
 }
 
+// BenchmarkCanonicalDocumentSize measures the cost of calculating encoded document size.
 func BenchmarkCanonicalDocumentSize(b *testing.B) {
 	document := Document{
 		"array":  Array(Int(1), Object(Document{"nested": String("value")})),

@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestConcurrentReadersObserveValidSnapshotsDuringSingleWriterCommits checks that concurrent readers see strictly ordered snapshots while one writer inserts indexed documents.
 func TestConcurrentReadersObserveValidSnapshotsDuringSingleWriterCommits(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -81,6 +82,7 @@ func TestConcurrentReadersObserveValidSnapshotsDuringSingleWriterCommits(t *test
 	}
 }
 
+// TestConcurrentQueriesWritesAndRealtimeConvergeForMemoryAndDurable checks that concurrent queries, writes, and live updates produce identical results in both database modes and after reopening.
 func TestConcurrentQueriesWritesAndRealtimeConvergeForMemoryAndDurable(t *testing.T) {
 	var memoryDocuments []Document
 	t.Run("memory", func(t *testing.T) {
@@ -125,6 +127,7 @@ func TestConcurrentQueriesWritesAndRealtimeConvergeForMemoryAndDurable(t *testin
 	})
 }
 
+// runConcurrentQueryWriteRealtimeStress runs concurrent readers and writers and checks that live query deltas reach the final database snapshot.
 func runConcurrentQueryWriteRealtimeStress(t *testing.T, db *DB) []Document {
 	t.Helper()
 	const (
@@ -273,6 +276,7 @@ func runConcurrentQueryWriteRealtimeStress(t *testing.T, db *DB) []Document {
 	return final.Documents
 }
 
+// validateConcurrentQueryDocuments checks that stress-test results contain the expected tenant and strictly increasing ranks.
 func validateConcurrentQueryDocuments(documents []Document) error {
 	var previous int64 = -1
 	for _, document := range documents {

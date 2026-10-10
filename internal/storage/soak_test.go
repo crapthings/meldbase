@@ -9,7 +9,8 @@ import (
 	"testing"
 )
 
-// TestConfigurableLargeDatabaseSoak is an exploratory storage stress test.
+// TestConfigurableLargeDatabaseSoak stress-tests storage with an environment-configured workload.
+//
 // Release evidence is produced only by the VCS-stamped `meld storage-soak`
 // command in internal/qualification; a Go test binary has no trustworthy VCS
 // build identity and must never emit a qualification receipt.
@@ -118,6 +119,7 @@ func TestConfigurableLargeDatabaseSoak(t *testing.T) {
 	assertSoakContents(t, reopened, keys)
 }
 
+// applySoakMutations applies one stress-test mutation batch and returns the next transaction ordinal.
 func applySoakMutations(t *testing.T, file *File, ordinal uint64, mutations []DocumentMutation) uint64 {
 	t.Helper()
 	if _, err := file.ApplyDocumentTransaction(DocumentTransaction{
@@ -128,6 +130,7 @@ func applySoakMutations(t *testing.T, file *File, ordinal uint64, mutations []Do
 	return ordinal + 1
 }
 
+// assertSoakContents checks that stored documents and index entries match the expected stress-test values.
 func assertSoakContents(t *testing.T, file *File, keys []string) {
 	t.Helper()
 	snapshot, err := file.OpenSnapshot()
@@ -155,6 +158,7 @@ func assertSoakContents(t *testing.T, file *File, keys []string) {
 	}
 }
 
+// soakEnvInt reads a non-negative integer setting or returns its default when unset.
 func soakEnvInt(t *testing.T, name string, fallback int) int {
 	t.Helper()
 	value := os.Getenv(name)
@@ -168,6 +172,7 @@ func soakEnvInt(t *testing.T, name string, fallback int) int {
 	return parsed
 }
 
+// soakDocumentID creates a document identifier from a stress-test document number.
 func soakDocumentID(index int) [16]byte {
 	var id [16]byte
 	binary.BigEndian.PutUint64(id[8:], uint64(index))
@@ -175,6 +180,7 @@ func soakDocumentID(index int) [16]byte {
 	return id
 }
 
+// soakTransactionID creates a transaction identifier from a stress-test transaction number.
 func soakTransactionID(ordinal uint64) [16]byte {
 	var id [16]byte
 	binary.BigEndian.PutUint64(id[8:], ordinal)
@@ -182,6 +188,7 @@ func soakTransactionID(ordinal uint64) [16]byte {
 	return id
 }
 
+// soakKey formats a stress-test key containing its document number and revision.
 func soakKey(index, revision int) string {
 	return fmt.Sprintf("key-%012d-r%06d", index, revision)
 }

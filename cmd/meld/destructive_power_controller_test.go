@@ -16,6 +16,7 @@ import (
 	"time"
 )
 
+// physicalControllerEvidenceFixture creates matching test marker, hardware proof, and signed controller event with a verification key.
 func physicalControllerEvidenceFixture(t *testing.T) (destructivePowerMarker, []byte, destructivePowerControllerProof, []byte, destructivePowerControllerEvent, ed25519.PublicKey) {
 	t.Helper()
 	marker := destructivePowerMarker{SchemaVersion: 1, SourceRevision: qualificationTestRevision, BuildRevision: qualificationTestRevision, GOOS: "linux", GOARCH: "amd64", TrialID: "power-01-01", Boundary: "after-page-write", DatabaseRelative: ".meldbase-power-power-01-01/power.meld", BootIDBefore: "boot-before", StartedAt: time.Now().UTC().Add(-time.Minute), ReachedAt: time.Now().UTC().Add(-50 * time.Second), OldCommitSequence: 1, NewCommitSequence: 2, OldStateSHA256: strings.Repeat("1", 64), NewStateSHA256: strings.Repeat("2", 64)}
@@ -42,6 +43,7 @@ func physicalControllerEvidenceFixture(t *testing.T) (destructivePowerMarker, []
 	return marker, markerRaw, proof, proofRaw, event, publicKey
 }
 
+// TestPhysicalPowerControllerPathsFailBeforeHardwareAction checks that controller paths reject shared outputs, existing proofs, symlink markers, and outputs outside the control directory.
 func TestPhysicalPowerControllerPathsFailBeforeHardwareAction(t *testing.T) {
 	directory := t.TempDir()
 	marker := filepath.Join(directory, "marker.json")
@@ -75,6 +77,7 @@ func TestPhysicalPowerControllerPathsFailBeforeHardwareAction(t *testing.T) {
 	}
 }
 
+// TestPhysicalPowerAdapterMeasurementUsesOpenedExecutable checks that adapter measurement retains the opened executable despite path replacement and rejects symlinks.
 func TestPhysicalPowerAdapterMeasurementUsesOpenedExecutable(t *testing.T) {
 	directory := t.TempDir()
 	adapter := filepath.Join(directory, "adapter")
@@ -109,6 +112,7 @@ func TestPhysicalPowerAdapterMeasurementUsesOpenedExecutable(t *testing.T) {
 	}
 }
 
+// TestPhysicalPowerControllerRunExecutesMeasuredDescriptorOnLinux checks that the Linux controller command runs the adapter and publishes measured proof and a signed event.
 func TestPhysicalPowerControllerRunExecutesMeasuredDescriptorOnLinux(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux /proc file-descriptor execution contract")
@@ -153,6 +157,7 @@ func TestPhysicalPowerControllerRunExecutesMeasuredDescriptorOnLinux(t *testing.
 	}
 }
 
+// TestPhysicalPowerControllerEvidenceRejectsForgeryAndDowngrade checks that physical power evidence rejects altered signatures, incorrect keys, mismatched runs, and unsigned legacy events.
 func TestPhysicalPowerControllerEvidenceRejectsForgeryAndDowngrade(t *testing.T) {
 	marker, markerRaw, proof, proofRaw, event, publicKey := physicalControllerEvidenceFixture(t)
 	if err := verifyDestructivePhysicalPowerEvidence(proofRaw, event, markerRaw, publicKey); err != nil {
@@ -186,6 +191,7 @@ func TestPhysicalPowerControllerEvidenceRejectsForgeryAndDowngrade(t *testing.T)
 	}
 }
 
+// TestPhysicalPowerAdapterExchangeRejectsUnsafeResponses checks that adapter responses require success, ordered timing, the expected target, and matching hardware evidence.
 func TestPhysicalPowerAdapterExchangeRejectsUnsafeResponses(t *testing.T) {
 	_, _, proof, _, _, _ := physicalControllerEvidenceFixture(t)
 	request, response := proof.Request, proof.Response
@@ -218,6 +224,7 @@ func TestPhysicalPowerAdapterExchangeRejectsUnsafeResponses(t *testing.T) {
 	}
 }
 
+// TestPhysicalPowerControllerRejectsStaleRevisionMarker checks that controller markers require the expected source revision and an unmodified build.
 func TestPhysicalPowerControllerRejectsStaleRevisionMarker(t *testing.T) {
 	marker, _, _, _, _, _ := physicalControllerEvidenceFixture(t)
 	if err := validateDestructivePowerMarkerForController(marker, qualificationTestRevision); err != nil {
@@ -234,6 +241,7 @@ func TestPhysicalPowerControllerRejectsStaleRevisionMarker(t *testing.T) {
 	}
 }
 
+// TestRedfishPowerCycleIsAFirstClassPhysicalMethod checks that Redfish power cycling is recognized by both physical and general power-method validation.
 func TestRedfishPowerCycleIsAFirstClassPhysicalMethod(t *testing.T) {
 	if !qualificationPhysicalPowerMethod("redfish-computer-system-power-cycle") || !qualificationPowerMethod("redfish-computer-system-power-cycle") {
 		t.Fatal("Redfish ComputerSystem power cycle is not recognized across physical power validation")

@@ -3,14 +3,19 @@ package database
 import "errors"
 
 const (
-	maxCompoundIndexFields      = 4
+	// maxCompoundIndexFields limits the number of fields in one compound index.
+	maxCompoundIndexFields = 4
+	// maxCanonicalSecondaryKeyLen limits encoded secondary keys to the available storage payload.
 	maxCanonicalSecondaryKeyLen = 4096 - 24
-	compoundPartialMarker       = byte(0x01)
-	compoundComponentFloor      = byte(0x02)
+	// compoundPartialMarker marks a tuple whose remaining fields are missing.
+	compoundPartialMarker = byte(0x01)
+	// compoundComponentFloor sorts below every encoded scalar component.
+	compoundComponentFloor = byte(0x02)
 )
 
-// encodeCompoundIndexKey encodes an ordered tuple into the V3 Secondary-key
-// payload. Each scalar is framed independently so tuple boundaries are
+// encodeCompoundIndexKey encodes a tuple in the sort order of its index fields.
+//
+// Each scalar is framed independently so tuple boundaries are
 // unambiguous and an encoded equality prefix is also a byte prefix. Descending
 // fields use the dual framing whose lexical order is the exact reverse of the
 // scalar codec, including the otherwise troublesome proper-prefix case.
@@ -68,8 +73,9 @@ func encodeCompoundIndexKey(values []Value, fields []IndexField) ([]byte, error)
 	return result, nil
 }
 
-// encodeCompoundPartialIndexKey indexes a document's longest present left
-// prefix. The marker sorts before every scalar component tag and the ID keeps
+// encodeCompoundPartialIndexKey encodes a document's present leading fields with its ID.
+//
+// The marker sorts before every scalar component tag and the ID keeps
 // partial tuples non-conflicting under a unique index. It is never generated
 // for a missing first component.
 func encodeCompoundPartialIndexKey(values []Value, fields []IndexField, id DocumentID) ([]byte, error) {
@@ -87,6 +93,7 @@ func encodeCompoundPartialIndexKey(values []Value, fields []IndexField, id Docum
 	return append(key, id[:]...), nil
 }
 
+// encodeCompoundIndexPrefix encodes the leading fields of a compound index key.
 func encodeCompoundIndexPrefix(values []Value, fields []IndexField) ([]byte, error) {
 	if len(values) == 0 || len(values) > len(fields) {
 		return nil, errors.New("meldbase: invalid compound index prefix")
@@ -94,6 +101,7 @@ func encodeCompoundIndexPrefix(values []Value, fields []IndexField) ([]byte, err
 	return encodeCompoundIndexKey(values, fields[:len(values)])
 }
 
+// appendAscendingIndexComponent frames a scalar key while preserving its byte order.
 func appendAscendingIndexComponent(destination, scalar []byte) []byte {
 	for _, value := range scalar {
 		if value == 0 {
@@ -105,6 +113,7 @@ func appendAscendingIndexComponent(destination, scalar []byte) []byte {
 	return append(destination, 0, 0)
 }
 
+// appendDescendingIndexComponent frames a scalar key in reversed byte order.
 func appendDescendingIndexComponent(destination, scalar []byte) []byte {
 	for _, value := range scalar {
 		inverted := ^value

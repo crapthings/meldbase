@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestSharedMutationConformanceCorpus checks decoded mutations against the shared expected-document examples.
 func TestSharedMutationConformanceCorpus(t *testing.T) {
 	data, err := os.ReadFile("../../testdata/mutation-conformance.json")
 	if err != nil {
@@ -50,6 +51,7 @@ func TestSharedMutationConformanceCorpus(t *testing.T) {
 	}
 }
 
+// TestDecodeMutationRejectsAmbiguousUnsafeAndMalformedInput checks that mutation decoding rejects ambiguous fields, invalid operations, overlapping paths, and identifier changes.
 func TestDecodeMutationRejectsAmbiguousUnsafeAndMalformedInput(t *testing.T) {
 	tests := []string{
 		`{"version":1,"version":1,"operations":[{"op":"unset","path":"x"}]}`,
@@ -66,6 +68,7 @@ func TestDecodeMutationRejectsAmbiguousUnsafeAndMalformedInput(t *testing.T) {
 	}
 }
 
+// TestMixedNumericIncrementRejectsInt64PrecisionLoss checks that adding a float to a large integer rejects loss of integer precision.
 func TestMixedNumericIncrementRejectsInt64PrecisionLoss(t *testing.T) {
 	mutation, err := CompileUpdate(Update{"$inc": map[string]any{"n": 0.5}})
 	if err != nil {

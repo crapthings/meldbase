@@ -13,6 +13,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// runVerify audits an existing database without mutation and prints its verification report.
 func runVerify(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)

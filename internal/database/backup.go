@@ -14,6 +14,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// BackupResult records the identity, size, and checksum of a physical backup.
 type BackupResult struct {
 	Bytes          uint64 `json:"bytes"`
 	Pages          uint64 `json:"pages"`
@@ -23,8 +24,9 @@ type BackupResult struct {
 	SHA256         string `json:"sha256"`
 }
 
-// Backup writes an exact, verified physical copy to a new path. It preserves
-// database identity and Commit Log history, so the result is a restore artifact
+// Backup writes a verified physical database copy to a new path.
+//
+// It preserves database identity and commit history, so the result is a restore artifact
 // rather than an independent writable fork. The source writer is blocked for
 // the copy duration; readers remain available.
 func (db *DB) Backup(ctx context.Context, destination string) (result BackupResult, resultErr error) {
@@ -50,8 +52,9 @@ func (db *DB) Backup(ctx context.Context, destination string) (result BackupResu
 	return db.backupWithStoreLocked(ctx, absoluteDestination, store)
 }
 
-// backupWithStoreLocked is the physical-copy half shared by ordinary
-// backups and archive bootstrap. The caller holds store.compactMu, which also
+// backupWithStoreLocked creates and publishes a verified backup under the store's compaction lock.
+//
+// The caller holds store.compactMu, which also
 // makes DB.Close wait until a newly created durable checkpoint has either been
 // paired with its verified snapshot or removed on failure.
 func (db *DB) backupWithStoreLocked(ctx context.Context, absoluteDestination string, store *durableStore) (result BackupResult, resultErr error) {
@@ -154,6 +157,7 @@ func (db *DB) backupWithStoreLocked(ctx context.Context, absoluteDestination str
 	}, nil
 }
 
+// hashBackupFile computes a file's checksum while requiring the exact expected byte count.
 func hashBackupFile(ctx context.Context, path string, expectedBytes uint64) ([32]byte, error) {
 	var result [32]byte
 	file, err := os.Open(path)

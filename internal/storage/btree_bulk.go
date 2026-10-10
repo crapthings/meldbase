@@ -5,8 +5,9 @@ import (
 	"math"
 )
 
-// SortedTreeBuilder consumes strictly increasing keys and builds immutable
-// leaves eagerly. Finish constructs only the much smaller branch frontier.
+// SortedTreeBuilder builds an immutable tree from entries supplied in increasing key order.
+//
+// Leaves are written as they fill, and Finish builds the remaining branch levels.
 // This is the storage boundary used by index construction today and by a
 // future external-merge source without changing catalog publication.
 //
@@ -24,6 +25,7 @@ type SortedTreeBuilder struct {
 	finished bool
 }
 
+// bulkTreeRef records a built subtree's page, entry count, and lowest key.
 type bulkTreeRef struct {
 	pageID uint64
 	count  uint64
@@ -38,7 +40,7 @@ func (tx *WriteTxn) NewSortedTreeBuilder(kind TreeKind) (*SortedTreeBuilder, err
 	return &SortedTreeBuilder{tx: tx, kind: kind, leafSize: 32}, nil
 }
 
-// Add consumes one key/value pair. Keys must be globally strictly increasing.
+// Add copies one entry whose key must follow all previously added keys.
 func (builder *SortedTreeBuilder) Add(key, value []byte) error {
 	if builder == nil || builder.tx == nil || builder.finished || len(key) == 0 || len(key) > 4096 {
 		return ErrCorrupt
@@ -66,7 +68,7 @@ func (builder *SortedTreeBuilder) Add(key, value []byte) error {
 	return nil
 }
 
-// Finish returns the immutable root page. Calling it more than once fails.
+// Finish completes the tree and returns its root page, failing if called again.
 func (builder *SortedTreeBuilder) Finish() (uint64, error) {
 	if builder == nil || builder.tx == nil || builder.finished {
 		return 0, ErrCorrupt
@@ -104,6 +106,7 @@ func (builder *SortedTreeBuilder) Finish() (uint64, error) {
 	return level[0].pageID, nil
 }
 
+// flushLeaf writes buffered entries to a leaf and remembers its subtree reference.
 func (builder *SortedTreeBuilder) flushLeaf() error {
 	node := &treeNode{leaf: true, keys: builder.keys, values: builder.values, count: uint64(len(builder.keys))}
 	payload, err := encodeTreeNode(node)
@@ -123,6 +126,7 @@ func (builder *SortedTreeBuilder) flushLeaf() error {
 	return nil
 }
 
+// partitionBulkLevel groups subtrees into branches that fit within a page.
 func partitionBulkLevel(level []bulkTreeRef) ([][]bulkTreeRef, error) {
 	if len(level) < 2 {
 		return nil, ErrCorrupt
@@ -162,6 +166,7 @@ func partitionBulkLevel(level []bulkTreeRef) ([][]bulkTreeRef, error) {
 	return groups, nil
 }
 
+// bulkBranchNode builds a branch from ordered child subtree references.
 func bulkBranchNode(children []bulkTreeRef) *treeNode {
 	node := &treeNode{children: make([]*nodeRef, len(children))}
 	for index, child := range children {
@@ -174,6 +179,7 @@ func bulkBranchNode(children []bulkTreeRef) *treeNode {
 	return node
 }
 
+// treePageType selects the leaf or branch page type for a tree kind.
 func treePageType(kind TreeKind, leaf bool) PageType {
 	leafType, branchType := treePageTypes(kind)
 	if leaf {

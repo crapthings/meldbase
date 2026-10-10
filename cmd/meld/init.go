@@ -15,9 +15,12 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+// defaultCollectionNames supplies the collections seeded into a new local access policy.
 const defaultCollectionNames = "projects,tasks,comments"
 
-// runInit creates one self-contained, local single-node bundle. It creates a
+// runInit creates one self-contained, local single-node bundle.
+//
+// It creates a
 // new directory only: a previously created bundle is never modified or reused.
 func runInit(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
@@ -155,6 +158,7 @@ func runInit(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// validateInitValue rejects empty configuration values and embedded line breaks.
 func validateInitValue(name, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("--%s must not be empty", name)
@@ -165,6 +169,7 @@ func validateInitValue(name, value string) error {
 	return nil
 }
 
+// randomURLToken encodes the requested number of random bytes as a URL-safe token.
 func randomURLToken(size int) (string, error) {
 	if size <= 0 {
 		return "", errors.New("random token size must be positive")
@@ -176,6 +181,7 @@ func randomURLToken(size int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(bytes), nil
 }
 
+// writeNewPrivateFile creates a new file with the supplied permissions and writes its contents.
 func writeNewPrivateFile(path string, content []byte, mode os.FileMode) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
@@ -189,6 +195,7 @@ func writeNewPrivateFile(path string, content []byte, mode os.FileMode) error {
 	return closeErr
 }
 
+// singleNodeEnv formats the local bundle settings as shell-quoted environment assignments.
 func singleNodeEnv(values map[string]string) string {
 	keys := []string{
 		"MELDBASE_DB", "MELDBASE_ADDR", "MELDBASE_ADMIN_ADDR", "MELDBASE_ADMIN_TOKEN",
@@ -204,10 +211,12 @@ func singleNodeEnv(values map[string]string) string {
 	return output.String()
 }
 
+// shellQuote quotes a value for use as one literal shell argument.
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
+// singleNodeStartScript returns a launcher that loads the bundle settings and starts the server.
 func singleNodeStartScript() string {
 	return `#!/bin/sh
 set -eu

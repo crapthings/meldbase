@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// TestCopyOnWriteTreeBatchSplitScanAndSnapshot checks that batched tree writes support ordered reads, preserve old roots, and survive reopening.
 func TestCopyOnWriteTreeBatchSplitScanAndSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tree.meld2")
 	file, _, err := Open(path)
@@ -111,6 +112,7 @@ func TestCopyOnWriteTreeBatchSplitScanAndSnapshot(t *testing.T) {
 	}
 }
 
+// TestCopyOnWriteTreeDeleteMergesWithoutRebuild checks that bulk deletion merges tree nodes with few new pages while preserving the old root.
 func TestCopyOnWriteTreeDeleteMergesWithoutRebuild(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "delete.meld2")
 	file, _, err := Open(path)
@@ -170,6 +172,7 @@ func TestCopyOnWriteTreeDeleteMergesWithoutRebuild(t *testing.T) {
 	}
 }
 
+// TestCopyOnWriteTreeSplitsSkewedLeafByEncodedBytes checks that leaf splits fit uneven values into pages and count only committed splits.
 func TestCopyOnWriteTreeSplitsSkewedLeafByEncodedBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "byte-balanced-split.meld2")
 	file, _, err := Open(path)
@@ -243,6 +246,7 @@ func TestCopyOnWriteTreeSplitsSkewedLeafByEncodedBytes(t *testing.T) {
 	}
 }
 
+// TestByteBalancedBranchSplitAccountsForPromotedKey checks that a branch split removes the promoted key when sizing the resulting pages.
 func TestByteBalancedBranchSplitAccountsForPromotedKey(t *testing.T) {
 	keys := make([][]byte, 0, 24)
 	for prefix := byte('a'); prefix <= 'd'; prefix++ {
@@ -276,6 +280,7 @@ func TestByteBalancedBranchSplitAccountsForPromotedKey(t *testing.T) {
 	}
 }
 
+// TestDeleteResplitsBranchWhenMinimumSeparatorGrows checks that deletion splits a branch again when its replacement separator becomes too large.
 func TestDeleteResplitsBranchWhenMinimumSeparatorGrows(t *testing.T) {
 	longMinimum := append([]byte{'b'}, bytes.Repeat([]byte{'z'}, 3_999)...)
 	keys := make([][]byte, 0, 500)
@@ -313,11 +318,13 @@ func TestDeleteResplitsBranchWhenMinimumSeparatorGrows(t *testing.T) {
 	assertInMemoryTreeFits(t, tree, tree.root)
 }
 
+// testLeafRef builds an in-memory leaf containing copies of the supplied keys.
 func testLeafRef(keys ...[]byte) *nodeRef {
 	node := &treeNode{leaf: true, keys: cloneByteMatrix(keys), values: make([][]byte, len(keys)), count: uint64(len(keys))}
 	return &nodeRef{node: node, count: node.count}
 }
 
+// assertInMemoryTreeFits checks that every node in an in-memory tree fits in one page.
 func assertInMemoryTreeFits(t *testing.T, tree *MutableTree, ref *nodeRef) {
 	t.Helper()
 	node, err := tree.load(ref)
@@ -335,6 +342,7 @@ func assertInMemoryTreeFits(t *testing.T, tree *MutableTree, ref *nodeRef) {
 	}
 }
 
+// TestCopyOnWriteTreeRandomizedAgainstMap checks randomized tree writes and older roots against independent map snapshots.
 func TestCopyOnWriteTreeRandomizedAgainstMap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "random.meld2")
 	file, _, err := Open(path)
@@ -383,6 +391,7 @@ func TestCopyOnWriteTreeRandomizedAgainstMap(t *testing.T) {
 	}
 }
 
+// assertTreeMatchesMap checks that an ordered tree scan matches every key and value in a map.
 func assertTreeMatchesMap(t *testing.T, file *File, root uint64, kind TreeKind, model map[string][]byte) {
 	t.Helper()
 	values, err := file.TreeScan(root, kind, nil, nil, 0)
@@ -404,6 +413,7 @@ func assertTreeMatchesMap(t *testing.T, file *File, root uint64, kind TreeKind, 
 	}
 }
 
+// cloneStringBytesMap copies a string-keyed map and each byte slice it contains.
 func cloneStringBytesMap(source map[string][]byte) map[string][]byte {
 	result := make(map[string][]byte, len(source))
 	for key, value := range source {

@@ -9,6 +9,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// runInspect prints storage format metadata and optionally rejects an incompatible format.
 func runInspect(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	flags.SetOutput(stderr)

@@ -14,9 +14,10 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
-// runAccessPolicy validates or explains the same strict manifest that meld
-// serve accepts. It never opens a database, validates a JWT, or issues a
-// credential; explain is a static policy simulation for review and tests.
+// runAccessPolicy handles validation and explanation commands for collection access manifests.
+//
+// It uses the same manifest rules as meld serve. Explanation simulates a policy
+// for review and tests without opening a database or authenticating an actor.
 func runAccessPolicy(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("usage: meld access-policy <validate|explain> [flags]")
@@ -62,6 +63,7 @@ func runAccessPolicy(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// readCollectionAccessManifest reads and validates a collection access manifest file.
 func readCollectionAccessManifest(path string) (meldserver.CollectionAccessManifest, error) {
 	if path == "" {
 		return meldserver.CollectionAccessManifest{}, errors.New("--file is required")
@@ -77,6 +79,7 @@ func readCollectionAccessManifest(path string) (meldserver.CollectionAccessManif
 	return manifest, nil
 }
 
+// writeCollectionAccessJSON writes an indented JSON policy value.
 func writeCollectionAccessJSON(stdout io.Writer, value any) error {
 	encoded, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -86,6 +89,7 @@ func writeCollectionAccessJSON(stdout io.Writer, value any) error {
 	return err
 }
 
+// collectionAccessExplanation reports the simulated actor's read and mutation permissions for a collection.
 type collectionAccessExplanation struct {
 	Version    int                                 `json:"version"`
 	Collection string                              `json:"collection"`
@@ -97,11 +101,13 @@ type collectionAccessExplanation struct {
 	Delete     collectionAccessMutationExplanation `json:"delete"`
 }
 
+// collectionAccessExplanationActor identifies the actor and workspace used in the simulation.
 type collectionAccessExplanationActor struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspaceId"`
 }
 
+// collectionAccessQueryExplanation reports read constraints, field permissions, and result limits.
 type collectionAccessQueryExplanation struct {
 	Allowed      bool            `json:"allowed"`
 	Constraint   json.RawMessage `json:"constraint,omitempty"`
@@ -110,6 +116,7 @@ type collectionAccessQueryExplanation struct {
 	ResultFields string          `json:"resultFields,omitempty"`
 }
 
+// collectionAccessInsertExplanation reports insert permissions and server-owned field values.
 type collectionAccessInsertExplanation struct {
 	Allowed      bool              `json:"allowed"`
 	InputFields  string            `json:"inputFields,omitempty"`
@@ -117,6 +124,7 @@ type collectionAccessInsertExplanation struct {
 	ServerFields map[string]string `json:"serverFields,omitempty"`
 }
 
+// collectionAccessMutationExplanation reports mutation permissions, path restrictions, and document limits.
 type collectionAccessMutationExplanation struct {
 	Allowed           bool     `json:"allowed"`
 	QueryPaths        string   `json:"queryPaths,omitempty"`
@@ -125,6 +133,7 @@ type collectionAccessMutationExplanation struct {
 	MaxAffected       int      `json:"maxAffected,omitempty"`
 }
 
+// explainCollectionAccess simulates a collection's access policies for an actor and prints the results.
 func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAccessManifest, rule meldserver.CollectionAccess, actor meldserver.Actor) error {
 	config, err := manifest.WorkspaceAuthorizerConfig()
 	if err != nil {
@@ -181,6 +190,7 @@ func explainCollectionAccess(stdout io.Writer, manifest meldserver.CollectionAcc
 	return writeCollectionAccessJSON(stdout, explanation)
 }
 
+// describePolicyFields formats either unrestricted access or a sorted list of permitted paths.
 func describePolicyFields(all bool, fields map[string]struct{}) string {
 	if all {
 		return "*"
@@ -188,6 +198,7 @@ func describePolicyFields(all bool, fields map[string]struct{}) string {
 	return fmt.Sprintf("%v", sortedPolicyPaths(fields))
 }
 
+// sortedPolicyPaths returns a sorted copy of the paths in a permission set.
 func sortedPolicyPaths(fields map[string]struct{}) []string {
 	paths := make([]string, 0, len(fields))
 	for path := range fields {
@@ -197,6 +208,7 @@ func sortedPolicyPaths(fields map[string]struct{}) []string {
 	return paths
 }
 
+// stringPolicyFields copies only string-valued server fields into the explanation.
 func stringPolicyFields(fields meldbase.Document) map[string]string {
 	result := make(map[string]string, len(fields))
 	for field, value := range fields {

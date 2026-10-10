@@ -2,6 +2,7 @@ package qualification
 
 import "testing"
 
+// TestAnchorHistoryCheckerAcceptsAmbiguousAdvanceNeededByLaterLoad checks that a failed update may have taken effect when a later read requires it.
 func TestAnchorHistoryCheckerAcceptsAmbiguousAdvanceNeededByLaterLoad(t *testing.T) {
 	target := anchorHistoryTestValue(1, 2)
 	history := AnchorHistory{Operations: []AnchorHistoryOperation{
@@ -14,6 +15,7 @@ func TestAnchorHistoryCheckerAcceptsAmbiguousAdvanceNeededByLaterLoad(t *testing
 	}
 }
 
+// TestAnchorHistoryCheckerRejectsStaleRealTimeLoad checks that a read cannot return an old anchor after a successful update has finished.
 func TestAnchorHistoryCheckerRejectsStaleRealTimeLoad(t *testing.T) {
 	target := anchorHistoryTestValue(1, 2)
 	history := AnchorHistory{Operations: []AnchorHistoryOperation{
@@ -26,6 +28,7 @@ func TestAnchorHistoryCheckerRejectsStaleRealTimeLoad(t *testing.T) {
 	}
 }
 
+// TestAnchorHistoryCheckerAllowsOverlappingLoadBeforeAdvance checks that an overlapping read may observe the anchor before an update takes effect.
 func TestAnchorHistoryCheckerAllowsOverlappingLoadBeforeAdvance(t *testing.T) {
 	history := AnchorHistory{Operations: []AnchorHistoryOperation{
 		{ID: "advance", Kind: AnchorHistoryAdvance, Outcome: AnchorHistorySucceeded, Invoke: 1, Return: 4, Value: anchorHistoryTestValue(1, 2)},
@@ -37,6 +40,7 @@ func TestAnchorHistoryCheckerAllowsOverlappingLoadBeforeAdvance(t *testing.T) {
 	}
 }
 
+// TestAnchorHistoryCheckerRejectsSuccessfulRealTimeRegression checks that a successful update cannot lower the anchor after a higher update has finished.
 func TestAnchorHistoryCheckerRejectsSuccessfulRealTimeRegression(t *testing.T) {
 	history := AnchorHistory{Operations: []AnchorHistoryOperation{
 		{ID: "higher", Kind: AnchorHistoryAdvance, Outcome: AnchorHistorySucceeded, Invoke: 1, Return: 2, Value: anchorHistoryTestValue(2, 3)},
@@ -48,6 +52,7 @@ func TestAnchorHistoryCheckerRejectsSuccessfulRealTimeRegression(t *testing.T) {
 	}
 }
 
+// TestAnchorHistoryCheckerRejectsTwoSuccessfulCrossedWriters checks that overlapping successful updates cannot each lower a different anchor coordinate.
 func TestAnchorHistoryCheckerRejectsTwoSuccessfulCrossedWriters(t *testing.T) {
 	history := AnchorHistory{Operations: []AnchorHistoryOperation{
 		{ID: "logical", Kind: AnchorHistoryAdvance, Outcome: AnchorHistorySucceeded, Invoke: 1, Return: 4, Value: anchorHistoryTestValue(1, 2)},
@@ -59,6 +64,7 @@ func TestAnchorHistoryCheckerRejectsTwoSuccessfulCrossedWriters(t *testing.T) {
 	}
 }
 
+// TestAnchorHistoryCheckerOrdersOverlappingComparableWriters checks that overlapping updates can be ordered from lower to higher coordinates consistently with a later read.
 func TestAnchorHistoryCheckerOrdersOverlappingComparableWriters(t *testing.T) {
 	higher := anchorHistoryTestValue(2, 3)
 	history := AnchorHistory{Operations: []AnchorHistoryOperation{
@@ -72,6 +78,7 @@ func TestAnchorHistoryCheckerOrdersOverlappingComparableWriters(t *testing.T) {
 	}
 }
 
+// TestAnchorHistoryCheckerRejectsMalformedInput checks that history validation rejects an operation whose return does not follow its invocation.
 func TestAnchorHistoryCheckerRejectsMalformedInput(t *testing.T) {
 	_, err := CheckAnchorHistory(AnchorHistory{Operations: []AnchorHistoryOperation{{
 		ID: "bad", Kind: AnchorHistoryLoad, Outcome: AnchorHistorySucceeded, Invoke: 1, Return: 1,
@@ -81,6 +88,7 @@ func TestAnchorHistoryCheckerRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+// anchorHistoryTestValue creates an existing test anchor with the supplied commit sequence and generation.
 func anchorHistoryTestValue(sequence, generation uint64) AnchorHistoryValue {
 	return AnchorHistoryValue{Exists: true, DatabaseID: [16]byte{1}, CommitSequence: sequence, Generation: generation}
 }

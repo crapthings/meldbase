@@ -9,25 +9,35 @@ import (
 )
 
 const (
-	maxSystemKeyBytes      = 256
+	// maxSystemKeyBytes bounds the byte length of a private record key.
+	maxSystemKeyBytes = 256
+	// inlineSystemValueLimit bounds bytes stored directly in a private record descriptor.
 	inlineSystemValueLimit = 8 * 1024
-	maxSystemValueBytes    = 16*1024*1024 + 64*1024
-	systemDirectoryBytes   = 32
+	// maxSystemValueBytes bounds the byte length of a private record value.
+	maxSystemValueBytes = 16*1024*1024 + 64*1024
+	// systemDirectoryBytes is the byte size of the private system tree directory.
+	systemDirectoryBytes = 32
 )
 
 var (
-	systemCatalogKey     = []byte{0, 'm', 'e', 'l', 'd', 'b', 'a', 's', 'e', '.', 's', 'y', 's', 't', 'e', 'm'}
+	// systemCatalogKey locates the private system tree directory in the collection catalog.
+	systemCatalogKey = []byte{0, 'm', 'e', 'l', 'd', 'b', 'a', 's', 'e', '.', 's', 'y', 's', 't', 'e', 'm'}
+	// systemDirectoryMagic identifies encoded private system tree directories.
 	systemDirectoryMagic = [8]byte{'M', 'E', 'L', 'D', 'S', 'Y', 'S', '3'}
+	// errSystemCASMismatch aborts publication when a private record condition does not match.
 	errSystemCASMismatch = errors.New("meldbase storage: system record compare-and-swap mismatch")
 )
 
+// systemDirectory records the private system tree root and record count.
 type systemDirectory struct {
 	Root  uint64
 	Count uint64
 }
 
 // SystemRecordMutation is one compare-and-set change in the private system
-// tree. It is also reusable by composite storage transactions that publish
+// tree.
+//
+// It is also reusable by composite storage transactions that publish
 // business and control-plane state under one DatabaseRoot.
 type SystemRecordMutation struct {
 	Key            []byte
@@ -39,7 +49,9 @@ type SystemRecordMutation struct {
 }
 
 // SystemRecordTransaction performs one compare-and-swap in the private system
-// tree. ExpectedHash is SHA-256 over the decoded current value when
+// tree.
+//
+// ExpectedHash is SHA-256 over the decoded current value when
 // ExpectedExists is true. NewValue must be non-empty unless Delete is set.
 type SystemRecordTransaction struct {
 	TransactionID  [16]byte
@@ -52,12 +64,14 @@ type SystemRecordTransaction struct {
 	Unconditional  bool
 }
 
+// SystemRecordResult reports whether a record change committed and returns the current value on a mismatch.
 type SystemRecordResult struct {
 	Sequence uint64
 	Applied  bool
 	Current  []byte
 }
 
+// ApplySystemRecordTransaction commits a private record change if its expected value matches.
 func (f *File) ApplySystemRecordTransaction(transaction SystemRecordTransaction) (SystemRecordResult, error) {
 	mutation := SystemRecordMutation{
 		Key: transaction.Key, ExpectedExists: transaction.ExpectedExists, ExpectedHash: transaction.ExpectedHash,
@@ -113,6 +127,7 @@ func (f *File) ApplySystemRecordTransaction(transaction SystemRecordTransaction)
 	return result, err
 }
 
+// validSystemRecordMutation checks key, value, and condition combinations for a private record change.
 func validSystemRecordMutation(mutation SystemRecordMutation) bool {
 	return len(mutation.Key) > 0 && len(mutation.Key) <= maxSystemKeyBytes &&
 		(!mutation.Unconditional || (!mutation.ExpectedExists && allZero(mutation.ExpectedHash[:]))) &&
@@ -122,7 +137,9 @@ func validSystemRecordMutation(mutation SystemRecordMutation) bool {
 		(mutation.Delete || (len(mutation.NewValue) > 0 && len(mutation.NewValue) <= maxSystemValueBytes))
 }
 
-// applySystemRecordMutation stages one private record CAS in catalog. A false
+// applySystemRecordMutation stages one private record CAS in catalog.
+//
+// A false
 // applied result is not an error and leaves the write transaction unchanged.
 func (tx *WriteTxn) applySystemRecordMutation(catalog *MutableTree, mutation SystemRecordMutation) ([]byte, bool, error) {
 	if tx == nil || catalog == nil || !validSystemRecordMutation(mutation) {
@@ -200,6 +217,7 @@ func (tx *WriteTxn) applySystemRecordMutation(catalog *MutableTree, mutation Sys
 	return nil, true, nil
 }
 
+// GetSystemRecord reads a private record from the current committed database.
 func (f *File) GetSystemRecord(key []byte) ([]byte, bool, error) {
 	if f == nil || len(key) == 0 || len(key) > maxSystemKeyBytes {
 		return nil, false, ErrCorrupt
@@ -213,12 +231,16 @@ func (f *File) GetSystemRecord(key []byte) ([]byte, bool, error) {
 }
 
 // SystemRecords returns an isolated key/value snapshot for maintenance such as
-// compact-to-new-file. It is not exposed through the public collection API.
+// compact-to-new-file.
+//
+// It is not exposed through the public collection API.
 func (snapshot *ReadSnapshot) SystemRecords() ([]KeyValue, error) {
 	return snapshot.ScanSystemRecords(nil, nil, 0)
 }
 
-// ScanSystemRecords returns private records in bytewise [start,end) order. A
+// ScanSystemRecords returns private records in bytewise [start,end) order.
+//
+// A
 // non-positive limit is unbounded. It exists for bounded first-party retention
 // maintenance, not application queries.
 func (snapshot *ReadSnapshot) ScanSystemRecords(start, end []byte, limit int) ([]KeyValue, error) {
@@ -267,6 +289,7 @@ func (snapshot *ReadSnapshot) ScanSystemRecords(start, end []byte, limit int) ([
 	return result, nil
 }
 
+// getSystemRecordUnlocked reads a private record from a catalog while the caller holds the file lock.
 func (f *File) getSystemRecordUnlocked(catalogRoot uint64, key []byte) ([]byte, bool, error) {
 	encodedDirectory, exists, err := f.treeGetUnlocked(catalogRoot, TreeCatalog, systemCatalogKey)
 	if err != nil || !exists {
@@ -285,6 +308,7 @@ func (f *File) getSystemRecordUnlocked(catalogRoot uint64, key []byte) ([]byte, 
 	return value, err == nil, err
 }
 
+// encodeSystemDirectory validates and encodes the private system tree directory.
 func encodeSystemDirectory(directory systemDirectory) ([]byte, error) {
 	if directory.Root < 2 {
 		return nil, ErrCorrupt
@@ -298,6 +322,7 @@ func encodeSystemDirectory(directory systemDirectory) ([]byte, error) {
 	return encoded, nil
 }
 
+// decodeSystemDirectory validates and reads the private system tree directory.
 func decodeSystemDirectory(encoded []byte) (systemDirectory, error) {
 	if len(encoded) != systemDirectoryBytes || string(encoded[:8]) != string(systemDirectoryMagic[:]) ||
 		binary.LittleEndian.Uint16(encoded[8:10]) != FormatVersion || binary.LittleEndian.Uint16(encoded[10:12]) != systemDirectoryBytes ||
@@ -311,14 +336,17 @@ func decodeSystemDirectory(encoded []byte) (systemDirectory, error) {
 	return directory, nil
 }
 
+// storeSystemValue stores private record bytes using the system value limits.
 func (tx *WriteTxn) storeSystemValue(value []byte) ([]byte, error) {
 	return tx.storeOverflowValue(value, inlineSystemValueLimit, maxSystemValueBytes, PageSystemOverflow)
 }
 
+// loadSystemValue reads private record bytes using the system value limits.
 func (tx *WriteTxn) loadSystemValue(stored []byte) ([]byte, error) {
 	return tx.loadOverflowValue(stored, inlineSystemValueLimit, maxSystemValueBytes, PageSystemOverflow)
 }
 
+// storeOverflowValue stores bytes inline or in linked pages within the supplied size limits.
 func (tx *WriteTxn) storeOverflowValue(value []byte, inlineLimit, maximum int, pageType PageType) ([]byte, error) {
 	if len(value) == 0 || len(value) > maximum {
 		return nil, ErrCorrupt
@@ -360,6 +388,7 @@ func (tx *WriteTxn) storeOverflowValue(value []byte, inlineLimit, maximum int, p
 	return descriptor, nil
 }
 
+// loadOverflowValue reads and verifies inline bytes or linked pages within the supplied size limits.
 func (tx *WriteTxn) loadOverflowValue(stored []byte, inlineLimit, maximum int, pageType PageType) ([]byte, error) {
 	if len(stored) == 0 {
 		return nil, ErrCorrupt

@@ -7,13 +7,13 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
-// modelCoordinate intentionally does not use RollbackAnchor or production
-// merge code. The executable model is an independent finite oracle.
+// modelCoordinate stores commit and generation positions for a model independent of production merge logic.
 type modelCoordinate struct {
 	sequence   uint64
 	generation uint64
 }
 
+// modelHistory defines the initialized, committed, and maintenance states explored by the model.
 var modelHistory = [...]modelCoordinate{
 	{sequence: 0, generation: 1}, // initialized database
 	{sequence: 1, generation: 2}, // logical commit
@@ -21,6 +21,7 @@ var modelHistory = [...]modelCoordinate{
 	{sequence: 2, generation: 4}, // later logical commit
 }
 
+// staticModelCounts records publication, recovery, and rollback-check coverage.
 type staticModelCounts struct {
 	acknowledgedStates uint64
 	failedWrites       uint64
@@ -29,6 +30,7 @@ type staticModelCounts struct {
 	recoveryRepairs    uint64
 }
 
+// TestStaticQuorumExhaustivePublicationRecoveryModel checks modeled publication and recovery schedules with one, three, and five replicas.
 func TestStaticQuorumExhaustivePublicationRecoveryModel(t *testing.T) {
 	var total staticModelCounts
 	for _, replicas := range []int{1, 3, 5} {
@@ -44,6 +46,7 @@ func TestStaticQuorumExhaustivePublicationRecoveryModel(t *testing.T) {
 	}
 }
 
+// exploreStaticModel explores which replicas persist each publication and checks the resulting recovery states.
 func exploreStaticModel(t *testing.T, durable []int, acknowledged, target int) staticModelCounts {
 	t.Helper()
 	var counts staticModelCounts
@@ -70,6 +73,7 @@ func exploreStaticModel(t *testing.T, durable []int, acknowledged, target int) s
 	return counts
 }
 
+// checkStaticRecoveryState checks read floors, rollback rejection, and repair visibility for each modeled majority.
 func checkStaticRecoveryState(t *testing.T, replicas []int, acknowledged, database int, counts *staticModelCounts) {
 	t.Helper()
 	quorum := len(replicas)/2 + 1
@@ -121,6 +125,7 @@ func checkStaticRecoveryState(t *testing.T, replicas []int, acknowledged, databa
 	}
 }
 
+// assertAllReadQuorumsAtLeast checks that every read majority observes at least the required history position.
 func assertAllReadQuorumsAtLeast(t *testing.T, replicas []int, floor int) {
 	t.Helper()
 	quorum := len(replicas)/2 + 1
@@ -140,10 +145,12 @@ func assertAllReadQuorumsAtLeast(t *testing.T, replicas []int, floor int) {
 	}
 }
 
+// modelBeforeOrEqual checks that neither commit sequence nor generation moves backward.
 func modelBeforeOrEqual(left, right modelCoordinate) bool {
 	return left.sequence <= right.sequence && left.generation <= right.generation
 }
 
+// add accumulates coverage counts from another model exploration.
 func (counts *staticModelCounts) add(other staticModelCounts) {
 	counts.acknowledgedStates += other.acknowledgedStates
 	counts.failedWrites += other.failedWrites
@@ -152,6 +159,7 @@ func (counts *staticModelCounts) add(other staticModelCounts) {
 	counts.recoveryRepairs += other.recoveryRepairs
 }
 
+// TestStaticQuorumModelRejectsCrossedHistories checks that coordinates advancing different dimensions remain incomparable.
 func TestStaticQuorumModelRejectsCrossedHistories(t *testing.T) {
 	left := modelCoordinate{sequence: 2, generation: 3}
 	right := modelCoordinate{sequence: 1, generation: 4}
@@ -160,6 +168,7 @@ func TestStaticQuorumModelRejectsCrossedHistories(t *testing.T) {
 	}
 }
 
+// TestStaticQuorumModelFindsCounterexampleWhenReadThresholdIsWeakened checks that reducing the read majority can lose an acknowledged update.
 func TestStaticQuorumModelFindsCounterexampleWhenReadThresholdIsWeakened(t *testing.T) {
 	for _, replicas := range []int{3, 5} {
 		quorum := replicas/2 + 1
@@ -172,6 +181,7 @@ func TestStaticQuorumModelFindsCounterexampleWhenReadThresholdIsWeakened(t *test
 	}
 }
 
+// modelCanLoseAcknowledgedFloor checks whether the requested read and write thresholds allow disjoint replica sets.
 func modelCanLoseAcknowledgedFloor(replicas, writeThreshold, readThreshold int) bool {
 	for writeMask := 0; writeMask < 1<<replicas; writeMask++ {
 		if bits.OnesCount(uint(writeMask)) != writeThreshold {
@@ -186,6 +196,7 @@ func modelCanLoseAcknowledgedFloor(replicas, writeThreshold, readThreshold int) 
 	return false
 }
 
+// TestStaticQuorumModelRejectsEndpointAliasesAsDistinctMembers checks that two endpoint names for one member cannot count as two votes.
 func TestStaticQuorumModelRejectsEndpointAliasesAsDistinctMembers(t *testing.T) {
 	// Two endpoint aliases can satisfy a naive endpoint-count quorum while
 	// representing only one durable member. Static member identity binding
@@ -204,6 +215,7 @@ func TestStaticQuorumModelRejectsEndpointAliasesAsDistinctMembers(t *testing.T) 
 	}
 }
 
+// TestStaticQuorumModelPreservesFailedWriteForkCounterexample checks that a failed minority write can create an incomparable branch requiring repair in both dimensions.
 func TestStaticQuorumModelPreservesFailedWriteForkCounterexample(t *testing.T) {
 	acknowledged := modelCoordinate{sequence: 0, generation: 1}
 	minorityFailedWrite := modelCoordinate{sequence: 1, generation: 2}
@@ -225,6 +237,7 @@ func TestStaticQuorumModelPreservesFailedWriteForkCounterexample(t *testing.T) {
 	}
 }
 
+// TestStaticQuorumSelectorNeverInventsASafeReadQuorum checks that every successful production selection matches an independently modeled safe majority.
 func TestStaticQuorumSelectorNeverInventsASafeReadQuorum(t *testing.T) {
 	identityA := [16]byte{1}
 	identityB := [16]byte{2}
@@ -268,11 +281,13 @@ func TestStaticQuorumSelectorNeverInventsASafeReadQuorum(t *testing.T) {
 	}
 }
 
+// modelReadChoice represents a safe modeled read result or an absent anchor.
 type modelReadChoice struct {
 	anchor meldbase.RollbackAnchor
 	exists bool
 }
 
+// modelSafeReadChoices enumerates majority results that contain a coordinate at least as advanced as all their existing anchors.
 func modelSafeReadChoices(results []loadResult, quorum int) []modelReadChoice {
 	choices := make([]modelReadChoice, 0)
 	for mask := 0; mask < 1<<len(results); mask++ {
@@ -306,6 +321,7 @@ func modelSafeReadChoices(results []loadResult, quorum int) []modelReadChoice {
 	return choices
 }
 
+// modelAnchorBeforeOrEqual checks matching database identity and nondecreasing commit and generation positions.
 func modelAnchorBeforeOrEqual(left, right meldbase.RollbackAnchor) bool {
 	return left.DatabaseID == right.DatabaseID &&
 		left.MinimumCommitSequence <= right.MinimumCommitSequence &&

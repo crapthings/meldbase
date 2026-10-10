@@ -8,6 +8,7 @@ import { MAX_WORKER_FRAME_BYTES, parseJSONRecord } from "./shared.js";
 import { RemoteWriteTransaction } from "./transaction.js";
 import type { WorkerSocket, WorkerSocketFactory } from "./worker.js";
 
+/** Provides protocol capabilities accepted by the simulated worker hub. */
 const WORKER_PROTOCOL = Object.freeze({
   versions: [1],
   capabilities: [
@@ -21,6 +22,7 @@ const WORKER_PROTOCOL = Object.freeze({
   ],
 });
 
+/** Provides valid registration limits for worker test sessions. */
 const WORKER_LIMITS = Object.freeze({
   maxPendingCalls: 64,
   maxOperationsPerCall: 256,
@@ -28,6 +30,7 @@ const WORKER_LIMITS = Object.freeze({
   policyEvaluationTimeoutMs: 2_000,
 });
 
+/** Records worker frames and emits controlled connection and message events. */
 class FakeSocket implements WorkerSocket {
   readyState = 0;
   readonly sent: string[] = [];
@@ -142,6 +145,7 @@ test("TypeScript and Go share the immutable worker protocol v1 contract", async 
   ]);
 });
 
+/** Creates a test worker with simulated sockets and recorded connection states. */
 function harness(
   methods: NonNullable<ConstructorParameters<typeof MeldbaseWorker>[0]["methods"]>,
   url = "wss://control.example.test/v1/workers",
@@ -229,6 +233,7 @@ test("worker closes the session when server registration limits are invalid", as
   }
 });
 
+/** Starts a test worker and completes its simulated hub registration. */
 async function startHarness(value: ReturnType<typeof harness>): Promise<FakeSocket> {
   const started = value.worker.start();
   await waitFor(() => value.sockets.length === 1);
@@ -763,6 +768,7 @@ test("registration rejection is observable while the worker reconnects", async (
   await worker.stop();
 });
 
+/** Polls a test condition until it succeeds or the deadline expires. */
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {

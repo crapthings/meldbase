@@ -12,6 +12,7 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+// adminWireSchemaField describes a JSON field path, type, and presence rules for the test schema.
 type adminWireSchemaField struct {
 	Path     string `json:"path"`
 	Type     string `json:"type"`
@@ -19,6 +20,7 @@ type adminWireSchemaField struct {
 	Nullable bool   `json:"nullable"`
 }
 
+// TestAdminSampleWireSchemaMatchesJSONEncoder checks that sample JSON matches the generated field schema and omits an absent server.
 func TestAdminSampleWireSchemaMatchesJSONEncoder(t *testing.T) {
 	fields := buildAdminWireSchema(t)
 	sample := Sample{Server: &meldserver.ServerStats{}}
@@ -56,6 +58,7 @@ func TestAdminSampleWireSchemaMatchesJSONEncoder(t *testing.T) {
 	}
 }
 
+// buildAdminWireSchema builds a sorted sample field schema and rejects duplicate paths.
 func buildAdminWireSchema(t *testing.T) []adminWireSchemaField {
 	t.Helper()
 	fields := make([]adminWireSchemaField, 0, 256)
@@ -69,6 +72,7 @@ func buildAdminWireSchema(t *testing.T) []adminWireSchemaField {
 	return fields
 }
 
+// collectAdminWireSchema walks exported struct fields to describe their JSON paths and presence rules.
 func collectAdminWireSchema(t *testing.T, value reflect.Type, prefix string, inheritedOptional bool, fields *[]adminWireSchemaField) {
 	t.Helper()
 	if value.Kind() != reflect.Struct {
@@ -103,6 +107,7 @@ func collectAdminWireSchema(t *testing.T, value reflect.Type, prefix string, inh
 	}
 }
 
+// adminJSONField reads a struct field JSON tag to determine its name, omission rules, and inclusion.
 func adminJSONField(field reflect.StructField) (name string, optional, included bool) {
 	tag := field.Tag.Get("json")
 	parts := strings.Split(tag, ",")
@@ -119,6 +124,7 @@ func adminJSONField(field reflect.StructField) (name string, optional, included 
 	return name, optional, true
 }
 
+// adminJSONWireType describes the JSON representation of a supported Go field type.
 func adminJSONWireType(t *testing.T, value reflect.Type) string {
 	t.Helper()
 	if value == reflect.TypeOf(time.Time{}) {
@@ -152,6 +158,7 @@ func adminJSONWireType(t *testing.T, value reflect.Type) string {
 	}
 }
 
+// collectAdminJSONPaths records field paths and value types from decoded JSON objects.
 func collectAdminJSONPaths(t *testing.T, value map[string]any, prefix string, paths map[string]string) {
 	t.Helper()
 	for name, raw := range value {
@@ -179,6 +186,7 @@ func collectAdminJSONPaths(t *testing.T, value map[string]any, prefix string, pa
 	}
 }
 
+// adminSchemaTypeMatchesJSON checks whether a schema type matches a decoded JSON value type.
 func adminSchemaTypeMatchesJSON(schemaType, jsonType string) bool {
 	switch {
 	case schemaType == "object":

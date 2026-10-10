@@ -12,27 +12,36 @@ import (
 )
 
 const (
+	// maxDurableCommitConsumers bounds the number of saved consumer checkpoints.
 	maxDurableCommitConsumers = 64
-	maxDurableConsumerName    = 64
+	// maxDurableConsumerName bounds the byte length of a consumer name.
+	maxDurableConsumerName = 64
+	// durableConsumerHeaderSize is the byte size of the checkpoint directory header.
 	durableConsumerHeaderSize = 16
 )
 
 var (
-	durableConsumerKey   = []byte{0, 'm', 'e', 'l', 'd', 'b', 'a', 's', 'e', '.', 'c', 'o', 'n', 's', 'u', 'm', 'e', 'r', 's'}
+	// durableConsumerKey locates the checkpoint directory in private system records.
+	durableConsumerKey = []byte{0, 'm', 'e', 'l', 'd', 'b', 'a', 's', 'e', '.', 'c', 'o', 'n', 's', 'u', 'm', 'e', 'r', 's'}
+	// durableConsumerMagic identifies encoded checkpoint directories.
 	durableConsumerMagic = [8]byte{'M', 'E', 'L', 'D', 'C', 'O', 'N', '1'}
 
-	// ErrDurableConsumerExists prevents an accidental reset of a durable
-	// checkpoint. Callers must explicitly open the existing consumer instead.
-	ErrDurableConsumerExists   = errors.New("meldbase storage: durable consumer already exists")
+	// ErrDurableConsumerExists reports that a named consumer checkpoint already exists.
+	//
+	// Callers must explicitly open the existing consumer instead.
+	ErrDurableConsumerExists = errors.New("meldbase storage: durable consumer already exists")
+	// ErrDurableConsumerNotFound reports a missing named checkpoint.
 	ErrDurableConsumerNotFound = errors.New("meldbase storage: durable consumer not found")
 )
 
+// durableConsumerCheckpoint records a named consumer's acknowledged commit sequence.
 type durableConsumerCheckpoint struct {
 	name string
 	ack  uint64
 }
 
-// DurableCommitConsumer is a pull-based, crash-resumable Commit Log consumer.
+// DurableCommitConsumer reads commits from a named checkpoint that survives a restart.
+//
 // Closing releases only its process-local replay pin; its named checkpoint
 // remains durable and continues to cap retention until DeleteDurableCommitConsumer
 // is called deliberately.
@@ -51,6 +60,7 @@ type DurableCommitConsumer struct {
 	closed     bool
 }
 
+// validDurableConsumerName checks consumer name length and supported characters.
 func validDurableConsumerName(name string) bool {
 	if len(name) == 0 || len(name) > maxDurableConsumerName {
 		return false
@@ -65,7 +75,8 @@ func validDurableConsumerName(name string) bool {
 	return true
 }
 
-// CreateDurableCommitConsumer establishes a new named checkpoint at after.
+// CreateDurableCommitConsumer creates a named consumer starting after a commit sequence.
+//
 // The selected position must already be recoverable from the current retained
 // Commit Log. Creation changes only private control-plane state: it publishes a
 // physical COW generation but does not advance the logical commit sequence or
@@ -120,8 +131,9 @@ func (f *File) CreateDurableCommitConsumer(name string, after uint64) (*DurableC
 	return f.openDurableCommitConsumerUnlocked(name, after)
 }
 
-// OpenDurableCommitConsumer resumes a named checkpoint. It fails explicitly if
-// the checkpoint predates retained history; a caller must resynchronize rather
+// OpenDurableCommitConsumer resumes a named consumer from its saved checkpoint.
+//
+// It fails explicitly if the checkpoint predates retained history; a caller must resynchronize rather
 // than silently starting from a newer position.
 func (f *File) OpenDurableCommitConsumer(name string) (*DurableCommitConsumer, error) {
 	if f == nil || !validDurableConsumerName(name) {
@@ -150,6 +162,7 @@ func (f *File) OpenDurableCommitConsumer(name string) (*DurableCommitConsumer, e
 	return f.openDurableCommitConsumerUnlocked(name, checkpoint.ack)
 }
 
+// retainedConsumerPosition checks whether replay can resume after a commit sequence.
 func retainedConsumerPosition(root DatabaseRoot, after uint64) error {
 	if after > root.CommitSequence {
 		return ErrCorrupt
@@ -160,6 +173,7 @@ func retainedConsumerPosition(root DatabaseRoot, after uint64) error {
 	return nil
 }
 
+// openDurableCommitConsumerUnlocked creates a pinned stream for a checkpoint under the file lock.
 func (f *File) openDurableCommitConsumerUnlocked(name string, after uint64) (*DurableCommitConsumer, error) {
 	if f == nil || f.file == nil {
 		return nil, errors.New("meldbase storage: file is closed")
@@ -172,8 +186,9 @@ func (f *File) openDurableCommitConsumerUnlocked(name string, after uint64) (*Du
 	return &DurableCommitConsumer{file: f, name: name, stream: stream, checkpoint: after, delivered: after}, nil
 }
 
-// Next returns the next durable Commit Log batch. It does not advance the
-// checkpoint; callers must Ack only after their own side effect is complete.
+// Next reads the next committed batch without changing the saved checkpoint.
+//
+// Callers must Ack only after their own side effect is complete.
 func (consumer *DurableCommitConsumer) Next(ctx context.Context) (CommitBatch, error) {
 	if consumer == nil {
 		return CommitBatch{}, ErrCursorClosed
@@ -203,9 +218,9 @@ func (consumer *DurableCommitConsumer) Next(ctx context.Context) (CommitBatch, e
 	return batch, nil
 }
 
-// ResolveChange materializes one change from the batch most recently returned
-// by Next. It has the same lifetime/ordering rule as LiveCommitStream: callers
-// must resolve all required images before advancing the consumer again.
+// ResolveChange loads the document images for a change in the most recently read batch.
+//
+// Callers must resolve all required images before reading the next batch.
 func (consumer *DurableCommitConsumer) ResolveChange(change CommitChange) (ResolvedCommitChange, error) {
 	if consumer == nil {
 		return ResolvedCommitChange{}, ErrCursorClosed
@@ -218,8 +233,9 @@ func (consumer *DurableCommitConsumer) ResolveChange(change CommitChange) (Resol
 	return consumer.stream.ResolveChange(change)
 }
 
-// Ack durably advances this consumer through a delivered sequence. Ack is
-// monotonic and idempotent; a stale process may acknowledge an older sequence
+// Ack saves a delivered commit sequence as this consumer's checkpoint.
+//
+// Ack is monotonic and idempotent; a stale process may acknowledge an older sequence
 // but can never move the durable checkpoint backward. The control-plane update
 // has no logical commit sequence, so it cannot create an acknowledgement loop.
 func (consumer *DurableCommitConsumer) Ack(sequence uint64) error {
@@ -268,6 +284,7 @@ func (consumer *DurableCommitConsumer) Ack(sequence uint64) error {
 	return nil
 }
 
+// createInitialDurableConsumerUnlocked initializes checkpoint storage in an empty database under the file lock.
 func (f *File) createInitialDurableConsumerUnlocked(name string) (uint64, error) {
 	if f == nil || f.file == nil || !validDurableConsumerName(name) || f.meta.CommitSequence != 0 {
 		return 0, ErrCorrupt
@@ -321,6 +338,7 @@ func (f *File) createInitialDurableConsumerUnlocked(name string) (uint64, error)
 	return checkpoint, err
 }
 
+// Checkpoint returns this consumer's latest acknowledged commit sequence.
 func (consumer *DurableCommitConsumer) Checkpoint() uint64 {
 	if consumer == nil {
 		return 0
@@ -330,6 +348,7 @@ func (consumer *DurableCommitConsumer) Checkpoint() uint64 {
 	return consumer.checkpoint
 }
 
+// Close releases the active stream while retaining the saved checkpoint.
 func (consumer *DurableCommitConsumer) Close() error {
 	if consumer == nil {
 		return nil
@@ -351,7 +370,9 @@ func (consumer *DurableCommitConsumer) Close() error {
 }
 
 // DeleteDurableCommitConsumer explicitly removes a checkpoint and its durable
-// retention pin. It does not close another process's active stream; that stream
+// retention pin.
+//
+// It does not close another process's active stream; that stream
 // still owns its temporary pin until Close, but future acknowledgements fail.
 func (f *File) DeleteDurableCommitConsumer(name string) error {
 	if f == nil || !validDurableConsumerName(name) {
@@ -378,6 +399,7 @@ func (f *File) DeleteDurableCommitConsumer(name string) error {
 	return f.replaceDurableConsumerCheckpointsUnlocked(checkpoints)
 }
 
+// findDurableConsumer looks up a named checkpoint in a list.
 func findDurableConsumer(checkpoints []durableConsumerCheckpoint, name string) (durableConsumerCheckpoint, bool) {
 	index := sort.Search(len(checkpoints), func(index int) bool { return checkpoints[index].name >= name })
 	if index < len(checkpoints) && checkpoints[index].name == name {
@@ -386,6 +408,7 @@ func findDurableConsumer(checkpoints []durableConsumerCheckpoint, name string) (
 	return durableConsumerCheckpoint{}, false
 }
 
+// durableConsumerCheckpointsUnlocked reads saved checkpoints from a catalog under the file lock.
 func (f *File) durableConsumerCheckpointsUnlocked(catalogRoot uint64) ([]durableConsumerCheckpoint, error) {
 	value, exists, err := f.getSystemRecordUnlocked(catalogRoot, durableConsumerKey)
 	if err != nil {
@@ -399,7 +422,9 @@ func (f *File) durableConsumerCheckpointsUnlocked(catalogRoot uint64) ([]durable
 
 // replaceDurableConsumerCheckpointsUnlocked persists only control-plane state:
 // it advances the physical generation but keeps CommitSequence and Commit Log
-// roots intact. The next business publication observes this directory before
+// roots intact.
+//
+// The next business publication observes this directory before
 // pruning history.
 func (f *File) replaceDurableConsumerCheckpointsUnlocked(checkpoints []durableConsumerCheckpoint) error {
 	encoded, err := encodeDurableConsumerCheckpoints(checkpoints)
@@ -434,6 +459,7 @@ func (f *File) replaceDurableConsumerCheckpointsUnlocked(checkpoints []durableCo
 	})
 }
 
+// encodeDurableConsumerCheckpoints validates and encodes the named checkpoint directory.
 func encodeDurableConsumerCheckpoints(checkpoints []durableConsumerCheckpoint) ([]byte, error) {
 	if len(checkpoints) > maxDurableCommitConsumers {
 		return nil, ErrCorrupt
@@ -464,6 +490,7 @@ func encodeDurableConsumerCheckpoints(checkpoints []durableConsumerCheckpoint) (
 	return result, nil
 }
 
+// decodeDurableConsumerCheckpoints validates and reads the named checkpoint directory.
 func decodeDurableConsumerCheckpoints(encoded []byte) ([]durableConsumerCheckpoint, error) {
 	if len(encoded) < durableConsumerHeaderSize || !bytes.Equal(encoded[:8], durableConsumerMagic[:]) ||
 		binary.LittleEndian.Uint16(encoded[8:10]) != FormatVersion || binary.LittleEndian.Uint16(encoded[12:14]) != 0 ||
@@ -499,6 +526,7 @@ func decodeDurableConsumerCheckpoints(encoded []byte) ([]durableConsumerCheckpoi
 	return result, nil
 }
 
+// durableConsumerRetentionFloor finds the earliest commit needed by saved consumer checkpoints.
 func (tx *WriteTxn) durableConsumerRetentionFloor(catalogRoot uint64, oldest, latest uint64) (uint64, error) {
 	if tx == nil || tx.file == nil || oldest == 0 || oldest > latest {
 		return 0, ErrCorrupt

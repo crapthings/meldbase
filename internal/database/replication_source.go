@@ -6,10 +6,10 @@ import (
 	"sync"
 )
 
-// ReplicationSourceSession is the primary-side state machine for one
-// authenticated peer. It deliberately permits one unacknowledged batch at a
-// time: this is both bounded flow control and the proof that a durable ACK can
-// never skip an unseen source token.
+// ReplicationSourceSession sends committed database changes to one authenticated receiver.
+//
+// Only one batch may await acknowledgement at a time, limiting queued work
+// and preventing acknowledgement of an unseen source token.
 type ReplicationSourceSession struct {
 	mu           sync.Mutex
 	subscription *DurableDatabaseChangeSubscription
@@ -21,9 +21,10 @@ type ReplicationSourceSession struct {
 	inFlight     uint64
 }
 
-// NewReplicationSourceSession binds an existing named durable database feed to
-// one source identity. The caller owns peer authentication and must close the
-// session when that authenticated connection ends.
+// NewReplicationSourceSession creates a replication session from a named database change feed.
+//
+// The caller authenticates the receiver and must close the session when
+// that authenticated connection ends.
 func NewReplicationSourceSession(db *DB, subscription *DurableDatabaseChangeSubscription, limits ReplicationFrameLimits) (*ReplicationSourceSession, error) {
 	if db == nil || subscription == nil {
 		return nil, ErrClosed
@@ -44,13 +45,16 @@ func NewReplicationSourceSession(db *DB, subscription *DurableDatabaseChangeSubs
 	return &ReplicationSourceSession{subscription: subscription, databaseID: identity, localMax: localMax}, nil
 }
 
+// Close stops the source session's durable change subscription.
 func (session *ReplicationSourceSession) Close() {
 	if session != nil && session.subscription != nil {
 		session.subscription.Close()
 	}
 }
 
-// AcceptHello validates a receiver's exact durable position. A different
+// AcceptHello checks the receiver's database identity and saved commit position.
+//
+// A different
 // identity or checkpoint is a safe resync response, never an implicit rewind
 // or jump of the source durable consumer.
 func (session *ReplicationSourceSession) AcceptHello(frame ReplicationFrame) (*ReplicationFrame, error) {
@@ -78,7 +82,9 @@ func (session *ReplicationSourceSession) AcceptHello(frame ReplicationFrame) (*R
 	return nil, nil
 }
 
-// NextFrame waits for the next ordered source batch. The caller must not send
+// NextFrame waits for the next source batch and prepares it for transmission.
+//
+// The caller must not send
 // another frame until AcceptAck succeeds for this token. If the peer's declared
 // frame cap cannot carry one atomic Commit Log batch, the session terminates
 // with snapshot_required rather than splitting or partially sending a commit.
@@ -119,7 +125,9 @@ func (session *ReplicationSourceSession) NextFrame(ctx context.Context) (*Replic
 	}
 }
 
-// AcceptAck makes one remote acknowledgement durable on the source. The token
+// AcceptAck saves the receiver's acknowledgement of the batch awaiting confirmation.
+//
+// The token
 // must exactly match the one batch in flight; stale, future or duplicate ACKs
 // cannot release retained history.
 func (session *ReplicationSourceSession) AcceptAck(frame ReplicationFrame) error {
@@ -138,6 +146,7 @@ func (session *ReplicationSourceSession) AcceptAck(frame ReplicationFrame) error
 	return nil
 }
 
+// Checkpoint returns the last source commit durably acknowledged by the receiver.
 func (session *ReplicationSourceSession) Checkpoint() (uint64, error) {
 	if session == nil || session.subscription == nil {
 		return 0, ErrClosed

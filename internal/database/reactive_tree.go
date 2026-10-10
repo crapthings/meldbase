@@ -6,8 +6,9 @@ import (
 	"sort"
 )
 
-// The reactive trees are immutable deterministic treaps. Updates path-copy
-// O(log N) nodes, so readers may retain an old view state without locks.
+// reactiveIDNode holds a member in an immutable tree ordered by document ID.
+//
+// Updates copy changed paths so readers can retain old view states without locks.
 type reactiveIDNode struct {
 	id          DocumentID
 	member      reactiveMember
@@ -15,6 +16,7 @@ type reactiveIDNode struct {
 	left, right *reactiveIDNode
 }
 
+// reactiveOrderNode holds a member in an immutable result-order tree with subtree counts.
 type reactiveOrderNode struct {
 	id          DocumentID
 	member      reactiveMember
@@ -23,11 +25,13 @@ type reactiveOrderNode struct {
 	left, right *reactiveOrderNode
 }
 
+// reactiveTreeEntry pairs a document ID with a member for bulk tree construction.
 type reactiveTreeEntry struct {
 	id     DocumentID
 	member reactiveMember
 }
 
+// reactiveNodePriority hashes an ID with a process-local seed to choose its tree priority.
 func reactiveNodePriority(seed maphash.Seed, id DocumentID) uint64 {
 	// The per-database process seed prevents chosen document IDs from forcing a
 	// degenerate tree. Reactive state is ephemeral, so priorities need not be
@@ -35,10 +39,12 @@ func reactiveNodePriority(seed maphash.Seed, id DocumentID) uint64 {
 	return maphash.Bytes(seed, id[:])
 }
 
+// compareDocumentIDs compares document IDs in byte order.
 func compareDocumentIDs(left, right DocumentID) int {
 	return bytes.Compare(left[:], right[:])
 }
 
+// reactiveIDGet looks up a member by ID in an immutable tree.
 func reactiveIDGet(root *reactiveIDNode, id DocumentID) (reactiveMember, bool) {
 	for root != nil {
 		switch comparison := compareDocumentIDs(id, root.id); {
@@ -53,6 +59,7 @@ func reactiveIDGet(root *reactiveIDNode, id DocumentID) (reactiveMember, bool) {
 	return reactiveMember{}, false
 }
 
+// reactiveIDPut returns a tree with the member inserted or replaced through copied paths.
 func reactiveIDPut(root *reactiveIDNode, seed maphash.Seed, id DocumentID, member reactiveMember) *reactiveIDNode {
 	if root == nil {
 		return &reactiveIDNode{id: id, member: member, priority: reactiveNodePriority(seed, id)}
@@ -75,6 +82,7 @@ func reactiveIDPut(root *reactiveIDNode, seed maphash.Seed, id DocumentID, membe
 	return &copy
 }
 
+// reactiveIDDelete returns a tree with the requested ID removed through copied paths.
 func reactiveIDDelete(root *reactiveIDNode, id DocumentID) *reactiveIDNode {
 	if root == nil {
 		return nil
@@ -93,6 +101,7 @@ func reactiveIDDelete(root *reactiveIDNode, id DocumentID) *reactiveIDNode {
 	}
 }
 
+// mergeReactiveIDs joins two ordered ID subtrees while preserving existing nodes.
 func mergeReactiveIDs(left, right *reactiveIDNode) *reactiveIDNode {
 	if left == nil {
 		return right
@@ -110,6 +119,7 @@ func mergeReactiveIDs(left, right *reactiveIDNode) *reactiveIDNode {
 	return &copy
 }
 
+// rotateReactiveIDRight rotates a private root copy right while copying its left child.
 func rotateReactiveIDRight(root *reactiveIDNode) *reactiveIDNode {
 	left := *root.left
 	root.left = left.right
@@ -117,6 +127,7 @@ func rotateReactiveIDRight(root *reactiveIDNode) *reactiveIDNode {
 	return &left
 }
 
+// rotateReactiveIDLeft rotates a private root copy left while copying its right child.
 func rotateReactiveIDLeft(root *reactiveIDNode) *reactiveIDNode {
 	right := *root.right
 	root.right = right.left
@@ -124,6 +135,7 @@ func rotateReactiveIDLeft(root *reactiveIDNode) *reactiveIDNode {
 	return &right
 }
 
+// higherReactivePriority compares tree priorities and breaks ties by document ID.
 func higherReactivePriority(leftPriority uint64, leftID DocumentID, rightPriority uint64, rightID DocumentID) bool {
 	if leftPriority != rightPriority {
 		return leftPriority > rightPriority
@@ -131,6 +143,7 @@ func higherReactivePriority(leftPriority uint64, leftID DocumentID, rightPriorit
 	return compareDocumentIDs(leftID, rightID) < 0
 }
 
+// compareReactiveOrder orders members by query sort fields, insertion position, and document ID.
 func compareReactiveOrder(query QuerySpec, leftID DocumentID, left reactiveMember, rightID DocumentID, right reactiveMember) int {
 	for _, field := range query.sort {
 		leftValue, leftOK := lookupInternal(left.document, field.Path)
@@ -165,6 +178,7 @@ func compareReactiveOrder(query QuerySpec, leftID DocumentID, left reactiveMembe
 	return compareDocumentIDs(leftID, rightID)
 }
 
+// reactiveOrderPut returns a result-order tree with the member inserted or replaced through copied paths.
 func reactiveOrderPut(root *reactiveOrderNode, seed maphash.Seed, query QuerySpec, id DocumentID, member reactiveMember) *reactiveOrderNode {
 	if root == nil {
 		return &reactiveOrderNode{id: id, member: member, priority: reactiveNodePriority(seed, id), size: 1}
@@ -188,6 +202,7 @@ func reactiveOrderPut(root *reactiveOrderNode, seed maphash.Seed, query QuerySpe
 	return &copy
 }
 
+// reactiveOrderDelete returns a result-order tree with the member removed through copied paths.
 func reactiveOrderDelete(root *reactiveOrderNode, query QuerySpec, id DocumentID, member reactiveMember) *reactiveOrderNode {
 	if root == nil {
 		return nil
@@ -208,6 +223,7 @@ func reactiveOrderDelete(root *reactiveOrderNode, query QuerySpec, id DocumentID
 	return mergeReactiveOrder(root.left, root.right)
 }
 
+// mergeReactiveOrder joins two result-order subtrees while preserving existing nodes.
 func mergeReactiveOrder(left, right *reactiveOrderNode) *reactiveOrderNode {
 	if left == nil {
 		return right
@@ -227,6 +243,7 @@ func mergeReactiveOrder(left, right *reactiveOrderNode) *reactiveOrderNode {
 	return &copy
 }
 
+// rotateReactiveOrderRight rotates a private root copy right and refreshes affected subtree counts.
 func rotateReactiveOrderRight(root *reactiveOrderNode) *reactiveOrderNode {
 	left := *root.left
 	root.left = left.right
@@ -236,6 +253,7 @@ func rotateReactiveOrderRight(root *reactiveOrderNode) *reactiveOrderNode {
 	return &left
 }
 
+// rotateReactiveOrderLeft rotates a private root copy left and refreshes affected subtree counts.
 func rotateReactiveOrderLeft(root *reactiveOrderNode) *reactiveOrderNode {
 	right := *root.right
 	root.right = right.left
@@ -245,10 +263,12 @@ func rotateReactiveOrderLeft(root *reactiveOrderNode) *reactiveOrderNode {
 	return &right
 }
 
+// recomputeReactiveOrderSize refreshes one result-order node's count from its children.
 func recomputeReactiveOrderSize(node *reactiveOrderNode) {
 	node.size = 1 + reactiveOrderSize(node.left) + reactiveOrderSize(node.right)
 }
 
+// reactiveOrderSize returns a result-order subtree's member count or zero for an empty tree.
 func reactiveOrderSize(node *reactiveOrderNode) uint64 {
 	if node == nil {
 		return 0
@@ -256,9 +276,10 @@ func reactiveOrderSize(node *reactiveOrderNode) uint64 {
 	return node.size
 }
 
-// buildReactiveTrees bulk-loads a complete immutable state. Sorting plus a
-// Cartesian-tree stack avoids the O(N log N) path-copy allocation cost that is
-// appropriate for incremental updates but wasteful during initial load/resync.
+// buildReactiveTrees builds immutable ID and result-order trees from a complete member set.
+//
+// Sorting and stack-based construction avoid repeated path copies during
+// initial loading and resynchronization.
 func buildReactiveTrees(seed maphash.Seed, query QuerySpec, entries []reactiveTreeEntry) (*reactiveIDNode, *reactiveOrderNode) {
 	if len(entries) == 0 {
 		return nil, nil
@@ -273,6 +294,7 @@ func buildReactiveTrees(seed maphash.Seed, query QuerySpec, entries []reactiveTr
 	return bulkReactiveIDTree(seed, idEntries), bulkReactiveOrderTree(seed, entries)
 }
 
+// bulkReactiveIDTree builds an ID tree from a nonempty slice already sorted by ID.
 func bulkReactiveIDTree(seed maphash.Seed, entries []reactiveTreeEntry) *reactiveIDNode {
 	nodes := make([]reactiveIDNode, len(entries))
 	stack := make([]*reactiveIDNode, 0, len(entries))
@@ -293,6 +315,7 @@ func bulkReactiveIDTree(seed maphash.Seed, entries []reactiveTreeEntry) *reactiv
 	return stack[0]
 }
 
+// bulkReactiveOrderTree builds a result-order tree from a nonempty slice already sorted by query order.
 func bulkReactiveOrderTree(seed maphash.Seed, entries []reactiveTreeEntry) *reactiveOrderNode {
 	nodes := make([]reactiveOrderNode, len(entries))
 	stack := make([]*reactiveOrderNode, 0, len(entries))
@@ -314,6 +337,7 @@ func bulkReactiveOrderTree(seed maphash.Seed, entries []reactiveTreeEntry) *reac
 	return stack[0]
 }
 
+// recomputeReactiveOrderSubtree refreshes member counts throughout a result-order subtree.
 func recomputeReactiveOrderSubtree(node *reactiveOrderNode) uint64 {
 	if node == nil {
 		return 0
@@ -322,6 +346,7 @@ func recomputeReactiveOrderSubtree(node *reactiveOrderNode) uint64 {
 	return node.size
 }
 
+// materializeReactiveOrder collects the requested page from a result-order tree without copying documents.
 func materializeReactiveOrder(root *reactiveOrderNode, skip int, limit *int) []Document {
 	start := uint64(skip)
 	total := reactiveOrderSize(root)
@@ -337,6 +362,7 @@ func materializeReactiveOrder(root *reactiveOrderNode, skip int, limit *int) []D
 	return result
 }
 
+// collectReactiveOrder collects documents in a position range while skipping irrelevant subtrees.
 func collectReactiveOrder(node *reactiveOrderNode, base, start, end uint64, result *[]Document) {
 	if node == nil || start >= end {
 		return

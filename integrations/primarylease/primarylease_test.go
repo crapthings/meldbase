@@ -13,10 +13,12 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// promotionAuthority returns a fixed promotion fence for matching test requests.
 type promotionAuthority struct {
 	fence meldbase.FollowerPromotionFence
 }
 
+// AuthorizeFollowerPromotion checks the database and commit position before returning the test fence.
 func (authority promotionAuthority) AuthorizeFollowerPromotion(_ context.Context, request meldbase.FollowerPromotionRequest) (meldbase.FollowerPromotionFence, error) {
 	if authority.fence.DatabaseID != request.DatabaseID || authority.fence.CommitSequence != request.CommitSequence {
 		return meldbase.FollowerPromotionFence{}, errors.New("unexpected promotion request")
@@ -24,6 +26,7 @@ func (authority promotionAuthority) AuthorizeFollowerPromotion(_ context.Context
 	return authority.fence, nil
 }
 
+// TestGuardVerifiesSignedLeaseAndFailsClosed checks that writes require a valid installed lease and cannot reuse a revoked epoch.
 func TestGuardVerifiesSignedLeaseAndFailsClosed(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -81,6 +84,7 @@ func TestGuardVerifiesSignedLeaseAndFailsClosed(t *testing.T) {
 	}
 }
 
+// TestGuardRejectsExpiredAndWrongOwnerCertificates checks that installation rejects expired leases, incorrect owners, and excessive lifetimes.
 func TestGuardRejectsExpiredAndWrongOwnerCertificates(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -109,6 +113,7 @@ func TestGuardRejectsExpiredAndWrongOwnerCertificates(t *testing.T) {
 	}
 }
 
+// TestSignedLeaseGuardBindsFollowerPromotionAndExpiresWrites checks that promotion requires a lease for the follower position and writes stop when it expires.
 func TestSignedLeaseGuardBindsFollowerPromotionAndExpiresWrites(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -173,6 +178,7 @@ func TestSignedLeaseGuardBindsFollowerPromotionAndExpiresWrites(t *testing.T) {
 	}
 }
 
+// TestGuardWriteCheckDoesNotAllocate checks that validating a write with an installed lease makes no heap allocations.
 func TestGuardWriteCheckDoesNotAllocate(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -198,6 +204,7 @@ func TestGuardWriteCheckDoesNotAllocate(t *testing.T) {
 	}
 }
 
+// TestAuthorityIssuesMonotonicCertificatesAndPreservesHandoffWindow checks that lease epochs increase, commit positions cannot regress, and ownership changes wait for expiry plus clock skew.
 func TestAuthorityIssuesMonotonicCertificatesAndPreservesHandoffWindow(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -239,6 +246,7 @@ func TestAuthorityIssuesMonotonicCertificatesAndPreservesHandoffWindow(t *testin
 	}
 }
 
+// TestAuthorityRevocationDoesNotShortenUnreachableOwnerLease checks that revocation preserves the old lease expiry before another owner can take over.
 func TestAuthorityRevocationDoesNotShortenUnreachableOwnerLease(t *testing.T) {
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -272,6 +280,7 @@ func TestAuthorityRevocationDoesNotShortenUnreachableOwnerLease(t *testing.T) {
 	}
 }
 
+// TestPromotionAuthorityIssuesFenceForExactFollowerRequest checks that promotion requires a readiness check and issues a certificate for the requested database and commit position.
 func TestPromotionAuthorityIssuesFenceForExactFollowerRequest(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -303,6 +312,7 @@ func TestPromotionAuthorityIssuesFenceForExactFollowerRequest(t *testing.T) {
 	}
 }
 
+// exactPromotionReadiness rejects promotion unless the stored lease matches the follower database and commit position.
 func exactPromotionReadiness(_ context.Context, request meldbase.FollowerPromotionRequest, record primarylease.LeaseRecord, exists bool) error {
 	if !exists || record.DatabaseID != request.DatabaseID || record.CommitSequence != request.CommitSequence {
 		return errors.New("follower position is not the controller checkpoint")
@@ -310,6 +320,7 @@ func exactPromotionReadiness(_ context.Context, request meldbase.FollowerPromoti
 	return nil
 }
 
+// TestLeaseHandoffHasNoWriteOverlapWithinDeclaredClockSkew checks that the slow old owner loses write permission before the fast new owner takes over.
 func TestLeaseHandoffHasNoWriteOverlapWithinDeclaredClockSkew(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -367,6 +378,7 @@ func TestLeaseHandoffHasNoWriteOverlapWithinDeclaredClockSkew(t *testing.T) {
 	}
 }
 
+// TestAuthorityStatsExposeOnlyFixedControlPlaneOutcomes checks counters for grants, rejected requests, promotion attempts, and revocation.
 func TestAuthorityStatsExposeOnlyFixedControlPlaneOutcomes(t *testing.T) {
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -404,6 +416,7 @@ func TestAuthorityStatsExposeOnlyFixedControlPlaneOutcomes(t *testing.T) {
 	}
 }
 
+// signedCertificate signs a test lease certificate and fails the test if signing fails.
 func signedCertificate(t *testing.T, privateKey ed25519.PrivateKey, certificate primarylease.Certificate) string {
 	t.Helper()
 	encoded, err := primarylease.Sign(certificate, privateKey)

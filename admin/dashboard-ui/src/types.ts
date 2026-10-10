@@ -1,5 +1,7 @@
+/** Holds dashboard data fields with values interpreted at display time. */
 export type RecordValue = Record<string, unknown>;
 
+/** Holds one sequenced snapshot of database statistics, rates, and health. */
 export type AdminSample = {
   sequence: number;
   stats: RecordValue;
@@ -17,10 +19,12 @@ export type AdminSample = {
   server?: RecordValue;
 };
 
+/** Contains the admin samples returned by the history endpoint. */
 export type HistoryResponse = {
   samples: AdminSample[];
 };
 
+/** Describes one diagnostic operation and its timing and query work counters. */
 export type DiagnosticEvent = {
   sequence: number;
   capturedAt: string;
@@ -48,6 +52,7 @@ export type DiagnosticEvent = {
   changes?: number;
 };
 
+/** Contains diagnostic events with pagination and session information. */
 export type DiagnosticResponse = {
   session?: string;
   truncated?: boolean;
@@ -56,6 +61,7 @@ export type DiagnosticResponse = {
   stats?: RecordValue;
 };
 
+/** Describes one collection index and its ordered fields. */
 export type IndexCatalogEntry = {
   collection: string;
   name: string;
@@ -63,8 +69,10 @@ export type IndexCatalogEntry = {
   unique: boolean;
 };
 
+/** Contains the index definitions returned by the admin catalog. */
 export type IndexCatalogResponse = {
   indexes: IndexCatalogEntry[];
 };
 
+/** Names the dashboard connection stages. */
 export type ConnectionState = "idle" | "connecting" | "live" | "retrying" | "error";

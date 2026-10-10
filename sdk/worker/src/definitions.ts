@@ -10,25 +10,29 @@ import type {
   TransactionalRPCHandler,
 } from "./types.js";
 
+/** Checks a handler and declares an ordinary RPC method. */
 function standardRPC(handler: RPCHandler): RPCDefinition {
   if (typeof handler !== "function") throw new TypeError("RPC handler must be a function");
   return { mode: "rpc", handler };
 }
 
+/** Checks a handler and declares an RPC method with atomic point writes. */
 function transactionalRPC(handler: TransactionalRPCHandler): RPCDefinition {
   if (typeof handler !== "function") throw new TypeError("Transactional RPC handler must be a function");
   return { mode: "transactional", handler };
 }
 
-/** Declares a named RPC handler. `rpc.transactional` adds atomic Meldbase point writes. */
+/** Declares ordinary RPC handlers or transactional handlers with atomic Meldbase point writes. */
 export const rpc = Object.assign(standardRPC, { transactional: transactionalRPC });
 
+/** Validates a read policy declaration and attaches its handler. */
 export function readPolicy(options: ReadPolicyOptions, handler: ReadPolicyHandler): ReadPolicyDefinition {
   if (typeof handler !== "function") throw new TypeError("Read-policy handler must be a function");
   validateReadPolicyOptions(options);
   return { ...options, handler };
 }
 
+/** Checks a read policy’s version, result limit, query paths, and result fields. */
 export function validateReadPolicyOptions(options: ReadPolicyOptions): void {
   const encodedVersion =
     options && typeof options.version === "string" ? new TextEncoder().encode(options.version) : new Uint8Array();
@@ -52,6 +56,7 @@ export function validateReadPolicyOptions(options: ReadPolicyOptions): void {
   validatePolicyFields(options.resultFields, false);
 }
 
+/** Checks a wildcard or bounded list of unique query paths or safe result fields. */
 function validatePolicyFields(value: "*" | readonly string[], paths: boolean): void {
   if (value === "*") return;
   if (!Array.isArray(value) || value.length > 256)

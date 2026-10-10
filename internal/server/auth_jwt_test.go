@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// TestHS256JWTAuthenticatorVerifiesSignedActiveWorkspace checks that a valid signed token identifies its user and workspace.
 func TestHS256JWTAuthenticatorVerifiesSignedActiveWorkspace(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -35,6 +36,7 @@ func TestHS256JWTAuthenticatorVerifiesSignedActiveWorkspace(t *testing.T) {
 	}
 }
 
+// TestHS256JWTAuthenticatorAcceptsBoundedDistinctRotationSecrets checks that configured rotation secrets authenticate tokens while an unknown secret is rejected.
 func TestHS256JWTAuthenticatorAcceptsBoundedDistinctRotationSecrets(t *testing.T) {
 	oldSecret := []byte("0123456789abcdef0123456789abcdef")
 	newSecret := []byte("fedcba9876543210fedcba9876543210")
@@ -64,6 +66,7 @@ func TestHS256JWTAuthenticatorAcceptsBoundedDistinctRotationSecrets(t *testing.T
 	}
 }
 
+// TestHS256JWTAuthenticatorRejectsInvalidBearerClaimsAndSignature checks that missing bearer credentials, invalid claims, and incorrect signatures reject authentication.
 func TestHS256JWTAuthenticatorRejectsInvalidBearerClaimsAndSignature(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -93,6 +96,7 @@ func TestHS256JWTAuthenticatorRejectsInvalidBearerClaimsAndSignature(t *testing.
 	}
 }
 
+// TestHS256JWTAuthenticatorRequiresIssuerAudienceAndNonReservedWorkspaceClaim checks that JWT setup rejects missing identity constraints, reserved workspace claims, and invalid secret lists.
 func TestHS256JWTAuthenticatorRequiresIssuerAudienceAndNonReservedWorkspaceClaim(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	secondSecret := []byte("fedcba9876543210fedcba9876543210")
@@ -111,6 +115,7 @@ func TestHS256JWTAuthenticatorRequiresIssuerAudienceAndNonReservedWorkspaceClaim
 	}
 }
 
+// TestHS256JWTAuthenticatorMapsConfiguredWorkspaceClaimToActorWorkspaceID checks that a custom token claim supplies the authenticated workspace ID.
 func TestHS256JWTAuthenticatorMapsConfiguredWorkspaceClaimToActorWorkspaceID(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -131,6 +136,7 @@ func TestHS256JWTAuthenticatorMapsConfiguredWorkspaceClaimToActorWorkspaceID(t *
 	}
 }
 
+// signedHS256JWT signs test claims as an HS256 JWT with the supplied secret.
 func signedHS256JWT(t *testing.T, secret []byte, claims map[string]any) string {
 	t.Helper()
 	header, err := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})

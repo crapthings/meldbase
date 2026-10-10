@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestDestructiveCorruptionCampaignReproducesAndBindsSource checks that corruption results can be verified again and reject a changed source database.
 func TestDestructiveCorruptionCampaignReproducesAndBindsSource(t *testing.T) {
 	directory := t.TempDir()
 	database := filepath.Join(directory, "source.meld")
@@ -58,6 +59,7 @@ func TestDestructiveCorruptionCampaignReproducesAndBindsSource(t *testing.T) {
 	}
 }
 
+// TestDeterministicCorruptionPageSamplesCoverEndpoints checks that page sampling covers both endpoints with evenly spaced selections.
 func TestDeterministicCorruptionPageSamplesCoverEndpoints(t *testing.T) {
 	if pages := deterministicPageSamples(4, 8); !equalUint64s(pages, []uint64{0, 1, 2, 3}) {
 		t.Fatalf("all pages=%v", pages)

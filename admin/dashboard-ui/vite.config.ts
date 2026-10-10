@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+/** Builds dashboard assets with stable filenames for embedding in the Go server. */
 export default defineConfig({
   base: "/assets/",
   plugins: [react(), tailwindcss()],

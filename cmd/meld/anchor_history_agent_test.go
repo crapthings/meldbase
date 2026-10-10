@@ -19,6 +19,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// anchorHistoryStubExecutor stores a test anchor and counts reads and updates under a lock.
 type anchorHistoryStubExecutor struct {
 	mu            sync.Mutex
 	configuration string
@@ -28,12 +29,14 @@ type anchorHistoryStubExecutor struct {
 	advances      int
 }
 
+// anchorHistoryDropFirstResponseTransport simulates losing the first successful HTTP response.
 type anchorHistoryDropFirstResponseTransport struct {
 	base    http.RoundTripper
 	mu      sync.Mutex
 	dropped bool
 }
 
+// RoundTrip forwards a request and discards the first successful response to simulate response loss.
 func (transport *anchorHistoryDropFirstResponseTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	response, err := transport.base.RoundTrip(request)
 	transport.mu.Lock()
@@ -49,13 +52,18 @@ func (transport *anchorHistoryDropFirstResponseTransport) RoundTrip(request *htt
 	return response, err
 }
 
+// ConfigurationID returns the test executor configuration identity.
 func (stub *anchorHistoryStubExecutor) ConfigurationID() string { return stub.configuration }
+
+// Load counts a test read and returns the stored anchor.
 func (stub *anchorHistoryStubExecutor) Load(context.Context) (meldbase.RollbackAnchor, bool, error) {
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
 	stub.loads++
 	return stub.anchor, stub.exists, nil
 }
+
+// Advance counts a test update and replaces the stored anchor.
 func (stub *anchorHistoryStubExecutor) Advance(_ context.Context, anchor meldbase.RollbackAnchor) error {
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
@@ -64,6 +72,7 @@ func (stub *anchorHistoryStubExecutor) Advance(_ context.Context, anchor meldbas
 	return nil
 }
 
+// TestHistoryAgentRealMTLSSignsAndDeduplicatesExecution checks authenticated signed results and single execution across retries while rejecting changed requests and incorrect peer identities.
 func TestHistoryAgentRealMTLSSignsAndDeduplicatesExecution(t *testing.T) {
 	pki := newAnchorTestPKI(t)
 	controllerCertificate, err := x509.ParseCertificate(pki.client.Certificate[0])
@@ -133,6 +142,7 @@ func TestHistoryAgentRealMTLSSignsAndDeduplicatesExecution(t *testing.T) {
 	}
 }
 
+// TestHistoryAgentAdvanceSurvivesCanceledControllerContext checks that an accepted update survives controller cancellation while expired requests are rejected.
 func TestHistoryAgentAdvanceSurvivesCanceledControllerContext(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -177,6 +187,7 @@ func TestHistoryAgentAdvanceSurvivesCanceledControllerContext(t *testing.T) {
 	}
 }
 
+// TestHistoryAgentDurableJournalSurvivesRestartAndRejectsTamper checks that persisted results prevent repeated execution after restart and reject altered journal signatures.
 func TestHistoryAgentDurableJournalSurvivesRestartAndRejectsTamper(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -238,6 +249,7 @@ func TestHistoryAgentDurableJournalSurvivesRestartAndRejectsTamper(t *testing.T)
 	}
 }
 
+// TestHistoryAgentResumesDurablyReservedOperationAfterCrash checks that a persisted unfinished request executes after restart and rejects changed request content.
 func TestHistoryAgentResumesDurablyReservedOperationAfterCrash(t *testing.T) {
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

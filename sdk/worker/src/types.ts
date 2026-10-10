@@ -12,6 +12,7 @@ export interface RPCContext {
   readonly signal: AbortSignal;
 }
 
+/** Provides the authenticated actor, cancellation signal, and query for a read policy decision. */
 export interface ReadPolicyContext {
   readonly actor: Actor;
   readonly signal: AbortSignal;
@@ -19,6 +20,7 @@ export interface ReadPolicyContext {
   readonly query: QuerySpec;
 }
 
+/** Provides document point operations and read policy invalidation within one atomic transaction. */
 export interface WriteTransaction {
   get(collection: string, id: string): Promise<Document>;
   insert(collection: string, document: InputDocument): Promise<string>;
@@ -29,17 +31,21 @@ export interface WriteTransaction {
   invalidateReadPolicy(collection: string): Promise<void>;
 }
 
+/** Handles an RPC call using its authenticated context and typed input. */
 export type RPCHandler = (context: RPCContext, input: Value) => Value | Promise<Value>;
+/** Handles an RPC call with access to an atomic write transaction. */
 export type TransactionalRPCHandler = (
   context: RPCContext,
   input: Value,
   transaction: WriteTransaction,
 ) => Value | Promise<Value>;
 
+/** Declares an ordinary or transactional RPC handler. */
 export type RPCDefinition =
   | { readonly mode: "rpc"; readonly handler: RPCHandler }
   | { readonly mode: "transactional"; readonly handler: TransactionalRPCHandler };
 
+/** Declares a read policy’s version, result limit, and allowed query and result fields. */
 export interface ReadPolicyOptions {
   readonly version: string;
   readonly maxResults: number;
@@ -47,12 +53,15 @@ export interface ReadPolicyOptions {
   readonly resultFields: "*" | readonly string[];
 }
 
+/** Returns an authorized query or denies a read by returning null. */
 export type ReadPolicyHandler = (context: ReadPolicyContext) => QuerySpec | null | Promise<QuerySpec | null>;
 
+/** Combines read policy limits with the handler that decides access. */
 export interface ReadPolicyDefinition extends ReadPolicyOptions {
   readonly handler: ReadPolicyHandler;
 }
 
+/** Defines the WebSocket operations needed by a worker connection. */
 export interface WorkerSocket {
   readonly readyState: number;
   send(data: string): void;
@@ -61,12 +70,15 @@ export interface WorkerSocket {
   removeEventListener(type: "open" | "close" | "error" | "message", listener: (event: any) => void): void;
 }
 
+/** Creates a worker socket with authentication headers. */
 export type WorkerSocketFactory = (
   url: string,
   options: { readonly headers: Readonly<Record<string, string>> },
 ) => WorkerSocket;
+/** Names the stages of a worker connection lifecycle. */
 export type WorkerState = "idle" | "connecting" | "registering" | "ready" | "stopped";
 
+/** Configures worker identity, handlers, transport, reconnect timing, and lifecycle callbacks. */
 export interface WorkerOptions {
   /**
    * A full `ws(s)://` worker control endpoint, or `meldbase://host[:port]`.

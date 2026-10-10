@@ -8,6 +8,7 @@ import (
 	storage "github.com/crapthings/meldbase/internal/storage"
 )
 
+// ReclaimResult reports reachable and reusable pages after reclamation.
 type ReclaimResult struct {
 	PhysicalPages   uint64
 	ReachablePages  uint64
@@ -18,8 +19,9 @@ type ReclaimResult struct {
 	Persisted       bool
 }
 
-// ReclaimOptions controls explicit page reclamation. Online scans a duplicate
-// read handle without holding the storage writer lock and installs its result
+// ReclaimOptions configures page-reclamation mode, retries, and persistence.
+//
+// Online scans a duplicate read handle without the storage writer lock and installs its result
 // only if the Meta generation is unchanged. MaxAttempts bounds complete graph
 // rescans after concurrent commits; zero selects three attempts.
 type ReclaimOptions struct {
@@ -30,16 +32,15 @@ type ReclaimOptions struct {
 	MemoryOnly bool
 }
 
-// ReclaimPages audits both valid Meta roots and every active snapshot/replay
-// lease, then makes only unreachable pages available to future COW commits. The
-// free pool is process-local and safely reconstructed by another call on reopen.
+// ReclaimPages audits protected roots and makes unreachable pages available for reuse.
 func (db *DB) ReclaimPages(ctx context.Context) (result ReclaimResult, resultErr error) {
 	return db.ReclaimPagesWithOptions(ctx, ReclaimOptions{})
 }
 
-// ReclaimPagesWithOptions runs explicit synchronous or low-pause optimistic
-// reclamation. Online mode is opt-in and may return an error wrapping
-// ErrReclamationConflict when every bounded attempt overlaps a commit.
+// ReclaimPagesWithOptions reclaims unused pages with the selected scan and persistence settings.
+//
+// Online mode may return ErrReclamationConflict when every bounded attempt
+// overlaps a commit.
 func (db *DB) ReclaimPagesWithOptions(ctx context.Context, options ReclaimOptions) (result ReclaimResult, resultErr error) {
 	if db == nil {
 		return result, ErrReclamationUnsupported

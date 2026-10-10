@@ -16,12 +16,15 @@ import (
 	historyqualification "github.com/crapthings/meldbase/internal/qualification"
 )
 
+// qualificationTestRevision identifies the source revision used in qualification fixtures.
 const qualificationTestRevision = "0123456789abcdef0123456789abcdef01234567"
 
+// qualificationPhysicalControllerTestPrivateKey returns a deterministic signing key for physical controller test receipts.
 func qualificationPhysicalControllerTestPrivateKey() ed25519.PrivateKey {
 	return ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
 }
 
+// TestQualificationCheckBuildsLevelThreePacketFromSameVolumeEvidence checks that matching durability and soak receipts produce level-three evidence without qualification claims.
 func TestQualificationCheckBuildsLevelThreePacketFromSameVolumeEvidence(t *testing.T) {
 	durability, soak := qualificationFixtures()
 	durabilityPath, _ := writeQualificationFixture(t, "durability.json", durability)
@@ -46,6 +49,7 @@ func TestQualificationCheckBuildsLevelThreePacketFromSameVolumeEvidence(t *testi
 	}
 }
 
+// TestQualificationCheckRequiresDestructiveRecordForLevelFour checks that durability and soak receipts alone cannot satisfy level four.
 func TestQualificationCheckRequiresDestructiveRecordForLevelFour(t *testing.T) {
 	durability, soak := qualificationFixtures()
 	durabilityPath, _ := writeQualificationFixture(t, "durability.json", durability)
@@ -60,6 +64,7 @@ func TestQualificationCheckRequiresDestructiveRecordForLevelFour(t *testing.T) {
 	}
 }
 
+// TestQualificationCheckAcceptsBoundCompleteDestructiveRecord checks that complete destructive fixtures produce level-four storage evidence.
 func TestQualificationCheckAcceptsBoundCompleteDestructiveRecord(t *testing.T) {
 	withQualificationDestructiveRecomputeBypass(t)
 	durability, soak := qualificationFixtures()
@@ -84,6 +89,7 @@ func TestQualificationCheckAcceptsBoundCompleteDestructiveRecord(t *testing.T) {
 	}
 }
 
+// TestQualificationCheckLevelFiveRequiresAndBindsCompleteRollbackProtectionEvidence checks that level-five packets bind signed anchor phases and history evidence.
 func TestQualificationCheckLevelFiveRequiresAndBindsCompleteRollbackProtectionEvidence(t *testing.T) {
 	withQualificationDestructiveRecomputeBypass(t)
 	durability, soak := qualificationFixtures()
@@ -115,6 +121,7 @@ func TestQualificationCheckLevelFiveRequiresAndBindsCompleteRollbackProtectionEv
 	}
 }
 
+// TestQualificationCheckLevelFiveRejectsMissingMismatchedAndReusedAnchorEvidence checks that level five rejects incomplete anchor evidence, mismatched identities, reused evidence, and reordered phases.
 func TestQualificationCheckLevelFiveRejectsMissingMismatchedAndReusedAnchorEvidence(t *testing.T) {
 	withQualificationDestructiveRecomputeBypass(t)
 	durability, soak := qualificationFixtures()
@@ -222,6 +229,7 @@ func TestQualificationCheckLevelFiveRejectsMissingMismatchedAndReusedAnchorEvide
 	}
 }
 
+// TestQualificationCheckRejectsBooleanOnlyLegacyDestructiveRecord checks that legacy destructive records containing only asserted outcomes are rejected.
 func TestQualificationCheckRejectsBooleanOnlyLegacyDestructiveRecord(t *testing.T) {
 	durability, soak := qualificationFixtures()
 	durabilityPath, durabilityRaw := writeQualificationFixture(t, "durability.json", durability)
@@ -251,6 +259,7 @@ func TestQualificationCheckRejectsBooleanOnlyLegacyDestructiveRecord(t *testing.
 	}
 }
 
+// TestQualificationCheckRejectsMissingDestructiveBoundaryAndInvalidOutcome checks that destructive records require complete trial boundaries and recovery outcomes backed by matching evidence.
 func TestQualificationCheckRejectsMissingDestructiveBoundaryAndInvalidOutcome(t *testing.T) {
 	durability, soak := qualificationFixtures()
 	durabilityPath, durabilityRaw := writeQualificationFixture(t, "durability.json", durability)
@@ -301,6 +310,7 @@ func TestQualificationCheckRejectsMissingDestructiveBoundaryAndInvalidOutcome(t 
 	}
 }
 
+// TestQualificationCheckRejectsWrongRevisionProfileVolumeAndBinding checks that qualification rejects mismatched revisions, modified builds, unsuitable soak profiles, and incomplete volume evidence.
 func TestQualificationCheckRejectsWrongRevisionProfileVolumeAndBinding(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -347,6 +357,7 @@ func TestQualificationCheckRejectsWrongRevisionProfileVolumeAndBinding(t *testin
 	}
 }
 
+// TestQualificationCheckRejectsUnknownReceiptFields checks that qualification receipts cannot contain unknown JSON fields.
 func TestQualificationCheckRejectsUnknownReceiptFields(t *testing.T) {
 	durability, soak := qualificationFixtures()
 	durabilityPath, _ := writeQualificationFixture(t, "durability.json", durability)
@@ -369,6 +380,7 @@ func TestQualificationCheckRejectsUnknownReceiptFields(t *testing.T) {
 	}
 }
 
+// TestQualificationProductionFilesystemIsExplicit checks the explicit filesystem allowlist used by production qualification.
 func TestQualificationProductionFilesystemIsExplicit(t *testing.T) {
 	for _, name := range []string{"ext-family", "xfs", "btrfs", "apfs"} {
 		if !qualificationProductionFilesystem(name) {
@@ -382,6 +394,7 @@ func TestQualificationProductionFilesystemIsExplicit(t *testing.T) {
 	}
 }
 
+// TestQualificationTimingAllowsSmallWallClockDrift checks that timing validation tolerates small clock drift and rejects invalid or widely differing timestamps.
 func TestQualificationTimingAllowsSmallWallClockDrift(t *testing.T) {
 	started := time.Date(2026, 7, 17, 1, 0, 0, 0, time.UTC)
 	if !qualificationTimingValid(started, started.Add(time.Minute+3*time.Second), time.Minute) {
@@ -395,6 +408,7 @@ func TestQualificationTimingAllowsSmallWallClockDrift(t *testing.T) {
 	}
 }
 
+// TestQualificationSoakAllowsBoundedClockDriftAndStableFinalSequence checks that soak validation accepts small clock drift and a final commit position matching the last phase.
 func TestQualificationSoakAllowsBoundedClockDriftAndStableFinalSequence(t *testing.T) {
 	durability, soak := qualificationFixtures()
 	soak.FinishedAt = soak.FinishedAt.Add(500 * time.Millisecond)
@@ -405,6 +419,7 @@ func TestQualificationSoakAllowsBoundedClockDriftAndStableFinalSequence(t *testi
 	}
 }
 
+// qualificationFixtures creates matching durability and soak receipts for qualification tests.
 func qualificationFixtures() (durabilityCheckResult, qualificationSoakReceipt) {
 	started := time.Date(2026, 7, 17, 1, 0, 0, 0, time.UTC)
 	checks := make([]durabilityCheckRecord, 0, 10)
@@ -451,6 +466,7 @@ func qualificationFixtures() (durabilityCheckResult, qualificationSoakReceipt) {
 	return durability, soak
 }
 
+// qualificationDestructiveFixture creates destructive trial records and artifact bindings for qualification tests.
 func qualificationDestructiveFixture(t *testing.T, durability durabilityCheckResult, soak qualificationSoakReceipt, durabilityRaw, soakRaw []byte) (qualificationDestructiveRecord, qualificationArtifactTestFixture) {
 	t.Helper()
 	started := durability.StartedAt
@@ -511,6 +527,7 @@ func qualificationDestructiveFixture(t *testing.T, durability durabilityCheckRes
 	return record, artifacts
 }
 
+// qualificationAnchorTestFixture holds signed anchor evidence and the keys used to alter test fixtures.
 type qualificationAnchorTestFixture struct {
 	publicKeyPath      string
 	phasePaths         []string
@@ -523,6 +540,7 @@ type qualificationAnchorTestFixture struct {
 	agentPrivateKeys   []ed25519.PrivateKey
 }
 
+// qualificationAnchorFixture writes signed anchor phase and history evidence for qualification tests.
 func qualificationAnchorFixture(t *testing.T) qualificationAnchorTestFixture {
 	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
@@ -598,6 +616,7 @@ func qualificationAnchorFixture(t *testing.T) qualificationAnchorTestFixture {
 	}
 }
 
+// qualificationLevelFiveArguments builds a level-five qualification command from test evidence paths.
 func qualificationLevelFiveArguments(durabilityPath, soakPath, destructivePath string, artifacts qualificationArtifactTestFixture, anchor qualificationAnchorTestFixture) []string {
 	arguments := []string{
 		"qualification-check", "--durability-receipt", durabilityPath, "--soak-receipt", soakPath,
@@ -612,6 +631,7 @@ func qualificationLevelFiveArguments(durabilityPath, soakPath, destructivePath s
 	return append(arguments, "--anchor-history-receipt", anchor.historyReceiptPath, "--anchor-history", anchor.historyPath)
 }
 
+// qualificationArtifactTestFixture holds test evidence paths, environment facts, and their hashes.
 type qualificationArtifactTestFixture struct {
 	rootPath             string
 	indexPath            string
@@ -624,6 +644,7 @@ type qualificationArtifactTestFixture struct {
 	hostSHA256           string
 }
 
+// newQualificationArtifactTestFixture writes test evidence and its index with the hashes needed to bind qualification records.
 func newQualificationArtifactTestFixture(t *testing.T, durability durabilityCheckResult, capturedAt time.Time) qualificationArtifactTestFixture {
 	t.Helper()
 	root := t.TempDir()
@@ -666,6 +687,7 @@ func newQualificationArtifactTestFixture(t *testing.T, durability durabilityChec
 	}
 }
 
+// qualificationEnvironmentFixture writes synthetic volume, host, and controller evidence for qualification tests.
 func qualificationEnvironmentFixture(t *testing.T, root string, durability durabilityCheckResult, capturedAt time.Time, method string) (qualificationEnvironmentEvidence, string, []byte) {
 	t.Helper()
 	operatorPath := filepath.Join(root, "operator-authorization.json")
@@ -732,6 +754,7 @@ func qualificationEnvironmentFixture(t *testing.T, root string, durability durab
 	return environment, environmentPath, environmentRaw
 }
 
+// indexOfArgumentValue finds the value position for a zero-based occurrence of a named argument.
 func indexOfArgumentValue(arguments []string, name string, ordinal int) int {
 	seen := 0
 	for index := 0; index+1 < len(arguments); index++ {
@@ -746,6 +769,7 @@ func indexOfArgumentValue(arguments []string, name string, ordinal int) int {
 	return -1
 }
 
+// rewriteQualificationPhaseChain alters phase receipts and writes a newly linked and signed chain.
 func rewriteQualificationPhaseChain(t *testing.T, fixture qualificationAnchorTestFixture, mutate func(*anchorQualificationReceipt)) []string {
 	t.Helper()
 	paths := make([]string, len(fixture.phaseReceipts))
@@ -766,6 +790,7 @@ func rewriteQualificationPhaseChain(t *testing.T, fixture qualificationAnchorTes
 	return paths
 }
 
+// withQualificationDestructiveRecomputeBypass disables original-evidence verification until the test finishes.
 func withQualificationDestructiveRecomputeBypass(t *testing.T) {
 	t.Helper()
 	previous := verifyQualificationDestructiveOriginalEvidence
@@ -773,6 +798,7 @@ func withQualificationDestructiveRecomputeBypass(t *testing.T) {
 	t.Cleanup(func() { verifyQualificationDestructiveOriginalEvidence = previous })
 }
 
+// writeQualificationFixture writes private JSON test data and returns its path and bytes.
 func writeQualificationFixture(t *testing.T, name string, value any) (string, []byte) {
 	t.Helper()
 	raw, err := json.MarshalIndent(value, "", "  ")

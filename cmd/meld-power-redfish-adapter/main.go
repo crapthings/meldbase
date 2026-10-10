@@ -21,10 +21,13 @@ import (
 )
 
 const (
+	// protocolSchema identifies the adapter request and response format.
 	protocolSchema = 1
-	maximumJSON    = 1 << 20
+	// maximumJSON bounds the request reader and limits Redfish response bodies to one MiB.
+	maximumJSON = 1 << 20
 )
 
+// adapterRequest binds a requested power cycle to a controller run, trial, marker, and target.
 type adapterRequest struct {
 	SchemaVersion        uint32    `json:"schemaVersion"`
 	ControllerRunID      string    `json:"controllerRunId"`
@@ -36,6 +39,7 @@ type adapterRequest struct {
 	RequestedAt          time.Time `json:"requestedAt"`
 }
 
+// adapterResponse reports the power-cycle outcome, timing, and hardware evidence.
 type adapterResponse struct {
 	SchemaVersion          uint32    `json:"schemaVersion"`
 	ControllerRunID        string    `json:"controllerRunId"`
@@ -51,6 +55,7 @@ type adapterResponse struct {
 	Success                bool      `json:"success"`
 }
 
+// redfishConfig holds the Redfish endpoint, credentials, evidence directory, and timeout settings.
 type redfishConfig struct {
 	BaseURL          *url.URL
 	SystemURI        string
@@ -62,6 +67,7 @@ type redfishConfig struct {
 	OperationTimeout time.Duration
 }
 
+// computerSystem holds the Redfish system identity, power state, and available reset actions.
 type computerSystem struct {
 	ODataID      string `json:"@odata.id"`
 	ID           string `json:"Id"`
@@ -76,6 +82,7 @@ type computerSystem struct {
 	} `json:"Actions"`
 }
 
+// targetIdentity records the hardware identity used to bind a power cycle to its intended system.
 type targetIdentity struct {
 	SchemaVersion uint32 `json:"schemaVersion"`
 	SystemURI     string `json:"systemUri"`
@@ -85,6 +92,7 @@ type targetIdentity struct {
 	Model         string `json:"model"`
 }
 
+// evidenceEntry records one timed Redfish operation with response details and a body hash.
 type evidenceEntry struct {
 	ObservedAt time.Time `json:"observedAt"`
 	Operation  string    `json:"operation"`
@@ -97,6 +105,7 @@ type evidenceEntry struct {
 	Error      string    `json:"error,omitempty"`
 }
 
+// hardwareEvidence groups the target identity and observed Redfish operations for one power-cycle trial.
 type hardwareEvidence struct {
 	SchemaVersion   uint32          `json:"schemaVersion"`
 	ControllerRunID string          `json:"controllerRunId"`
@@ -109,6 +118,7 @@ type hardwareEvidence struct {
 	Successful      bool            `json:"successful"`
 }
 
+// main runs the Redfish adapter and reports failures through its exit status.
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "meld-power-redfish-adapter:", err)
@@ -116,6 +126,7 @@ func main() {
 	}
 }
 
+// run prints the configured hardware identity or executes one validated power-cycle request.
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	config, client, err := loadConfig()
 	if err != nil {
@@ -156,6 +167,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	return json.NewEncoder(stdout).Encode(response)
 }
 
+// loadConfig validates environment settings and creates a certificate-verifying Redfish client with redirects disabled.
 func loadConfig() (redfishConfig, *http.Client, error) {
 	rawBase := os.Getenv("MELDBASE_REDFISH_BASE_URL")
 	base, err := url.Parse(rawBase)
@@ -201,6 +213,7 @@ func loadConfig() (redfishConfig, *http.Client, error) {
 	return redfishConfig{base, systemURI, username, password, evidenceDir, poll, requestTimeout, operationTimeout}, client, nil
 }
 
+// executePowerCycle cycles the approved system off and on while recording hardware evidence and attempting restoration after failure.
 func executePowerCycle(ctx context.Context, client *http.Client, config redfishConfig, request adapterRequest) (response adapterResponse, resultErr error) {
 	evidence := hardwareEvidence{SchemaVersion: 1, ControllerRunID: request.ControllerRunID, TrialID: request.TrialID, StartedAt: time.Now().UTC()}
 	evidenceOutput := filepath.Join(config.EvidenceDir, "redfish-"+request.ControllerRunID+".json")
@@ -276,6 +289,7 @@ func executePowerCycle(ctx context.Context, client *http.Client, config redfishC
 	return adapterResponse{protocolSchema, request.ControllerRunID, request.TrialID, request.Method, "redfish-" + hex.EncodeToString(operationHash[:8]), targetSHA, acceptedAt, powerLostAt, powerRestoredAt, evidenceSHA, base64.StdEncoding.EncodeToString(evidenceRaw), true}, nil
 }
 
+// getSystem fetches the Redfish system and optionally records the observed response and power state.
 func getSystem(ctx context.Context, client *http.Client, config redfishConfig, evidence *hardwareEvidence) (computerSystem, []byte, error) {
 	var system computerSystem
 	response, raw, err := requestJSON(ctx, client, config, http.MethodGet, config.SystemURI, nil)
@@ -311,6 +325,7 @@ func getSystem(ctx context.Context, client *http.Client, config redfishConfig, e
 	return system, raw, nil
 }
 
+// postReset requests a Redfish reset action and records its response as hardware evidence.
 func postReset(ctx context.Context, client *http.Client, config redfishConfig, path, resetType string, evidence *hardwareEvidence) (time.Time, string, error) {
 	body, _ := json.Marshal(struct {
 		ResetType string `json:"ResetType"`
@@ -334,6 +349,7 @@ func postReset(ctx context.Context, client *http.Client, config redfishConfig, p
 	return entry.ObservedAt, entry.Location, nil
 }
 
+// waitPowerState polls the system until the requested power state appears or the context ends.
 func waitPowerState(ctx context.Context, client *http.Client, config redfishConfig, want string, evidence *hardwareEvidence) (time.Time, error) {
 	for {
 		system, _, err := getSystem(ctx, client, config, evidence)
@@ -348,6 +364,7 @@ func waitPowerState(ctx context.Context, client *http.Client, config redfishConf
 	}
 }
 
+// requestJSON sends an authenticated Redfish request with a timeout and bounded response body.
 func requestJSON(ctx context.Context, client *http.Client, config redfishConfig, method, path string, body []byte) (*http.Response, []byte, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, config.RequestTimeout)
 	defer cancel()
@@ -378,6 +395,7 @@ func requestJSON(ctx context.Context, client *http.Client, config redfishConfig,
 	return response, raw, nil
 }
 
+// systemIdentity validates the configured system identity and hashes its stable hardware fields.
 func systemIdentity(config redfishConfig, system computerSystem) (targetIdentity, string, error) {
 	identity := targetIdentity{1, system.ODataID, system.UUID, system.SerialNumber, system.Manufacturer, system.Model}
 	if identity.SystemURI != config.SystemURI || identity.UUID == "" || identity.SerialNumber == "" || identity.Manufacturer == "" || identity.Model == "" {
@@ -390,6 +408,7 @@ func systemIdentity(config redfishConfig, system computerSystem) (targetIdentity
 	return identity, digest(raw), nil
 }
 
+// writeEvidence creates and syncs a private hardware-evidence file and returns its hash and bytes.
 func writeEvidence(directory, runID string, evidence hardwareEvidence) (string, []byte, error) {
 	path := filepath.Join(directory, "redfish-"+runID+".json")
 	raw, err := json.MarshalIndent(evidence, "", "  ")
@@ -419,6 +438,7 @@ func writeEvidence(directory, runID string, evidence hardwareEvidence) (string, 
 	return digest(raw), raw, nil
 }
 
+// appendEvidence appends an observation within the entry limit while skipping consecutive equivalent system observations.
 func appendEvidence(evidence *hardwareEvidence, entry evidenceEntry) error {
 	if len(evidence.Entries) != 0 && entry.Operation == "observe-system" {
 		previous := evidence.Entries[len(evidence.Entries)-1]
@@ -433,6 +453,7 @@ func appendEvidence(evidence *hardwareEvidence, entry evidenceEntry) error {
 	return nil
 }
 
+// decodeStrict decodes one request from a bounded reader and rejects unknown fields or extra JSON values.
 func decodeStrict(reader io.Reader, output any) error {
 	decoder := json.NewDecoder(io.LimitReader(reader, maximumJSON+1))
 	decoder.DisallowUnknownFields()
@@ -446,6 +467,7 @@ func decodeStrict(reader io.Reader, output any) error {
 	return nil
 }
 
+// decodeJSONBytes decodes one Redfish response value and rejects trailing JSON content.
 func decodeJSONBytes(raw []byte, output any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if err := decoder.Decode(output); err != nil {
@@ -458,6 +480,7 @@ func decodeJSONBytes(raw []byte, output any) error {
 	return nil
 }
 
+// validateRequest checks the adapter protocol, requested method, identifiers, hashes, and request timestamp.
 func validateRequest(request adapterRequest) error {
 	if request.SchemaVersion != protocolSchema || !hexString(request.ControllerRunID, 32) || request.TrialID == "" || request.Method != "redfish-computer-system-power-cycle" || !hexString(request.MarkerSHA256, 64) || request.BootIDBefore == "" || !hexString(request.TargetIdentitySHA256, 64) || request.RequestedAt.IsZero() {
 		return errors.New("Redfish adapter request is incomplete or unsupported")
@@ -465,12 +488,14 @@ func validateRequest(request adapterRequest) error {
 	return nil
 }
 
+// validSystemURI checks for a plain relative Redfish system path with a supported identifier.
 func validSystemURI(value string) bool {
 	parsed, err := url.Parse(value)
 	id := strings.TrimPrefix(value, "/redfish/v1/Systems/")
 	return err == nil && !parsed.IsAbs() && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.RawPath == "" && parsed.Path == value && strings.HasPrefix(value, "/redfish/v1/Systems/") && safeRedfishID(id)
 }
 
+// safeRedfishID checks that a Redfish identifier uses allowed characters within the length limit.
 func safeRedfishID(value string) bool {
 	if value == "" || len(value) > 128 {
 		return false
@@ -484,9 +509,12 @@ func safeRedfishID(value string) bool {
 	return true
 }
 
+// validActionURI checks the system reset path prefix and suffix while rejecting double dots.
 func validActionURI(value string) bool {
 	return strings.HasPrefix(value, "/redfish/v1/Systems/") && strings.HasSuffix(value, "/Actions/ComputerSystem.Reset") && !strings.Contains(value, "..")
 }
+
+// contains reports whether a string appears in a list.
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -495,7 +523,11 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+// digest returns the lowercase hexadecimal SHA-256 hash of the supplied bytes.
 func digest(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
+
+// hexString checks that a string has the required length and contains lowercase hexadecimal bytes.
 func hexString(value string, length int) bool {
 	if len(value) != length {
 		return false
@@ -503,6 +535,8 @@ func hexString(value string, length int) bool {
 	_, err := hex.DecodeString(value)
 	return err == nil && value == strings.ToLower(value)
 }
+
+// boundedHeader returns a header value or its hash when it is too long or contains line breaks.
 func boundedHeader(response *http.Response, name string) string {
 	value := response.Header.Get(name)
 	if len(value) > 256 || strings.ContainsAny(value, "\r\n") {
@@ -511,6 +545,7 @@ func boundedHeader(response *http.Response, name string) string {
 	return value
 }
 
+// redactedLocation returns a short relative Redfish location or hashes other location values.
 func redactedLocation(response *http.Response) string {
 	value := response.Header.Get("Location")
 	parsed, err := url.Parse(value)
@@ -523,6 +558,7 @@ func redactedLocation(response *http.Response) string {
 	return "sha256:" + digest([]byte(value))
 }
 
+// existingDirectory resolves an existing directory path and rejects a symlink at that path.
 func existingDirectory(path string) (string, error) {
 	absolute, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -535,6 +571,7 @@ func existingDirectory(path string) (string, error) {
 	return absolute, nil
 }
 
+// durationEnv parses a bounded duration from an environment variable or returns the fallback when it is empty.
 func durationEnv(name string, fallback, minimum, maximum time.Duration) (time.Duration, error) {
 	raw := os.Getenv(name)
 	if raw == "" {

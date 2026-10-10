@@ -10,32 +10,40 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// failingLeaseStore simulates an unavailable lease replica.
 type failingLeaseStore struct{}
 
+// identifiedLeaseStore adds a fixed member identity to a test lease store.
 type identifiedLeaseStore struct {
 	primarylease.LeaseStore
 	identity string
 }
 
+// PrimaryLeaseMemberIdentity returns the test member identity.
 func (store identifiedLeaseStore) PrimaryLeaseMemberIdentity() string { return store.identity }
 
+// rotatingIdentifiedLeaseStore supplies multiple certificate identities for one test member.
 type rotatingIdentifiedLeaseStore struct {
 	primarylease.LeaseStore
 	identities []string
 }
 
+// PrimaryLeaseMemberIdentities returns a copy of the test member identities.
 func (store rotatingIdentifiedLeaseStore) PrimaryLeaseMemberIdentities() []string {
 	return append([]string(nil), store.identities...)
 }
 
+// LoadPrimaryLease reports that the simulated replica is unavailable.
 func (failingLeaseStore) LoadPrimaryLease(context.Context, [16]byte) (primarylease.LeaseRecord, bool, error) {
 	return primarylease.LeaseRecord{}, false, errors.New("member unavailable")
 }
 
+// CompareAndSwapPrimaryLease reports that the simulated replica is unavailable.
 func (failingLeaseStore) CompareAndSwapPrimaryLease(context.Context, [16]byte, *primarylease.LeaseRecord, primarylease.LeaseRecord) (bool, error) {
 	return false, errors.New("member unavailable")
 }
 
+// TestQuorumStoreRequiresExactMajorityAndRepairsFromPartialWrite checks that a minority write cannot replace majority state and a later write repairs it.
 func TestQuorumStoreRequiresExactMajorityAndRepairsFromPartialWrite(t *testing.T) {
 	databaseID := [16]byte{9: 1}
 	now := time.Date(2026, 7, 18, 1, 2, 3, 0, time.UTC)
@@ -64,6 +72,7 @@ func TestQuorumStoreRequiresExactMajorityAndRepairsFromPartialWrite(t *testing.T
 	}
 }
 
+// TestQuorumStoreFailsClosedOnCrossedPartialHistories checks that conflicting replica histories without a matching majority are rejected.
 func TestQuorumStoreFailsClosedOnCrossedPartialHistories(t *testing.T) {
 	databaseID := [16]byte{9: 2}
 	now := time.Date(2026, 7, 18, 1, 2, 3, 0, time.UTC)
@@ -80,6 +89,7 @@ func TestQuorumStoreFailsClosedOnCrossedPartialHistories(t *testing.T) {
 	}
 }
 
+// TestQuorumStoreMaintainsAvailabilityOnlyAtMajority checks that two of three replicas support reads and writes while one cannot support reads.
 func TestQuorumStoreMaintainsAvailabilityOnlyAtMajority(t *testing.T) {
 	databaseID := [16]byte{9: 3}
 	now := time.Date(2026, 7, 18, 1, 2, 3, 0, time.UTC)
@@ -110,6 +120,7 @@ func TestQuorumStoreMaintainsAvailabilityOnlyAtMajority(t *testing.T) {
 	}
 }
 
+// TestQuorumStoreRejectsAliasedOrIncompleteMemberSets checks that duplicate member names, repeated identities, and even member counts are rejected.
 func TestQuorumStoreRejectsAliasedOrIncompleteMemberSets(t *testing.T) {
 	member := primarylease.NewMemoryStore()
 	if _, err := primarylease.NewQuorumStore([]primarylease.QuorumReplica{{MemberID: "member-a", Store: member}, {MemberID: "member-a", Store: member}, {MemberID: "member-c", Store: member}}); err == nil {
@@ -124,6 +135,7 @@ func TestQuorumStoreRejectsAliasedOrIncompleteMemberSets(t *testing.T) {
 	}
 }
 
+// TestQuorumStoreRejectsOverlappingRotatingMemberIdentities checks that rotating certificate identities cannot overlap between or repeat within members.
 func TestQuorumStoreRejectsOverlappingRotatingMemberIdentities(t *testing.T) {
 	member := primarylease.NewMemoryStore()
 	rotating := rotatingIdentifiedLeaseStore{LeaseStore: member, identities: []string{"leaf-old", "leaf-new"}}
@@ -138,6 +150,7 @@ func TestQuorumStoreRejectsOverlappingRotatingMemberIdentities(t *testing.T) {
 	}
 }
 
+// TestQuorumCASModelPreventsTwoAcknowledgedSuccessors checks that majority intersection prevents two successful replacements of the same predecessor.
 func TestQuorumCASModelPreventsTwoAcknowledgedSuccessors(t *testing.T) {
 	for _, replicas := range []int{1, 3, 5} {
 		quorum := replicas/2 + 1
@@ -156,6 +169,7 @@ func TestQuorumCASModelPreventsTwoAcknowledgedSuccessors(t *testing.T) {
 	}
 }
 
+// putLeaseRecord inserts a test lease record into an empty memory store.
 func putLeaseRecord(t *testing.T, store *primarylease.MemoryStore, databaseID [16]byte, record primarylease.LeaseRecord) {
 	t.Helper()
 	swapped, err := store.CompareAndSwapPrimaryLease(context.Background(), databaseID, nil, record)

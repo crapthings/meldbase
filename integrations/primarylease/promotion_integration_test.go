@@ -13,6 +13,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// TestDurableACKReadinessPromotesCaughtUpFollowerAfterSafeHandoff checks that a caught-up follower becomes writable after the previous writer lease expires.
 func TestDurableACKReadinessPromotesCaughtUpFollowerAfterSafeHandoff(t *testing.T) {
 	directory := t.TempDir()
 	source, follower, readiness, authority, publicKey, clock := promotionFixture(t, directory)
@@ -47,6 +48,7 @@ func TestDurableACKReadinessPromotesCaughtUpFollowerAfterSafeHandoff(t *testing.
 	}
 }
 
+// TestDurableACKReadinessRejectsFollowerWhenSourceAdvancedAfterACK checks that a follower stays read-only when the source has advanced beyond its acknowledged position.
 func TestDurableACKReadinessRejectsFollowerWhenSourceAdvancedAfterACK(t *testing.T) {
 	directory := t.TempDir()
 	source, follower, readiness, authority, publicKey, clock := promotionFixture(t, directory)
@@ -81,6 +83,7 @@ func TestDurableACKReadinessRejectsFollowerWhenSourceAdvancedAfterACK(t *testing
 	}
 }
 
+// promotionFixture creates a source, an acknowledged follower snapshot, and a lease authority with a controllable clock for promotion tests.
 func promotionFixture(t *testing.T, directory string) (*meldbase.DB, *meldbase.Follower, primarylease.DurableConsumerPromotionReadiness, *primarylease.Authority, ed25519.PublicKey, *time.Time) {
 	t.Helper()
 	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))

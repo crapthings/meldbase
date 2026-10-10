@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestENOSPCSystemRecordMatrixPublishesOnlyOldOrDurableGeneration checks that disk-full faults recover the expected old or synced system-record generation.
 func TestENOSPCSystemRecordMatrixPublishesOnlyOldOrDurableGeneration(t *testing.T) {
 	for _, point := range commitFaultPoints() {
 		t.Run(faultPointName(point), func(t *testing.T) {
@@ -64,6 +65,7 @@ func TestENOSPCSystemRecordMatrixPublishesOnlyOldOrDurableGeneration(t *testing.
 	}
 }
 
+// TestENOSPCDocumentSystemMatrixNeverSplitsBusinessAndTerminalState checks that disk-full recovery keeps document and system-record changes in the same generation.
 func TestENOSPCDocumentSystemMatrixNeverSplitsBusinessAndTerminalState(t *testing.T) {
 	for _, point := range commitFaultPoints() {
 		t.Run(faultPointName(point), func(t *testing.T) {
@@ -134,6 +136,7 @@ func TestENOSPCDocumentSystemMatrixNeverSplitsBusinessAndTerminalState(t *testin
 	}
 }
 
+// TestENOSPCPersistentFreeSpaceMaintenanceNeverChangesLogicalState checks that disk-full faults during free-space publication preserve documents and the logical commit sequence.
 func TestENOSPCPersistentFreeSpaceMaintenanceNeverChangesLogicalState(t *testing.T) {
 	for _, point := range commitFaultPoints() {
 		t.Run(faultPointName(point), func(t *testing.T) {
@@ -193,6 +196,7 @@ func TestENOSPCPersistentFreeSpaceMaintenanceNeverChangesLogicalState(t *testing
 	}
 }
 
+// TestENOSPCAppendMatrixPublishesOnlyOldOrDurableIndexedGeneration checks that short append and publication faults recover matching document and index states.
 func TestENOSPCAppendMatrixPublishesOnlyOldOrDurableIndexedGeneration(t *testing.T) {
 	for _, point := range commitFaultPoints() {
 		t.Run(faultPointName(point), func(t *testing.T) {
@@ -262,6 +266,7 @@ func TestENOSPCAppendMatrixPublishesOnlyOldOrDurableIndexedGeneration(t *testing
 	}
 }
 
+// TestENOSPCReusedPageMatrixCannotCorruptProtectedFallback checks that disk-full faults while reusing pages preserve a recoverable committed generation.
 func TestENOSPCReusedPageMatrixCannotCorruptProtectedFallback(t *testing.T) {
 	for _, point := range commitFaultPoints() {
 		t.Run(faultPointName(point), func(t *testing.T) {
@@ -349,6 +354,7 @@ func TestENOSPCReusedPageMatrixCannotCorruptProtectedFallback(t *testing.T) {
 	}
 }
 
+// commitFaultPoints returns the write and sync boundaries used by commit fault tests.
 func commitFaultPoints() []faultPoint {
 	return []faultPoint{
 		faultAfterPageWrite, faultBeforeDataSync, faultAfterDataSync,
@@ -356,6 +362,7 @@ func commitFaultPoints() []faultPoint {
 	}
 }
 
+// faultPointName returns a readable test name for a commit fault boundary.
 func faultPointName(point faultPoint) string {
 	switch point {
 	case faultAfterPageWrite:
@@ -373,6 +380,7 @@ func faultPointName(point faultPoint) string {
 	}
 }
 
+// installENOSPCFault installs a one-shot disk-full fault with optional page tearing at the selected boundary.
 func installENOSPCFault(t *testing.T, file *File, point faultPoint, tearPage func()) {
 	t.Helper()
 	metaSlot := 1 - file.metaSlot
@@ -401,6 +409,7 @@ func installENOSPCFault(t *testing.T, file *File, point faultPoint, tearPage fun
 	}
 }
 
+// assertENOSPCIndexedGeneration checks the recovered sequence, document, index entry, and page reachability.
 func assertENOSPCIndexedGeneration(t *testing.T, file *File, id [16]byte, sequence uint64, document, key string) {
 	t.Helper()
 	if file.Meta().CommitSequence != sequence {

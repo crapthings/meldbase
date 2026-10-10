@@ -1,7 +1,6 @@
 package database
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -9,26 +8,36 @@ import (
 )
 
 var (
+	// ErrDiagnosticsActive reports that a diagnostics session is already active.
 	ErrDiagnosticsActive = errors.New("meldbase: diagnostics are already active")
 )
 
+// DiagnosticKind identifies the operation recorded by a diagnostic event.
 type DiagnosticKind string
 
 const (
-	DiagnosticQuery  DiagnosticKind = "query"
+	// DiagnosticQuery marks a query diagnostic.
+	DiagnosticQuery DiagnosticKind = "query"
+	// DiagnosticCommit marks a commit diagnostic.
 	DiagnosticCommit DiagnosticKind = "commit"
 )
 
+// DiagnosticOutcome identifies how a recorded operation ended.
 type DiagnosticOutcome string
 
 const (
-	DiagnosticSuccess  DiagnosticOutcome = "success"
-	DiagnosticFailure  DiagnosticOutcome = "failure"
+	// DiagnosticSuccess marks a successful operation.
+	DiagnosticSuccess DiagnosticOutcome = "success"
+	// DiagnosticFailure marks a failed operation.
+	DiagnosticFailure DiagnosticOutcome = "failure"
+	// DiagnosticCanceled marks a canceled operation.
 	DiagnosticCanceled DiagnosticOutcome = "canceled"
 )
 
-// DiagnosticsOptions controls opt-in detailed events. Defaults retain 256
-// events and record failed, >=50ms queries and >=100ms durable commits. Setting
+// DiagnosticsOptions configures bounded diagnostic recording and event selection.
+//
+// Defaults retain 256 events and record failures, queries taking at least 50ms,
+// and commits taking at least 100ms.
 // RecordAll is intended only for short development sessions. SampleEvery adds a
 // deterministic one-in-N sample of otherwise fast successful operations.
 type DiagnosticsOptions struct {
@@ -40,6 +49,7 @@ type DiagnosticsOptions struct {
 	ExcludeFailures     bool
 }
 
+// DiagnosticEvent records one operation's timing, outcome, and work counters.
 type DiagnosticEvent struct {
 	Sequence              uint64            `json:"sequence"`
 	CapturedAt            time.Time         `json:"capturedAt"`
@@ -69,6 +79,7 @@ type DiagnosticEvent struct {
 	Sampled               bool              `json:"sampled"`
 }
 
+// DiagnosticStats reports diagnostics activity and retained event counts.
 type DiagnosticStats struct {
 	Enabled         bool   `json:"enabled"`
 	Capacity        uint64 `json:"capacity"`
@@ -79,6 +90,7 @@ type DiagnosticStats struct {
 	CommitsObserved uint64 `json:"commitsObserved"`
 }
 
+// DiagnosticSnapshot captures a diagnostics session's counters and retained events.
 type DiagnosticSnapshot struct {
 	Session    uint64            `json:"session"`
 	StartedAt  time.Time         `json:"startedAt"`
@@ -89,8 +101,9 @@ type DiagnosticSnapshot struct {
 	HasMore    bool              `json:"hasMore"`
 }
 
-// Diagnostics owns a fixed-capacity event ring. Close disables future timing
-// and recording but keeps the retained snapshot readable by its owner.
+// Diagnostics owns a bounded ring of recorded operation events.
+//
+// Close disables timing and recording but keeps retained events readable.
 type Diagnostics struct {
 	db        *DB
 	options   DiagnosticsOptions
@@ -109,6 +122,7 @@ type Diagnostics struct {
 	overwritten  uint64
 }
 
+// diagnosticSpan records the start and sampling position of one observed operation.
 type diagnosticSpan struct {
 	recorder *Diagnostics
 	kind     DiagnosticKind
@@ -116,6 +130,7 @@ type diagnosticSpan struct {
 	ordinal  uint64
 }
 
+// EnableDiagnostics starts the database's single bounded diagnostic recording session.
 func (db *DB) EnableDiagnostics(options DiagnosticsOptions) (*Diagnostics, error) {
 	if db == nil {
 		return nil, ErrClosed
@@ -151,6 +166,7 @@ func (db *DB) EnableDiagnostics(options DiagnosticsOptions) (*Diagnostics, error
 	return diagnostics, nil
 }
 
+// beginDiagnostic starts an operation timer when diagnostics are enabled.
 func (db *DB) beginDiagnostic(kind DiagnosticKind) diagnosticSpan {
 	if db == nil {
 		return diagnosticSpan{}
@@ -162,6 +178,7 @@ func (db *DB) beginDiagnostic(kind DiagnosticKind) diagnosticSpan {
 	return recorder.begin(kind)
 }
 
+// begin starts timing a known operation and advances its sampling counter.
 func (d *Diagnostics) begin(kind DiagnosticKind) diagnosticSpan {
 	if d.closed.Load() {
 		return diagnosticSpan{}
@@ -178,6 +195,7 @@ func (d *Diagnostics) begin(kind DiagnosticKind) diagnosticSpan {
 	return diagnosticSpan{recorder: d, kind: kind, started: time.Now(), ordinal: ordinal}
 }
 
+// finishQueryDiagnostic forwards a query outcome to its diagnostic session.
 func (db *DB) finishQueryDiagnostic(span diagnosticSpan, explain ExplainResult, returned int, operationErr error) {
 	if span.recorder == nil {
 		return
@@ -185,6 +203,7 @@ func (db *DB) finishQueryDiagnostic(span diagnosticSpan, explain ExplainResult, 
 	span.recorder.finishQuery(span, explain, returned, operationErr)
 }
 
+// finishQuery records safe query labels, work counters, and timing.
 func (d *Diagnostics) finishQuery(span diagnosticSpan, explain ExplainResult, returned int, operationErr error) {
 	event := finishDiagnosticEvent(span, operationErr)
 	event.Stage = safeDiagnosticStage(explain.Stage)
@@ -221,6 +240,7 @@ func (d *Diagnostics) finishQuery(span diagnosticSpan, explain ExplainResult, re
 	d.record(event, span.ordinal)
 }
 
+// finishCommitDiagnostic forwards a commit outcome to its diagnostic session.
 func (db *DB) finishCommitDiagnostic(span diagnosticSpan, changes int, operationErr error) {
 	if span.recorder == nil {
 		return
@@ -228,6 +248,7 @@ func (db *DB) finishCommitDiagnostic(span diagnosticSpan, changes int, operation
 	span.recorder.finishCommit(span, changes, operationErr)
 }
 
+// finishCommit records a commit's timing, outcome, and change count.
 func (d *Diagnostics) finishCommit(span diagnosticSpan, changes int, operationErr error) {
 	event := finishDiagnosticEvent(span, operationErr)
 	if changes > 0 {
@@ -236,6 +257,7 @@ func (d *Diagnostics) finishCommit(span diagnosticSpan, changes int, operationEr
 	d.record(event, span.ordinal)
 }
 
+// finishDiagnosticEvent builds timing and outcome fields for a completed operation.
 func finishDiagnosticEvent(span diagnosticSpan, operationErr error) DiagnosticEvent {
 	finished := time.Now()
 	outcome, class := classifyDiagnosticError(operationErr)
@@ -245,6 +267,7 @@ func finishDiagnosticEvent(span diagnosticSpan, operationErr error) DiagnosticEv
 	}
 }
 
+// record retains eligible events in the bounded ring and overwrites the oldest when full.
 func (d *Diagnostics) record(event DiagnosticEvent, ordinal uint64) {
 	if d == nil || d.closed.Load() {
 		return
@@ -277,6 +300,7 @@ func (d *Diagnostics) record(event DiagnosticEvent, ordinal uint64) {
 	}
 }
 
+// Stats samples diagnostic activity and event retention counters.
 func (d *Diagnostics) Stats() DiagnosticStats {
 	if d == nil {
 		return DiagnosticStats{}
@@ -292,12 +316,14 @@ func (d *Diagnostics) Stats() DiagnosticStats {
 	return stats
 }
 
+// Snapshot copies all events currently retained by the diagnostic session.
 func (d *Diagnostics) Snapshot() DiagnosticSnapshot {
 	return d.SnapshotAfter(0, 0)
 }
 
-// SnapshotAfter returns retained events with sequence greater than after in
-// chronological order. A non-positive limit means the ring capacity. Truncated
+// SnapshotAfter copies retained events newer than after in chronological order.
+//
+// A non-positive limit means the ring capacity; Truncated
 // reports that after predates the oldest retained sequence; HasMore asks the
 // caller to continue from the last returned sequence.
 func (d *Diagnostics) SnapshotAfter(after uint64, limit int) DiagnosticSnapshot {
@@ -339,8 +365,9 @@ func (d *Diagnostics) SnapshotAfter(after uint64, limit int) DiagnosticSnapshot 
 	}
 }
 
-// DiagnosticSnapshotAfter reads the currently active diagnostic session. It
-// allows long-lived admin handlers to follow a safely replaced session.
+// DiagnosticSnapshotAfter copies newer events from the currently active diagnostic session.
+//
+// Long-lived admin handlers can follow a replaced session through this method.
 func (db *DB) DiagnosticSnapshotAfter(after uint64, limit int) DiagnosticSnapshot {
 	if db == nil {
 		return DiagnosticSnapshot{CapturedAt: time.Now()}
@@ -352,12 +379,12 @@ func (db *DB) DiagnosticSnapshotAfter(after uint64, limit int) DiagnosticSnapsho
 	return diagnostics.SnapshotAfter(after, limit)
 }
 
-// DiagnosticSnapshotAfter lets a fixed Diagnostics handle also satisfy admin
-// diagnostic-source contracts.
+// DiagnosticSnapshotAfter copies newer events through the admin diagnostic-source contract.
 func (d *Diagnostics) DiagnosticSnapshotAfter(after uint64, limit int) DiagnosticSnapshot {
 	return d.SnapshotAfter(after, limit)
 }
 
+// Close disables recording while leaving retained diagnostic events readable.
 func (d *Diagnostics) Close() error {
 	if d == nil {
 		return nil
@@ -369,92 +396,4 @@ func (d *Diagnostics) Close() error {
 		d.db.diagnostics.CompareAndSwap(d, nil)
 	}
 	return nil
-}
-
-func safeDiagnosticStage(stage string) string {
-	switch stage {
-	case "COLLSCAN", "IXSCAN", "ID_LOOKUP":
-		return stage
-	default:
-		return "UNKNOWN"
-	}
-}
-
-func safeDiagnosticPlanReason(reason string) string {
-	switch reason {
-	case "collection_scan", "empty_index_result", "primary_lookup", "primary_union",
-		"secondary_index", "index_union", "multi_index_union", "not_planned":
-		return reason
-	default:
-		return ""
-	}
-}
-
-func safeDiagnosticFallbackReason(reason string) string {
-	switch reason {
-	case "unfiltered", "unindexed_or_branch", "no_secondary_indexes",
-		"no_usable_index", "budget_rejected":
-		return reason
-	default:
-		return ""
-	}
-}
-
-func safeDiagnosticEarlyStopReason(reason string) string {
-	switch reason {
-	case "limit_not_set", "zero_limit", "sort_required", "collection_insertion_order",
-		"candidate_position_order", "single_exact_source", "exact_span_position_merge",
-		"window_overflow", "mixed_primary_secondary", "primary_union", "range_scan",
-		"too_many_exact_spans", "access_order_not_proven":
-		return reason
-	default:
-		return ""
-	}
-}
-
-func safeDiagnosticEarlyStopScope(scope string) string {
-	switch scope {
-	case "documents", "keys_and_documents":
-		return scope
-	default:
-		return ""
-	}
-}
-
-func safeDiagnosticBudgetReason(reason string) string {
-	switch reason {
-	case "documents", "keys", "candidates", "sort_bytes", "skip", "predicate_steps":
-		return reason
-	default:
-		return ""
-	}
-}
-
-func classifyDiagnosticError(err error) (DiagnosticOutcome, string) {
-	if err == nil {
-		return DiagnosticSuccess, ""
-	}
-	if errors.Is(err, context.Canceled) {
-		return DiagnosticCanceled, "canceled"
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return DiagnosticCanceled, "deadline"
-	}
-	classes := []struct {
-		err  error
-		name string
-	}{
-		{ErrClosed, "closed"}, {ErrNotFound, "not_found"},
-		{ErrDuplicateID, "duplicate_id"}, {ErrDuplicateKey, "duplicate_key"},
-		{ErrMutationLimit, "mutation_limit"}, {ErrDurability, "durability"},
-		{ErrCorrupt, "corrupt"}, {ErrInvalidDocument, "invalid_document"},
-		{ErrInvalidFilter, "invalid_filter"}, {ErrInvalidUpdate, "invalid_update"},
-		{ErrInvalidIndex, "invalid_index"}, {ErrQueryBudget, "query_budget"},
-	}
-	for _, class := range classes {
-		if errors.Is(err, class.err) {
-			return DiagnosticFailure, class.name
-		}
-	}
-	return DiagnosticFailure, "other"
 }

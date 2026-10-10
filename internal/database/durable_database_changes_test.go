@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen checks that a durable database subscription delivers document and index changes and resumes from its checkpoint after reopening.
 func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "durable-database-changes.meld2")
 	db, err := OpenWithOptions(path, OpenOptions{CommitRetention: CommitRetentionPolicy{MaxCommits: 2}})
@@ -123,6 +124,7 @@ func TestDurableDatabaseChangesCarriesCatalogAndDocumentsAcrossReopen(t *testing
 	}
 }
 
+// TestDurableDatabaseChangesRejectUnsupportedAndInvalidArguments checks that durable database subscriptions reject memory databases, invalid names, and empty buffers.
 func TestDurableDatabaseChangesRejectUnsupportedAndInvalidArguments(t *testing.T) {
 	memory := New()
 	defer memory.Close()
@@ -144,6 +146,7 @@ func TestDurableDatabaseChangesRejectUnsupportedAndInvalidArguments(t *testing.T
 	}
 }
 
+// receiveDurableDatabaseBatch waits for a database-change batch and fails on subscription errors, closed channels, or timeout.
 func receiveDurableDatabaseBatch(t *testing.T, subscription *DurableDatabaseChangeSubscription) DurableDatabaseChangeBatch {
 	t.Helper()
 	select {

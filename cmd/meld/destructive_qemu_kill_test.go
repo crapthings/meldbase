@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestValidateQMPKillProofBindsSIGKILLPausedRestartAndDirectIO checks that valid QEMU kill evidence is accepted and a termination without SIGKILL is rejected.
 func TestValidateQMPKillProofBindsSIGKILLPausedRestartAndDirectIO(t *testing.T) {
 	now := time.Now().UTC()
 	markerRaw := []byte("{\"marker\":\"kill-proof\"}\n")
@@ -60,6 +61,7 @@ func TestValidateQMPKillProofBindsSIGKILLPausedRestartAndDirectIO(t *testing.T) 
 	}
 }
 
+// TestValidateQMPBlockInventoryRequiresDirectIOAndFlushes checks that QEMU disk evidence requires the expected writable image, direct I/O, and enabled flushes.
 func TestValidateQMPBlockInventoryRequiresDirectIOAndFlushes(t *testing.T) {
 	for name, raw := range map[string]json.RawMessage{
 		"host cache":   json.RawMessage(`[{"inserted":{"ro":false,"file":"/target.img","cache":{"direct":false,"no-flush":false}}}]`),
@@ -79,6 +81,7 @@ func TestValidateQMPBlockInventoryRequiresDirectIOAndFlushes(t *testing.T) {
 	}
 }
 
+// qmpTestExchange creates a timestamped QEMU control message for tests.
 func qmpTestExchange(direction string, at time.Time, message string) destructiveQMPExchange {
 	return destructiveQMPExchange{Direction: direction, At: at, Message: json.RawMessage(message)}
 }

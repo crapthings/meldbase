@@ -7,6 +7,7 @@ import { MeldbaseClientClosedError, MeldbaseError, MeldbaseInternalError, Meldba
 import { abortReason, asError, decodeWireError, exactKeys, positiveLimit, record } from "./shared.js";
 import type { ClientOptions, RealtimeTicket, SyncStatus, WebSocketLike } from "./types.js";
 
+/** Tracks a subscription’s query, listeners, resume token, and current documents. */
 interface ActiveSubscription {
   readonly requestId: string;
   readonly collection: string;
@@ -18,6 +19,7 @@ interface ActiveSubscription {
   documents: Document[];
 }
 
+/** Tracks an RPC request, its cancellation signal, and the callbacks that settle its result. */
 interface ActiveRPCCall {
   readonly requestId: string;
   readonly method: string;
@@ -30,6 +32,7 @@ interface ActiveRPCCall {
   sent: boolean;
 }
 
+/** Shares an authenticated WebSocket for resumable query subscriptions and RPC calls. */
 export class RealtimeConnection {
   readonly #socketFactory: (url: string) => WebSocketLike;
   readonly #ticket: () => Promise<RealtimeTicket>;
@@ -501,6 +504,7 @@ export class RealtimeConnection {
   }
 }
 
+/** Links a document to its neighbors while applying ordered query changes. */
 interface WireDeltaNode {
   readonly id: string;
   document: Document;
@@ -508,6 +512,7 @@ interface WireDeltaNode {
   next: WireDeltaNode | undefined;
 }
 
+/** Validates and applies ordered query changes to produce a bounded document snapshot. */
 function applyWireDelta(current: readonly Document[], operations: readonly unknown[], maximum: number): Document[] {
   if (current.length > maximum) throw new Error("Invalid local delta state");
   const byId = new Map<string, WireDeltaNode>();

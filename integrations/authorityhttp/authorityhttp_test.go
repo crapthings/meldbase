@@ -25,6 +25,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/primarylease"
 )
 
+// TestHandlerDerivesOwnerAndSeparatesRevokeAuthorization checks that grants use the authenticated node identity and revocation requires operator authorization.
 func TestHandlerDerivesOwnerAndSeparatesRevokeAuthorization(t *testing.T) {
 	store := primarylease.NewMemoryStore()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
@@ -111,6 +112,7 @@ func TestHandlerDerivesOwnerAndSeparatesRevokeAuthorization(t *testing.T) {
 	}
 }
 
+// TestClientUsesVerifiedMTLSIdentityPinnedServerAndLeaseResponses checks certificate identities, server pinning, and lease grant and revocation responses.
 func TestClientUsesVerifiedMTLSIdentityPinnedServerAndLeaseResponses(t *testing.T) {
 	pki := newAuthorityPKI(t)
 	_, signingKey, err := ed25519.GenerateKey(rand.Reader)
@@ -200,6 +202,7 @@ func TestClientUsesVerifiedMTLSIdentityPinnedServerAndLeaseResponses(t *testing.
 	}
 }
 
+// TestPrimaryRuntimeRenewsThroughPinnedMTLSAuthority checks that renewing a lease through a pinned mTLS authority enables primary writes.
 func TestPrimaryRuntimeRenewsThroughPinnedMTLSAuthority(t *testing.T) {
 	pki := newAuthorityPKI(t)
 	publicKey, signingKey, err := ed25519.GenerateKey(rand.Reader)
@@ -258,6 +261,7 @@ func TestPrimaryRuntimeRenewsThroughPinnedMTLSAuthority(t *testing.T) {
 	}
 }
 
+// TestPrimaryRuntimeUsesThreeMemberMTLSQuorumAuthority checks that primary renewal persists a lease on a majority of three mTLS members.
 func TestPrimaryRuntimeUsesThreeMemberMTLSQuorumAuthority(t *testing.T) {
 	pki := newAuthorityPKI(t)
 	publicKey, signingKey, err := ed25519.GenerateKey(rand.Reader)
@@ -368,6 +372,7 @@ func TestPrimaryRuntimeUsesThreeMemberMTLSQuorumAuthority(t *testing.T) {
 	}
 }
 
+// verifiedRequest creates a JSON test request with a simulated verified TLS peer.
 func verifiedRequest(method, endpoint string, body []byte) *http.Request {
 	request := httptest.NewRequest(method, endpoint, bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -375,6 +380,7 @@ func verifiedRequest(method, endpoint string, body []byte) *http.Request {
 	return request
 }
 
+// authorityPKI holds the test certificate authority and server, node, and operator certificates.
 type authorityPKI struct {
 	roots    *x509.CertPool
 	ca       *x509.Certificate
@@ -385,6 +391,7 @@ type authorityPKI struct {
 	operator tls.Certificate
 }
 
+// newAuthorityPKI creates a trusted certificate authority and certificates for authority integration tests.
 func newAuthorityPKI(t *testing.T) authorityPKI {
 	t.Helper()
 	now := time.Now().Add(-time.Minute)
@@ -407,6 +414,7 @@ func newAuthorityPKI(t *testing.T) authorityPKI {
 	return authorityPKI{roots: roots, ca: ca, caKey: caKey, server: server, nodeA: nodeA, nodeB: nodeB, operator: operator}
 }
 
+// newAuthorityLeaf creates a test certificate for the requested server or client usage.
 func newAuthorityLeaf(t *testing.T, ca *x509.Certificate, caKey ed25519.PrivateKey, serial int64, usage x509.ExtKeyUsage) tls.Certificate {
 	t.Helper()
 	key := newAuthorityKey(t)
@@ -426,6 +434,7 @@ func newAuthorityLeaf(t *testing.T, ca *x509.Certificate, caKey ed25519.PrivateK
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}
 }
 
+// newAuthorityKey generates an Ed25519 private key and fails the test if generation fails.
 func newAuthorityKey(t *testing.T) ed25519.PrivateKey {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
@@ -435,6 +444,7 @@ func newAuthorityKey(t *testing.T) ed25519.PrivateKey {
 	return key
 }
 
+// httpClient creates a TLS 1.3 client that trusts the test authority and presents the supplied certificate.
 func (pki authorityPKI) httpClient(certificate *tls.Certificate) *http.Client {
 	config := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pki.roots, Certificates: []tls.Certificate{*certificate}}
 	return &http.Client{Transport: &http.Transport{TLSClientConfig: config}}

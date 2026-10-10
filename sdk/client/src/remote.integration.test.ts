@@ -11,17 +11,27 @@ import { promisify } from "node:util";
 import { MeldbaseClient, MeldbaseError } from "./index.js";
 import type { Document, WebSocketLike } from "./index.js";
 
+/** Locates the repository used to build the integration test server. */
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
+/** Runs external build commands through a promise-based interface. */
 const execFileAsync = promisify(execFile);
+/** Loads CommonJS dependencies from this integration test module. */
 const require = createRequire(import.meta.url);
+/** Provides the Node WebSocket implementation used by integration test clients. */
 const NodeWebSocket = require("ws") as new (url: string) => WebSocketLike;
+/** Provides a fixed JWT signing secret for authenticated integration tests. */
 const productionSecret = "0123456789abcdef0123456789abcdef";
+/** Provides a fixed control-plane token for worker integration tests. */
 const workerToken = "0123456789abcdef0123456789abcdef";
 
+/** Holds server startup arguments and optional environment overrides. */
 type ServerCommand = { readonly args: string[]; readonly env?: Readonly<Record<string, string>> };
+/** Exposes test server endpoints and asynchronous process cleanup. */
 type RunningServer = { readonly baseURL: string; readonly workerURL: string | undefined; stop(): Promise<void> };
+/** Exposes asynchronous cleanup for a test worker. */
 type RunningWorker = { stop(): Promise<void> };
 
+/** Builds and starts a temporary test server and returns its endpoints and cleanup function. */
 async function startServer(command: (directory: string) => Promise<ServerCommand>): Promise<RunningServer> {
   const directory = await mkdtemp(`${tmpdir()}/meldbase-client-integration-`);
   const binary = `${directory}/meld`;
@@ -91,12 +101,14 @@ async function startServer(command: (directory: string) => Promise<ServerCommand
   };
 }
 
+/** Starts an unauthenticated local server for client integration tests. */
 function startDevelopmentServer(): Promise<RunningServer> {
   return startServer(async (directory) => ({
     args: ["serve", "--db", `${directory}/app.meld`, "--addr", "127.0.0.1:0", "--dev-no-auth"],
   }));
 }
 
+/** Starts a local test server with worker control and an items read policy. */
 function startWorkerDevelopmentServer(): Promise<RunningServer> {
   return startServer(async (directory) => ({
     args: [
@@ -115,6 +127,7 @@ function startWorkerDevelopmentServer(): Promise<RunningServer> {
   }));
 }
 
+/** Signs a short-lived test identity token for the requested workspace. */
 function signedProductionJWT(workspace: string): string {
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const unsigned = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({
@@ -127,6 +140,7 @@ function signedProductionJWT(workspace: string): string {
   return `${unsigned}.${createHmac("sha256", productionSecret).update(unsigned).digest("base64url")}`;
 }
 
+/** Starts a test server with JWT authentication and workspace access policies. */
 function startProductionServer(): Promise<RunningServer> {
   return startServer(async (directory) => {
     const secretPath = `${directory}/jwt.secret`;
@@ -161,6 +175,7 @@ function startProductionServer(): Promise<RunningServer> {
   });
 }
 
+/** Polls a test condition for up to five seconds and reports what failed to arrive. */
 async function waitFor(predicate: () => boolean, description: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (!predicate()) {
@@ -169,6 +184,7 @@ async function waitFor(predicate: () => boolean, description: string): Promise<v
   }
 }
 
+/** Builds and starts the SDK test worker against the server control endpoint. */
 async function startSDKWorker(server: RunningServer): Promise<RunningWorker> {
   await waitFor(() => server.workerURL !== undefined, "the worker control endpoint");
   await execFileAsync("pnpm", ["--filter", "@meldbase/worker", "build"], { cwd: repository });

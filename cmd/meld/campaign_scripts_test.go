@@ -11,6 +11,7 @@ import (
 	meldserver "github.com/crapthings/meldbase/server"
 )
 
+// TestDestructiveQEMUMatrixDryRunPinsLegacyAndSessionTrials checks that dry runs schedule fifteen QEMU trials with the expected legacy and session identifiers.
 func TestDestructiveQEMUMatrixDryRunPinsLegacyAndSessionTrials(t *testing.T) {
 	repository, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -59,6 +60,7 @@ func TestDestructiveQEMUMatrixDryRunPinsLegacyAndSessionTrials(t *testing.T) {
 	}
 }
 
+// TestQualificationLinuxFoundationDryRunPinsDestructiveOrder checks that the Linux campaign dry run orders its stages and includes physical controller attestation.
 func TestQualificationLinuxFoundationDryRunPinsDestructiveOrder(t *testing.T) {
 	repository, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -100,6 +102,7 @@ func TestQualificationLinuxFoundationDryRunPinsDestructiveOrder(t *testing.T) {
 	}
 }
 
+// TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults checks that the systemd launcher maps settings to CLI arguments and enforces its deployment constraints.
 func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) {
 	repository, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -283,6 +286,7 @@ func TestSingleNodeSystemdLauncherPinsLoopbackDevelopmentDefaults(t *testing.T) 
 	}
 }
 
+// TestSingleNodeBackupRestoreDrillRetainsPrivateEvidenceInOrder checks that the restore drill script runs verification steps in order and retains artifacts in a private directory.
 func TestSingleNodeBackupRestoreDrillRetainsPrivateEvidenceInOrder(t *testing.T) {
 	repository, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

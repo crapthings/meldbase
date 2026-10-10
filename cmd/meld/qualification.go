@@ -15,11 +15,16 @@ import (
 	soakqualification "github.com/crapthings/meldbase/internal/qualification"
 )
 
+// qualificationReceiptMaxBytes limits the size of a qualification receipt file.
 const qualificationReceiptMaxBytes = 1 << 20
 
+// qualificationSoakPhase records one phase of a storage soak test.
 type qualificationSoakPhase = soakqualification.SoakPhaseReceipt
+
+// qualificationSoakReceipt records the storage soak test's runtime and verification evidence.
 type qualificationSoakReceipt = soakqualification.SoakReceipt
 
+// qualificationDestructiveRecord collects destructive trial results and their campaign evidence bindings.
 type qualificationDestructiveRecord struct {
 	SchemaVersion               uint32                          `json:"schemaVersion"`
 	SourceRevision              string                          `json:"sourceRevision"`
@@ -46,6 +51,7 @@ type qualificationDestructiveRecord struct {
 	SessionExecutableSHA256     string                          `json:"sessionExecutableSha256"`
 }
 
+// qualificationDestructiveTrial records one destructive trial's recovery outcome and state proofs.
 type qualificationDestructiveTrial struct {
 	ID                   string    `json:"id"`
 	Kind                 string    `json:"kind"`
@@ -66,6 +72,7 @@ type qualificationDestructiveTrial struct {
 	ArtifactsSHA256      string    `json:"artifactsSha256"`
 }
 
+// qualificationInfrastructure binds a campaign to its environment and controller evidence hashes.
 type qualificationInfrastructure struct {
 	EnvironmentRecordSHA256 string `json:"environmentRecordSha256"`
 	KernelAndMountSHA256    string `json:"kernelAndMountSha256"`
@@ -75,14 +82,21 @@ type qualificationInfrastructure struct {
 }
 
 const (
-	qualificationTrialCapacity         = "capacity-exhaustion"
-	qualificationTrialProcess          = "process-kill"
-	qualificationTrialPower            = "power-cut"
-	qualificationAsyncBoundary         = "asynchronous"
+	// qualificationTrialCapacity identifies trials that exhaust storage capacity.
+	qualificationTrialCapacity = "capacity-exhaustion"
+	// qualificationTrialProcess identifies trials that kill the database process.
+	qualificationTrialProcess = "process-kill"
+	// qualificationTrialPower identifies trials that cut external power.
+	qualificationTrialPower = "power-cut"
+	// qualificationAsyncBoundary marks process trials triggered outside a fixed storage publication stage.
+	qualificationAsyncBoundary = "asynchronous"
+	// qualificationMinimumBoundaryTrials sets the required number of trials for each publication boundary.
 	qualificationMinimumBoundaryTrials = 3
-	qualificationMinimumProcessTrials  = 20
+	// qualificationMinimumProcessTrials sets the required number of process termination trials.
+	qualificationMinimumProcessTrials = 20
 )
 
+// qualificationPublicationBoundaries lists the storage publication stages required for boundary trials.
 var qualificationPublicationBoundaries = [...]string{
 	"after-page-write",
 	"before-data-sync",
@@ -91,6 +105,7 @@ var qualificationPublicationBoundaries = [...]string{
 	"after-meta-sync",
 }
 
+// qualificationCheckResult reports qualification status and the evidence identities supporting it.
 type qualificationCheckResult struct {
 	SchemaVersion                 uint32   `json:"schemaVersion"`
 	SourceRevision                string   `json:"sourceRevision"`
@@ -118,6 +133,7 @@ type qualificationCheckResult struct {
 	Passed                        bool     `json:"passed"`
 }
 
+// runQualificationCheck checks the requested evidence level and prints the result or publishes a signed release packet.
 func runQualificationCheck(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("qualification-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -185,6 +201,7 @@ func runQualificationCheck(args []string, stdout, stderr io.Writer) error {
 	return encoder.Encode(result)
 }
 
+// qualificationCheckInputs holds evidence paths and the source revision for a qualification check.
 type qualificationCheckInputs struct {
 	durabilityPath           string
 	soakPath                 string
@@ -199,6 +216,7 @@ type qualificationCheckInputs struct {
 	sourceRevision           string
 }
 
+// buildQualificationCheckResult validates supplied campaign evidence and determines its qualification level.
 func buildQualificationCheckResult(inputs qualificationCheckInputs) (qualificationCheckResult, error) {
 	if inputs.durabilityPath == "" || inputs.soakPath == "" || !validDurabilitySourceRevision(inputs.sourceRevision) {
 		return qualificationCheckResult{}, errors.New("qualification evidence requires durability, soak and a valid source revision")
@@ -290,6 +308,7 @@ func buildQualificationCheckResult(inputs qualificationCheckInputs) (qualificati
 	return result, nil
 }
 
+// qualificationAnchorBindings holds verified anchor evidence hashes and run configuration identities.
 type qualificationAnchorBindings struct {
 	PublicKeySHA256         string
 	PhaseReceiptSHA256      []string
@@ -301,6 +320,7 @@ type qualificationAnchorBindings struct {
 	HistoryConfigurationID  string
 }
 
+// validateQualificationAnchorEvidence verifies independent anchor phase and history evidence bound to the clean release revision.
 func validateQualificationAnchorEvidence(publicKeyPath string, phasePaths []string, historyReceiptPath, historyPath, revision string) (qualificationAnchorBindings, error) {
 	if publicKeyPath == "" || len(phasePaths) != len(anchorQualificationPhases) || historyReceiptPath == "" || historyPath == "" {
 		return qualificationAnchorBindings{}, errors.New("Level 5 requires one public key, five ordered phase receipts, one history receipt and its controller history")
@@ -347,6 +367,7 @@ func validateQualificationAnchorEvidence(publicKeyPath string, phasePaths []stri
 	}, nil
 }
 
+// readQualificationReceipt reads a bounded regular receipt file and decodes exactly one JSON value without unknown fields.
 func readQualificationReceipt(path string, target any) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -382,6 +403,7 @@ func readQualificationReceipt(path string, target any) ([]byte, error) {
 	return raw, nil
 }
 
+// validateQualificationDurability checks that a clean release receipt contains the required successful storage capability probes.
 func validateQualificationDurability(receipt durabilityCheckResult, revision string) error {
 	if receipt.SchemaVersion != 2 || receipt.SourceRevision != revision || receipt.BuildRevision != revision || receipt.BuildModified || !receipt.Passed {
 		return errors.New("requires a passing clean schema-2 receipt bound to the release revision")
@@ -418,6 +440,7 @@ func validateQualificationDurability(receipt durabilityCheckResult, revision str
 	return nil
 }
 
+// validateQualificationSoak checks a release soak receipt's runtime identity, workload totals, and final storage verification.
 func validateQualificationSoak(receipt qualificationSoakReceipt, durability durabilityCheckResult, revision string) error {
 	if receipt.SchemaVersion != 4 || receipt.FormatRevision != 3 || receipt.Engine != "current" || receipt.Profile != "release" ||
 		!receipt.RaceEnabled || receipt.SourceRevision != revision || receipt.BuildRevision != revision || receipt.BuildModified {
@@ -471,6 +494,7 @@ func validateQualificationSoak(receipt qualificationSoakReceipt, durability dura
 	return nil
 }
 
+// validateQualificationDestructive checks that a destructive manifest matches its campaign identity and required evidence bindings.
 func validateQualificationDestructive(record qualificationDestructiveRecord, packet qualificationCheckResult) error {
 	if record.SchemaVersion != 6 || record.SourceRevision != packet.SourceRevision || !qualificationSafeName(record.PlatformClass, 128) ||
 		record.GOOS != packet.GOOS || record.GOARCH != packet.GOARCH || record.Device != packet.Device ||
@@ -503,6 +527,7 @@ func validateQualificationDestructive(record qualificationDestructiveRecord, pac
 	return nil
 }
 
+// validateQualificationDestructiveTrials checks each trial's recovery proofs and the required fault and publication boundary coverage.
 func validateQualificationDestructiveTrials(record qualificationDestructiveRecord) error {
 	if len(record.Trials) == 0 || len(record.Trials) > 10_000 {
 		return errors.New("destructive trial set must contain between 1 and 10000 trials")
@@ -594,6 +619,7 @@ func validateQualificationDestructiveTrials(record qualificationDestructiveRecor
 	return nil
 }
 
+// qualificationBoundaryAllowed checks whether a publication boundary is permitted for the given trial kind.
 func qualificationBoundaryAllowed(kind, boundary string) bool {
 	if kind == qualificationTrialProcess {
 		return boundary == qualificationAsyncBoundary
@@ -606,11 +632,13 @@ func qualificationBoundaryAllowed(kind, boundary string) bool {
 	return false
 }
 
+// qualificationSHA256 returns the hexadecimal SHA-256 hash of evidence bytes.
 func qualificationSHA256(raw []byte) string {
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:])
 }
 
+// qualificationHexDigest checks that a value encodes a SHA-256 hash as hexadecimal.
 func qualificationHexDigest(value string) bool {
 	if len(value) != sha256.Size*2 {
 		return false
@@ -619,6 +647,7 @@ func qualificationHexDigest(value string) bool {
 	return err == nil
 }
 
+// qualificationSafeName accepts a bounded nonempty name made of ASCII letters, digits, dots, underscores, and hyphens.
 func qualificationSafeName(value string, maximum int) bool {
 	if len(value) == 0 || len(value) > maximum {
 		return false
@@ -632,6 +661,7 @@ func qualificationSafeName(value string, maximum int) bool {
 	return true
 }
 
+// qualificationProductionFilesystem checks whether a filesystem name belongs to the qualification matrix.
 func qualificationProductionFilesystem(name string) bool {
 	switch name {
 	case "ext-family", "xfs", "btrfs", "apfs":
@@ -641,6 +671,7 @@ func qualificationProductionFilesystem(name string) bool {
 	}
 }
 
+// qualificationAddCounter adds a counter value only when the unsigned total cannot overflow.
 func qualificationAddCounter(total *uint64, value uint64) bool {
 	if value > ^uint64(0)-*total {
 		return false
@@ -649,6 +680,7 @@ func qualificationAddCounter(total *uint64, value uint64) bool {
 	return true
 }
 
+// qualificationTimingValid checks that a positive duration agrees with the recorded time interval within five seconds.
 func qualificationTimingValid(started, finished time.Time, duration time.Duration) bool {
 	if started.IsZero() || !finished.After(started) || duration <= 0 {
 		return false

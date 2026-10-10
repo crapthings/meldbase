@@ -15,6 +15,7 @@ import (
 	"time"
 )
 
+// TestRS256JWKSAuthenticatorVerifiesOIDCTokenAndCachesKeySet checks that an RSA-signed identity token authenticates its actor while repeated requests reuse the fetched key set.
 func TestRS256JWKSAuthenticatorVerifiesOIDCTokenAndCachesKeySet(t *testing.T) {
 	private, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -55,6 +56,7 @@ func TestRS256JWKSAuthenticatorVerifiesOIDCTokenAndCachesKeySet(t *testing.T) {
 	}
 }
 
+// TestRS256JWKSAuthenticatorRequiresHTTPSJWKSURLIssuerAudienceAndNonReservedWorkspaceClaim checks that authenticator settings require HTTPS, issuer, audience, and a workspace claim outside reserved JWT fields.
 func TestRS256JWKSAuthenticatorRequiresHTTPSJWKSURLIssuerAudienceAndNonReservedWorkspaceClaim(t *testing.T) {
 	if _, err := NewRS256JWKSAuthenticator(RS256JWKSAuthenticatorConfig{JWKSURL: "http://identity.example.test/keys", Issuer: "issuer", Audience: "audience"}); err == nil {
 		t.Fatal("HTTP JWKS URL accepted")
@@ -72,6 +74,7 @@ func TestRS256JWKSAuthenticatorRequiresHTTPSJWKSURLIssuerAudienceAndNonReservedW
 	}
 }
 
+// TestRS256JWKSAuthenticatorRejectsRedirectOutsideHTTPS checks that fetching signing keys rejects a redirect to plaintext HTTP.
 func TestRS256JWKSAuthenticatorRejectsRedirectOutsideHTTPS(t *testing.T) {
 	plaintext := httptest.NewServer(http.NotFoundHandler())
 	defer plaintext.Close()
@@ -90,6 +93,7 @@ func TestRS256JWKSAuthenticatorRejectsRedirectOutsideHTTPS(t *testing.T) {
 	}
 }
 
+// signedRS256JWT creates an RSA-signed JWT with the supplied key identifier and claims or fails the test.
 func signedRS256JWT(t *testing.T, private *rsa.PrivateKey, keyID string, claims map[string]any) string {
 	t.Helper()
 	header, err := json.Marshal(map[string]string{"alg": "RS256", "kid": keyID, "typ": "JWT"})

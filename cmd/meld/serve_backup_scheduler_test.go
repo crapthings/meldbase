@@ -13,6 +13,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestServeBackupSchedulerPublishesPairedArtifactsAndPrunesOnlyVerifiedPairs checks that scheduled backups retain the latest backup pair and complete restore drills while preserving unrelated files.
 func TestServeBackupSchedulerPublishesPairedArtifactsAndPrunesOnlyVerifiedPairs(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.meld")
@@ -109,6 +110,7 @@ func TestServeBackupSchedulerPublishesPairedArtifactsAndPrunesOnlyVerifiedPairs(
 	}
 }
 
+// TestServeBackupSchedulerRequiresCompleteSafeConfiguration checks that scheduled backups reject incomplete settings and memory databases while allowing a disabled schedule.
 func TestServeBackupSchedulerRequiresCompleteSafeConfiguration(t *testing.T) {
 	db := meldbase.New()
 	defer db.Close()

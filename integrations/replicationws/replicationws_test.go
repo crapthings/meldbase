@@ -15,6 +15,7 @@ import (
 	"github.com/crapthings/meldbase"
 )
 
+// TestHandlerStreamsOneDurablyAcknowledgedBatch checks that the source persists a batch acknowledgment before sending the next batch.
 func TestHandlerStreamsOneDurablyAcknowledgedBatch(t *testing.T) {
 	db, err := meldbase.Open(filepath.Join(t.TempDir(), "source.meld2"))
 	if err != nil {
@@ -88,6 +89,7 @@ func TestHandlerStreamsOneDurablyAcknowledgedBatch(t *testing.T) {
 	}
 }
 
+// TestHandlerRejectsBrowserOriginAndUnauthenticatedPeer checks that replication rejects browser origins, denied peers, plain HTTP, and outdated TLS.
 func TestHandlerRejectsBrowserOriginAndUnauthenticatedPeer(t *testing.T) {
 	db := meldbase.New()
 	defer db.Close()
@@ -124,6 +126,7 @@ func TestHandlerRejectsBrowserOriginAndUnauthenticatedPeer(t *testing.T) {
 	}
 }
 
+// TestHandlerRejectsConcurrentSessionForAuthorizedConsumer checks that a consumer holding a source lease cannot start another replication session.
 func TestHandlerRejectsConcurrentSessionForAuthorizedConsumer(t *testing.T) {
 	db := meldbase.New()
 	defer db.Close()
@@ -145,6 +148,7 @@ func TestHandlerRejectsConcurrentSessionForAuthorizedConsumer(t *testing.T) {
 	}
 }
 
+// TestReceiveAppliesPrimaryWebSocketTailToFollower checks that secure WebSocket replication applies later source changes to a follower and stops on cancellation.
 func TestReceiveAppliesPrimaryWebSocketTailToFollower(t *testing.T) {
 	directory := t.TempDir()
 	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))
@@ -206,6 +210,7 @@ func TestReceiveAppliesPrimaryWebSocketTailToFollower(t *testing.T) {
 	}
 }
 
+// TestReceiveAcknowledgesBootstrapCoveredBatchesBeforeApplyingTail checks that snapshot-covered batches are acknowledged before later changes are applied to the follower.
 func TestReceiveAcknowledgesBootstrapCoveredBatchesBeforeApplyingTail(t *testing.T) {
 	directory := t.TempDir()
 	source, err := meldbase.Open(filepath.Join(directory, "source.meld2"))

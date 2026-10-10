@@ -15,6 +15,7 @@ import (
 	"github.com/crapthings/meldbase/integrations/anchorhttp"
 )
 
+// TestAnchorQualificationKeygenUsesExclusivePrivateKey checks that key generation writes matching keys with a private signing file and refuses overwrite.
 func TestAnchorQualificationKeygenUsesExclusivePrivateKey(t *testing.T) {
 	directory := t.TempDir()
 	privatePath := filepath.Join(directory, "signing.key")
@@ -40,6 +41,7 @@ func TestAnchorQualificationKeygenUsesExclusivePrivateKey(t *testing.T) {
 	}
 }
 
+// TestAnchorQualificationSignedCompleteChainRejectsTamperReplayAndWrongKey checks that a complete signed receipt chain rejects altered receipts, repeated phases, and the wrong verification key.
 func TestAnchorQualificationSignedCompleteChainRejectsTamperReplayAndWrongKey(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -110,6 +112,7 @@ func TestAnchorQualificationSignedCompleteChainRejectsTamperReplayAndWrongKey(t 
 	}
 }
 
+// syntheticAnchorQualificationReceipt creates an unsigned test receipt describing the requested anchor verification phase.
 func syntheticAnchorQualificationReceipt(phase string, started time.Time, publicKey ed25519.PublicKey) anchorQualificationReceipt {
 	databaseSequence, databaseGeneration := uint64(2), uint64(3)
 	anchorSequence, anchorGeneration := databaseSequence, databaseGeneration

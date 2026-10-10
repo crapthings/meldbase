@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// TestCompoundIndexKeyPreservesMixedTupleOrderAndPrefixes checks that compound keys preserve scalar tuple order and field prefixes in both sort directions.
 func TestCompoundIndexKeyPreservesMixedTupleOrderAndPrefixes(t *testing.T) {
 	values := []Value{
 		Null(), Bool(false), Bool(true), Int(-1), Float(-0.5), Int(0), Float(0), Int(1),
@@ -48,6 +49,7 @@ func TestCompoundIndexKeyPreservesMixedTupleOrderAndPrefixes(t *testing.T) {
 	}
 }
 
+// TestCompoundIndexKeySupportsMixedDirectionsAndRejectsInvalidTuples checks that compound keys support different field directions and reject invalid tuple definitions.
 func TestCompoundIndexKeySupportsMixedDirectionsAndRejectsInvalidTuples(t *testing.T) {
 	fields := []IndexField{{Field: "group", Order: 1}, {Field: "score", Order: -1}}
 	tuples := [][]Value{{String("a"), Int(1)}, {String("a"), Int(3)}, {String("b"), Int(2)}}
@@ -78,6 +80,7 @@ func TestCompoundIndexKeySupportsMixedDirectionsAndRejectsInvalidTuples(t *testi
 	}
 }
 
+// TestCompoundPartialIndexKeysRemainInPrefixAndDoNotConflict checks that partial keys share their field prefix while remaining distinct by document identifier.
 func TestCompoundPartialIndexKeysRemainInPrefixAndDoNotConflict(t *testing.T) {
 	fields := []IndexField{{Field: "workspace", Order: 1}}
 	prefix, err := encodeCompoundIndexPrefix([]Value{String("a")}, fields)
@@ -99,6 +102,7 @@ func TestCompoundPartialIndexKeysRemainInPrefixAndDoNotConflict(t *testing.T) {
 	}
 }
 
+// compareIndexTuple compares tuple fields in order using scalar key bytes and each field sort direction.
 func compareIndexTuple(left, right []Value, fields []IndexField) int {
 	for index, field := range fields {
 		leftKey, leftErr := encodeIndexKey(left[index])

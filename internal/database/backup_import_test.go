@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// TestImportPhysicalBackupVerifiesBeforeNoOverwritePublication checks that verified physical import preserves exact backup bytes and creates an owner-private follower database.
 func TestImportPhysicalBackupVerifiesBeforeNoOverwritePublication(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
@@ -58,6 +59,7 @@ func TestImportPhysicalBackupVerifiesBeforeNoOverwritePublication(t *testing.T) 
 	}
 }
 
+// TestPhysicalBackupRestorePreservesIndexedQueryReplayAndRealtime checks that restored backups preserve indexed results, historical query replay, and subsequent live updates.
 func TestPhysicalBackupRestorePreservesIndexedQueryReplayAndRealtime(t *testing.T) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source.meld2")
@@ -173,6 +175,7 @@ func TestPhysicalBackupRestorePreservesIndexedQueryReplayAndRealtime(t *testing.
 	}
 }
 
+// assertOwnerPrivateStorageArtifact checks that storage files deny group and other permissions on non-Windows systems.
 func assertOwnerPrivateStorageArtifact(t *testing.T, path string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -187,6 +190,7 @@ func assertOwnerPrivateStorageArtifact(t *testing.T, path string) {
 	}
 }
 
+// TestImportPhysicalBackupRejectsBadStreamAndPreservesDestination checks that invalid or oversized backup streams publish no file and existing destinations remain untouched.
 func TestImportPhysicalBackupRejectsBadStreamAndPreservesDestination(t *testing.T) {
 	directory := t.TempDir()
 	source, err := Open(filepath.Join(directory, "source.meld2"))

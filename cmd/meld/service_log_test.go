@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// newBufferServiceLogger creates a logger writing to the supplied buffer or fails the test.
 func newBufferServiceLogger(t *testing.T, output *bytes.Buffer, level string) *serviceLogger {
 	t.Helper()
 	logger, err := newServiceLogger(output, level)
@@ -17,6 +18,7 @@ func newBufferServiceLogger(t *testing.T, output *bytes.Buffer, level string) *s
 	return logger
 }
 
+// TestServiceLoggerFiltersStructuredEventsByLevel checks that log levels filter events and retained records contain the expected structured fields.
 func TestServiceLoggerFiltersStructuredEventsByLevel(t *testing.T) {
 	var output bytes.Buffer
 	logger := newBufferServiceLogger(t, &output, "warn")

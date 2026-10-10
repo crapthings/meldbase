@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestChangeDispatcherCommitDoesNotWaitForDeliveryAndPreservesWatcherBoundary checks that commits finish before delivery and new watchers receive only later commits.
 func TestChangeDispatcherCommitDoesNotWaitForDeliveryAndPreservesWatcherBoundary(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -65,6 +66,7 @@ func TestChangeDispatcherCommitDoesNotWaitForDeliveryAndPreservesWatcherBoundary
 	}
 }
 
+// TestChangeDispatcherOverflowResyncsReactiveAndFailsWatchers checks that queue overflow refreshes live query results and closes direct watchers as slow consumers.
 func TestChangeDispatcherOverflowResyncsReactiveAndFailsWatchers(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -108,6 +110,7 @@ func TestChangeDispatcherOverflowResyncsReactiveAndFailsWatchers(t *testing.T) {
 	}
 }
 
+// TestChangeDispatcherOverflowIsObservableWithoutReactiveViews checks that queue overflow is counted even without live query subscribers.
 func TestChangeDispatcherOverflowIsObservableWithoutReactiveViews(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -124,6 +127,7 @@ func TestChangeDispatcherOverflowIsObservableWithoutReactiveViews(t *testing.T) 
 	}
 }
 
+// TestChangeDispatcherBoundsPendingChangesAndReportsPressure checks that pending-change counts enforce the queue limit and return to zero after overflow.
 func TestChangeDispatcherBoundsPendingChangesAndReportsPressure(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -179,6 +183,7 @@ func TestChangeDispatcherBoundsPendingChangesAndReportsPressure(t *testing.T) {
 	}
 }
 
+// TestChangeDispatcherBoundsPendingCanonicalBytes checks that queued change bytes enforce a separate limit and are released after overflow.
 func TestChangeDispatcherBoundsPendingCanonicalBytes(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -250,6 +255,7 @@ func TestChangeDispatcherBoundsPendingCanonicalBytes(t *testing.T) {
 	}
 }
 
+// TestChangeWatcherBoundsPendingCanonicalBytes checks that a watcher exceeding its byte limit closes and releases its pending-byte accounting.
 func TestChangeWatcherBoundsPendingCanonicalBytes(t *testing.T) {
 	db := New()
 	defer db.Close()
@@ -327,6 +333,7 @@ func TestChangeWatcherBoundsPendingCanonicalBytes(t *testing.T) {
 	}
 }
 
+// TestChangeDispatchAccountsAndClonesChangedPaths checks that changed field paths count toward event size and are copied independently.
 func TestChangeDispatchAccountsAndClonesChangedPaths(t *testing.T) {
 	change := Change{Collection: "items", Operation: UpdateOperation, ChangedPaths: []string{"owner.name", "title"}}
 	base, ok := changeDispatchBaseBytes(Change{Collection: change.Collection, Operation: change.Operation})
