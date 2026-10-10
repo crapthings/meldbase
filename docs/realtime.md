@@ -1,3 +1,7 @@
+---
+next: false
+---
+
 # Live queries
 
 A live query gives your application updated query results as data changes.

@@ -1,3 +1,7 @@
+<script setup>
+import { withBase } from "vitepress";
+</script>
+
 # Meet Meldbase
 
 Meldbase is a single-node document database written in Go. An embedded Go
@@ -40,6 +44,6 @@ an npm installation route.
 
 ## Reference
 
-Browse the generated [TypeScript API reference](/api/typescript/) for exact
+Browse the generated <a :href="withBase('/api/typescript/')" target="_self">TypeScript API reference</a> for exact
 client, React, and worker SDK signatures. The repository contains the Go API,
 server implementation, CLI help, and release history.

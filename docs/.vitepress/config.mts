@@ -23,7 +23,7 @@ export default defineConfig({
         ],
       },
       { text: "Documentation", link: "/overview" },
-      { text: "API reference", link: "/api/typescript/" },
+      { text: "API reference", link: "/api/typescript/", target: "_self" },
     ],
     sidebar: [
       {
@@ -45,7 +45,7 @@ export default defineConfig({
           { text: "Live queries", link: "/realtime" },
         ],
       },
-      { text: "Reference", items: [{ text: "TypeScript API", link: "/api/typescript/" }] },
+      { text: "Reference", items: [{ text: "TypeScript API", link: "/api/typescript/", target: "_self" }] },
     ],
     socialLinks: [{ icon: "github", link: "https://github.com/crapthings/meldbase" }],
     footer: {
